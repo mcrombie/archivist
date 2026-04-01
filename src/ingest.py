@@ -1,15 +1,45 @@
-from pathlib import Path
-import re
+from __future__ import annotations
 
-def extract_chapter_title(text, fallback):
+import json
+import re
+from pathlib import Path
+from typing import List, Dict
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+MANUSCRIPT_DIR = BASE_DIR / "manuscript"
+OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_FILE = OUTPUT_DIR / "chunks.json"
+
+PARAGRAPHS_PER_CHUNK = 4
+PARAGRAPH_OVERLAP = 1
+
+
+def read_markdown_files(manuscript_dir: Path) -> List[Path]:
+    """Return all markdown files in sorted order."""
+    return sorted(manuscript_dir.glob("*.md"))
+
+
+def extract_chapter_title(text: str, fallback: str) -> str:
+    """Extract the first level-1 markdown heading as the chapter title."""
     match = re.search(r"^#\s+(.+)$", text, flags=re.MULTILINE)
     return match.group(1).strip() if match else fallback
 
 
+def clean_title_from_filename(stem: str) -> str:
+    """Remove leading sort numbers/underscores from a filename stem."""
+    return re.sub(r"^\d+[_\-\s]*", "", stem).strip()
 
-def split_into_paragraphs(text):
-    lines = text.split("\n")
-    paragraphs = []
+
+def split_into_paragraphs(text: str) -> List[str]:
+    """
+    Split text into paragraphs.
+
+    Assumes the manuscript export currently uses one paragraph per line,
+    with no blank lines between paragraphs.
+    """
+    lines = text.splitlines()
+    paragraphs: List[str] = []
 
     for line in lines:
         cleaned = line.strip()
@@ -26,33 +56,90 @@ def split_into_paragraphs(text):
     return paragraphs
 
 
+def chunk_paragraphs(
+    paragraphs: List[str],
+    chunk_size: int,
+    overlap: int,
+) -> List[Dict[str, object]]:
+    """Group paragraphs into overlapping chunks."""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than 0")
+    if overlap >= chunk_size:
+        raise ValueError("overlap must be smaller than chunk_size")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-manuscript_dir = BASE_DIR / "manuscript"
+    chunks: List[Dict[str, object]] = []
+    start = 0
+    paragraph_count = len(paragraphs)
 
-files = list(manuscript_dir.glob("*.md"))
+    while start < paragraph_count:
+        end = min(start + chunk_size, paragraph_count)
+        current_paragraphs = paragraphs[start:end]
 
-print("Looking in:", manuscript_dir)
-print(f"Found {len(files)} markdown files.\n")
+        chunks.append({
+            "paragraph_start": start + 1,
+            "paragraph_end": end,
+            "text": "\n\n".join(current_paragraphs),
+        })
 
-# for file in files:
-#     text = file.read_text(encoding="utf-8")
-#     chapter_title = extract_chapter_title(text, file.stem)[3:]
+        if end == paragraph_count:
+            break
 
-#     print(f"--- {file.name} ---")
-#     print(f"--- {chapter_title} ---") 
-#     print()
+        start += chunk_size - overlap
 
-
-# NUMBER OF PARAGRAPHS IN EACH CHAPTER
-# for file in files:
-#     text = file.read_text(encoding="utf-8")
-#     paragraphs = split_into_paragraphs(text)
-
-#     print(f"{file.name}: {len(paragraphs)} paragraphs")
+    return chunks
 
 
+def build_chunks_for_file(file_path: Path) -> List[Dict[str, object]]:
+    """Read one markdown file and return chunk records."""
+    text = file_path.read_text(encoding="utf-8")
+    chapter_title = extract_chapter_title(text,fallback=clean_title_from_filename(file_path.stem))
+    paragraphs = split_into_paragraphs(text)
+
+    records: List[Dict[str, object]] = []
+    paragraph_chunks = chunk_paragraphs(
+        paragraphs,
+        chunk_size=PARAGRAPHS_PER_CHUNK,
+        overlap=PARAGRAPH_OVERLAP,
+    )
+
+    for i, chunk in enumerate(paragraph_chunks, start=1):
+        records.append({
+            "document": file_path.name,
+            "chapter_title": chapter_title,
+            "chunk_id": f"{file_path.stem}_{i:03}",
+            "paragraph_start": chunk["paragraph_start"],
+            "paragraph_end": chunk["paragraph_end"],
+            "text": chunk["text"],
+        })
+
+    return records
 
 
-for index, paragraph in enumerate(split_into_paragraphs(files[8].read_text(encoding="utf-8"))):
-    print ("PARAGRAPH: " + str(index) + " " + paragraph)
+def main() -> None:
+    """Build chunks from all manuscript markdown files and save as JSON."""
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    files = read_markdown_files(MANUSCRIPT_DIR)
+    if not files:
+        print("No markdown files found in manuscript/")
+        return
+
+    all_chunks: List[Dict[str, object]] = []
+
+    print(f"Found {len(files)} markdown files.\n")
+
+    for file_path in files:
+        file_chunks = build_chunks_for_file(file_path)
+        all_chunks.extend(file_chunks)
+        print(f"{file_path.name}: created {len(file_chunks)} chunks")
+
+    OUTPUT_FILE.write_text(
+        json.dumps(all_chunks, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    print(f"\nSaved {len(all_chunks)} total chunks to {OUTPUT_FILE}")
+
+
+if __name__ == "__main__":
+    main()
