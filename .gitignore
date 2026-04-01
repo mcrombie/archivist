@@ -4,3 +4,4 @@ __pycache__/
 output/
 *.pyc
 manuscript/
+old_manuscript/
