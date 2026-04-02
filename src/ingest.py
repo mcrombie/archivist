@@ -56,18 +56,115 @@ def split_into_paragraphs(text: str) -> List[str]:
     return paragraphs
 
 
+def is_quote_paragraph(paragraph: str) -> bool:
+    """
+    Check if a paragraph starts with a quote
+    """
+    stripped = paragraph.strip()
+    return stripped.startswith(("“", '"', "‘", "'"))
+
+
+def is_weak_transition(paragraph: str) -> bool:
+    """
+    Determines if a paragraph is a poor place to begin a new chunk
+    """
+    stripped = paragraph.strip()
+    lower = stripped.lower()
+
+    weak_starts = (
+        "or,",
+        "and,",
+        "but,",
+        "however,",
+        "thus,",
+        "yet,",
+        "indeed,",
+        "for example,",
+        "for instance,",
+        "as another",
+        "as one",
+        "as this",
+    )
+
+    if lower.startswith(weak_starts):
+        return True
+
+    if len(stripped) < 120:
+        return True
+
+    return False
+
+
+def is_quote_setup(paragraph: str) -> bool:
+    """
+    Check if a paragraph is to be followed by a quote
+    """
+    stripped = paragraph.strip()
+    lower = stripped.lower()
+
+    setup_phrases = (
+        "said:",
+        "wrote:",
+        "declared:",
+        "argued:",
+        "claimed:",
+        "observed:",
+        "described:",
+        "fumed:",
+        "went so far as to say:",
+        "as follows:",
+    )
+
+    if stripped.endswith(":"):
+        return True
+
+    if any(lower.endswith(phrase) for phrase in setup_phrases):
+        return True
+
+    return False
+
+
+def adjust_chunk_start(paragraphs: list[str], proposed_start: int, previous_start: int) -> int:
+    """
+    Adjust a proposed chunk start to better respect rhetorical boundaries.
+    """
+    start = proposed_start
+
+    if start <= previous_start or start >= len(paragraphs):
+        return start
+
+    current = paragraphs[start]
+
+    # If starting on a quote, try to pull in its setup paragraph.
+    if is_quote_paragraph(current) and start - 1 > previous_start:
+        prev_para = paragraphs[start - 1]
+        if is_quote_setup(prev_para):
+            start -= 1
+            return start
+
+    # If starting on a weak transition, try to skip forward.
+    if is_weak_transition(current) and start + 1 < len(paragraphs):
+        start += 1
+        return start
+
+    return start
+
+
 def chunk_paragraphs(
-    paragraphs: List[str],
+    paragraphs: list[str],
     chunk_size: int,
     overlap: int,
-) -> List[Dict[str, object]]:
-    """Group paragraphs into overlapping chunks."""
+) -> list[dict[str, object]]:
+    """
+    Group paragraphs into overlapping chunks, using simple heuristics
+    to improve rhetorical coherence.
+    """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than 0")
     if overlap >= chunk_size:
         raise ValueError("overlap must be smaller than chunk_size")
 
-    chunks: List[Dict[str, object]] = []
+    chunks: list[dict[str, object]] = []
     start = 0
     paragraph_count = len(paragraphs)
 
@@ -84,10 +181,15 @@ def chunk_paragraphs(
         if end == paragraph_count:
             break
 
-        start += chunk_size - overlap
+        proposed_start = start + chunk_size - overlap
+        next_start = adjust_chunk_start(paragraphs, proposed_start, start)
+
+        if next_start <= start:
+            next_start = start + 1
+
+        start = next_start
 
     return chunks
-
 
 def build_chunks_for_file(file_path: Path) -> List[Dict[str, object]]:
     """Read one markdown file and return chunk records."""
