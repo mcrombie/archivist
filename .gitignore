@@ -5,3 +5,4 @@ output/
 *.pyc
 manuscript/
 old_manuscript/
+chroma_db/
