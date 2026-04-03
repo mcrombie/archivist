@@ -16,7 +16,7 @@ chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 collection = chroma_client.get_or_create_collection(name="manuscript")
 
 
-def embed_query(query):
+def embed_query(query: str) -> list[float]:
     response = client.embeddings.create(
         model="text-embedding-3-small",
         input=query
@@ -24,20 +24,21 @@ def embed_query(query):
     return response.data[0].embedding
 
 
-def search(query, n_results=5):
+def search(query: str, n_results: int = 5):
     query_embedding = embed_query(query)
 
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=n_results
+        n_results=n_results,
+        include=["metadatas", "distances"]
     )
 
     return results
 
 
-def main():
+def main() -> None:
     while True:
-        query = input("\nAsk a question (or 'exit'): ")
+        query = input("\nAsk a question (or 'exit'): ").strip()
 
         if query.lower() == "exit":
             break
@@ -46,10 +47,28 @@ def main():
 
         print("\nTop results:\n")
 
-        for i, doc in enumerate(results["metadatas"][0]):
-            print(f"Result {i+1}")
-            print(doc["text"][:500])
-            print("-" * 50)
+        metadatas = results.get("metadatas", [[]])[0]
+        distances = results.get("distances", [[]])[0]
+
+        if not metadatas:
+            print("No results found.")
+            continue
+
+        for i, meta in enumerate(metadatas, start=1):
+            distance = distances[i - 1] if i - 1 < len(distances) else None
+
+            print(f"Result {i}")
+            print(f"Document: {meta.get('document', 'N/A')}")
+            print(f"Chapter: {meta.get('chapter_title', 'N/A')}")
+            print(f"Chunk ID: {meta.get('chunk_id', 'N/A')}")
+            print(f"Paragraphs: {meta.get('paragraph_start', '?')}–{meta.get('paragraph_end', '?')}")
+            if distance is not None:
+                print(f"Distance: {distance:.4f}")
+
+            text = meta.get("text", "")
+            preview = text[:900] + ("..." if len(text) > 900 else "")
+            print(preview)
+            print("-" * 80)
 
 
 if __name__ == "__main__":
