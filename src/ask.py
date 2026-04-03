@@ -58,12 +58,12 @@ def answer_question(question: str, n_results: int = 5):
     results = retrieve(question, n_results=n_results)
     context = build_context(results)
 
-    prompt = f"""You are a research assistant for a historical manuscript.
+    prompt = f"""You are a research assistant for a historical manuscript about Virginia and the American empire.
 
-Answer the user's question using only the provided sources.
-If the sources do not contain enough information, say so.
-Be clear and concise.
-After the answer, list the source numbers you relied on.
+Answer the question using only the provided sources.
+Cite source numbers inline after major claims, like [Source 2].
+If the sources are insufficient, say so.
+Prefer specific, concrete answers over vague summaries.
 
 Question:
 {question}
