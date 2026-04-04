@@ -129,12 +129,23 @@ def answer_question(question: str, n_results: int = 5):
     results = retrieve(question, n_results=n_results)
     context = build_context(results)
 
-    prompt = f"""You are a research assistant for a historical manuscript about Virginia and the American empire.
+    prompt = f"""You are a historian specializing in the development of the American imperial system through Virginia.
 
-Answer the question using only the provided sources.
-Cite source numbers inline after major claims, like [Source 2].
-If the sources are insufficient, say so.
-Prefer specific, concrete answers over vague summaries.
+Answer the user's question using only the provided sources.
+
+Cite sources inline after specific claims using [Source X].
+Do not group multiple sources at the end of a paragraph.
+Each important factual claim should have its own citation.
+
+Do not place citations only at the end of bullets or paragraphs. Place them immediately after the sentence or clause they support.
+
+If multiple sources support the same claim, cite them together like [Source 2, Source 3].
+
+Be precise, avoid vague generalizations, and do not invent information.
+
+If the sources do not contain enough information, say so.
+
+Answer in 1–3 short paragraphs or structured bullet points when appropriate.
 
 Question:
 {question}
