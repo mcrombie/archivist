@@ -106,7 +106,7 @@ def retrieve(query: str, n_results: int = 5):
     return results
 
 
-def build_context(results) -> str:
+def build_context(results) -> tuple[str, list[dict]]:
     expanded_chunks = expand_with_neighbors(results)
 
     context_blocks = []
@@ -122,12 +122,12 @@ def build_context(results) -> str:
         )
         context_blocks.append(block)
 
-    return "\n\n".join(context_blocks)
+    return "\n\n".join(context_blocks), expanded_chunks
 
 
 def answer_question(question: str, n_results: int = 5):
     results = retrieve(question, n_results=n_results)
-    context = build_context(results)
+    context, expanded_chunks = build_context(results)
 
     prompt = f"""You are a historian specializing in the development of the American imperial system through Virginia.
 
@@ -159,7 +159,7 @@ Sources:
         input=prompt
     )
 
-    return response.output_text, results
+    return response.output_text, expanded_chunks
 
 
 def main() -> None:
@@ -169,22 +169,18 @@ def main() -> None:
         if question.lower() == "exit":
             break
 
-        answer, results = answer_question(question)
+        answer, expanded_chunks = answer_question(question)
 
         print("\nAnswer:\n")
         print(answer)
 
-        print("\nRetrieved sources:\n")
-        metadatas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
-
-        for i, meta in enumerate(metadatas, start=1):
-            distance = distances[i - 1] if i - 1 < len(distances) else None
+        print("\nSources shown to model:\n")
+        for i, chunk in enumerate(expanded_chunks, start=1):
             print(f"Source {i}")
-            print(f"  Chapter: {meta.get('chapter_title', 'N/A')}")
-            print(f"  Chunk ID: {meta.get('chunk_id', 'N/A')}")
-            if distance is not None:
-                print(f"  Distance: {distance:.4f}")
+            print(f"  Document: {chunk.get('document', 'N/A')}")
+            print(f"  Chapter: {chunk.get('chapter_title', 'N/A')}")
+            print(f"  Chunk ID: {chunk.get('chunk_id', 'N/A')}")
+            print(f"  Paragraphs: {chunk.get('paragraph_start', '?')}–{chunk.get('paragraph_end', '?')}")
             print("-" * 60)
 
 
