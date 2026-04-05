@@ -19,6 +19,9 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 collection = chroma_client.get_or_create_collection(name="manuscript")
 
+MAX_PRIMARY_DISTANCE = 1.05
+MAX_FINAL_SOURCES = 8
+
 
 def load_chunks() -> list[dict]:
     with open(CHUNKS_FILE, "r", encoding="utf-8") as f:
@@ -27,6 +30,27 @@ def load_chunks() -> list[dict]:
 
 def build_chunk_lookup(chunks: list[dict]) -> dict[str, dict]:
     return {chunk["chunk_id"]: chunk for chunk in chunks}
+
+
+def get_filtered_primary_chunks(results, max_distance: float = MAX_PRIMARY_DISTANCE) -> list[dict]:
+    """
+    Return the primary retrieved chunks whose distances are within the threshold.
+    If filtering removes everything, fall back to the original retrieved chunks.
+    """
+    metadatas = results.get("metadatas", [[]])[0]
+    distances = results.get("distances", [[]])[0]
+
+    primary_chunks = []
+
+    for meta, dist in zip(metadatas, distances):
+        if dist <= max_distance:
+            primary_chunks.append(meta)
+
+    # Fallback: if everything gets filtered out, keep the original primary hits
+    if not primary_chunks:
+        primary_chunks = metadatas
+
+    return primary_chunks
 
 
 def get_neighbor_chunk_ids(chunk_id: str) -> list[str]:
@@ -53,16 +77,14 @@ ALL_CHUNKS = load_chunks()
 CHUNK_LOOKUP = build_chunk_lookup(ALL_CHUNKS)
 
 
-def expand_with_neighbors(results) -> list[dict]:
+def expand_with_neighbors(primary_chunks: list[dict]) -> list[dict]:
     """
-    Expand retrieved chunks with immediate neighbors and de-duplicate them.
+    Expand a list of primary chunks with immediate neighbors and de-duplicate them.
     """
-    retrieved = results.get("metadatas", [[]])[0]
-
     expanded = []
     seen = set()
 
-    for meta in retrieved:
+    for meta in primary_chunks:
         chunk_id = meta.get("chunk_id")
         if not chunk_id:
             continue
@@ -106,12 +128,10 @@ def retrieve(query: str, n_results: int = 5):
     return results
 
 
-def build_context(results) -> tuple[str, list[dict]]:
-    expanded_chunks = expand_with_neighbors(results)
-
+def build_context(final_chunks: list[dict]) -> str:
     context_blocks = []
 
-    for i, chunk in enumerate(expanded_chunks, start=1):
+    for i, chunk in enumerate(final_chunks, start=1):
         block = (
             f"[Source {i}]\n"
             f"Document: {chunk.get('document', 'N/A')}\n"
@@ -122,24 +142,42 @@ def build_context(results) -> tuple[str, list[dict]]:
         )
         context_blocks.append(block)
 
-    return "\n\n".join(context_blocks), expanded_chunks
+    return "\n\n".join(context_blocks)
+
+
+def finalize_context_chunks(
+    results,
+    max_primary_distance: float = MAX_PRIMARY_DISTANCE,
+    max_final_sources: int = MAX_FINAL_SOURCES,
+) -> list[dict]:
+    """
+    Build the canonical final source list used both for model context and display.
+    """
+    primary_chunks = get_filtered_primary_chunks(results, max_distance=max_primary_distance)
+    expanded_chunks = expand_with_neighbors(primary_chunks)
+
+    # Cap final context length
+    final_chunks = expanded_chunks[:max_final_sources]
+
+    return final_chunks
 
 
 def answer_question(question: str, n_results: int = 5):
     results = retrieve(question, n_results=n_results)
-    context, expanded_chunks = build_context(results)
+    final_chunks = finalize_context_chunks(results)
+    context = build_context(final_chunks)
 
     prompt = f"""You are a historian specializing in the development of the American imperial system through Virginia.
 
 Answer the user's question using only the provided sources.
 
 Cite sources inline after specific claims using [Source X].
-Do not group multiple sources at the end of a paragraph.
+Do not group multiple sources only at the end of a paragraph.
 Each important factual claim should have its own citation.
+If a sentence contains multiple distinct claims, cite each claim separately.
+If multiple sources support the same claim, cite them together like [Source 2, Source 3].
 
 Do not place citations only at the end of bullets or paragraphs. Place them immediately after the sentence or clause they support.
-
-If multiple sources support the same claim, cite them together like [Source 2, Source 3].
 
 Be precise, avoid vague generalizations, and do not invent information.
 
@@ -159,7 +197,7 @@ Sources:
         input=prompt
     )
 
-    return response.output_text, expanded_chunks
+    return response.output_text, final_chunks
 
 
 def main() -> None:
@@ -169,20 +207,20 @@ def main() -> None:
         if question.lower() == "exit":
             break
 
-        answer, expanded_chunks = answer_question(question)
+        answer, final_chunks = answer_question(question)
 
         print("\nAnswer:\n")
         print(answer)
 
         print("\nSources shown to model:\n")
-        for i, chunk in enumerate(expanded_chunks, start=1):
+        for i, chunk in enumerate(final_chunks, start=1):
             print(f"Source {i}")
             print(f"  Document: {chunk.get('document', 'N/A')}")
             print(f"  Chapter: {chunk.get('chapter_title', 'N/A')}")
             print(f"  Chunk ID: {chunk.get('chunk_id', 'N/A')}")
             print(f"  Paragraphs: {chunk.get('paragraph_start', '?')}–{chunk.get('paragraph_end', '?')}")
             print("-" * 60)
-
+            
 
 if __name__ == "__main__":
     main()
