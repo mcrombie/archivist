@@ -144,6 +144,58 @@ def build_context(final_chunks: list[dict]) -> str:
     return "\n\n".join(context_blocks)
 
 
+def find_exact_match_chunks(term: str, chunks: list[dict]) -> list[dict]:
+    """
+    Return chunks whose text contains the term as a case-insensitive substring.
+    """
+    term_lower = term.lower().strip()
+    matches = []
+
+    for chunk in chunks:
+        text = chunk.get("text", "").lower()
+        if term_lower in text:
+            matches.append(chunk)
+
+    return matches
+
+
+def finalize_index_context(term: str, semantic_results) -> list[dict]:
+    """
+    Prefer exact text matches for index terms; fall back to semantic retrieval.
+    """
+    exact_matches = find_exact_match_chunks(term, ALL_CHUNKS)
+
+    seen = set()
+    final_chunks = []
+
+    # First: exact matches
+    for chunk in exact_matches:
+        cid = chunk["chunk_id"]
+        if cid not in seen:
+            final_chunks.append(chunk)
+            seen.add(cid)
+
+    # Then: neighbors of exact matches
+    for chunk in exact_matches:
+        for neighbor_id in get_neighbor_chunk_ids(chunk["chunk_id"]):
+            neighbor = CHUNK_LOOKUP.get(neighbor_id)
+            if neighbor and neighbor["chunk_id"] not in seen:
+                final_chunks.append(neighbor)
+                seen.add(neighbor["chunk_id"])
+
+    # Then: semantic fallback if exact matches are sparse
+    primary_chunks = get_filtered_primary_chunks(semantic_results)
+    semantic_expanded = expand_with_neighbors(primary_chunks)
+
+    for chunk in semantic_expanded:
+        cid = chunk["chunk_id"]
+        if cid not in seen:
+            final_chunks.append(chunk)
+            seen.add(cid)
+
+    return final_chunks[:MAX_FINAL_SOURCES]
+
+
 def generate_index_entry(term: str, final_chunks: list[dict]) -> str:
     context = build_context(final_chunks)
 
@@ -197,7 +249,7 @@ def main() -> None:
             break
 
         results = retrieve(term)
-        final_chunks = finalize_context_chunks(results)
+        final_chunks = finalize_index_context(term, results)
         output = generate_index_entry(term, final_chunks)
 
         print("\nCandidate index entry:\n")
