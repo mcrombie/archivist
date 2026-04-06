@@ -8,6 +8,8 @@ load_dotenv()
 import chromadb
 from openai import OpenAI
 
+from filters import should_skip_document
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 CHUNKS_FILE = BASE_DIR / "output" / "chunks.json"
 CHROMA_DIR = BASE_DIR / "chroma_db"
@@ -41,8 +43,18 @@ def main():
 
     print(f"Loaded {len(chunks)} chunks")
 
-    texts = [chunk["text"] for chunk in chunks]
-    ids = [chunk["chunk_id"] for chunk in chunks]
+
+    # Filter chunks
+    filtered_chunks = [
+        chunk for chunk in chunks
+        if not should_skip_document(chunk.get("document", ""))
+    ]
+
+    print(f"After filtering: {len(filtered_chunks)} chunks")
+
+    # Only use filtered chunks
+    texts = [chunk["text"] for chunk in filtered_chunks]
+    ids = [chunk["chunk_id"] for chunk in filtered_chunks]
 
     # Embed in batches (important)
     batch_size = 50
@@ -50,7 +62,7 @@ def main():
     for i in range(0, len(texts), batch_size):
         batch_texts = texts[i:i + batch_size]
         batch_ids = ids[i:i + batch_size]
-        batch_chunks = chunks[i:i + batch_size]
+        batch_chunks = filtered_chunks[i:i + batch_size]
 
         embeddings = embed_texts(batch_texts)
 

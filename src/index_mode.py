@@ -9,6 +9,8 @@ load_dotenv()
 import chromadb
 from openai import OpenAI
 
+from filters import SKIP_FILES
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 CHROMA_DIR = BASE_DIR / "chroma_db"
 CHUNKS_FILE = BASE_DIR / "output" / "chunks.json"
@@ -152,6 +154,10 @@ def find_exact_match_chunks(term: str, chunks: list[dict]) -> list[dict]:
     matches = []
 
     for chunk in chunks:
+        # Filter chunks
+        if chunk.get("document") in SKIP_FILES:
+            continue
+
         text = chunk.get("text", "").lower()
         if term_lower in text:
             matches.append(chunk)
