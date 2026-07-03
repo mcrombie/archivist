@@ -1,4 +1,4 @@
-# Archivist
+cd ..# Archivist
 
 A domain-aware retrieval-augmented generation (RAG) system for historical research and manuscript analysis.
 

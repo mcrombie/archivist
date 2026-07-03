@@ -6,3 +6,7 @@ output/
 manuscript/
 old_manuscript/
 chroma_db/
+projects/
+frontend/node_modules/
+frontend/dist/
+web-api*.log
