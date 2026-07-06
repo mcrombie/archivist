@@ -185,5 +185,11 @@ def sources(
 def app_shell(full_path: str) -> FileResponse:
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
     raise HTTPException(status_code=404, detail="Frontend has not been built yet.")

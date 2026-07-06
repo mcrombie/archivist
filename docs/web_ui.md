@@ -34,6 +34,9 @@ The web API needs:
 
 ## Current Capabilities
 
+- Opens to a simple upload-first manuscript screen.
+- Processes the manuscript before presenting mode selection.
+- Offers Q&A mode and index mode as separate focused workspaces.
 - Upload one or more `.md` / `.txt` files, or a `.zip` containing them.
 - Process a manuscript into a local project under `projects/`.
 - Ignore detected index files when building the searchable manuscript corpus.

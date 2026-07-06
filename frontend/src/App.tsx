@@ -1,19 +1,18 @@
 import {
-  AlertCircle,
   Archive,
+  ArrowLeft,
   BookOpen,
   CheckCircle2,
-  Database,
   FileSearch,
   FileText,
+  Library,
   ListTree,
   Loader2,
   Search,
   Send,
-  Settings,
   Upload
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
   CandidateTerm,
   Project,
@@ -27,285 +26,285 @@ import {
   searchExistingIndex
 } from "./api";
 
-type Mode = "question" | "index" | "existing";
-type Notice = { type: "info" | "error" | "success"; text: string } | null;
+type AppStage = "welcome" | "choose" | "question" | "index";
+type Notice = { type: "error" | "success" | "info"; text: string } | null;
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string>("current");
-  const [mode, setMode] = useState<Mode>("question");
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [stage, setStage] = useState<AppStage>("welcome");
   const [notice, setNotice] = useState<Notice>(null);
-  const [loadingProjects, setLoadingProjects] = useState(true);
 
-  const activeProject = useMemo(
-    () => projects.find((project) => project.id === activeProjectId) ?? projects[0],
-    [activeProjectId, projects]
+  const currentProject = useMemo(
+    () => projects.find((project) => project.id === "current") ?? null,
+    [projects]
   );
 
   async function refreshProjects(nextProjectId?: string) {
-    setLoadingProjects(true);
-    try {
-      const nextProjects = await listProjects();
-      setProjects(nextProjects);
-      if (nextProjectId) {
-        setActiveProjectId(nextProjectId);
-      } else if (!nextProjects.some((project) => project.id === activeProjectId)) {
-        setActiveProjectId(nextProjects[0]?.id ?? "current");
+    const nextProjects = await listProjects();
+    setProjects(nextProjects);
+    if (nextProjectId) {
+      const nextProject = nextProjects.find((project) => project.id === nextProjectId);
+      if (nextProject) {
+        setActiveProject(nextProject);
       }
-    } catch (error) {
-      setNotice({ type: "error", text: errorMessage(error) });
-    } finally {
-      setLoadingProjects(false);
     }
   }
 
   useEffect(() => {
-    refreshProjects();
+    refreshProjects().catch((error) => {
+      setNotice({ type: "error", text: errorMessage(error) });
+    });
   }, []);
 
+  function selectProject(project: Project) {
+    setActiveProject(project);
+    setStage("choose");
+    setNotice(null);
+  }
+
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand-block">
-          <Archive size={24} />
-          <div>
-            <h1>Archivist</h1>
-            <p>Manuscript workbench</p>
-          </div>
+    <main className="library-shell">
+      <div className="library-grain" />
+      <header className="app-header">
+        <div className="brand-mark">
+          <Library size={25} />
+          <span>Archivist</span>
         </div>
-
-        <section className="side-section">
-          <div className="side-heading">
-            <BookOpen size={16} />
-            <span>Projects</span>
-          </div>
-          <div className="project-list">
-            {loadingProjects ? (
-              <div className="muted-row">
-                <Loader2 size={16} className="spin" />
-                Loading
-              </div>
-            ) : (
-              projects.map((project) => (
-                <button
-                  key={project.id}
-                  className={`project-button ${project.id === activeProject?.id ? "active" : ""}`}
-                  onClick={() => setActiveProjectId(project.id)}
-                >
-                  <span>{project.name}</span>
-                  {project.embedded ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
-                </button>
-              ))
-            )}
-          </div>
-        </section>
-
-        {activeProject ? <ProjectStatus project={activeProject} onRefresh={refreshProjects} setNotice={setNotice} /> : null}
-      </aside>
-
-      <section className="workspace">
-        {notice ? <NoticeBar notice={notice} onDismiss={() => setNotice(null)} /> : null}
-
-        <UploadPanel onCreated={(project) => refreshProjects(project.id)} setNotice={setNotice} />
-
         {activeProject ? (
-          <>
-            <header className="workspace-header">
-              <div>
-                <p className="eyebrow">Active project</p>
-                <h2>{activeProject.name}</h2>
-              </div>
-              <div className="mode-tabs" role="tablist" aria-label="Archivist mode">
-                <button className={mode === "question" ? "active" : ""} onClick={() => setMode("question")}>
-                  <FileSearch size={16} />
-                  Question
-                </button>
-                <button className={mode === "index" ? "active" : ""} onClick={() => setMode("index")}>
-                  <ListTree size={16} />
-                  Index
-                </button>
-                <button className={mode === "existing" ? "active" : ""} onClick={() => setMode("existing")}>
-                  <Search size={16} />
-                  Existing
-                </button>
-              </div>
-            </header>
-
-            {mode === "question" ? <QuestionMode project={activeProject} setNotice={setNotice} /> : null}
-            {mode === "index" ? <IndexMode project={activeProject} setNotice={setNotice} /> : null}
-            {mode === "existing" ? <ExistingIndexMode project={activeProject} setNotice={setNotice} /> : null}
-          </>
+          <button className="ghost-button" onClick={() => setStage("welcome")}>
+            <ArrowLeft size={16} />
+            New Manuscript
+          </button>
         ) : null}
-      </section>
+      </header>
+
+      {notice ? <NoticeBanner notice={notice} onClose={() => setNotice(null)} /> : null}
+
+      {stage === "welcome" ? (
+        <WelcomeScreen
+          currentProject={currentProject}
+          onProjectReady={(project) => {
+            setActiveProject(project);
+            setStage("choose");
+          }}
+          onUseCurrent={selectProject}
+          refreshProjects={refreshProjects}
+          setNotice={setNotice}
+        />
+      ) : null}
+
+      {stage === "choose" && activeProject ? (
+        <ModeChooser
+          project={activeProject}
+          onQuestion={() => setStage("question")}
+          onIndex={() => setStage("index")}
+        />
+      ) : null}
+
+      {stage === "question" && activeProject ? (
+        <QuestionMode project={activeProject} onBack={() => setStage("choose")} setNotice={setNotice} />
+      ) : null}
+
+      {stage === "index" && activeProject ? (
+        <IndexMode project={activeProject} onBack={() => setStage("choose")} setNotice={setNotice} />
+      ) : null}
     </main>
   );
 }
 
-function ProjectStatus({
-  project,
-  onRefresh,
+function WelcomeScreen({
+  currentProject,
+  onProjectReady,
+  onUseCurrent,
+  refreshProjects,
   setNotice
 }: {
-  project: Project;
-  onRefresh: (projectId?: string) => Promise<void>;
+  currentProject: Project | null;
+  onProjectReady: (project: Project) => void;
+  onUseCurrent: (project: Project) => void;
+  refreshProjects: (projectId?: string) => Promise<void>;
   setNotice: (notice: Notice) => void;
 }) {
-  const [embedding, setEmbedding] = useState(false);
-
-  async function handleEmbed() {
-    setEmbedding(true);
-    setNotice({ type: "info", text: "Building search index" });
-    try {
-      const updated = await embedProject(project.id);
-      await onRefresh(updated.id);
-      setNotice({ type: "success", text: "Search index ready" });
-    } catch (error) {
-      setNotice({ type: "error", text: errorMessage(error) });
-    } finally {
-      setEmbedding(false);
-    }
-  }
-
-  return (
-    <section className="side-section status-panel">
-      <div className="side-heading">
-        <Database size={16} />
-        <span>Status</span>
-      </div>
-      <dl className="stat-grid">
-        <div>
-          <dt>Files</dt>
-          <dd>{project.stats.source_files}</dd>
-        </div>
-        <div>
-          <dt>Chunks</dt>
-          <dd>{project.stats.searchable_chunks}</dd>
-        </div>
-        <div>
-          <dt>Index refs</dt>
-          <dd>{project.stats.existing_index_chunks}</dd>
-        </div>
-        <div>
-          <dt>Embedded</dt>
-          <dd>{project.embedded_chunks}</dd>
-        </div>
-      </dl>
-
-      <div className="settings-list">
-        <span>
-          <Settings size={14} />
-          {project.settings.ignore_existing_index ? "Ignoring existing index" : "Index included"}
-        </span>
-        <span>
-          <Settings size={14} />
-          {project.settings.consult_existing_index ? "Consulting existing index" : "No index consultation"}
-        </span>
-      </div>
-
-      <button className="primary-button full" onClick={handleEmbed} disabled={embedding || project.is_builtin}>
-        {embedding ? <Loader2 size={16} className="spin" /> : <Database size={16} />}
-        {project.embedded ? "Rebuild Index" : "Build Search Index"}
-      </button>
-    </section>
-  );
-}
-
-function UploadPanel({
-  onCreated,
-  setNotice
-}: {
-  onCreated: (project: Project) => void;
-  setNotice: (notice: Notice) => void;
-}) {
-  const [projectName, setProjectName] = useState("First edition manuscript");
+  const [projectName, setProjectName] = useState("Untitled manuscript");
   const [files, setFiles] = useState<FileList | null>(null);
   const [ignoreExistingIndex, setIgnoreExistingIndex] = useState(true);
   const [consultExistingIndex, setConsultExistingIndex] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-  async function handleSubmit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     if (!files?.length) {
-      setNotice({ type: "error", text: "Select at least one .md, .txt, or .zip file" });
+      setNotice({ type: "error", text: "Select a manuscript file first." });
       return;
     }
 
-    setCreating(true);
+    setProcessing(true);
+    setNotice({ type: "info", text: "Preparing the manuscript." });
     try {
-      const project = await createProject({
+      const created = await createProject({
         projectName,
         ignoreExistingIndex,
         consultExistingIndex,
         files
       });
-      onCreated(project);
-      setNotice({ type: "success", text: "Project processed" });
+
+      let readyProject = created;
+      try {
+        setNotice({ type: "info", text: "Building the search index." });
+        readyProject = await embedProject(created.id);
+      } catch (error) {
+        setNotice({ type: "error", text: `Project created, but indexing failed: ${errorMessage(error)}` });
+      }
+
+      await refreshProjects(readyProject.id);
+      onProjectReady(readyProject);
+      if (readyProject.embedded) {
+        setNotice({ type: "success", text: "Manuscript processed." });
+      }
     } catch (error) {
       setNotice({ type: "error", text: errorMessage(error) });
     } finally {
-      setCreating(false);
+      setProcessing(false);
     }
   }
 
   return (
-    <form className="upload-band" onSubmit={handleSubmit}>
-      <div className="upload-fields">
-        <label>
-          <span>Project name</span>
-          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
-        </label>
-        <label className="file-input">
-          <span>Manuscript files</span>
-          <input
-            type="file"
-            multiple
-            accept=".md,.txt,.zip"
-            onChange={(event) => setFiles(event.target.files)}
-          />
-        </label>
+    <section className="welcome-stage">
+      <div className="manuscript-desk">
+        <div className="desk-intro">
+          <div className="seal">
+            <Archive size={30} />
+          </div>
+          <p className="kicker">A manuscript assistant for writers</p>
+          <h1>Bring a draft into the archive.</h1>
+          <p>
+            Archivist helps writers question, inspect, and index long manuscripts while keeping source passages close at hand.
+          </p>
+        </div>
+
+        <form className="upload-form" onSubmit={submit}>
+          <label>
+            <span>Manuscript name</span>
+            <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+          </label>
+
+          <label className="drop-field">
+            <FileText size={22} />
+            <span>{files?.length ? `${files.length} file(s) selected` : "Upload manuscript"}</span>
+            <input
+              type="file"
+              multiple
+              accept=".md,.txt,.zip"
+              onChange={(event) => setFiles(event.target.files)}
+            />
+          </label>
+
+          <div className="option-pair">
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={ignoreExistingIndex}
+                onChange={(event) => setIgnoreExistingIndex(event.target.checked)}
+              />
+              Ignore existing index
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={consultExistingIndex}
+                onChange={(event) => setConsultExistingIndex(event.target.checked)}
+              />
+              Consult existing index
+            </label>
+          </div>
+
+          <button className="primary-button full" disabled={processing}>
+            {processing ? <Loader2 size={17} className="spin" /> : <Upload size={17} />}
+            Process Manuscript
+          </button>
+        </form>
+
+        {currentProject ? (
+          <button className="text-button" onClick={() => onUseCurrent(currentProject)}>
+            Open current manuscript
+          </button>
+        ) : null}
       </div>
-      <div className="upload-options">
-        <label className="check-row">
-          <input
-            type="checkbox"
-            checked={ignoreExistingIndex}
-            onChange={(event) => setIgnoreExistingIndex(event.target.checked)}
-          />
-          Ignore existing index
-        </label>
-        <label className="check-row">
-          <input
-            type="checkbox"
-            checked={consultExistingIndex}
-            onChange={(event) => setConsultExistingIndex(event.target.checked)}
-          />
-          Consult existing index
-        </label>
-      </div>
-      <button className="primary-button" type="submit" disabled={creating}>
-        {creating ? <Loader2 size={16} className="spin" /> : <Upload size={16} />}
-        Process
-      </button>
-    </form>
+    </section>
   );
 }
 
-function QuestionMode({ project, setNotice }: { project: Project; setNotice: (notice: Notice) => void }) {
-  const [question, setQuestion] = useState("What role did Jamestown play as a corporate experiment?");
-  const [nResults, setNResults] = useState(5);
+function ModeChooser({
+  project,
+  onQuestion,
+  onIndex
+}: {
+  project: Project;
+  onQuestion: () => void;
+  onIndex: () => void;
+}) {
+  return (
+    <section className="mode-stage">
+      <div className="project-vellum">
+        <p className="kicker">Manuscript processed</p>
+        <h1>{project.name}</h1>
+        <dl className="simple-stats">
+          <div>
+            <dt>Searchable chunks</dt>
+            <dd>{project.stats.searchable_chunks}</dd>
+          </div>
+          <div>
+            <dt>Existing index chunks</dt>
+            <dd>{project.stats.existing_index_chunks}</dd>
+          </div>
+          <div>
+            <dt>Search index</dt>
+            <dd>{project.embedded ? "Ready" : "Not built"}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div className="mode-choice-grid">
+        <button className="mode-choice" onClick={onQuestion} disabled={!project.embedded}>
+          <FileSearch size={26} />
+          <span>Q&A Mode</span>
+          <small>Ask questions and inspect cited manuscript passages.</small>
+        </button>
+        <button className="mode-choice" onClick={onIndex} disabled={!project.embedded}>
+          <ListTree size={26} />
+          <span>Index Mode</span>
+          <small>Draft index entries and compare against an existing index.</small>
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function QuestionMode({
+  project,
+  onBack,
+  setNotice
+}: {
+  project: Project;
+  onBack: () => void;
+  setNotice: (notice: Notice) => void;
+}) {
+  const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<SourceChunk[]>([]);
   const [loading, setLoading] = useState(false);
 
-  async function submitQuestion(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!project.embedded) {
-      setNotice({ type: "error", text: "Build the search index first" });
+    if (!question.trim()) {
+      setNotice({ type: "error", text: "Enter a question." });
       return;
     }
+
     setLoading(true);
     try {
-      const result = await askQuestion(project.id, question, nResults);
+      const result = await askQuestion(project.id, question, 5);
       setAnswer(result.answer);
       setSources(result.sources);
     } catch (error) {
@@ -316,58 +315,55 @@ function QuestionMode({ project, setNotice }: { project: Project; setNotice: (no
   }
 
   return (
-    <section className="mode-grid">
-      <form className="tool-panel" onSubmit={submitQuestion}>
+    <section className="focused-stage">
+      <ModeHeader title="Q&A Mode" project={project} onBack={onBack} icon={<FileSearch size={22} />} />
+      <form className="query-panel" onSubmit={submit}>
         <label>
           <span>Question</span>
-          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={6} />
+          <textarea
+            rows={5}
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Ask something about the manuscript..."
+          />
         </label>
-        <div className="inline-controls">
-          <label>
-            <span>Retrieval count</span>
-            <input
-              type="number"
-              min={1}
-              max={12}
-              value={nResults}
-              onChange={(event) => setNResults(Number(event.target.value))}
-            />
-          </label>
-          <button className="primary-button" disabled={loading}>
-            {loading ? <Loader2 size={16} className="spin" /> : <Send size={16} />}
-            Ask
-          </button>
-        </div>
+        <button className="primary-button" disabled={loading}>
+          {loading ? <Loader2 size={17} className="spin" /> : <Send size={17} />}
+          Ask
+        </button>
       </form>
 
-      <ResultPanel title="Answer" body={answer} empty="No answer yet" />
-      <SourceList sources={sources} title="Sources" />
+      <OutputBlock title="Answer" body={answer} empty="No answer yet." />
+      <Sources title="Sources" sources={sources} />
     </section>
   );
 }
 
-function IndexMode({ project, setNotice }: { project: Project; setNotice: (notice: Notice) => void }) {
-  const [term, setTerm] = useState("Virginia Company");
+function IndexMode({
+  project,
+  onBack,
+  setNotice
+}: {
+  project: Project;
+  onBack: () => void;
+  setNotice: (notice: Notice) => void;
+}) {
+  const [term, setTerm] = useState("");
   const [consultExistingIndex, setConsultExistingIndex] = useState(project.settings.consult_existing_index);
+  const [candidateTerms, setCandidateTerms] = useState<CandidateTerm[]>([]);
   const [entry, setEntry] = useState("");
   const [sources, setSources] = useState<SourceChunk[]>([]);
   const [existingSources, setExistingSources] = useState<SourceChunk[]>([]);
-  const [terms, setTerms] = useState<CandidateTerm[]>([]);
+  const [indexSearch, setIndexSearch] = useState("");
+  const [indexMatches, setIndexMatches] = useState<SourceChunk[]>([]);
   const [loadingTerms, setLoadingTerms] = useState(false);
   const [generating, setGenerating] = useState(false);
-
-  useEffect(() => {
-    setConsultExistingIndex(project.settings.consult_existing_index);
-    setTerms([]);
-    setEntry("");
-    setSources([]);
-    setExistingSources([]);
-  }, [project.id]);
+  const [searching, setSearching] = useState(false);
 
   async function loadTerms() {
     setLoadingTerms(true);
     try {
-      setTerms(await getCandidateTerms(project.id));
+      setCandidateTerms(await getCandidateTerms(project.id, 40));
     } catch (error) {
       setNotice({ type: "error", text: errorMessage(error) });
     } finally {
@@ -375,12 +371,13 @@ function IndexMode({ project, setNotice }: { project: Project; setNotice: (notic
     }
   }
 
-  async function submitTerm(event: FormEvent) {
+  async function submitEntry(event: FormEvent) {
     event.preventDefault();
-    if (!project.embedded) {
-      setNotice({ type: "error", text: "Build the search index first" });
+    if (!term.trim()) {
+      setNotice({ type: "error", text: "Enter an index term." });
       return;
     }
+
     setGenerating(true);
     try {
       const result = await generateIndexEntry(project.id, term, consultExistingIndex);
@@ -394,146 +391,171 @@ function IndexMode({ project, setNotice }: { project: Project; setNotice: (notic
     }
   }
 
-  return (
-    <section className="index-layout">
-      <div className="tool-panel">
-        <div className="panel-header">
-          <h3>Candidate terms</h3>
-          <button className="icon-button" type="button" onClick={loadTerms} title="Refresh terms">
-            {loadingTerms ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
-          </button>
-        </div>
-        <div className="term-list">
-          {terms.length ? (
-            terms.map((candidate) => (
-              <button key={candidate.term} onClick={() => setTerm(candidate.term)}>
-                <span>{candidate.term}</span>
-                <small>{candidate.count}</small>
-              </button>
-            ))
-          ) : (
-            <p className="empty-state">No terms loaded</p>
-          )}
-        </div>
-      </div>
-
-      <div className="mode-grid compact">
-        <form className="tool-panel" onSubmit={submitTerm}>
-          <label>
-            <span>Index term</span>
-            <input value={term} onChange={(event) => setTerm(event.target.value)} />
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={consultExistingIndex}
-              disabled={!project.stats.existing_index_chunks}
-              onChange={(event) => setConsultExistingIndex(event.target.checked)}
-            />
-            Consult existing index
-          </label>
-          <button className="primary-button" disabled={generating}>
-            {generating ? <Loader2 size={16} className="spin" /> : <ListTree size={16} />}
-            Generate Entry
-          </button>
-        </form>
-
-        <ResultPanel title="Candidate entry" body={entry} empty="No entry yet" />
-        <SourceList sources={sources} title="Manuscript sources" />
-        <SourceList sources={existingSources} title="Existing index references" />
-      </div>
-    </section>
-  );
-}
-
-function ExistingIndexMode({ project, setNotice }: { project: Project; setNotice: (notice: Notice) => void }) {
-  const [term, setTerm] = useState("Virginia Company");
-  const [results, setResults] = useState<SourceChunk[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  async function submitSearch(event: FormEvent) {
+  async function submitIndexSearch(event: FormEvent) {
     event.preventDefault();
-    setLoading(true);
+    if (!indexSearch.trim()) {
+      return;
+    }
+    setSearching(true);
     try {
-      const data = await searchExistingIndex(project.id, term);
-      setResults(data.results);
+      const result = await searchExistingIndex(project.id, indexSearch);
+      setIndexMatches(result.results);
     } catch (error) {
       setNotice({ type: "error", text: errorMessage(error) });
     } finally {
-      setLoading(false);
+      setSearching(false);
     }
   }
 
   return (
-    <section className="mode-grid">
-      <form className="tool-panel" onSubmit={submitSearch}>
-        <label>
-          <span>Existing index term</span>
-          <input value={term} onChange={(event) => setTerm(event.target.value)} />
-        </label>
-        <button className="primary-button" disabled={loading || !project.stats.existing_index_chunks}>
-          {loading ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
-          Search
-        </button>
-      </form>
-      <SourceList sources={results} title="Matches" />
+    <section className="focused-stage">
+      <ModeHeader title="Index Mode" project={project} onBack={onBack} icon={<ListTree size={22} />} />
+
+      <div className="index-workspace">
+        <section className="term-panel">
+          <div className="panel-title">
+            <h2>Terms</h2>
+            <button className="small-button" onClick={loadTerms}>
+              {loadingTerms ? <Loader2 size={15} className="spin" /> : <Search size={15} />}
+              Find
+            </button>
+          </div>
+          <div className="term-list">
+            {candidateTerms.length ? (
+              candidateTerms.map((candidate) => (
+                <button key={candidate.term} onClick={() => setTerm(candidate.term)}>
+                  <span>{candidate.term}</span>
+                  <small>{candidate.count}</small>
+                </button>
+              ))
+            ) : (
+              <p className="empty-state">No terms loaded.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="index-main">
+          <form className="query-panel" onSubmit={submitEntry}>
+            <label>
+              <span>Index term</span>
+              <input value={term} onChange={(event) => setTerm(event.target.value)} />
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={consultExistingIndex}
+                disabled={!project.stats.existing_index_chunks}
+                onChange={(event) => setConsultExistingIndex(event.target.checked)}
+              />
+              Consult existing index
+            </label>
+            <button className="primary-button" disabled={generating}>
+              {generating ? <Loader2 size={17} className="spin" /> : <ListTree size={17} />}
+              Generate Entry
+            </button>
+          </form>
+
+          <OutputBlock title="Candidate entry" body={entry} empty="No entry yet." />
+
+          <form className="index-search" onSubmit={submitIndexSearch}>
+            <label>
+              <span>Search existing index</span>
+              <input value={indexSearch} onChange={(event) => setIndexSearch(event.target.value)} />
+            </label>
+            <button className="small-button" disabled={searching || !project.stats.existing_index_chunks}>
+              {searching ? <Loader2 size={15} className="spin" /> : <Search size={15} />}
+              Search
+            </button>
+          </form>
+
+          <Sources title="Manuscript sources" sources={sources} />
+          <Sources title="Existing index references" sources={[...existingSources, ...indexMatches]} />
+        </section>
+      </div>
     </section>
   );
 }
 
-function ResultPanel({ title, body, empty }: { title: string; body: string; empty: string }) {
+function ModeHeader({
+  title,
+  project,
+  icon,
+  onBack
+}: {
+  title: string;
+  project: Project;
+  icon: ReactNode;
+  onBack: () => void;
+}) {
   return (
-    <section className="result-panel">
-      <div className="panel-header">
-        <h3>{title}</h3>
-        <FileText size={16} />
+    <header className="mode-header">
+      <button className="ghost-button" onClick={onBack}>
+        <ArrowLeft size={16} />
+        Modes
+      </button>
+      <div>
+        <p className="kicker">{project.name}</p>
+        <h1>
+          {icon}
+          {title}
+        </h1>
+      </div>
+    </header>
+  );
+}
+
+function OutputBlock({ title, body, empty }: { title: string; body: string; empty: string }) {
+  return (
+    <section className="output-block">
+      <div className="panel-title">
+        <h2>{title}</h2>
+        <BookOpen size={17} />
       </div>
       {body ? <pre>{body}</pre> : <p className="empty-state">{empty}</p>}
     </section>
   );
 }
 
-function SourceList({ title, sources }: { title: string; sources: SourceChunk[] }) {
+function Sources({ title, sources }: { title: string; sources: SourceChunk[] }) {
   return (
-    <section className="sources-panel">
-      <div className="panel-header">
-        <h3>{title}</h3>
+    <section className="sources-block">
+      <div className="panel-title">
+        <h2>{title}</h2>
         <span>{sources.length}</span>
       </div>
-      <div className="source-list">
-        {sources.length ? (
-          sources.map((source) => (
+      {sources.length ? (
+        <div className="source-stack">
+          {sources.map((source) => (
             <details key={`${source.chunk_id}-${source.source_number}`} className="source-card">
               <summary>
-                <span>
-                  Source {source.source_number}: {source.chapter_title}
-                </span>
+                <strong>Source {source.source_number}</strong>
+                <span>{source.chapter_title}</span>
                 <small>
                   {source.chunk_id} | {source.paragraph_start}-{source.paragraph_end}
                 </small>
               </summary>
               <p>{source.text}</p>
             </details>
-          ))
-        ) : (
-          <p className="empty-state">No sources</p>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <p className="empty-state">No sources.</p>
+      )}
     </section>
   );
 }
 
-function NoticeBar({ notice, onDismiss }: { notice: Exclude<Notice, null>; onDismiss: () => void }) {
+function NoticeBanner({ notice, onClose }: { notice: Exclude<Notice, null>; onClose: () => void }) {
   return (
-    <button className={`notice ${notice.type}`} onClick={onDismiss}>
-      {notice.type === "error" ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+    <button className={`notice-banner ${notice.type}`} onClick={onClose}>
+      <CheckCircle2 size={16} />
       <span>{notice.text}</span>
     </button>
   );
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Something went wrong";
+  return error instanceof Error ? error.message : "Something went wrong.";
 }
 
 export default App;
