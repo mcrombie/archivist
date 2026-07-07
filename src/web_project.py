@@ -11,11 +11,19 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
-from openai import OpenAI
+import httpx
+from dotenv import load_dotenv
+from openai import OpenAI, OpenAIError
 
 from corpus import get_neighbor_chunk_ids
 from filters import should_skip_document
-from ingest import build_chunks_for_file, clean_title_from_filename, chunk_paragraphs, extract_chapter_title, split_into_paragraphs
+from importers import (
+    SUPPORTED_DOCUMENT_SUFFIXES,
+    build_chunks_for_imported_document,
+    import_document,
+    split_existing_index_section,
+)
+from ingest import clean_title_from_filename, extract_chapter_title
 from retrieval import MAX_FINAL_SOURCES, MAX_PRIMARY_DISTANCE
 
 
@@ -27,7 +35,9 @@ LEGACY_MANUSCRIPT_DIR = BASE_DIR / "manuscript"
 EMBED_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-5"
 
-SUPPORTED_UPLOAD_SUFFIXES = {".md", ".txt", ".zip"}
+load_dotenv(BASE_DIR / ".env")
+
+SUPPORTED_UPLOAD_SUFFIXES = SUPPORTED_DOCUMENT_SUFFIXES | {".zip"}
 INDEX_NAME_PATTERN = re.compile(r"(^|[_\-\s])index($|[_\-\s\.])", re.IGNORECASE)
 
 
@@ -49,16 +59,6 @@ def read_json(path: Path, default: Any) -> Any:
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def read_text_file(path: Path) -> str:
-    data = path.read_bytes()
-    for encoding in ("utf-8-sig", "utf-16", "cp1252"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace")
 
 
 def project_dir(project_id: str) -> Path:
@@ -185,7 +185,7 @@ def copy_upload_to_source(project_id: str, filename: str, content: bytes) -> lis
                 if member.is_dir():
                     continue
                 member_name = Path(member.filename)
-                if member_name.suffix.lower() not in {".md", ".txt"}:
+                if member_name.suffix.lower() not in SUPPORTED_DOCUMENT_SUFFIXES:
                     continue
                 destination = (extract_root / safe_filename(member_name.name)).resolve()
                 if not str(destination).startswith(str(extract_root.resolve())):
@@ -205,24 +205,6 @@ def safe_filename(filename: str) -> str:
     name = Path(filename).name.strip()
     cleaned = re.sub(r"[^a-zA-Z0-9._() \-]+", "_", name)
     return cleaned or "upload.md"
-
-
-def build_chunks_for_text_file(file_path: Path) -> list[dict[str, Any]]:
-    text = read_text_file(file_path)
-    chapter_title = extract_chapter_title(text, fallback=clean_title_from_filename(file_path.stem))
-    paragraphs = split_into_paragraphs(text)
-    paragraph_chunks = chunk_paragraphs(paragraphs, chunk_size=4, overlap=1)
-    records: list[dict[str, Any]] = []
-    for i, chunk in enumerate(paragraph_chunks, start=1):
-        records.append({
-            "document": file_path.name,
-            "chapter_title": chapter_title,
-            "chunk_id": f"{file_path.stem}_{i:03}",
-            "paragraph_start": chunk["paragraph_start"],
-            "paragraph_end": chunk["paragraph_end"],
-            "text": chunk["text"],
-        })
-    return records
 
 
 def build_project(
@@ -245,22 +227,38 @@ def build_project(
     index_documents: set[str] = set()
 
     for file_path in sorted(source_dir(project_id).rglob("*")):
-        if not file_path.is_file() or file_path.suffix.lower() not in {".md", ".txt"}:
+        if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_DOCUMENT_SUFFIXES:
             continue
-        text = read_text_file(file_path)
-        file_chunks = build_chunks_for_file(file_path) if file_path.suffix.lower() == ".md" else build_chunks_for_text_file(file_path)
-        index_doc = is_index_document(file_path, text)
+        imported_document = import_document(file_path)
+        manuscript_document, embedded_index_document = split_existing_index_section(imported_document)
+        index_doc = is_index_document(file_path, imported_document.text)
         skip_doc = should_skip_document(file_path.name)
+        embedded_index_chunks: list[dict[str, object]] = []
 
         if index_doc:
             index_documents.add(file_path.name)
-            existing_index_chunks.extend(file_chunks)
+            existing_index_chunks.extend(build_chunks_for_imported_document(imported_document))
+            if ignore_existing_index:
+                ignored_documents.add(file_path.name)
+                continue
 
-        if skip_doc or (ignore_existing_index and index_doc):
+        if embedded_index_document:
+            index_documents.add(embedded_index_document.document_name)
+            embedded_index_chunks = build_chunks_for_imported_document(embedded_index_document)
+            existing_index_chunks.extend(embedded_index_chunks)
+
+        if skip_doc:
             ignored_documents.add(file_path.name)
             continue
 
-        chunks.extend(file_chunks)
+        if manuscript_document:
+            chunks.extend(build_chunks_for_imported_document(manuscript_document))
+
+        if embedded_index_document:
+            if ignore_existing_index:
+                ignored_documents.add(embedded_index_document.document_name)
+            else:
+                chunks.extend(embedded_index_chunks)
 
     write_json(chunks_path(project_id), chunks)
     write_json(existing_index_path(project_id), existing_index_chunks)
@@ -304,7 +302,27 @@ def openai_client() -> OpenAI:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set.")
-    return OpenAI(api_key=api_key)
+    if should_trust_environment_proxy():
+        return OpenAI(api_key=api_key)
+    return OpenAI(api_key=api_key, http_client=httpx.Client(trust_env=False))
+
+
+def should_trust_environment_proxy() -> bool:
+    return os.getenv("ARCHIVIST_TRUST_ENV_PROXY", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def friendly_openai_error(exc: OpenAIError) -> str:
+    error_name = exc.__class__.__name__
+    if error_name in {"APIConnectionError", "APITimeoutError"}:
+        return (
+            "Could not reach OpenAI while building embeddings. "
+            "Check your internet connection, VPN/firewall, and API access, then retry the search index build."
+        )
+    if error_name == "AuthenticationError":
+        return "OpenAI authentication failed. Check OPENAI_API_KEY in the Archivist .env file."
+    if error_name == "RateLimitError":
+        return "OpenAI rate limit or quota was reached. Wait a bit or check project billing, then retry."
+    return f"OpenAI request failed: {exc}"
 
 
 def chroma_client() -> chromadb.PersistentClient:
@@ -321,8 +339,11 @@ def chroma_collection_count(project_id: str) -> int:
 
 
 def embed_texts(client: OpenAI, texts: list[str]) -> list[list[float]]:
-    response = client.embeddings.create(model=EMBED_MODEL, input=texts)
-    return [item.embedding for item in response.data]
+    try:
+        response = client.embeddings.create(model=EMBED_MODEL, input=texts)
+        return [item.embedding for item in response.data]
+    except OpenAIError as exc:
+        raise RuntimeError(friendly_openai_error(exc)) from exc
 
 
 def embed_project(project_id: str) -> dict[str, Any]:

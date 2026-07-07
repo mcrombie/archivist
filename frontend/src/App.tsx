@@ -99,6 +99,11 @@ function App() {
           project={activeProject}
           onQuestion={() => setStage("question")}
           onIndex={() => setStage("index")}
+          onProjectUpdated={async (project) => {
+            setActiveProject(project);
+            await refreshProjects(project.id);
+          }}
+          setNotice={setNotice}
         />
       ) : null}
 
@@ -195,7 +200,7 @@ function WelcomeScreen({
             <input
               type="file"
               multiple
-              accept=".md,.txt,.zip"
+              accept=".md,.txt,.docx,.pdf,.zip"
               onChange={(event) => setFiles(event.target.files)}
             />
           </label>
@@ -238,12 +243,33 @@ function WelcomeScreen({
 function ModeChooser({
   project,
   onQuestion,
-  onIndex
+  onIndex,
+  onProjectUpdated,
+  setNotice
 }: {
   project: Project;
   onQuestion: () => void;
   onIndex: () => void;
+  onProjectUpdated: (project: Project) => Promise<void>;
+  setNotice: (notice: Notice) => void;
 }) {
+  const [buildingIndex, setBuildingIndex] = useState(false);
+  const indexReady = project.embedded;
+
+  async function buildSearchIndex() {
+    setBuildingIndex(true);
+    setNotice({ type: "info", text: "Building the search index." });
+    try {
+      const readyProject = await embedProject(project.id);
+      await onProjectUpdated(readyProject);
+      setNotice({ type: "success", text: "Search index built." });
+    } catch (error) {
+      setNotice({ type: "error", text: errorMessage(error) });
+    } finally {
+      setBuildingIndex(false);
+    }
+  }
+
   return (
     <section className="mode-stage">
       <div className="project-vellum">
@@ -260,18 +286,27 @@ function ModeChooser({
           </div>
           <div>
             <dt>Search index</dt>
-            <dd>{project.embedded ? "Ready" : "Not built"}</dd>
+            <dd>{indexReady ? "Ready" : buildingIndex ? "Building..." : "Not built"}</dd>
           </div>
         </dl>
+        {!indexReady ? (
+          <div className="index-status-panel">
+            <p>The manuscript was imported, but Q&A and Index Mode need a search index.</p>
+            <button className="primary-button" onClick={buildSearchIndex} disabled={buildingIndex}>
+              {buildingIndex ? <Loader2 size={17} className="spin" /> : <Upload size={17} />}
+              Build Search Index
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="mode-choice-grid">
-        <button className="mode-choice" onClick={onQuestion} disabled={!project.embedded}>
+        <button className="mode-choice" onClick={onQuestion} disabled={!indexReady}>
           <FileSearch size={26} />
           <span>Q&A Mode</span>
           <small>Ask questions and inspect cited manuscript passages.</small>
         </button>
-        <button className="mode-choice" onClick={onIndex} disabled={!project.embedded}>
+        <button className="mode-choice" onClick={onIndex} disabled={!indexReady}>
           <ListTree size={26} />
           <span>Index Mode</span>
           <small>Draft index entries and compare against an existing index.</small>
