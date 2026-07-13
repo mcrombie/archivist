@@ -29,6 +29,68 @@ import {
 type AppStage = "welcome" | "choose" | "question" | "index";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
 
+function ProcessStatus({ messages }: { messages: string[] }) {
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  useEffect(() => {
+    setMessageIndex(0);
+    if (messages.length < 2) return;
+
+    const interval = window.setInterval(() => {
+      setMessageIndex((current) => Math.min(current + 1, messages.length - 1));
+    }, 2400);
+
+    return () => window.clearInterval(interval);
+  }, [messages]);
+
+  return (
+    <div className="process-status" role="status" aria-live="polite">
+      <span className="process-pulse" aria-hidden="true" />
+      <span>{messages[messageIndex]}</span>
+    </div>
+  );
+}
+
+const MANUSCRIPT_IMPORT_STEPS = [
+  "Uploading manuscript files...",
+  "Reading document structure...",
+  "Separating manuscript text from existing index material...",
+  "Preparing searchable passages..."
+];
+
+const EMBEDDING_STEPS = [
+  "Building the semantic search index...",
+  "Embedding manuscript passages...",
+  "Organizing passages for retrieval...",
+  "Finalizing the searchable archive..."
+];
+
+const QUESTION_STEPS = [
+  "Searching the manuscript for relevant passages...",
+  "Comparing the strongest source matches...",
+  "Assembling grounded context...",
+  "Writing an answer with source citations..."
+];
+
+const INDEX_ENTRY_STEPS = [
+  "Finding passages related to this term...",
+  "Comparing uses across the manuscript...",
+  "Checking relevant existing index entries...",
+  "Drafting the index entry and subentries..."
+];
+
+const CANDIDATE_TERM_STEPS = [
+  "Scanning the manuscript for indexable terms...",
+  "Counting recurring names and concepts...",
+  "Ranking candidate terms..."
+];
+
+const INDEX_SEARCH_STEPS = [
+  "Searching existing index entries...",
+  "Comparing nearby references...",
+  "Collecting the closest matches..."
+];
+
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -136,6 +198,7 @@ function WelcomeScreen({
   const [ignoreExistingIndex, setIgnoreExistingIndex] = useState(true);
   const [consultExistingIndex, setConsultExistingIndex] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [processSteps, setProcessSteps] = useState(MANUSCRIPT_IMPORT_STEPS);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -145,6 +208,7 @@ function WelcomeScreen({
     }
 
     setProcessing(true);
+    setProcessSteps(MANUSCRIPT_IMPORT_STEPS);
     setNotice({ type: "info", text: "Preparing the manuscript." });
     try {
       const created = await createProject({
@@ -156,6 +220,7 @@ function WelcomeScreen({
 
       let readyProject = created;
       try {
+        setProcessSteps(EMBEDDING_STEPS);
         setNotice({ type: "info", text: "Building the search index." });
         readyProject = await embedProject(created.id);
       } catch (error) {
@@ -228,6 +293,7 @@ function WelcomeScreen({
             {processing ? <Loader2 size={17} className="spin" /> : <Upload size={17} />}
             Process Manuscript
           </button>
+          {processing ? <ProcessStatus messages={processSteps} /> : null}
         </form>
 
         {currentProject ? (
@@ -296,6 +362,7 @@ function ModeChooser({
               {buildingIndex ? <Loader2 size={17} className="spin" /> : <Upload size={17} />}
               Build Search Index
             </button>
+            {buildingIndex ? <ProcessStatus messages={EMBEDDING_STEPS} /> : null}
           </div>
         ) : null}
       </div>
@@ -366,6 +433,7 @@ function QuestionMode({
           {loading ? <Loader2 size={17} className="spin" /> : <Send size={17} />}
           Ask
         </button>
+        {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
       </form>
 
       <OutputBlock title="Answer" body={answer} empty="No answer yet." />
@@ -455,6 +523,7 @@ function IndexMode({
               Find
             </button>
           </div>
+          {loadingTerms ? <ProcessStatus messages={CANDIDATE_TERM_STEPS} /> : null}
           <div className="term-list">
             {candidateTerms.length ? (
               candidateTerms.map((candidate) => (
@@ -488,6 +557,7 @@ function IndexMode({
               {generating ? <Loader2 size={17} className="spin" /> : <ListTree size={17} />}
               Generate Entry
             </button>
+            {generating ? <ProcessStatus messages={INDEX_ENTRY_STEPS} /> : null}
           </form>
 
           <OutputBlock title="Candidate entry" body={entry} empty="No entry yet." />
@@ -501,6 +571,7 @@ function IndexMode({
               {searching ? <Loader2 size={15} className="spin" /> : <Search size={15} />}
               Search
             </button>
+            {searching ? <ProcessStatus messages={INDEX_SEARCH_STEPS} /> : null}
           </form>
 
           <Sources title="Manuscript sources" sources={sources} />
