@@ -22,11 +22,12 @@ import {
   embedProject,
   generateIndexEntry,
   getCandidateTerms,
+  getManuscriptSources,
   listProjects,
   searchExistingIndex
 } from "./api";
 
-type AppStage = "welcome" | "choose" | "question" | "index";
+type AppStage = "welcome" | "choose" | "viewer" | "question" | "index";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
 
 function ProcessStatus({ messages }: { messages: string[] }) {
@@ -159,6 +160,7 @@ function App() {
       {stage === "choose" && activeProject ? (
         <ModeChooser
           project={activeProject}
+          onViewer={() => setStage("viewer")}
           onQuestion={() => setStage("question")}
           onIndex={() => setStage("index")}
           onProjectUpdated={async (project) => {
@@ -167,6 +169,10 @@ function App() {
           }}
           setNotice={setNotice}
         />
+      ) : null}
+
+      {stage === "viewer" && activeProject ? (
+        <ManuscriptViewer project={activeProject} onBack={() => setStage("choose")} setNotice={setNotice} />
       ) : null}
 
       {stage === "question" && activeProject ? (
@@ -308,12 +314,14 @@ function WelcomeScreen({
 
 function ModeChooser({
   project,
+  onViewer,
   onQuestion,
   onIndex,
   onProjectUpdated,
   setNotice
 }: {
   project: Project;
+  onViewer: () => void;
   onQuestion: () => void;
   onIndex: () => void;
   onProjectUpdated: (project: Project) => Promise<void>;
@@ -368,6 +376,11 @@ function ModeChooser({
       </div>
 
       <div className="mode-choice-grid">
+        <button className="mode-choice" onClick={onViewer}>
+          <BookOpen size={26} />
+          <span>Manuscript Viewer</span>
+          <small>Read the processed manuscript and inspect its paragraph locations.</small>
+        </button>
         <button className="mode-choice" onClick={onQuestion} disabled={!indexReady}>
           <FileSearch size={26} />
           <span>Q&A Mode</span>
@@ -379,6 +392,93 @@ function ModeChooser({
           <small>Draft index entries and compare against an existing index.</small>
         </button>
       </div>
+    </section>
+  );
+}
+
+const VIEWER_PAGE_SIZE = 12;
+
+function ManuscriptViewer({
+  project,
+  onBack,
+  setNotice
+}: {
+  project: Project;
+  onBack: () => void;
+  setNotice: (notice: Notice) => void;
+}) {
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [passages, setPassages] = useState<SourceChunk[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getManuscriptSources(project.id, offset, VIEWER_PAGE_SIZE)
+      .then((result) => {
+        if (!cancelled) {
+          setTotal(result.total);
+          setPassages(result.sources);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setNotice({ type: "error", text: errorMessage(error) });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [offset, project.id, setNotice]);
+
+  const firstPassage = total ? offset + 1 : 0;
+  const lastPassage = Math.min(offset + passages.length, total);
+
+  return (
+    <section className="focused-stage">
+      <ModeHeader title="Manuscript Viewer" project={project} onBack={onBack} icon={<BookOpen size={22} />} />
+      <section className="viewer-panel">
+        <header className="viewer-toolbar">
+          <div>
+            <p className="kicker">Processed manuscript</p>
+            <h2>{project.name}</h2>
+          </div>
+          <span>{loading ? "Loading..." : `${firstPassage}-${lastPassage} of ${total} passages`}</span>
+        </header>
+
+        {loading ? <ProcessStatus messages={["Opening the manuscript..."]} /> : null}
+
+        {!loading && passages.length ? (
+          <div className="manuscript-pages">
+            {passages.map((passage) => (
+              <article className="manuscript-passage" key={passage.chunk_id}>
+                <header>
+                  <div>
+                    <h3>{passage.chapter_title}</h3>
+                    <span>{passage.document}</span>
+                  </div>
+                  <small>Paragraphs {passage.paragraph_start ?? "?"}-{passage.paragraph_end ?? "?"}</small>
+                </header>
+                <p>{passage.text}</p>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        {!loading && !passages.length ? <p className="empty-state">No manuscript text was found.</p> : null}
+
+        <footer className="viewer-pagination">
+          <button className="small-button" disabled={loading || offset === 0} onClick={() => setOffset((value) => Math.max(0, value - VIEWER_PAGE_SIZE))}>
+            Previous
+          </button>
+          <button className="small-button" disabled={loading || offset + VIEWER_PAGE_SIZE >= total} onClick={() => setOffset((value) => value + VIEWER_PAGE_SIZE)}>
+            Next
+          </button>
+        </footer>
+      </section>
     </section>
   );
 }

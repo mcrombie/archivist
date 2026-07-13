@@ -120,3 +120,10 @@ export async function getCandidateTerms(projectId: string, limit = 60) {
   );
   return data.terms;
 }
+
+export async function getManuscriptSources(projectId: string, offset = 0, limit = 12) {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  return requestJson<{ total: number; sources: SourceChunk[] }>(
+    `/api/projects/${projectId}/sources?${params.toString()}`
+  );
+}

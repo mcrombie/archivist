@@ -177,8 +177,30 @@ def sources(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> dict[str, object]:
     chunks = load_project_chunks(project_id)
-    selected = chunks[offset:offset + limit]
-    return {"total": len(chunks), "sources": source_payload(selected)}
+    reading_chunks: list[dict[str, object]] = []
+    previous_document: str | None = None
+    previous_end = 0
+
+    for chunk in chunks:
+        reading_chunk = dict(chunk)
+        document = str(chunk.get("document", ""))
+        start = int(chunk.get("paragraph_start") or 1)
+        end = int(chunk.get("paragraph_end") or start)
+
+        if document == previous_document and start <= previous_end:
+            overlap = previous_end - start + 1
+            paragraphs = str(chunk.get("text", "")).split("\n\n")
+            reading_chunk["text"] = "\n\n".join(paragraphs[overlap:])
+            reading_chunk["paragraph_start"] = start + overlap
+
+        if str(reading_chunk.get("text", "")).strip():
+            reading_chunks.append(reading_chunk)
+
+        previous_document = document
+        previous_end = end
+
+    selected = reading_chunks[offset:offset + limit]
+    return {"total": len(reading_chunks), "sources": source_payload(selected)}
 
 
 @app.get("/{full_path:path}")

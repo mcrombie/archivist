@@ -109,7 +109,8 @@ button:disabled {
 .output-block,
 .sources-block,
 .term-panel,
-.index-main {
+.index-main,
+.viewer-panel {
   border: 1px solid rgba(103, 63, 33, 0.48);
   border-radius: 10px;
   background:
@@ -369,7 +370,7 @@ textarea:focus {
 
 .mode-choice-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
   gap: 18px;
 }
 
@@ -426,8 +427,66 @@ textarea:focus {
 .output-block,
 .sources-block,
 .term-panel,
-.index-main {
+.index-main,
+.viewer-panel {
   padding: 18px;
+}
+
+.viewer-toolbar,
+.viewer-pagination,
+.manuscript-passage > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.viewer-toolbar {
+  border-bottom: 1px solid rgba(126, 79, 39, 0.3);
+  padding-bottom: 16px;
+}
+
+.viewer-toolbar .kicker {
+  margin: 0 0 5px;
+}
+
+.viewer-toolbar > span,
+.manuscript-passage header span,
+.manuscript-passage header small {
+  color: #765038;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.manuscript-pages {
+  display: flex;
+  flex-direction: column;
+}
+
+.manuscript-passage {
+  border-bottom: 1px solid rgba(126, 79, 39, 0.22);
+  padding: 24px clamp(4px, 2vw, 24px);
+}
+
+.manuscript-passage h3 {
+  margin: 0 0 4px;
+  color: #342116;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 19px;
+}
+
+.manuscript-passage p {
+  margin: 16px 0 0;
+  color: #2d1e13;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.viewer-pagination {
+  justify-content: flex-end;
+  padding-top: 18px;
 }
 
 .query-panel {
@@ -655,6 +714,12 @@ textarea:focus {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .viewer-toolbar,
+  .manuscript-passage > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 560px) {
@@ -669,7 +734,8 @@ textarea:focus {
   .output-block,
   .sources-block,
   .term-panel,
-  .index-main {
+  .index-main,
+  .viewer-panel {
     padding: 16px;
   }
 
