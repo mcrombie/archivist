@@ -22,6 +22,7 @@ from importers import (
     build_chunks_for_imported_document,
     import_document,
     split_existing_index_section,
+    chapter_title_from_text,
 )
 from ingest import clean_title_from_filename, extract_chapter_title
 from retrieval import MAX_FINAL_SOURCES, MAX_PRIMARY_DISTANCE
@@ -425,16 +426,35 @@ def expand_with_neighbors(primary_chunks: list[dict[str, Any]], lookup: dict[str
 
 
 def finalize_question_context(project_id: str, results: dict[str, Any], max_final_sources: int = MAX_FINAL_SOURCES) -> list[dict[str, Any]]:
-    lookup = build_chunk_lookup(load_project_chunks(project_id))
-    primary = get_filtered_primary_chunks(results)
+    lookup = build_chunk_lookup(annotate_chapter_titles(load_project_chunks(project_id)))
+    primary = [lookup.get(str(chunk.get("chunk_id")), chunk) for chunk in get_filtered_primary_chunks(results)]
     return expand_with_neighbors(primary, lookup)[:max_final_sources]
+
+
+def annotate_chapter_titles(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    annotated: list[dict[str, Any]] = []
+    current_document: str | None = None
+    current_title: str | None = None
+    for chunk in chunks:
+        item = dict(chunk)
+        document = str(item.get("document", ""))
+        if document != current_document:
+            current_document = document
+            current_title = str(item.get("chapter_title") or "")
+        detected = chapter_title_from_text(str(item.get("text", "")))
+        if detected:
+            current_title = detected
+        item["chapter_title"] = current_title or item.get("chapter_title", "N/A")
+        annotated.append(item)
+    return annotated
 
 
 def build_context(chunks: list[dict[str, Any]], label: str = "Source") -> str:
     blocks = []
-    for i, chunk in enumerate(chunks, start=1):
+    for chunk in chunks:
+        citation = citation_label(chunk)
         blocks.append(
-            f"[{label} {i}]\n"
+            f"[{citation if label == 'Source' else f'{label}: {citation}'}]\n"
             f"Document: {chunk.get('document', 'N/A')}\n"
             f"Chapter: {chunk.get('chapter_title', 'N/A')}\n"
             f"Chunk ID: {chunk.get('chunk_id', 'N/A')}\n"
@@ -444,15 +464,68 @@ def build_context(chunks: list[dict[str, Any]], label: str = "Source") -> str:
     return "\n\n".join(blocks)
 
 
+def citation_label(chunk: dict[str, Any]) -> str:
+    chapter = str(chunk.get("chapter_title") or "").strip()
+    if not chapter or chapter == "N/A" or re.fullmatch(r"page\s+\d+", chapter, flags=re.IGNORECASE):
+        chapter = Path(str(chunk.get("document") or "Manuscript")).stem
+    if len(chapter) > 90:
+        chapter = chapter[:87].rstrip() + "..."
+    start = chunk.get("paragraph_start", "?")
+    end = chunk.get("paragraph_end", "?")
+    paragraph_label = f"¶{start}" if start == end else f"¶{start}–{end}"
+    return f"{chapter}, {paragraph_label}"
+
+
+def merge_adjacent_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge selected neighboring chunks after retrieval without changing stored RAG chunks."""
+    if not chunks:
+        return []
+
+    ranked = list(enumerate(chunks))
+    ranked.sort(key=lambda item: (
+        str(item[1].get("document", "")),
+        int(item[1].get("paragraph_start") or 0),
+        item[0],
+    ))
+    merged: list[dict[str, Any]] = []
+
+    for _, chunk in ranked:
+        current = dict(chunk)
+        current["chunk_ids"] = list(chunk.get("chunk_ids") or [str(chunk.get("chunk_id", "N/A"))])
+        if not merged:
+            merged.append(current)
+            continue
+
+        previous = merged[-1]
+        same_document = previous.get("document") == current.get("document")
+        same_chapter = previous.get("chapter_title") == current.get("chapter_title")
+        previous_end = int(previous.get("paragraph_end") or 0)
+        current_start = int(current.get("paragraph_start") or 0)
+        neighboring = current_start <= previous_end + 1
+
+        if not same_document or not same_chapter or not neighboring:
+            merged.append(current)
+            continue
+
+        overlap = max(0, previous_end - current_start + 1)
+        current_paragraphs = str(current.get("text", "")).split("\n\n")
+        new_text = "\n\n".join(current_paragraphs[overlap:]).strip()
+        if new_text:
+            previous["text"] = f"{str(previous.get('text', '')).rstrip()}\n\n{new_text}"
+        previous["paragraph_end"] = max(previous_end, int(current.get("paragraph_end") or previous_end))
+        previous["chunk_ids"] = [*previous["chunk_ids"], *current["chunk_ids"]]
+    return merged
+
+
 def answer_project_question(project_id: str, question: str, n_results: int = 5) -> tuple[str, list[dict[str, Any]]]:
     results = retrieve_project(project_id, question, n_results=n_results)
-    final_chunks = finalize_question_context(project_id, results)
+    final_chunks = merge_adjacent_chunks(finalize_question_context(project_id, results))
     context = build_context(final_chunks)
     prompt = f"""You are a historian specializing in the development of the American imperial system through Virginia.
 
 Answer the user's question using only the provided sources.
 
-Cite sources inline after specific claims using [Source X].
+Cite sources inline after specific claims using the exact bracketed citation labels supplied below.
 Do not group multiple sources only at the end of a paragraph.
 Each important factual claim should have its own citation.
 If the sources do not contain enough information, say so.
@@ -481,7 +554,7 @@ def find_exact_match_chunks(term: str, chunks: list[dict[str, Any]]) -> list[dic
 
 
 def finalize_index_context(project_id: str, term: str, semantic_results: dict[str, Any], max_final_sources: int = MAX_FINAL_SOURCES) -> list[dict[str, Any]]:
-    chunks = load_project_chunks(project_id)
+    chunks = annotate_chapter_titles(load_project_chunks(project_id))
     lookup = build_chunk_lookup(chunks)
     exact_matches = find_exact_match_chunks(term, chunks)
     seen: set[str] = set()
@@ -500,7 +573,11 @@ def finalize_index_context(project_id: str, term: str, semantic_results: dict[st
                 final_chunks.append(neighbor)
                 seen.add(neighbor["chunk_id"])
 
-    for chunk in expand_with_neighbors(get_filtered_primary_chunks(semantic_results), lookup):
+    semantic_primary = [
+        lookup.get(str(chunk.get("chunk_id")), chunk)
+        for chunk in get_filtered_primary_chunks(semantic_results)
+    ]
+    for chunk in expand_with_neighbors(semantic_primary, lookup):
         cid = chunk["chunk_id"]
         if cid not in seen:
             final_chunks.append(chunk)
@@ -517,8 +594,8 @@ def search_existing_index(project_id: str, term: str, limit: int = 8) -> list[di
 
 def generate_index_entry(project_id: str, term: str, consult_existing_index: bool) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     semantic_results = retrieve_project(project_id, term, n_results=5)
-    final_chunks = finalize_index_context(project_id, term, semantic_results)
-    existing_index_chunks = search_existing_index(project_id, term) if consult_existing_index else []
+    final_chunks = merge_adjacent_chunks(finalize_index_context(project_id, term, semantic_results))
+    existing_index_chunks = merge_adjacent_chunks(search_existing_index(project_id, term)) if consult_existing_index else []
     context = build_context(final_chunks)
     existing_context = build_context(existing_index_chunks, label="Existing Index") if existing_index_chunks else "No existing index context supplied."
 
@@ -535,7 +612,7 @@ Instructions:
 - Then suggest 0-5 possible subentries if they are clearly supported by the sources.
 - Be cautious: if the term is only mentioned briefly or weakly, say so.
 - Do not invent page numbers.
-- Use source numbers when making claims, like [Source 2].
+- Use the exact bracketed human-readable citation labels supplied below when making claims.
 - If existing index context is supplied, use it only as a comparison reference. Do not copy it blindly.
 
 Format exactly like this:
@@ -546,7 +623,7 @@ Summary:
 <summary>
 
 Key locations:
-- [Source X] <chapter / chunk / brief note>
+- [<citation label>] <brief note>
 
 Suggested subentries:
 - <subentry>
@@ -587,9 +664,11 @@ def source_payload(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for i, chunk in enumerate(chunks, start=1):
         payload.append({
             "source_number": i,
+            "citation_label": citation_label(chunk),
             "document": chunk.get("document", "N/A"),
             "chapter_title": chunk.get("chapter_title", "N/A"),
             "chunk_id": chunk.get("chunk_id", "N/A"),
+            "chunk_ids": chunk.get("chunk_ids") or [chunk.get("chunk_id", "N/A")],
             "paragraph_start": chunk.get("paragraph_start"),
             "paragraph_end": chunk.get("paragraph_end"),
             "text": chunk.get("text", ""),

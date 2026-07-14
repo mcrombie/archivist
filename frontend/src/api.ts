@@ -23,9 +23,11 @@ export type Project = {
 
 export type SourceChunk = {
   source_number: number;
+  citation_label: string;
   document: string;
   chapter_title: string;
   chunk_id: string;
+  chunk_ids: string[];
   paragraph_start?: number;
   paragraph_end?: number;
   text: string;

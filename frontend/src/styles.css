@@ -646,6 +646,55 @@ select:focus {
   line-height: 1.62;
 }
 
+.inline-citation {
+  position: relative;
+  display: inline;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(155, 91, 48, 0.12);
+  color: #743526;
+  padding: 1px 4px;
+  font: inherit;
+  font-weight: 750;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: rgba(116, 53, 38, 0.35);
+  text-underline-offset: 2px;
+}
+
+.inline-citation:hover,
+.inline-citation:focus-visible {
+  background: rgba(155, 91, 48, 0.22);
+  outline: none;
+}
+
+.citation-preview {
+  pointer-events: none;
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  display: none;
+  width: min(360px, 75vw);
+  border: 1px solid rgba(225, 193, 127, 0.58);
+  border-radius: 8px;
+  background: #2d1d12;
+  box-shadow: 0 12px 30px rgba(18, 9, 4, 0.34);
+  color: #f5e4b7;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  text-decoration: none;
+  transform: translateX(-50%);
+}
+
+.inline-citation:hover .citation-preview,
+.inline-citation:focus-visible .citation-preview {
+  display: block;
+}
+
 .empty-state {
   margin: 0;
   color: #6e4b30;
@@ -691,6 +740,29 @@ select:focus {
   color: #332317;
   font-size: 14px;
   line-height: 1.58;
+}
+
+.source-card-body {
+  border-top: 1px solid rgba(145, 92, 44, 0.28);
+}
+
+.source-card-body p {
+  border-top: 0;
+}
+
+.copy-reference {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  margin: 0 12px 12px;
+  border: 1px solid rgba(116, 53, 38, 0.3);
+  border-radius: 7px;
+  background: rgba(255, 250, 229, 0.68);
+  color: #643c29;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .index-workspace {

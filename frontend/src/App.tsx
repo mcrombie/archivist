@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
+  Copy,
   FileSearch,
   FileText,
   Library,
@@ -642,7 +643,7 @@ function QuestionMode({
         {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
       </form>
 
-      <OutputBlock title="Answer" body={answer} empty="No answer yet." />
+      <OutputBlock title="Answer" body={answer} empty="No answer yet." sources={sources} />
       <Sources title="Sources" sources={sources} />
     </section>
   );
@@ -766,7 +767,7 @@ function IndexMode({
             {generating ? <ProcessStatus messages={INDEX_ENTRY_STEPS} /> : null}
           </form>
 
-          <OutputBlock title="Candidate entry" body={entry} empty="No entry yet." />
+          <OutputBlock title="Candidate entry" body={entry} empty="No entry yet." sources={sources} />
 
           <form className="index-search" onSubmit={submitIndexSearch}>
             <label>
@@ -816,16 +817,51 @@ function ModeHeader({
   );
 }
 
-function OutputBlock({ title, body, empty }: { title: string; body: string; empty: string }) {
+function OutputBlock({ title, body, empty, sources = [] }: { title: string; body: string; empty: string; sources?: SourceChunk[] }) {
   return (
     <section className="output-block">
       <div className="panel-title">
         <h2>{title}</h2>
         <BookOpen size={17} />
       </div>
-      {body ? <pre>{body}</pre> : <p className="empty-state">{empty}</p>}
+      {body ? <pre><CitationText body={body} sources={sources} /></pre> : <p className="empty-state">{empty}</p>}
     </section>
   );
+}
+
+function CitationText({ body, sources }: { body: string; sources: SourceChunk[] }) {
+  if (!sources.length) return <>{body}</>;
+  const sourceByLabel = new Map(sources.map((source) => [source.citation_label, source]));
+  const labels = [...sourceByLabel.keys()].sort((a, b) => b.length - a.length);
+  const escapedLabels = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const parts = body.split(new RegExp(`(\\[(?:${escapedLabels.join("|")})\\])`, "g"));
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        const label = part.startsWith("[") && part.endsWith("]") ? part.slice(1, -1) : "";
+        const source = sourceByLabel.get(label);
+        if (!source) return part;
+        const excerpt = source.text.replace(/\s+/g, " ").trim().slice(0, 220);
+        return (
+          <button key={`${label}-${index}`} className="inline-citation" type="button" onClick={() => openSource(source)}>
+            [{label}]
+            <span className="citation-preview" role="tooltip">{excerpt}{source.text.length > 220 ? "…" : ""}</span>
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function sourceAnchor(source: SourceChunk) {
+  return `source-${source.chunk_ids.join("-").replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+
+function openSource(source: SourceChunk) {
+  const element = document.getElementById(sourceAnchor(source));
+  if (element instanceof HTMLDetailsElement) element.open = true;
+  element?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function Sources({ title, sources }: { title: string; sources: SourceChunk[] }) {
@@ -838,15 +874,18 @@ function Sources({ title, sources }: { title: string; sources: SourceChunk[] }) 
       {sources.length ? (
         <div className="source-stack">
           {sources.map((source) => (
-            <details key={`${source.chunk_id}-${source.source_number}`} className="source-card">
+            <details id={sourceAnchor(source)} key={sourceAnchor(source)} className="source-card">
               <summary>
-                <strong>Source {source.source_number}</strong>
-                <span>{source.chapter_title}</span>
-                <small>
-                  {source.chunk_id} | {source.paragraph_start}-{source.paragraph_end}
-                </small>
+                <strong>{source.citation_label}</strong>
+                <span>{source.document}</span>
               </summary>
-              <p>{source.text}</p>
+              <div className="source-card-body">
+                <p>{source.text}</p>
+                <button className="copy-reference" type="button" onClick={() => navigator.clipboard.writeText(source.chunk_ids.join(", "))}>
+                  <Copy size={14} />
+                  Copy internal reference
+                </button>
+              </div>
             </details>
           ))}
         </div>

@@ -88,21 +88,24 @@ def build_chunks_for_imported_document(document: ImportedDocument) -> list[dict[
 
 def chapter_title_from_text(text: str) -> str | None:
     """Return a chapter heading at the start of a passage, excluding its opening prose."""
-    first_paragraph = text.strip().split("\n\n", 1)[0].strip()
-    heading_match = re.match(r"^(chapter\s+(?:\d+|[ivxlcdm]+))\b", first_paragraph, flags=re.IGNORECASE)
-    if not heading_match:
-        return None
+    detected: str | None = None
+    for paragraph in text.strip().split("\n\n"):
+        paragraph = paragraph.strip()
+        heading_match = re.match(r"^(chapter\s+(?:\d+|[ivxlcdm]+))\b", paragraph, flags=re.IGNORECASE)
+        if not heading_match:
+            continue
 
-    title_parts = re.split(r"[\"'\u2018\u2019\u201c\u201d]", first_paragraph, maxsplit=1)
-    if len(title_parts) > 1:
-        title = title_parts[0].strip().rstrip(" :-\u2013\u2014")
-        if len(title) <= 160:
-            return title
+        title_parts = re.split(r"[\"\u201c\u201d]", paragraph, maxsplit=1)
+        if len(title_parts) > 1:
+            title = title_parts[0].strip().rstrip(" :-\u2013\u2014")
+            if len(title) <= 160:
+                detected = title
+                continue
 
-    # Some PDFs concatenate an unquoted chapter heading and its first prose
-    # sentence. Preserve the reliable chapter number rather than mislabeling
-    # the passage with the preceding chapter or treating prose as the title.
-    return heading_match.group(1)
+        # Some PDFs concatenate an unquoted chapter heading and its first prose
+        # sentence. Preserve the reliable chapter number rather than prose.
+        detected = heading_match.group(1)
+    return detected
 
 
 def split_existing_index_section(document: ImportedDocument) -> tuple[ImportedDocument | None, ImportedDocument | None]:
