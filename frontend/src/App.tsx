@@ -12,7 +12,7 @@ import {
   Send,
   Upload
 } from "lucide-react";
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
   CandidateTerm,
   Project,
@@ -407,19 +407,32 @@ function ManuscriptViewer({
   onBack: () => void;
   setNotice: (notice: Notice) => void;
 }) {
+  const pdfFiles = project.source_files.filter((file) => file.toLowerCase().endsWith(".pdf"));
+  const [selectedSourceFile, setSelectedSourceFile] = useState(pdfFiles[0] ?? "");
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [passages, setPassages] = useState<SourceChunk[]>([]);
+  const [documents, setDocuments] = useState<string[]>([]);
+  const [selectedDocument, setSelectedDocument] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [fontSize, setFontSize] = useState(16);
+  const [pageInput, setPageInput] = useState("1");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (selectedSourceFile) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
-    getManuscriptSources(project.id, offset, VIEWER_PAGE_SIZE)
+    getManuscriptSources(project.id, offset, VIEWER_PAGE_SIZE, search, selectedDocument)
       .then((result) => {
         if (!cancelled) {
           setTotal(result.total);
           setPassages(result.sources);
+          setDocuments(result.documents);
         }
       })
       .catch((error) => {
@@ -432,10 +445,54 @@ function ManuscriptViewer({
     return () => {
       cancelled = true;
     };
-  }, [offset, project.id, setNotice]);
+  }, [offset, project.id, search, selectedDocument, selectedSourceFile, setNotice]);
 
   const firstPassage = total ? offset + 1 : 0;
   const lastPassage = Math.min(offset + passages.length, total);
+  const pageCount = Math.max(1, Math.ceil(total / VIEWER_PAGE_SIZE));
+  const currentPage = Math.floor(offset / VIEWER_PAGE_SIZE) + 1;
+
+  useEffect(() => setPageInput(String(currentPage)), [currentPage]);
+
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    setOffset(0);
+    setSearch(searchInput.trim());
+  }
+
+  function jumpToPage(event: FormEvent) {
+    event.preventDefault();
+    const requestedPage = Number.parseInt(pageInput, 10);
+    if (!Number.isFinite(requestedPage)) return;
+    setOffset((Math.min(pageCount, Math.max(1, requestedPage)) - 1) * VIEWER_PAGE_SIZE);
+  }
+
+
+  if (selectedSourceFile) {
+    const encodedPath = selectedSourceFile.split(/[\\/]/).map(encodeURIComponent).join("/");
+    return (
+      <section className="focused-stage viewer-focused-stage">
+        <ModeHeader title="Manuscript Viewer" project={project} onBack={onBack} icon={<BookOpen size={22} />} />
+        <section className="pdf-viewer-panel">
+          <header className="pdf-viewer-toolbar">
+            <div>
+              <p className="kicker">Original manuscript</p>
+              <h2>{project.name}</h2>
+            </div>
+            {pdfFiles.length > 1 ? (
+              <label>
+                <span>Document</span>
+                <select value={selectedSourceFile} onChange={(event) => setSelectedSourceFile(event.target.value)}>
+                  {pdfFiles.map((file) => <option key={file}>{file}</option>)}
+                </select>
+              </label>
+            ) : <span>{selectedSourceFile}</span>}
+          </header>
+          <iframe title={`${project.name} manuscript`} src={`/api/projects/${project.id}/source-file/${encodedPath}`} />
+        </section>
+      </section>
+    );
+  }
 
   return (
     <section className="focused-stage">
@@ -449,20 +506,51 @@ function ManuscriptViewer({
           <span>{loading ? "Loading..." : `${firstPassage}-${lastPassage} of ${total} passages`}</span>
         </header>
 
+        <div className="viewer-controls">
+          <form className="viewer-search" onSubmit={submitSearch}>
+            <label>
+              <span>Search manuscript</span>
+              <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Find a name, phrase, or subject..." />
+            </label>
+            <button className="small-button" disabled={loading}><Search size={15} />Search</button>
+            {search ? (
+              <button className="viewer-clear-button" type="button" onClick={() => { setSearchInput(""); setSearch(""); setOffset(0); }}>
+                Clear
+              </button>
+            ) : null}
+          </form>
+
+          <div className="viewer-options">
+            {documents.length > 1 ? (
+              <label>
+                <span>Document</span>
+                <select value={selectedDocument} onChange={(event) => { setSelectedDocument(event.target.value); setOffset(0); }}>
+                  <option value="">All documents</option>
+                  {documents.map((document) => <option key={document}>{document}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <div className="viewer-text-size" aria-label="Text size">
+              <span>Text size</span>
+              <button type="button" onClick={() => setFontSize((size) => Math.max(14, size - 1))} disabled={fontSize === 14}>A−</button>
+              <button type="button" onClick={() => setFontSize((size) => Math.min(22, size + 1))} disabled={fontSize === 22}>A+</button>
+            </div>
+          </div>
+        </div>
+
         {loading ? <ProcessStatus messages={["Opening the manuscript..."]} /> : null}
 
         {!loading && passages.length ? (
-          <div className="manuscript-pages">
+          <div className="manuscript-pages" style={{ "--viewer-font-size": `${fontSize}px` } as CSSProperties}>
             {passages.map((passage) => (
               <article className="manuscript-passage" key={passage.chunk_id}>
                 <header>
                   <div>
-                    <h3>{passage.chapter_title}</h3>
                     <span>{passage.document}</span>
                   </div>
                   <small>Paragraphs {passage.paragraph_start ?? "?"}-{passage.paragraph_end ?? "?"}</small>
                 </header>
-                <p>{passage.text}</p>
+                <p><HighlightedText text={passage.text} query={search} /></p>
               </article>
             ))}
           </div>
@@ -474,12 +562,30 @@ function ManuscriptViewer({
           <button className="small-button" disabled={loading || offset === 0} onClick={() => setOffset((value) => Math.max(0, value - VIEWER_PAGE_SIZE))}>
             Previous
           </button>
+          <form onSubmit={jumpToPage}>
+            <span>Page</span>
+            <input aria-label="Page number" inputMode="numeric" value={pageInput} onChange={(event) => setPageInput(event.target.value)} />
+            <span>of {pageCount}</span>
+          </form>
           <button className="small-button" disabled={loading || offset + VIEWER_PAGE_SIZE >= total} onClick={() => setOffset((value) => value + VIEWER_PAGE_SIZE)}>
             Next
           </button>
         </footer>
       </section>
     </section>
+  );
+}
+
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escapedQuery})`, "gi"));
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLocaleLowerCase() === query.toLocaleLowerCase() ? <mark key={index}>{part}</mark> : part
+      )}
+    </>
   );
 }
 

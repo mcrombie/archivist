@@ -121,9 +121,17 @@ export async function getCandidateTerms(projectId: string, limit = 60) {
   return data.terms;
 }
 
-export async function getManuscriptSources(projectId: string, offset = 0, limit = 12) {
+export async function getManuscriptSources(
+  projectId: string,
+  offset = 0,
+  limit = 12,
+  search = "",
+  document = ""
+) {
   const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-  return requestJson<{ total: number; sources: SourceChunk[] }>(
+  if (search) params.set("search", search);
+  if (document) params.set("document", document);
+  return requestJson<{ total: number; sources: SourceChunk[]; documents: string[] }>(
     `/api/projects/${projectId}/sources?${params.toString()}`
   );
 }

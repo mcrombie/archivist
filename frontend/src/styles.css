@@ -20,7 +20,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -199,7 +200,8 @@ label span {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid #b78751;
   border-radius: 8px;
@@ -213,7 +215,8 @@ textarea {
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   border-color: #7e3c29;
   outline: 3px solid rgba(164, 85, 55, 0.18);
 }
@@ -446,6 +449,64 @@ textarea:focus {
   padding-bottom: 16px;
 }
 
+.viewer-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(240px, 1fr);
+  gap: 14px;
+  border-bottom: 1px solid rgba(126, 79, 39, 0.22);
+  padding: 16px 0;
+}
+
+.viewer-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.viewer-clear-button {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: #743526;
+  padding: 0 6px;
+  font-weight: 800;
+}
+
+.viewer-options {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.viewer-options label {
+  min-width: 180px;
+}
+
+.viewer-text-size {
+  display: grid;
+  grid-template-columns: repeat(2, 38px);
+  gap: 5px;
+}
+
+.viewer-text-size > span {
+  grid-column: 1 / -1;
+  color: #4f3522;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.viewer-text-size button {
+  height: 42px;
+  border: 1px solid #b78751;
+  border-radius: 8px;
+  background: rgba(255, 253, 239, 0.72);
+  color: #3d281a;
+  font-weight: 800;
+}
+
 .viewer-toolbar .kicker {
   margin: 0 0 5px;
 }
@@ -479,14 +540,81 @@ textarea:focus {
   margin: 16px 0 0;
   color: #2d1e13;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 16px;
+  font-size: var(--viewer-font-size, 16px);
   line-height: 1.72;
   white-space: pre-wrap;
+}
+
+.manuscript-passage mark {
+  border-radius: 3px;
+  background: #f2ce72;
+  color: inherit;
+  padding: 0 2px;
 }
 
 .viewer-pagination {
   justify-content: flex-end;
   padding-top: 18px;
+}
+
+.viewer-pagination form {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #68462f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.viewer-pagination input {
+  width: 58px;
+  padding: 8px;
+  text-align: center;
+}
+
+.viewer-focused-stage {
+  width: min(1500px, calc(100% - 32px));
+}
+
+.pdf-viewer-panel {
+  overflow: hidden;
+  border: 1px solid rgba(225, 193, 127, 0.42);
+  border-radius: 10px;
+  background: #21160e;
+  box-shadow: 0 24px 72px rgba(11, 6, 3, 0.48);
+}
+
+.pdf-viewer-toolbar {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: linear-gradient(135deg, rgba(255, 249, 226, 0.97), rgba(235, 212, 164, 0.95));
+  padding: 14px 18px;
+}
+
+.pdf-viewer-toolbar .kicker {
+  margin: 0 0 4px;
+}
+
+.pdf-viewer-toolbar > span {
+  color: #765038;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pdf-viewer-toolbar label {
+  width: min(420px, 45vw);
+}
+
+.pdf-viewer-panel iframe {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 205px);
+  min-height: 620px;
+  border: 0;
+  background: #3a2a1d;
 }
 
 .query-panel {
@@ -720,6 +848,14 @@ textarea:focus {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .viewer-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .viewer-options {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 560px) {
@@ -745,5 +881,20 @@ textarea:focus {
 
   .source-card summary small {
     grid-column: 1;
+  }
+
+  .viewer-search {
+    grid-template-columns: 1fr auto;
+  }
+
+  .viewer-search label,
+  .viewer-clear-button {
+    grid-column: 1 / -1;
+  }
+
+  .viewer-options,
+  .viewer-pagination {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

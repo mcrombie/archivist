@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from importers import chapter_title_from_text
+
 from web_project import (
     BASE_DIR,
     answer_project_question,
@@ -26,6 +28,7 @@ from web_project import (
     load_project_chunks,
     search_existing_index,
     source_payload,
+    source_dir,
 )
 
 
@@ -175,17 +178,27 @@ def sources(
     project_id: str,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+    document: Annotated[str | None, Query(max_length=300)] = None,
 ) -> dict[str, object]:
     chunks = load_project_chunks(project_id)
     reading_chunks: list[dict[str, object]] = []
     previous_document: str | None = None
     previous_end = 0
+    current_chapter_title: str | None = None
 
     for chunk in chunks:
         reading_chunk = dict(chunk)
         document = str(chunk.get("document", ""))
         start = int(chunk.get("paragraph_start") or 1)
         end = int(chunk.get("paragraph_end") or start)
+
+        if document != previous_document:
+            current_chapter_title = str(chunk.get("chapter_title", "N/A"))
+        detected_title = chapter_title_from_text(str(chunk.get("text", "")))
+        if detected_title:
+            current_chapter_title = detected_title
+        reading_chunk["chapter_title"] = current_chapter_title or "N/A"
 
         if document == previous_document and start <= previous_end:
             overlap = previous_end - start + 1
@@ -199,8 +212,38 @@ def sources(
         previous_document = document
         previous_end = end
 
-    selected = reading_chunks[offset:offset + limit]
-    return {"total": len(reading_chunks), "sources": source_payload(selected)}
+    documents = sorted({str(chunk.get("document", "N/A")) for chunk in reading_chunks})
+    filtered_chunks = reading_chunks
+    if document:
+        filtered_chunks = [chunk for chunk in filtered_chunks if str(chunk.get("document", "")) == document]
+    if search and search.strip():
+        needle = search.strip().casefold()
+        filtered_chunks = [
+            chunk
+            for chunk in filtered_chunks
+            if needle in str(chunk.get("text", "")).casefold()
+            or needle in str(chunk.get("chapter_title", "")).casefold()
+        ]
+
+    selected = filtered_chunks[offset:offset + limit]
+    return {
+        "total": len(filtered_chunks),
+        "sources": source_payload(selected),
+        "documents": documents,
+    }
+
+
+@app.get("/api/projects/{project_id}/source-file/{file_path:path}")
+def source_file(project_id: str, file_path: str) -> FileResponse:
+    root = source_dir(project_id).resolve()
+    requested = (root / file_path).resolve()
+    try:
+        requested.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid source file path.") from exc
+    if not requested.is_file():
+        raise HTTPException(status_code=404, detail="Source file not found.")
+    return FileResponse(requested, media_type="application/pdf" if requested.suffix.lower() == ".pdf" else None)
 
 
 @app.get("/{full_path:path}")

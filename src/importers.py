@@ -56,7 +56,7 @@ def import_document(path: Path) -> ImportedDocument:
         return ImportedDocument(
             source_path=path,
             document_name=path.name,
-            chapter_title=first_meaningful_line(text) or clean_title_from_filename(path.stem),
+            chapter_title=first_meaningful_line(text, ignore_page_markers=True) or clean_title_from_filename(path.stem),
             text=text,
         )
 
@@ -69,10 +69,14 @@ def build_chunks_for_imported_document(document: ImportedDocument) -> list[dict[
     safe_stem = safe_chunk_stem(document.source_path.stem)
 
     records: list[dict[str, object]] = []
+    current_chapter_title = document.chapter_title
     for index, chunk in enumerate(paragraph_chunks, start=1):
+        detected_title = chapter_title_from_text(str(chunk["text"]))
+        if detected_title:
+            current_chapter_title = detected_title
         records.append({
             "document": document.document_name,
-            "chapter_title": document.chapter_title,
+            "chapter_title": current_chapter_title,
             "chunk_id": f"{safe_stem}_{index:03}",
             "paragraph_start": chunk["paragraph_start"],
             "paragraph_end": chunk["paragraph_end"],
@@ -80,6 +84,25 @@ def build_chunks_for_imported_document(document: ImportedDocument) -> list[dict[
         })
 
     return records
+
+
+def chapter_title_from_text(text: str) -> str | None:
+    """Return a chapter heading at the start of a passage, excluding its opening prose."""
+    first_paragraph = text.strip().split("\n\n", 1)[0].strip()
+    heading_match = re.match(r"^(chapter\s+(?:\d+|[ivxlcdm]+))\b", first_paragraph, flags=re.IGNORECASE)
+    if not heading_match:
+        return None
+
+    title_parts = re.split(r"[\"'\u2018\u2019\u201c\u201d]", first_paragraph, maxsplit=1)
+    if len(title_parts) > 1:
+        title = title_parts[0].strip().rstrip(" :-\u2013\u2014")
+        if len(title) <= 160:
+            return title
+
+    # Some PDFs concatenate an unquoted chapter heading and its first prose
+    # sentence. Preserve the reliable chapter number rather than mislabeling
+    # the passage with the preceding chapter or treating prose as the title.
+    return heading_match.group(1)
 
 
 def split_existing_index_section(document: ImportedDocument) -> tuple[ImportedDocument | None, ImportedDocument | None]:
@@ -239,9 +262,11 @@ def normalize_inline_text(text: str) -> str:
     return text.strip()
 
 
-def first_meaningful_line(text: str) -> str:
+def first_meaningful_line(text: str, ignore_page_markers: bool = False) -> str:
     for line in text.splitlines():
         cleaned = line.strip().strip("#").strip()
+        if ignore_page_markers and re.fullmatch(r"page\s+\d+", cleaned, flags=re.IGNORECASE):
+            continue
         if cleaned:
             return cleaned[:120]
     return ""
