@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   Archive,
   ArrowLeft,
   BookOpen,
@@ -11,9 +12,10 @@ import {
   Loader2,
   Search,
   Send,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
-import { CSSProperties, FormEvent, ReactNode, useEffect, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import {
   CandidateTerm,
   DisplayGroup,
@@ -50,7 +52,8 @@ function ProcessStatus({ messages }: { messages: string[] }) {
   return (
     <div className="process-status" role="status" aria-live="polite">
       <span className="process-pulse" aria-hidden="true" />
-      <span>{messages[messageIndex]}</span>
+      <span className="sr-only">{messages[0]}</span>
+      <span aria-hidden="true">{messages[messageIndex]}</span>
     </div>
   );
 }
@@ -131,12 +134,14 @@ function App() {
   return (
     <main className="library-shell">
       <div className="library-grain" />
-      <header className="app-header">
-        <div className="brand-mark">
-          <Library size={25} />
-          <span>Archivist</span>
-        </div>
-      </header>
+      {stage !== "question" ? (
+        <header className="app-header">
+          <div className="brand-mark">
+            <Library size={25} />
+            <span>Archivist</span>
+          </div>
+        </header>
+      ) : null}
 
       {notice ? <NoticeBanner notice={notice} onClose={() => setNotice(null)} /> : null}
 
@@ -579,18 +584,38 @@ function QuestionMode({
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<SourceChunk[]>([]);
   const [displayGroups, setDisplayGroups] = useState<DisplayGroup[]>([]);
+  const [submittedQuestion, setSubmittedQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const answerHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (!answer || !answerHeadingRef.current) return;
+
+    const heading = answerHeadingRef.current;
+    const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth";
+    window.requestAnimationFrame(() => {
+      heading.focus({ preventScroll: true });
+      heading.scrollIntoView({ behavior, block: "start" });
+    });
+  }, [answer]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!question.trim()) {
+    const trimmedQuestion = question.trim();
+    if (!trimmedQuestion) {
       setNotice({ type: "error", text: "Enter a question." });
       return;
     }
 
+    setSubmittedQuestion(trimmedQuestion);
+    setAnswer("");
+    setSources([]);
+    setDisplayGroups([]);
     setLoading(true);
     try {
-      const result = await askQuestion(project.id, question, 5);
+      const result = await askQuestion(project.id, trimmedQuestion, 5);
       setAnswer(result.answer);
       setSources(result.sources);
       setDisplayGroups(result.display_groups);
@@ -602,54 +627,95 @@ function QuestionMode({
   }
 
   return (
-    <section className="focused-stage question-stage">
-      <section className="question-hero" aria-labelledby="question-page-title">
-        <figure className="question-cover">
-          <img
-            src={coverArt}
-            alt="Cover art for Cradle of the Empire: an ancient tree overlooking sailing ships"
-            width="896"
-            height="1344"
-            decoding="async"
-          />
-        </figure>
-        <div className="question-welcome">
-          <p className="kicker">{project.name}</p>
-          <h1 id="question-page-title">Ask the Archivist</h1>
-          <p className="question-introduction">
-            Archivist is a question-answering companion to {project.name}. Ask about the people,
-            places, events, and ideas in the book. It searches the manuscript, builds an answer from
-            the text, and shows the passages behind its response.
-          </p>
-          <form
-            className="query-panel question-query"
-            aria-label={`Ask a question about ${project.name}`}
-            onSubmit={submit}
-          >
-            <label>
-              <span>Your question</span>
-              <textarea
-                rows={5}
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="Ask about a person, place, event, or idea in the book..."
-              />
-            </label>
-            <button className="primary-button" disabled={loading}>
-              {loading ? <Loader2 size={17} className="spin" /> : <Send size={17} />}
-              Ask
-            </button>
-            {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
-          </form>
-        </div>
-      </section>
+    <section className="question-stage" aria-labelledby="question-page-title">
+      <figure className="cover-panel">
+        <img
+          src={coverArt}
+          alt="Cover art for Cradle of the Empire: an ancient tree overlooking sailing ships"
+          width="896"
+          height="1344"
+          decoding="async"
+        />
+        <span className="cover-vignette" aria-hidden="true" />
+        <figcaption>
+          <span>Featured manuscript</span>
+          <strong>{project.name}</strong>
+        </figcaption>
+      </figure>
 
-      {answer ? (
-        <>
-          <OutputBlock title="Answer" body={answer} empty="" sources={sources} />
-          <DisplayGroups title="Sources" groups={displayGroups} />
-        </>
-      ) : null}
+      <div className="question-workspace">
+        <header className="workspace-brand">
+          <span className="brand-glyph"><Library size={17} /></span>
+          <strong>Archivist</strong>
+          <span className="brand-rule" aria-hidden="true" />
+          <small>Manuscript Q&amp;A</small>
+        </header>
+
+        <div className="question-intro">
+          <p className="kicker">Source-grounded book companion</p>
+          <h1 id="question-page-title">
+            <span>Ask the book.</span>
+            <em>Follow the evidence.</em>
+          </h1>
+          <p className="question-introduction">
+            Archivist is a research companion for <cite>{project.name}</cite>. Ask about a person,
+            place, event, theme, or connection. Every answer is assembled from the manuscript and
+            linked to the passages that support it.
+          </p>
+        </div>
+
+        <form
+          className="question-composer"
+          aria-label={`Ask a question about ${project.name}`}
+          aria-busy={loading}
+          onSubmit={submit}
+        >
+          <label htmlFor="archivist-question">
+            <span>Your question</span>
+            <textarea
+              id="archivist-question"
+              rows={4}
+              required
+              disabled={loading}
+              aria-describedby="question-grounding-note"
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder="What does the manuscript say about..."
+            />
+          </label>
+          <div className="composer-footer">
+            <span id="question-grounding-note" className="grounding-note">
+              <i aria-hidden="true" />
+              Grounded in {project.stats.searchable_chunks.toLocaleString()} searchable passages
+            </span>
+            <button className="ask-button" type="submit" disabled={loading || !question.trim()}>
+              {loading ? <Loader2 size={17} className="spin" /> : null}
+              {loading ? "Searching" : "Ask Archivist"}
+              {!loading ? <Send size={16} /> : null}
+            </button>
+          </div>
+          {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
+        </form>
+
+        {answer ? (
+          <section className="response-section" aria-labelledby="response-question">
+            <header className="response-header">
+              <p>Answer from the manuscript</p>
+              <h2 id="response-question" ref={answerHeadingRef} tabIndex={-1}>{submittedQuestion}</h2>
+            </header>
+            <div className="answer-workspace">
+              <OutputBlock title="Answer" body={answer} empty="" sources={sources} />
+              <DisplayGroups title="Sources" groups={displayGroups} />
+            </div>
+          </section>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -831,7 +897,13 @@ function OutputBlock({ title, body, empty, sources = [] }: { title: string; body
         <h2>{title}</h2>
         <BookOpen size={17} />
       </div>
-      {body ? <pre><CitationText body={body} sources={sources} /></pre> : <p className="empty-state">{empty}</p>}
+      {body ? (
+        <div className="answer-copy">
+          {body.split(/\n{2,}/).map((paragraph, index) => (
+            <p key={index}><CitationText body={paragraph} sources={sources} /></p>
+          ))}
+        </div>
+      ) : <p className="empty-state">{empty}</p>}
     </section>
   );
 }
@@ -856,9 +928,15 @@ function CitationText({ body, sources }: { body: string; sources: SourceChunk[] 
         const excerpt = excerptText.slice(0, 220);
         const humanLabels = resolvedSources.map((source) => source.citation_label).join("; ");
         return (
-          <button key={`${part}-${index}`} className="inline-citation" type="button" onClick={() => openSource(firstSource)}>
+          <button
+            key={`${part}-${index}`}
+            className="inline-citation"
+            type="button"
+            aria-label={`Open source: ${humanLabels}`}
+            onClick={() => openSource(firstSource)}
+          >
             [{humanLabels}]
-            <span className="citation-preview" role="tooltip">{excerpt}{excerptText.length > 220 ? "…" : ""}</span>
+            <span className="citation-preview" aria-hidden="true">{excerpt}{excerptText.length > 220 ? "…" : ""}</span>
           </button>
         );
       })}
@@ -875,7 +953,12 @@ function openSource(source: SourceChunk) {
     `[data-source-numbers~="${source.source_number}"]`
   ) ?? document.getElementById(sourceAnchor(source));
   if (element instanceof HTMLDetailsElement) element.open = true;
-  element?.scrollIntoView({ behavior: "smooth", block: "center" });
+  const summary = element?.querySelector<HTMLElement>("summary");
+  summary?.focus({ preventScroll: true });
+  const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
+  element?.scrollIntoView({ behavior, block: "center" });
 }
 
 function DisplayGroups({ title, groups }: { title: string; groups: DisplayGroup[] }) {
@@ -885,7 +968,7 @@ function DisplayGroups({ title, groups }: { title: string; groups: DisplayGroup[
     <section className="sources-block">
       <div className="panel-title">
         <h2>{title}</h2>
-        <span>{sourceCount}</span>
+        <span>{sourceCount} {sourceCount === 1 ? "source" : "sources"}</span>
       </div>
       {groups.length ? (
         <div className="source-stack">
@@ -957,11 +1040,21 @@ function Sources({ title, sources }: { title: string; sources: SourceChunk[] }) 
 }
 
 function NoticeBanner({ notice, onClose }: { notice: Exclude<Notice, null>; onClose: () => void }) {
+  const isError = notice.type === "error";
   return (
-    <button className={`notice-banner ${notice.type}`} onClick={onClose}>
-      <CheckCircle2 size={16} />
+    <div
+      className={`notice-banner ${notice.type}`}
+      role={isError ? "alert" : "status"}
+      aria-live={isError ? "assertive" : "polite"}
+    >
+      <span className="notice-symbol" aria-hidden="true">
+        {isError ? <AlertCircle size={17} /> : <CheckCircle2 size={17} />}
+      </span>
       <span>{notice.text}</span>
-    </button>
+      <button className="notice-dismiss" type="button" aria-label="Dismiss notification" onClick={onClose}>
+        <X size={16} />
+      </button>
+    </div>
   );
 }
 
