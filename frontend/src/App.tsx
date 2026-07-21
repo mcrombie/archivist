@@ -595,10 +595,11 @@ function QuestionMode({
     const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ? "auto"
       : "smooth";
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
       heading.focus({ preventScroll: true });
-      heading.scrollIntoView({ behavior, block: "start" });
+      heading.closest<HTMLElement>(".response-section")?.scrollIntoView({ behavior, block: "start" });
     });
+    return () => window.cancelAnimationFrame(frame);
   }, [answer]);
 
   async function submit(event: FormEvent) {
@@ -627,95 +628,100 @@ function QuestionMode({
   }
 
   return (
-    <section className="question-stage" aria-labelledby="question-page-title">
-      <figure className="cover-panel">
-        <img
-          src={coverArt}
-          alt="Cover art for Cradle of the Empire: an ancient tree overlooking sailing ships"
-          width="896"
-          height="1344"
-          decoding="async"
-        />
-        <span className="cover-vignette" aria-hidden="true" />
-        <figcaption>
-          <span>Featured manuscript</span>
-          <strong>{project.name}</strong>
-        </figcaption>
-      </figure>
+    <section
+      className={`question-page${answer ? " has-answer" : ""}`}
+      aria-labelledby="question-page-title"
+    >
+      <div className="question-stage">
+        <figure className="cover-panel">
+          <img
+            src={coverArt}
+            alt="Cover art for Cradle of the Empire: an ancient tree overlooking sailing ships"
+            width="896"
+            height="1344"
+            decoding="async"
+          />
+          <span className="cover-vignette" aria-hidden="true" />
+          <figcaption>
+            <span>Featured manuscript</span>
+            <strong>{project.name}</strong>
+          </figcaption>
+        </figure>
 
-      <div className="question-workspace">
-        <header className="workspace-brand">
-          <span className="brand-glyph"><Library size={17} /></span>
-          <strong>Archivist</strong>
-          <span className="brand-rule" aria-hidden="true" />
-          <small>Manuscript Q&amp;A</small>
-        </header>
+        <div className="question-workspace">
+          <header className="workspace-brand">
+            <span className="brand-glyph"><Library size={17} /></span>
+            <strong>Archivist</strong>
+            <span className="brand-rule" aria-hidden="true" />
+            <small>Manuscript Q&amp;A</small>
+          </header>
 
-        <div className="question-intro">
-          <p className="kicker">Source-grounded book companion</p>
-          <h1 id="question-page-title">
-            <span>Ask the book.</span>
-            <em>Follow the evidence.</em>
-          </h1>
-          <p className="question-introduction">
-            Archivist is a research companion for <cite>{project.name}</cite>. Ask about a person,
-            place, event, theme, or connection. Every answer is assembled from the manuscript and
-            linked to the passages that support it.
-          </p>
-        </div>
-
-        <form
-          className="question-composer"
-          aria-label={`Ask a question about ${project.name}`}
-          aria-busy={loading}
-          onSubmit={submit}
-        >
-          <label htmlFor="archivist-question">
-            <span>Your question</span>
-            <textarea
-              id="archivist-question"
-              rows={4}
-              required
-              disabled={loading}
-              aria-describedby="question-grounding-note"
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder="What does the manuscript say about..."
-            />
-          </label>
-          <div className="composer-footer">
-            <span id="question-grounding-note" className="grounding-note">
-              <i aria-hidden="true" />
-              Grounded in {project.stats.searchable_chunks.toLocaleString()} searchable passages
-            </span>
-            <button className="ask-button" type="submit" disabled={loading || !question.trim()}>
-              {loading ? <Loader2 size={17} className="spin" /> : null}
-              {loading ? "Searching" : "Ask Archivist"}
-              {!loading ? <Send size={16} /> : null}
-            </button>
+          <div className="question-intro">
+            <p className="kicker">Source-grounded book companion</p>
+            <h1 id="question-page-title">
+              <span>Ask the book.</span>
+              <em>Follow the evidence.</em>
+            </h1>
+            <p className="question-introduction">
+              Archivist is a research companion for <cite>{project.name}</cite>. Ask about a person,
+              place, event, theme, or connection. Every answer is assembled from the manuscript and
+              linked to the passages that support it.
+            </p>
           </div>
-          {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
-        </form>
 
-        {answer ? (
-          <section className="response-section" aria-labelledby="response-question">
-            <header className="response-header">
-              <p>Answer from the manuscript</p>
-              <h2 id="response-question" ref={answerHeadingRef} tabIndex={-1}>{submittedQuestion}</h2>
-            </header>
-            <div className="answer-workspace">
-              <OutputBlock title="Answer" body={answer} empty="" sources={sources} />
-              <DisplayGroups title="Sources" groups={displayGroups} />
+          <form
+            className="question-composer"
+            aria-label={`Ask a question about ${project.name}`}
+            aria-busy={loading}
+            onSubmit={submit}
+          >
+            <label htmlFor="archivist-question">
+              <span>Your question</span>
+              <textarea
+                id="archivist-question"
+                rows={4}
+                required
+                disabled={loading}
+                aria-describedby="question-grounding-note"
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="What does the manuscript say about..."
+              />
+            </label>
+            <div className="composer-footer">
+              <span id="question-grounding-note" className="grounding-note">
+                <i aria-hidden="true" />
+                Grounded in {project.stats.searchable_chunks.toLocaleString()} searchable passages
+              </span>
+              <button className="ask-button" type="submit" disabled={loading || !question.trim()}>
+                {loading ? <Loader2 size={17} className="spin" /> : null}
+                {loading ? "Searching" : "Ask Archivist"}
+                {!loading ? <Send size={16} /> : null}
+              </button>
             </div>
-          </section>
-        ) : null}
+            {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
+          </form>
+        </div>
       </div>
+
+      {answer ? (
+        <section className="response-section" aria-labelledby="response-question">
+          <header className="response-header">
+            <p>Answer from the manuscript</p>
+            <h2 id="response-question" ref={answerHeadingRef} tabIndex={-1}>{submittedQuestion}</h2>
+          </header>
+          <div className="answer-workspace">
+            <OutputBlock title="Answer" body={answer} empty="" sources={sources} />
+            <DisplayGroups title="Sources" groups={displayGroups} />
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }
