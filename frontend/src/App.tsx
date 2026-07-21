@@ -13,7 +13,7 @@ import {
   Send,
   Upload
 } from "lucide-react";
-import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, useEffect, useState } from "react";
 import {
   CandidateTerm,
   DisplayGroup,
@@ -29,7 +29,7 @@ import {
   searchExistingIndex
 } from "./api";
 
-type AppStage = "loading" | "unavailable" | "welcome" | "choose" | "viewer" | "question" | "index";
+type AppStage = "loading" | "unavailable" | "question";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
 
 function ProcessStatus({ messages }: { messages: string[] }) {
@@ -95,31 +95,13 @@ const INDEX_SEARCH_STEPS = [
 ];
 
 function App() {
-  const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [stage, setStage] = useState<AppStage>("loading");
   const [notice, setNotice] = useState<Notice>(null);
 
-  const currentProject = useMemo(
-    () => projects.find((project) => project.id === "current") ?? null,
-    [projects]
-  );
-
-  async function refreshProjects(nextProjectId?: string) {
-    const nextProjects = await listProjects();
-    setProjects(nextProjects);
-    if (nextProjectId) {
-      const nextProject = nextProjects.find((project) => project.id === nextProjectId);
-      if (nextProject) {
-        setActiveProject(nextProject);
-      }
-    }
-  }
-
   useEffect(() => {
     listProjects()
       .then((nextProjects) => {
-        setProjects(nextProjects);
         const builtInProject = nextProjects.find((project) => project.id === "current");
         const ready = builtInProject
           && builtInProject.stats.searchable_chunks > 0
@@ -145,12 +127,6 @@ function App() {
       });
   }, []);
 
-  function selectProject(project: Project) {
-    setActiveProject(project);
-    setStage("choose");
-    setNotice(null);
-  }
-
   return (
     <main className="library-shell">
       <div className="library-grain" />
@@ -159,12 +135,6 @@ function App() {
           <Library size={25} />
           <span>Archivist</span>
         </div>
-        {activeProject && !activeProject.is_builtin ? (
-          <button className="ghost-button" onClick={() => setStage("welcome")}>
-            <ArrowLeft size={16} />
-            New Manuscript
-          </button>
-        ) : null}
       </header>
 
       {notice ? <NoticeBanner notice={notice} onClose={() => setNotice(null)} /> : null}
@@ -187,43 +157,8 @@ function App() {
         </section>
       ) : null}
 
-      {stage === "welcome" ? (
-        <WelcomeScreen
-          currentProject={currentProject}
-          onProjectReady={(project) => {
-            setActiveProject(project);
-            setStage("choose");
-          }}
-          onUseCurrent={selectProject}
-          refreshProjects={refreshProjects}
-          setNotice={setNotice}
-        />
-      ) : null}
-
-      {stage === "choose" && activeProject ? (
-        <ModeChooser
-          project={activeProject}
-          onViewer={() => setStage("viewer")}
-          onQuestion={() => setStage("question")}
-          onIndex={() => setStage("index")}
-          onProjectUpdated={async (project) => {
-            setActiveProject(project);
-            await refreshProjects(project.id);
-          }}
-          setNotice={setNotice}
-        />
-      ) : null}
-
-      {stage === "viewer" && activeProject ? (
-        <ManuscriptViewer project={activeProject} onBack={() => setStage("choose")} setNotice={setNotice} />
-      ) : null}
-
       {stage === "question" && activeProject ? (
-        <QuestionMode project={activeProject} onBack={() => setStage("choose")} setNotice={setNotice} />
-      ) : null}
-
-      {stage === "index" && activeProject ? (
-        <IndexMode project={activeProject} onBack={() => setStage("choose")} setNotice={setNotice} />
+        <QuestionMode project={activeProject} setNotice={setNotice} />
       ) : null}
     </main>
   );
@@ -634,11 +569,9 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 
 function QuestionMode({
   project,
-  onBack,
   setNotice
 }: {
   project: Project;
-  onBack: () => void;
   setNotice: (notice: Notice) => void;
 }) {
   const [question, setQuestion] = useState("");
@@ -669,7 +602,12 @@ function QuestionMode({
 
   return (
     <section className="focused-stage">
-      <ModeHeader title="Q&A Mode" project={project} onBack={onBack} icon={<FileSearch size={22} />} />
+      <header className="mode-header">
+        <div>
+          <p className="kicker">{project.name}</p>
+          <h1><FileSearch size={22} /> Ask the book</h1>
+        </div>
+      </header>
       <form className="query-panel" onSubmit={submit}>
         <label>
           <span>Question</span>
@@ -687,8 +625,12 @@ function QuestionMode({
         {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
       </form>
 
-      <OutputBlock title="Answer" body={answer} empty="No answer yet." sources={sources} />
-      <DisplayGroups title="Sources" groups={displayGroups} />
+      {answer ? (
+        <>
+          <OutputBlock title="Answer" body={answer} empty="" sources={sources} />
+          <DisplayGroups title="Sources" groups={displayGroups} />
+        </>
+      ) : null}
     </section>
   );
 }
