@@ -29,7 +29,7 @@ import {
   searchExistingIndex
 } from "./api";
 
-type AppStage = "welcome" | "choose" | "viewer" | "question" | "index";
+type AppStage = "loading" | "unavailable" | "welcome" | "choose" | "viewer" | "question" | "index";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
 
 function ProcessStatus({ messages }: { messages: string[] }) {
@@ -97,7 +97,7 @@ const INDEX_SEARCH_STEPS = [
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
-  const [stage, setStage] = useState<AppStage>("welcome");
+  const [stage, setStage] = useState<AppStage>("loading");
   const [notice, setNotice] = useState<Notice>(null);
 
   const currentProject = useMemo(
@@ -117,9 +117,32 @@ function App() {
   }
 
   useEffect(() => {
-    refreshProjects().catch((error) => {
-      setNotice({ type: "error", text: errorMessage(error) });
-    });
+    listProjects()
+      .then((nextProjects) => {
+        setProjects(nextProjects);
+        const builtInProject = nextProjects.find((project) => project.id === "current");
+        const ready = builtInProject
+          && builtInProject.stats.searchable_chunks > 0
+          && builtInProject.embedded
+          && builtInProject.embedded_chunks === builtInProject.stats.searchable_chunks;
+
+        if (!builtInProject || !ready) {
+          setActiveProject(builtInProject ?? null);
+          setStage("unavailable");
+          setNotice({
+            type: "error",
+            text: "The local Cradle of the Empire corpus or its search index is unavailable."
+          });
+          return;
+        }
+
+        setActiveProject(builtInProject);
+        setStage("question");
+      })
+      .catch((error) => {
+        setStage("unavailable");
+        setNotice({ type: "error", text: errorMessage(error) });
+      });
   }, []);
 
   function selectProject(project: Project) {
@@ -136,7 +159,7 @@ function App() {
           <Library size={25} />
           <span>Archivist</span>
         </div>
-        {activeProject ? (
+        {activeProject && !activeProject.is_builtin ? (
           <button className="ghost-button" onClick={() => setStage("welcome")}>
             <ArrowLeft size={16} />
             New Manuscript
@@ -145,6 +168,24 @@ function App() {
       </header>
 
       {notice ? <NoticeBanner notice={notice} onClose={() => setNotice(null)} /> : null}
+
+      {stage === "loading" ? (
+        <section className="welcome-stage">
+          <ProcessStatus messages={["Opening Cradle of the Empire..."]} />
+        </section>
+      ) : null}
+
+      {stage === "unavailable" ? (
+        <section className="welcome-stage">
+          <div className="manuscript-desk">
+            <div className="desk-intro">
+              <p className="kicker">Built-in manuscript</p>
+              <h1>Cradle of the Empire is not ready.</h1>
+              <p>Restore or rebuild the local corpus and Chroma search index, then reload Archivist.</p>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {stage === "welcome" ? (
         <WelcomeScreen
@@ -636,7 +677,7 @@ function QuestionMode({
             rows={5}
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
-            placeholder="Ask something about the manuscript..."
+            placeholder={`Ask something about ${project.name}...`}
           />
         </label>
         <button className="primary-button" disabled={loading}>

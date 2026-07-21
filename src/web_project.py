@@ -124,7 +124,7 @@ def current_project_manifest() -> dict[str, Any]:
     index_chunks = [chunk for chunk in chunks if is_index_document_name(chunk.get("document", ""))]
     return {
         "id": "current",
-        "name": "Current manuscript",
+        "name": "Cradle of the Empire",
         "created_at": "",
         "updated_at": "",
         "settings": {
