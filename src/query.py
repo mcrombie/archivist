@@ -1,74 +1,51 @@
-import os
-from pathlib import Path
-
-from dotenv import load_dotenv
-load_dotenv()
-
-import chromadb
-from openai import OpenAI
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-CHROMA_DIR = BASE_DIR / "chroma_db"
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-collection = chroma_client.get_or_create_collection(name="manuscript")
+from corpus import get_chunk_lookup
+from filters import should_skip_document
+from retrieval import (
+    MAX_PRIMARY_DISTANCE,
+    finalize_context_chunks,
+    get_filtered_primary_chunks,
+    retrieve,
+)
 
 
-def embed_query(query: str) -> list[float]:
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=query
-    )
-    return response.data[0].embedding
+def inspect_query(query: str, n_results: int = 5) -> None:
+    results = retrieve(query, n_results=n_results)
+    metadatas = results.get("metadatas", [[]])[0]
+    distances = results.get("distances", [[]])[0]
+    primary_ids = {
+        chunk.get("chunk_id") for chunk in get_filtered_primary_chunks(results)
+    }
+    final_chunks = finalize_context_chunks(results)
+    final_ids = {chunk.get("chunk_id") for chunk in final_chunks}
+    lookup = get_chunk_lookup()
 
+    print("\nRaw top-k retrieval:")
+    for rank, (chunk, distance) in enumerate(zip(metadatas, distances), start=1):
+        chunk_id = chunk.get("chunk_id", "N/A")
+        if should_skip_document(chunk.get("document", "")):
+            status = "dropped: structural document filter"
+        elif chunk_id not in primary_ids:
+            status = f"dropped: distance > {MAX_PRIMARY_DISTANCE}"
+        elif chunk_id not in lookup:
+            status = "dropped: missing from disk lookup"
+        elif chunk_id not in final_ids:
+            status = "dropped: final source cap"
+        else:
+            status = "kept in model context"
+        print(f"  {rank}. {chunk_id}  distance={distance:.4f}  {status}")
 
-def search(query: str, n_results: int = 5):
-    query_embedding = embed_query(query)
-
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=n_results,
-        include=["metadatas", "distances"]
-    )
-
-    return results
+    print("\nFinalized model context:")
+    for source_number, chunk in enumerate(final_chunks, start=1):
+        origin = "primary" if chunk.get("chunk_id") in primary_ids else "neighbor"
+        print(f"  Source {source_number}: {chunk.get('chunk_id', 'N/A')} ({origin})")
 
 
 def main() -> None:
     while True:
         query = input("\nAsk a question (or 'exit'): ").strip()
-
         if query.lower() == "exit":
             break
-
-        results = search(query)
-
-        print("\nTop results:\n")
-
-        metadatas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
-
-        if not metadatas:
-            print("No results found.")
-            continue
-
-        for i, meta in enumerate(metadatas, start=1):
-            distance = distances[i - 1] if i - 1 < len(distances) else None
-
-            print(f"Result {i}")
-            print(f"Document: {meta.get('document', 'N/A')}")
-            print(f"Chapter: {meta.get('chapter_title', 'N/A')}")
-            print(f"Chunk ID: {meta.get('chunk_id', 'N/A')}")
-            print(f"Paragraphs: {meta.get('paragraph_start', '?')}–{meta.get('paragraph_end', '?')}")
-            if distance is not None:
-                print(f"Distance: {distance:.4f}")
-
-            text = meta.get("text", "")
-            preview = text[:900] + ("..." if len(text) > 900 else "")
-            print(preview)
-            print("-" * 80)
+        inspect_query(query)
 
 
 if __name__ == "__main__":

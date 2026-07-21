@@ -15,7 +15,6 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
-from corpus import get_neighbor_chunk_ids
 from filters import should_skip_document
 from importers import (
     SUPPORTED_DOCUMENT_SUFFIXES,
@@ -25,7 +24,13 @@ from importers import (
     chapter_title_from_text,
 )
 from ingest import clean_title_from_filename, extract_chapter_title
-from retrieval import MAX_FINAL_SOURCES, MAX_PRIMARY_DISTANCE
+from prompts import build_answer_prompt, build_index_prompt_web
+from retrieval import (
+    embed_query,
+    finalize_context_chunks,
+    finalize_index_context,
+    find_exact_match_chunks,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -111,10 +116,6 @@ def load_project_chunks(project_id: str) -> list[dict[str, Any]]:
 
 def load_existing_index_chunks(project_id: str) -> list[dict[str, Any]]:
     return read_json(existing_index_path(project_id), [])
-
-
-def build_chunk_lookup(chunks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {str(chunk.get("chunk_id")): chunk for chunk in chunks if chunk.get("chunk_id")}
 
 
 def current_project_manifest() -> dict[str, Any]:
@@ -378,57 +379,12 @@ def embed_project(project_id: str) -> dict[str, Any]:
 
 def retrieve_project(project_id: str, query: str, n_results: int = 5) -> dict[str, Any]:
     collection = chroma_client().get_collection(name=collection_name(project_id))
-    embedding = embed_texts(openai_client(), [query])[0]
+    embedding = embed_query(query, embedding_client=openai_client())
     return collection.query(
         query_embeddings=[embedding],
         n_results=n_results,
         include=["metadatas", "distances"],
     )
-
-
-def get_filtered_primary_chunks(results: dict[str, Any], max_distance: float = MAX_PRIMARY_DISTANCE) -> list[dict[str, Any]]:
-    metadatas = results.get("metadatas", [[]])[0]
-    distances = results.get("distances", [[]])[0]
-    primary_chunks = []
-    for meta, distance in zip(metadatas, distances):
-        if should_skip_document(meta.get("document", "")):
-            continue
-        if distance <= max_distance:
-            primary_chunks.append(meta)
-    if not primary_chunks:
-        primary_chunks = [meta for meta in metadatas if not should_skip_document(meta.get("document", ""))]
-    return primary_chunks
-
-
-def expand_with_neighbors(primary_chunks: list[dict[str, Any]], lookup: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    expanded: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for meta in primary_chunks:
-        chunk_id = meta.get("chunk_id")
-        if not chunk_id:
-            continue
-        neighbor_ids = get_neighbor_chunk_ids(chunk_id)
-        prev_id = neighbor_ids[0] if len(neighbor_ids) == 2 else None
-        next_id = neighbor_ids[-1] if neighbor_ids else None
-        ordered_ids = []
-        if prev_id:
-            ordered_ids.append(prev_id)
-        ordered_ids.append(chunk_id)
-        if next_id and next_id != prev_id:
-            ordered_ids.append(next_id)
-        for cid in ordered_ids:
-            chunk = lookup.get(cid)
-            if not chunk or should_skip_document(chunk.get("document", "")) or cid in seen:
-                continue
-            expanded.append(chunk)
-            seen.add(cid)
-    return expanded
-
-
-def finalize_question_context(project_id: str, results: dict[str, Any], max_final_sources: int = MAX_FINAL_SOURCES) -> list[dict[str, Any]]:
-    lookup = build_chunk_lookup(annotate_chapter_titles(load_project_chunks(project_id)))
-    primary = [lookup.get(str(chunk.get("chunk_id")), chunk) for chunk in get_filtered_primary_chunks(results)]
-    return expand_with_neighbors(primary, lookup)[:max_final_sources]
 
 
 def annotate_chapter_titles(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -447,21 +403,6 @@ def annotate_chapter_titles(chunks: list[dict[str, Any]]) -> list[dict[str, Any]
         item["chapter_title"] = current_title or item.get("chapter_title", "N/A")
         annotated.append(item)
     return annotated
-
-
-def build_context(chunks: list[dict[str, Any]], label: str = "Source") -> str:
-    blocks = []
-    for chunk in chunks:
-        citation = citation_label(chunk)
-        blocks.append(
-            f"[{citation if label == 'Source' else f'{label}: {citation}'}]\n"
-            f"Document: {chunk.get('document', 'N/A')}\n"
-            f"Chapter: {chunk.get('chapter_title', 'N/A')}\n"
-            f"Chunk ID: {chunk.get('chunk_id', 'N/A')}\n"
-            f"Paragraphs: {chunk.get('paragraph_start', '?')}-{chunk.get('paragraph_end', '?')}\n"
-            f"Text:\n{chunk.get('text', '')}\n"
-        )
-    return "\n\n".join(blocks)
 
 
 def citation_label(chunk: dict[str, Any]) -> str:
@@ -514,126 +455,39 @@ def merge_adjacent_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
             previous["text"] = f"{str(previous.get('text', '')).rstrip()}\n\n{new_text}"
         previous["paragraph_end"] = max(previous_end, int(current.get("paragraph_end") or previous_end))
         previous["chunk_ids"] = [*previous["chunk_ids"], *current["chunk_ids"]]
+        if "source_numbers" in current:
+            previous["source_numbers"] = [
+                *previous.get("source_numbers", []),
+                *current["source_numbers"],
+            ]
     return merged
 
 
 def answer_project_question(project_id: str, question: str, n_results: int = 5) -> tuple[str, list[dict[str, Any]]]:
     results = retrieve_project(project_id, question, n_results=n_results)
-    final_chunks = merge_adjacent_chunks(finalize_question_context(project_id, results))
-    context = build_context(final_chunks)
-    prompt = f"""You are a historian specializing in the development of the American imperial system through Virginia.
-
-Answer the user's question using only the provided sources.
-
-Cite sources inline after specific claims using the exact bracketed citation labels supplied below.
-Do not group multiple sources only at the end of a paragraph.
-Each important factual claim should have its own citation.
-If the sources do not contain enough information, say so.
-
-Answer in 1-3 short paragraphs or structured bullet points when appropriate.
-
-Question:
-{question}
-
-Sources:
-{context}
-"""
+    final_chunks = finalize_context_chunks(results, chunks=load_project_chunks(project_id))
+    prompt = build_answer_prompt(question, final_chunks)
     response = openai_client().responses.create(model=CHAT_MODEL, input=prompt)
     return response.output_text, final_chunks
 
 
-def find_exact_match_chunks(term: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    term_lower = term.lower().strip()
-    if not term_lower:
-        return []
-    return [
-        chunk for chunk in chunks
-        if not should_skip_document(chunk.get("document", ""))
-        and term_lower in chunk.get("text", "").lower()
-    ]
-
-
-def finalize_index_context(project_id: str, term: str, semantic_results: dict[str, Any], max_final_sources: int = MAX_FINAL_SOURCES) -> list[dict[str, Any]]:
-    chunks = annotate_chapter_titles(load_project_chunks(project_id))
-    lookup = build_chunk_lookup(chunks)
-    exact_matches = find_exact_match_chunks(term, chunks)
-    seen: set[str] = set()
-    final_chunks: list[dict[str, Any]] = []
-
-    for chunk in exact_matches:
-        cid = chunk["chunk_id"]
-        if cid not in seen:
-            final_chunks.append(chunk)
-            seen.add(cid)
-
-    for chunk in exact_matches:
-        for neighbor_id in get_neighbor_chunk_ids(chunk["chunk_id"]):
-            neighbor = lookup.get(neighbor_id)
-            if neighbor and neighbor["chunk_id"] not in seen and not should_skip_document(neighbor.get("document", "")):
-                final_chunks.append(neighbor)
-                seen.add(neighbor["chunk_id"])
-
-    semantic_primary = [
-        lookup.get(str(chunk.get("chunk_id")), chunk)
-        for chunk in get_filtered_primary_chunks(semantic_results)
-    ]
-    for chunk in expand_with_neighbors(semantic_primary, lookup):
-        cid = chunk["chunk_id"]
-        if cid not in seen:
-            final_chunks.append(chunk)
-            seen.add(cid)
-
-    return final_chunks[:max_final_sources]
-
-
 def search_existing_index(project_id: str, term: str, limit: int = 8) -> list[dict[str, Any]]:
     index_chunks = load_existing_index_chunks(project_id)
-    matches = find_exact_match_chunks(term, index_chunks)
+    matches = find_exact_match_chunks(term, index_chunks, empty_term_matches=False)
     return matches[:limit]
 
 
 def generate_index_entry(project_id: str, term: str, consult_existing_index: bool) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     semantic_results = retrieve_project(project_id, term, n_results=5)
-    final_chunks = merge_adjacent_chunks(finalize_index_context(project_id, term, semantic_results))
-    existing_index_chunks = merge_adjacent_chunks(search_existing_index(project_id, term)) if consult_existing_index else []
-    context = build_context(final_chunks)
-    existing_context = build_context(existing_index_chunks, label="Existing Index") if existing_index_chunks else "No existing index context supplied."
-
-    prompt = f"""You are helping build a back-of-the-book index for a historical manuscript.
-
-Using only the provided manuscript sources, produce a candidate index entry for the term below.
-
-Term:
-{term}
-
-Instructions:
-- Write a 2-4 sentence summary of how this term is used in the manuscript.
-- Then list the strongest candidate locations.
-- Then suggest 0-5 possible subentries if they are clearly supported by the sources.
-- Be cautious: if the term is only mentioned briefly or weakly, say so.
-- Do not invent page numbers.
-- Use the exact bracketed human-readable citation labels supplied below when making claims.
-- If existing index context is supplied, use it only as a comparison reference. Do not copy it blindly.
-
-Format exactly like this:
-
-Index term: <term>
-
-Summary:
-<summary>
-
-Key locations:
-- [<citation label>] <brief note>
-
-Suggested subentries:
-- <subentry>
-
-Existing index context:
-{existing_context}
-
-Manuscript sources:
-{context}
-"""
+    chunks = load_project_chunks(project_id)
+    final_chunks = finalize_index_context(
+        term,
+        semantic_results,
+        chunks=chunks,
+        empty_term_matches=False,
+    )
+    existing_index_chunks = search_existing_index(project_id, term) if consult_existing_index else []
+    prompt = build_index_prompt_web(term, final_chunks, existing_index_chunks)
     response = openai_client().responses.create(model=CHAT_MODEL, input=prompt)
     return response.output_text, final_chunks, existing_index_chunks
 
@@ -659,18 +513,31 @@ def candidate_terms(project_id: str, limit: int = 50) -> list[dict[str, Any]]:
     return [{"term": term, "count": count} for term, count in counter.most_common(limit)]
 
 
-def source_payload(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    payload = []
+def source_payload(chunks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    sources = []
     for i, chunk in enumerate(chunks, start=1):
-        payload.append({
+        sources.append({
             "source_number": i,
             "citation_label": citation_label(chunk),
             "document": chunk.get("document", "N/A"),
             "chapter_title": chunk.get("chapter_title", "N/A"),
             "chunk_id": chunk.get("chunk_id", "N/A"),
-            "chunk_ids": chunk.get("chunk_ids") or [chunk.get("chunk_id", "N/A")],
+            "chunk_ids": [chunk.get("chunk_id", "N/A")],
             "paragraph_start": chunk.get("paragraph_start"),
             "paragraph_end": chunk.get("paragraph_end"),
             "text": chunk.get("text", ""),
         })
-    return payload
+
+    numbered_chunks = [
+        {**chunk, "source_numbers": [i]}
+        for i, chunk in enumerate(chunks, start=1)
+    ]
+    display_groups = []
+    for group in merge_adjacent_chunks(numbered_chunks):
+        numbers = group["source_numbers"]
+        display_groups.append({
+            "source_numbers": numbers,
+            "text": group.get("text", ""),
+            "citation_labels": [sources[number - 1]["citation_label"] for number in numbers],
+        })
+    return {"sources": sources, "display_groups": display_groups}

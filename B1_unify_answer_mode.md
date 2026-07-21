@@ -132,7 +132,7 @@ That is not cosmetic: `chapter_title` is emitted as the `Chapter:` line of every
 
 Annotation exists for the **docx and PDF import paths**, where a heading survives as an ordinary prose paragraph and there is no markdown structure to read it from. That is import machinery for the deferred generic stack, not part of the evaluated path. Removing it from the context path removes nothing the manuscript corpus uses.
 
-**Prove it rather than trusting the argument.** For every chunk on disk, assert the annotated `chapter_title` equals the stored one. Expected to pass everywhere; a failure means body prose somewhere opens with "Chapter N" and is being misread as a heading — which would be a retrieval-context defect worth having found, and an escalation rather than a proceed.
+**Prove it rather than trusting the argument.** For every retrieval-eligible chunk on disk, assert the annotated `chapter_title` equals the stored one. Also report mismatches across the full corpus as a diagnostic. Structural documents excluded by `SKIP_FILES` cannot reach model context and may differ; any eligible-chunk failure means body prose somewhere opens with "Chapter N" and is being misread as a heading — a retrieval-context defect worth having found, and an escalation rather than a proceed. This scope was amended with owner approval on 2026-07-21 after the original all-chunk assertion found eight Table of Contents-only mismatches.
 
 ⚠ **Related, and out of scope here:** `importers.build_chunks_for_imported_document` calls `chunk_paragraphs(paragraphs, chunk_size=4, overlap=1)` with the values **hardcoded** rather than importing `PARAGRAPHS_PER_CHUNK` and `PARAGRAPH_OVERLAP` from `ingest`. The two chunking parameters therefore exist twice. Brief 2 records those parameters in the corpus manifest and would silently fail to describe the import path. Log it in `DEFECTS.md` as a duplicated constant, assigned to Brief 2; do not fix it here.
 
@@ -192,7 +192,7 @@ Every criterion is a computed check, not a judgement call.
   This is the brief's central assertion. Capture the "before" fixture as the first commit of the brief, not the last.
 
 - **Cross-path equivalence.** The same 10 questions produce identical ordered `chunk_id` lists from the CLI path and the web path, with `merge_adjacent_chunks` applied only at presentation. Any difference is a defect, not a tolerance.
-- **Annotation is a proven no-op.** For every chunk on disk, the `chapter_title` produced by `annotate_chapter_titles` equals the stored `chapter_title`. If this fails, annotation is doing real work on this corpus and the decision to drop it is wrong — escalate rather than proceeding.
+- **Annotation is a proven context no-op.** For every retrieval-eligible chunk on disk, the `chapter_title` produced by `annotate_chapter_titles` equals the stored `chapter_title`; the full-corpus mismatch set is also reported. Any eligible mismatch means annotation is doing real work on evaluated context and the decision to drop it is wrong — escalate rather than proceeding.
 - **Collection freshness.** For every chunk in the Chroma collection, `sha256(metadata["text"]) == sha256(disk_chunk["text"])`, and every collection `chunk_id` exists on disk. A mismatch means the collection is stale relative to `output/chunks.json` and gets a `DEFECTS.md` entry. This matters because `expand_with_neighbors` silently drops any retrieved chunk absent from the disk lookup, so staleness would show up as quietly missing sources rather than as an error.
 - **Merging cannot reach the prompt.** For one fixed question, the assembled prompt string is identical whether or not `display_groups` is computed. Merging is presentation by construction, and this asserts it rather than trusting the call graph.
 - **Parameters untouched.** A test asserts `MAX_PRIMARY_DISTANCE == 1.05`, `MAX_FINAL_SOURCES == 8`, the `retrieve` default `n_results == 5`, `PARAGRAPHS_PER_CHUNK == 4`, `PARAGRAPH_OVERLAP == 1`, and the two-entry `SKIP_FILES` set. These are the values Brief 2 will record and Brief 7 will report against; a silent change here would invalidate everything downstream.
@@ -228,6 +228,6 @@ This tripwire exists because refactoring is the enjoyable, unbounded task and th
 
 Per `AGENTS.md`, record here rather than acting on:
 
-- Every retrieval change you wanted to make and did not. Threshold adjustments, expansion-order changes, re-ranking, anything. This list is the raw material for the post-baseline briefs, and it records what the system was *expected* to get wrong — which is worth far more once compared against what it actually got wrong.
-- Anything the brief left underspecified that forced an invented mechanic. That is a defect and gets a `DEFECTS.md` entry, not a note.
-- The measured diff size, against the tripwire.
+- Deferred retrieval changes: none were made. The distance threshold/fallback, expansion order, final-source truncation, lack of re-ranking, chunking parameters, and `SKIP_FILES` remain exactly at their pre-Brief-1 behavior for measurement after the baseline.
+- Specification gaps requiring mechanics were the retrieval-eligible annotation boundary and the web index comparison namespace; both are recorded in `DEFECTS.md` with their verification.
+- Measured diff: 671 insertions and 465 deletions (1,136 changed lines), excluding `pyproject.toml` and `uv.lock`; deletions include the 85-line UTF-16 `requirements.txt`, which Git reports as binary. The owner authorized completing the brief after the tripwire fired.

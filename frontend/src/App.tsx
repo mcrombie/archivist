@@ -16,6 +16,7 @@ import {
 import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
   CandidateTerm,
+  DisplayGroup,
   Project,
   SourceChunk,
   askQuestion,
@@ -602,6 +603,7 @@ function QuestionMode({
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<SourceChunk[]>([]);
+  const [displayGroups, setDisplayGroups] = useState<DisplayGroup[]>([]);
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent) {
@@ -616,6 +618,7 @@ function QuestionMode({
       const result = await askQuestion(project.id, question, 5);
       setAnswer(result.answer);
       setSources(result.sources);
+      setDisplayGroups(result.display_groups);
     } catch (error) {
       setNotice({ type: "error", text: errorMessage(error) });
     } finally {
@@ -644,7 +647,7 @@ function QuestionMode({
       </form>
 
       <OutputBlock title="Answer" body={answer} empty="No answer yet." sources={sources} />
-      <Sources title="Sources" sources={sources} />
+      <DisplayGroups title="Sources" groups={displayGroups} />
     </section>
   );
 }
@@ -663,6 +666,7 @@ function IndexMode({
   const [candidateTerms, setCandidateTerms] = useState<CandidateTerm[]>([]);
   const [entry, setEntry] = useState("");
   const [sources, setSources] = useState<SourceChunk[]>([]);
+  const [displayGroups, setDisplayGroups] = useState<DisplayGroup[]>([]);
   const [existingSources, setExistingSources] = useState<SourceChunk[]>([]);
   const [indexSearch, setIndexSearch] = useState("");
   const [indexMatches, setIndexMatches] = useState<SourceChunk[]>([]);
@@ -693,6 +697,7 @@ function IndexMode({
       const result = await generateIndexEntry(project.id, term, consultExistingIndex);
       setEntry(result.entry);
       setSources(result.sources);
+      setDisplayGroups(result.display_groups);
       setExistingSources(result.existing_index_sources);
     } catch (error) {
       setNotice({ type: "error", text: errorMessage(error) });
@@ -781,7 +786,7 @@ function IndexMode({
             {searching ? <ProcessStatus messages={INDEX_SEARCH_STEPS} /> : null}
           </form>
 
-          <Sources title="Manuscript sources" sources={sources} />
+          <DisplayGroups title="Manuscript sources" groups={displayGroups} />
           <Sources title="Existing index references" sources={[...existingSources, ...indexMatches]} />
         </section>
       </div>
@@ -831,22 +836,27 @@ function OutputBlock({ title, body, empty, sources = [] }: { title: string; body
 
 function CitationText({ body, sources }: { body: string; sources: SourceChunk[] }) {
   if (!sources.length) return <>{body}</>;
-  const sourceByLabel = new Map(sources.map((source) => [source.citation_label, source]));
-  const labels = [...sourceByLabel.keys()].sort((a, b) => b.length - a.length);
-  const escapedLabels = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const parts = body.split(new RegExp(`(\\[(?:${escapedLabels.join("|")})\\])`, "g"));
+  const sourceByNumber = new Map(sources.map((source) => [source.source_number, source]));
+  const parts = body.split(/(\[Source \d+(?:, Source \d+)*\])/g);
 
   return (
     <>
       {parts.map((part, index) => {
-        const label = part.startsWith("[") && part.endsWith("]") ? part.slice(1, -1) : "";
-        const source = sourceByLabel.get(label);
-        if (!source) return part;
-        const excerpt = source.text.replace(/\s+/g, " ").trim().slice(0, 220);
+        if (!/^\[Source \d+(?:, Source \d+)*\]$/.test(part)) return part;
+
+        const sourceNumbers = [...part.matchAll(/Source (\d+)/g)].map((match) => Number(match[1]));
+        const citedSources = sourceNumbers.map((sourceNumber) => sourceByNumber.get(sourceNumber));
+        if (citedSources.some((source) => !source)) return part;
+
+        const resolvedSources = citedSources as SourceChunk[];
+        const firstSource = resolvedSources[0];
+        const excerptText = firstSource.text.replace(/\s+/g, " ").trim();
+        const excerpt = excerptText.slice(0, 220);
+        const humanLabels = resolvedSources.map((source) => source.citation_label).join("; ");
         return (
-          <button key={`${label}-${index}`} className="inline-citation" type="button" onClick={() => openSource(source)}>
-            [{label}]
-            <span className="citation-preview" role="tooltip">{excerpt}{source.text.length > 220 ? "…" : ""}</span>
+          <button key={`${part}-${index}`} className="inline-citation" type="button" onClick={() => openSource(firstSource)}>
+            [{humanLabels}]
+            <span className="citation-preview" role="tooltip">{excerpt}{excerptText.length > 220 ? "…" : ""}</span>
           </button>
         );
       })}
@@ -859,9 +869,57 @@ function sourceAnchor(source: SourceChunk) {
 }
 
 function openSource(source: SourceChunk) {
-  const element = document.getElementById(sourceAnchor(source));
+  const element = document.querySelector<HTMLElement>(
+    `[data-source-numbers~="${source.source_number}"]`
+  ) ?? document.getElementById(sourceAnchor(source));
   if (element instanceof HTMLDetailsElement) element.open = true;
   element?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function DisplayGroups({ title, groups }: { title: string; groups: DisplayGroup[] }) {
+  const sourceCount = groups.reduce((count, group) => count + group.source_numbers.length, 0);
+
+  return (
+    <section className="sources-block">
+      <div className="panel-title">
+        <h2>{title}</h2>
+        <span>{sourceCount}</span>
+      </div>
+      {groups.length ? (
+        <div className="source-stack">
+          {groups.map((group) => {
+            const sourceNumbers = group.source_numbers.join(" ");
+            const sourceLabel = group.source_numbers.map((sourceNumber) => `Source ${sourceNumber}`).join(", ");
+            return (
+              <details
+                key={sourceNumbers}
+                className="source-card"
+                data-source-numbers={sourceNumbers}
+              >
+                <summary>
+                  <strong>{group.citation_labels.join("; ")}</strong>
+                  <span>{sourceLabel}</span>
+                </summary>
+                <div className="source-card-body">
+                  <p>{group.text}</p>
+                  <button
+                    className="copy-reference"
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(sourceLabel)}
+                  >
+                    <Copy size={14} />
+                    Copy source reference
+                  </button>
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="empty-state">No sources.</p>
+      )}
+    </section>
+  );
 }
 
 function Sources({ title, sources }: { title: string; sources: SourceChunk[] }) {

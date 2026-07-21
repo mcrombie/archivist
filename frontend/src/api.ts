@@ -33,6 +33,12 @@ export type SourceChunk = {
   text: string;
 };
 
+export type DisplayGroup = {
+  source_numbers: number[];
+  text: string;
+  citation_labels: string[];
+};
+
 export type CandidateTerm = {
   term: string;
   count: number;
@@ -86,11 +92,14 @@ export async function embedProject(projectId: string): Promise<Project> {
 }
 
 export async function askQuestion(projectId: string, question: string, nResults: number) {
-  return requestJson<{ answer: string; sources: SourceChunk[] }>(`/api/projects/${projectId}/question`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, n_results: nResults })
-  });
+  return requestJson<{ answer: string; sources: SourceChunk[]; display_groups: DisplayGroup[] }>(
+    `/api/projects/${projectId}/question`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, n_results: nResults })
+    }
+  );
 }
 
 export async function generateIndexEntry(
@@ -101,6 +110,7 @@ export async function generateIndexEntry(
   return requestJson<{
     entry: string;
     sources: SourceChunk[];
+    display_groups: DisplayGroup[];
     existing_index_sources: SourceChunk[];
   }>(`/api/projects/${projectId}/index/entry`, {
     method: "POST",

@@ -123,7 +123,7 @@ def embed(project_id: str) -> dict[str, object]:
 def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
     try:
         answer, chunks = answer_project_question(project_id, request.question, n_results=request.n_results)
-        return {"answer": answer, "sources": source_payload(chunks)}
+        return {"answer": answer, **source_payload(chunks)}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -138,10 +138,11 @@ def index_entry(project_id: str, request: IndexEntryRequest) -> dict[str, object
             term=request.term,
             consult_existing_index=request.consult_existing_index,
         )
+        payload = source_payload(chunks)
         return {
             "entry": output,
-            "sources": source_payload(chunks),
-            "existing_index_sources": source_payload(existing_index_chunks),
+            **payload,
+            "existing_index_sources": source_payload(existing_index_chunks)["sources"],
         }
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -157,7 +158,7 @@ def existing_index_search(
 ) -> dict[str, object]:
     try:
         chunks = search_existing_index(project_id, term, limit=limit)
-        return {"results": source_payload(chunks)}
+        return {"results": source_payload(chunks)["sources"]}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -228,7 +229,7 @@ def sources(
     selected = filtered_chunks[offset:offset + limit]
     return {
         "total": len(filtered_chunks),
-        "sources": source_payload(selected),
+        "sources": source_payload(selected)["sources"],
         "documents": documents,
     }
 

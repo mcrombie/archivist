@@ -1,53 +1,11 @@
-import os
-
-from dotenv import load_dotenv
-load_dotenv()
-
-from openai import OpenAI
-
-from retrieval import retrieve, finalize_index_context, build_context
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from prompts import build_index_prompt_cli
+from retrieval import default_openai_client, finalize_index_context, retrieve
 
 
 def generate_index_entry(term: str, final_chunks: list[dict]) -> str:
-    context = build_context(final_chunks)
+    prompt = build_index_prompt_cli(term, final_chunks)
 
-    prompt = f"""You are helping build a back-of-the-book index for a historical manuscript.
-
-Using only the provided sources, produce a candidate index entry for the term below.
-
-Term:
-{term}
-
-Instructions:
-- Write a 2-4 sentence summary of how this term is used in the manuscript.
-- Then list the strongest candidate locations.
-- Then suggest 0-5 possible subentries if they are clearly supported by the sources.
-- Be cautious: if the term is only mentioned briefly or weakly, say so.
-- Do not invent page numbers.
-- Use source numbers when making claims, like [Source 2].
-
-Format exactly like this:
-
-Index term: <term>
-
-Summary:
-<summary>
-
-Key locations:
-- [Source X] <chapter / chunk / brief note>
-- [Source X] <chapter / chunk / brief note>
-
-Suggested subentries:
-- <subentry>
-- <subentry>
-
-Sources:
-{context}
-"""
-
-    response = client.responses.create(
+    response = default_openai_client().responses.create(
         model="gpt-5",
         input=prompt
     )

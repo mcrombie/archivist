@@ -1,5 +1,6 @@
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -7,13 +8,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CHUNKS_FILE = BASE_DIR / "output" / "chunks.json"
 
 
-def load_chunks() -> list[dict]:
-    with open(CHUNKS_FILE, "r", encoding="utf-8") as f:
+def load_chunks(path: Path = CHUNKS_FILE) -> list[dict]:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def build_chunk_lookup(chunks: list[dict]) -> dict[str, dict]:
     return {chunk["chunk_id"]: chunk for chunk in chunks}
+
+
+@lru_cache(maxsize=1)
+def get_all_chunks() -> list[dict]:
+    return load_chunks()
+
+
+@lru_cache(maxsize=1)
+def get_chunk_lookup() -> dict[str, dict]:
+    return build_chunk_lookup(get_all_chunks())
 
 
 def get_neighbor_chunk_ids(chunk_id: str) -> list[str]:
@@ -33,7 +44,3 @@ def get_neighbor_chunk_ids(chunk_id: str) -> list[str]:
     neighbors.append(f"{prefix}_{number + 1:03}")
 
     return neighbors
-
-
-ALL_CHUNKS = load_chunks()
-CHUNK_LOOKUP = build_chunk_lookup(ALL_CHUNKS)

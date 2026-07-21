@@ -45,6 +45,30 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-21] Web index comparison context had a second Source namespace
+Phase/Brief: Phase 1, Brief 1
+Symptom: applying `[Source N]` independently to manuscript and existing-index blocks produced two `[Source 1]` headers, while the verbatim format example still requested `<citation label>`.
+Cause: spec gap in the brief — it mandated the citation-token change but did not define numbering for the web prompt's second, comparison-only context.
+Resolution and verification: comparison excerpts use unbracketed `Existing Index N:` headings and the prompt forbids citing them; manuscript chunks remain the sole `[Source N]` list, and the format example now says `[Source N]`. A synthetic prompt test asserts these properties.
+
+## [2026-07-21] Annotation invariant included unreachable structural chunks
+Phase/Brief: Phase 1, Brief 1
+Symptom: the required all-disk assertion found eight title changes, all in the skipped Table of Contents document; no retrieval-eligible chunk changed.
+Cause: spec gap in the brief — its rationale described evaluated context while its assertion included structural documents that cannot reach that context.
+Resolution and verification: with owner approval, the blocking invariant now covers every retrieval-eligible chunk and the full corpus remains a diagnostic. Tests assert zero eligible mismatches and the known structural mismatch set.
+
+## [2026-07-21] Chunk merging moved behind the model boundary
+Phase/Brief: Phase 1, Brief 1 cohort opening
+Symptom: the web path previously merged adjacent chunks before prompt construction, so one citation could resolve to several chunks.
+Cause: cohort opening — a presentation operation changed what the model saw.
+Resolution and verification: prompts now receive the same unmerged numbered chunks on CLI and web paths; `display_groups` preserves merged reading presentation and a test proves computing it cannot alter the prompt.
+
+## [2026-07-21] Imported-document chunk parameters are duplicated
+Phase/Brief: Phase 1, Brief 1; assigned to Brief 2
+Symptom: `build_chunks_for_imported_document` hardcodes chunk size 4 and overlap 1 instead of using the constants in `ingest.py`.
+Cause: duplicated configuration constant.
+Resolution and verification: intentionally not changed in Brief 1. Brief 2 must give the import path one parameter source before recording chunking configuration in the corpus manifest.
+
 ## Pre-existing, logged at project setup (2026-07-21)
 
 Found by reading `main` before Brief 1. Recorded here so they are tracked rather than rediscovered, with the brief that owns each. **None of these are to be fixed opportunistically** — each is fixed by its owning brief or not at all.
