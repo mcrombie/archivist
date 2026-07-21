@@ -28,6 +28,7 @@ import {
   listProjects,
   searchExistingIndex
 } from "./api";
+import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
 
 type AppStage = "loading" | "unavailable" | "question";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
@@ -601,29 +602,47 @@ function QuestionMode({
   }
 
   return (
-    <section className="focused-stage">
-      <header className="mode-header">
-        <div>
-          <p className="kicker">{project.name}</p>
-          <h1><FileSearch size={22} /> Ask the book</h1>
-        </div>
-      </header>
-      <form className="query-panel" onSubmit={submit}>
-        <label>
-          <span>Question</span>
-          <textarea
-            rows={5}
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder={`Ask something about ${project.name}...`}
+    <section className="focused-stage question-stage">
+      <section className="question-hero" aria-labelledby="question-page-title">
+        <figure className="question-cover">
+          <img
+            src={coverArt}
+            alt="Cover art for Cradle of the Empire: an ancient tree overlooking sailing ships"
+            width="896"
+            height="1344"
+            decoding="async"
           />
-        </label>
-        <button className="primary-button" disabled={loading}>
-          {loading ? <Loader2 size={17} className="spin" /> : <Send size={17} />}
-          Ask
-        </button>
-        {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
-      </form>
+        </figure>
+        <div className="question-welcome">
+          <p className="kicker">{project.name}</p>
+          <h1 id="question-page-title">Ask the Archivist</h1>
+          <p className="question-introduction">
+            Archivist is a question-answering companion to {project.name}. Ask about the people,
+            places, events, and ideas in the book. It searches the manuscript, builds an answer from
+            the text, and shows the passages behind its response.
+          </p>
+          <form
+            className="query-panel question-query"
+            aria-label={`Ask a question about ${project.name}`}
+            onSubmit={submit}
+          >
+            <label>
+              <span>Your question</span>
+              <textarea
+                rows={5}
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                placeholder="Ask about a person, place, event, or idea in the book..."
+              />
+            </label>
+            <button className="primary-button" disabled={loading}>
+              {loading ? <Loader2 size={17} className="spin" /> : <Send size={17} />}
+              Ask
+            </button>
+            {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
+          </form>
+        </div>
+      </section>
 
       {answer ? (
         <>

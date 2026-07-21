@@ -406,6 +406,78 @@ select:focus {
   padding: 32px 0 60px;
 }
 
+.question-stage {
+  gap: 18px;
+  padding-top: 18px;
+}
+
+.question-hero {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(103, 63, 33, 0.48);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(255, 249, 226, 0.97), rgba(235, 212, 164, 0.95)),
+    repeating-linear-gradient(0deg, rgba(99, 65, 29, 0.05) 0 1px, transparent 1px 6px);
+  box-shadow: 0 24px 72px rgba(11, 6, 3, 0.38);
+}
+
+.question-cover {
+  min-height: 540px;
+  margin: 0;
+  background: #1d120b;
+}
+
+.question-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.question-welcome {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(28px, 4vw, 52px);
+}
+
+.question-welcome .kicker {
+  margin: 0 0 8px;
+}
+
+.question-welcome h1 {
+  font-size: clamp(38px, 5vw, 58px);
+  line-height: 1.02;
+}
+
+.question-introduction {
+  max-width: 620px;
+  margin: 18px 0 0;
+  color: #59402a;
+  font-size: 16px;
+  line-height: 1.62;
+}
+
+.query-panel.question-query {
+  margin-top: 28px;
+  border: 0;
+  border-top: 1px solid rgba(126, 79, 39, 0.25);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 24px 0 0;
+}
+
+.question-query textarea {
+  min-height: 126px;
+}
+
+.question-query .primary-button {
+  min-width: 104px;
+}
+
 .mode-header {
   display: flex;
   align-items: center;
@@ -930,6 +1002,21 @@ select:focus {
   }
 }
 
+@media (max-width: 760px) {
+  .question-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .question-cover {
+    min-height: 0;
+    height: clamp(220px, 58vw, 360px);
+  }
+
+  .question-cover img {
+    object-position: center 58%;
+  }
+}
+
 @media (max-width: 560px) {
   .app-header {
     align-items: flex-start;
@@ -968,5 +1055,21 @@ select:focus {
   .viewer-pagination {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .question-welcome {
+    padding: 24px 18px 28px;
+  }
+
+  .question-welcome h1 {
+    font-size: 34px;
+  }
+
+  .question-introduction {
+    font-size: 15px;
+  }
+
+  .query-panel.question-query {
+    padding: 20px 0 0;
   }
 }
