@@ -1,0 +1,195 @@
+{
+  "fixture_schema": "archivist.b1_pre_change/1",
+  "captured_at": "2026-07-21T18:36:27.171306+00:00",
+  "commit": "967fe7d4c823ac624247f9a651cec4aad8617f70",
+  "working_tree": "clean",
+  "retrieval_params": {
+    "n_results": 5,
+    "max_primary_distance": 1.05,
+    "max_final_sources": 8
+  },
+  "questions": {
+    "What does the manuscript say about Paquiquineo?": {
+      "primary": [
+        "08_Chapter 2 Tsenacomoco (1542-1572)_003",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_005",
+        "30_Appendix B Was Don Luis Opechancanough_001",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_004",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_008"
+      ],
+      "context": [
+        "08_Chapter 2 Tsenacomoco (1542-1572)_002",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_003",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_004",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_005",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_006",
+        "30_Appendix B Was Don Luis Opechancanough_001"
+      ]
+    },
+    "Who was Edwin Sandys and what did he do?": {
+      "primary": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_017",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_018",
+        "22_Chapter 16 The Lords of North America (1893 - 1917)_025",
+        "14_Chapter 8 The Planter Ascendancy (1705-1730)_010",
+        "22_Chapter 16 The Lords of North America (1893 - 1917)_034"
+      ],
+      "context": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_016",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_017",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_018",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_019",
+        "22_Chapter 16 The Lords of North America (1893 - 1917)_024",
+        "22_Chapter 16 The Lords of North America (1893 - 1917)_025",
+        "22_Chapter 16 The Lords of North America (1893 - 1917)_026",
+        "14_Chapter 8 The Planter Ascendancy (1705-1730)_009"
+      ]
+    },
+    "What role did Jamestown play as a corporate experiment?": {
+      "primary": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_017",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_005",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_018",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_012",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_016"
+      ],
+      "context": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_016",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_017",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_018",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_004",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_005",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_006",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_019",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_011"
+      ]
+    },
+    "How did the headright system work?": {
+      "primary": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_017",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_018",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_008",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_009",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_016"
+      ],
+      "context": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_016",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_017",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_018",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_019",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_007",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_008",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_009",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_010"
+      ]
+    },
+    "What was the Starving Time and how did the Virginia Company describe it?": {
+      "primary": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_011",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_010",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_002",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_005",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_003"
+      ],
+      "context": [
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_010",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_011",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_012",
+        "10_Chapter 4 Cradle of the Empire (1601 - 1622)_009",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_001",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_002",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_003",
+        "11_Chapter 5 Wrath of Mangopeesomon (1622-1646)_004"
+      ]
+    },
+    "What does the manuscript say about propaganda in the interwar period?": {
+      "primary": [
+        "23_Chapter 17 War for the World (1917 - 1945)_015",
+        "23_Chapter 17 War for the World (1917 - 1945)_016",
+        "28_Afterword (Tentative)_006",
+        "28_Afterword (Tentative)_005",
+        "23_Chapter 17 War for the World (1917 - 1945)_001"
+      ],
+      "context": [
+        "23_Chapter 17 War for the World (1917 - 1945)_014",
+        "23_Chapter 17 War for the World (1917 - 1945)_015",
+        "23_Chapter 17 War for the World (1917 - 1945)_016",
+        "23_Chapter 17 War for the World (1917 - 1945)_017",
+        "28_Afterword (Tentative)_005",
+        "28_Afterword (Tentative)_006",
+        "28_Afterword (Tentative)_007"
+      ]
+    },
+    "How does the manuscript treat the relationship between tobacco and labor?": {
+      "primary": [
+        "12_Chapter 6 Conquest of the Coast (1646-1677)_010",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_018",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_017",
+        "13_Chapter 7 The Old Dominion (1677-1705)_004",
+        "21_Chapter 15 An Industrial Revolution (1870 - 1893)_023"
+      ],
+      "context": [
+        "12_Chapter 6 Conquest of the Coast (1646-1677)_009",
+        "12_Chapter 6 Conquest of the Coast (1646-1677)_010",
+        "12_Chapter 6 Conquest of the Coast (1646-1677)_011"
+      ]
+    },
+    "What does the manuscript say about slavery?": {
+      "primary": [
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_006",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_007",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_005",
+        "17_Chapter 11 The American Empire (1776 - 1800)_010",
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_004"
+      ],
+      "context": [
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_005",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_006",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_007",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_008",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_004",
+        "17_Chapter 11 The American Empire (1776 - 1800)_009",
+        "17_Chapter 11 The American Empire (1776 - 1800)_010",
+        "17_Chapter 11 The American Empire (1776 - 1800)_011"
+      ]
+    },
+    "How did Virginia's relationship with westward expansion change over time?": {
+      "primary": [
+        "17_Chapter 11 The American Empire (1776 - 1800)_014",
+        "18_Chapter 12 The Virginia Dynasty (1800-1824)_007",
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_003",
+        "18_Chapter 12 The Virginia Dynasty (1800-1824)_008",
+        "16_Chapter 10 War for the Woodlands (1754-1776)_012"
+      ],
+      "context": [
+        "17_Chapter 11 The American Empire (1776 - 1800)_013",
+        "17_Chapter 11 The American Empire (1776 - 1800)_014",
+        "17_Chapter 11 The American Empire (1776 - 1800)_015",
+        "18_Chapter 12 The Virginia Dynasty (1800-1824)_006",
+        "18_Chapter 12 The Virginia Dynasty (1800-1824)_007",
+        "18_Chapter 12 The Virginia Dynasty (1800-1824)_008",
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_002",
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_003"
+      ]
+    },
+    "What does the manuscript say about the founding of Oregon?": {
+      "primary": [
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_006",
+        "07_Chapter 1 The Columbian Cataclysm (1517-1542)_001",
+        "20_Chapter 14 Knell of the Union (1850-1870)_005",
+        "08_Chapter 2 Tsenacomoco (1542-1572)_003",
+        "19_Chapter 13 Conquest of the Continent (1824-1850)_022"
+      ],
+      "context": [
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_005",
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_006",
+        "15_Chapter 9 An Unsettled Dominion (1730-1754)_007",
+        "07_Chapter 1 The Columbian Cataclysm (1517-1542)_001",
+        "07_Chapter 1 The Columbian Cataclysm (1517-1542)_002",
+        "20_Chapter 14 Knell of the Union (1850-1870)_004",
+        "20_Chapter 14 Knell of the Union (1850-1870)_005",
+        "20_Chapter 14 Knell of the Union (1850-1870)_006"
+      ]
+    }
+  }
+}
