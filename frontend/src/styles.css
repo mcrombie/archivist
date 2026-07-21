@@ -1308,18 +1308,25 @@ select:focus {
     linear-gradient(180deg, #0c0d0b, #11100d 56%, #090a09);
   padding: clamp(64px, 9vh, 104px) clamp(28px, 6vw, 96px) 110px;
   scroll-margin-top: 0;
-  animation: response-arrive 420ms ease-out both;
+  animation: response-arrive 720ms cubic-bezier(0.2, 0.72, 0.25, 1) both;
 }
 
 .response-header {
   width: min(1320px, 100%);
-  margin: 0 auto 28px;
-  border-top: 1px solid var(--line);
-  padding-top: 24px;
+  margin: 0 auto 34px;
 }
 
-.response-header p {
-  margin: 0 0 10px;
+.submitted-question {
+  max-width: 940px;
+  border: 1px solid rgba(226, 189, 121, 0.18);
+  border-left: 3px solid var(--brass);
+  border-radius: 0 14px 14px 0;
+  background: linear-gradient(90deg, rgba(226, 189, 121, 0.07), rgba(255, 255, 255, 0.018));
+  padding: 22px 28px 24px;
+}
+
+.submitted-question > p {
+  margin: 0 0 11px;
   color: var(--brass-bright);
   font-size: 10px;
   font-weight: 800;
@@ -1327,7 +1334,7 @@ select:focus {
   text-transform: uppercase;
 }
 
-.response-header h2 {
+.submitted-question h2 {
   max-width: 920px;
   margin: 0;
   color: var(--paper);
@@ -1338,9 +1345,28 @@ select:focus {
   letter-spacing: -0.03em;
 }
 
-.response-header h2:focus {
+.submitted-question h2:focus {
   outline: 2px solid rgba(226, 189, 121, 0.4);
   outline-offset: 10px;
+}
+
+.response-provenance {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 20px 0 0;
+  color: #9f937d;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.response-provenance i {
+  width: 24px;
+  height: 1px;
+  background: var(--brass);
 }
 
 .answer-workspace {
@@ -1361,32 +1387,84 @@ select:focus {
 }
 
 .answer-workspace .output-block {
-  border: 1px solid rgba(93, 66, 36, 0.3);
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+  isolation: isolate;
+  border: 1px solid rgba(91, 61, 28, 0.38);
+  border-radius: 6px 11px 7px 9px;
   background:
-    linear-gradient(145deg, rgba(247, 237, 215, 0.98), rgba(225, 207, 170, 0.97));
+    linear-gradient(92deg, transparent 0 49.2%, rgba(102, 72, 38, 0.05) 49.7%, transparent 50.4%),
+    linear-gradient(145deg, #f0e2c1, #e3cfa6 55%, #dbc397);
+  box-shadow:
+    7px 9px 0 -4px rgba(191, 165, 116, 0.88),
+    13px 17px 44px rgba(0, 0, 0, 0.34),
+    inset 0 0 42px rgba(91, 55, 21, 0.1);
+}
+
+.answer-workspace .output-block::before,
+.answer-workspace .output-block::after {
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border-radius: inherit;
+  content: "";
+}
+
+.answer-workspace .output-block::before {
+  opacity: 0.58;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(90, 62, 31, 0.05) 4px 5px),
+    repeating-linear-gradient(90deg, transparent 0 108px, rgba(91, 62, 30, 0.055) 108px 109px);
+  mix-blend-mode: multiply;
+}
+
+.answer-workspace .output-block::after {
+  background:
+    radial-gradient(ellipse at 8% 11%, rgba(110, 67, 28, 0.14), transparent 21%),
+    radial-gradient(circle at 86% 16%, rgba(116, 73, 34, 0.08) 0 2px, transparent 3px),
+    radial-gradient(circle at 91% 23%, rgba(116, 73, 34, 0.07) 0 1px, transparent 3px),
+    radial-gradient(ellipse at 84% 88%, rgba(102, 62, 25, 0.12), transparent 25%),
+    radial-gradient(ellipse at 48% 105%, rgba(108, 66, 29, 0.1), transparent 34%);
+  box-shadow:
+    inset 15px 0 28px rgba(92, 58, 25, 0.07),
+    inset -12px 0 28px rgba(92, 58, 25, 0.08),
+    inset 0 0 0 1px rgba(255, 249, 226, 0.34);
+}
+
+.answer-workspace .output-block > * {
+  position: relative;
+  z-index: 1;
 }
 
 .answer-workspace .output-block .panel-title {
-  margin-bottom: 22px;
-  border-bottom: 1px solid rgba(99, 70, 38, 0.2);
-  padding-bottom: 14px;
+  margin-bottom: 24px;
+  border-bottom: 3px double rgba(91, 61, 29, 0.28);
+  padding-bottom: 15px;
 }
 
 .answer-workspace .output-block .panel-title h2 {
-  color: #2a2117;
-  font-size: 23px;
+  color: #342416;
+  font-size: 25px;
+  font-weight: 600;
 }
 
 .answer-workspace .output-block .panel-title svg {
-  color: #8d6332;
+  width: 31px;
+  height: 31px;
+  border: 1px solid rgba(112, 74, 34, 0.42);
+  border-radius: 50%;
+  color: #7d542d;
+  padding: 7px;
 }
 
 .answer-copy {
   max-width: 70ch;
-  color: #2a2218;
+  color: #332416;
   font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
-  font-size: 17px;
-  line-height: 1.76;
+  font-size: 18px;
+  line-height: 1.8;
 }
 
 .answer-copy p {
@@ -1399,9 +1477,14 @@ select:focus {
 }
 
 .answer-workspace .inline-citation {
-  background: rgba(143, 91, 40, 0.12);
-  color: #70431f;
-  text-decoration-color: rgba(112, 67, 31, 0.35);
+  border-bottom: 1px solid rgba(115, 71, 31, 0.28);
+  border-radius: 3px;
+  background: rgba(132, 79, 30, 0.1);
+  color: #72441f;
+  padding: 0.08em 0.24em;
+  text-decoration-color: rgba(112, 67, 31, 0.26);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .answer-workspace .inline-citation:hover,
@@ -1410,8 +1493,14 @@ select:focus {
 }
 
 .answer-workspace .sources-block {
+  position: relative;
+  z-index: 1;
   border: 1px solid rgba(226, 189, 121, 0.2);
   background: linear-gradient(145deg, rgba(29, 27, 23, 0.98), rgba(18, 18, 15, 0.98));
+}
+
+.answer-workspace .citation-preview {
+  z-index: 20;
 }
 
 .answer-workspace .sources-block .panel-title {
@@ -1577,7 +1666,7 @@ summary:focus-visible {
 @keyframes response-arrive {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(24px);
   }
   to {
     opacity: 1;
@@ -1586,24 +1675,40 @@ summary:focus-visible {
 }
 
 @keyframes landing-scroll-away {
-  from {
+  0%,
+  12% {
     opacity: 1;
-    transform: scale(1);
+    transform: translateY(0) scale(1);
   }
-  to {
-    opacity: 0.18;
-    transform: scale(0.985);
+
+  58% {
+    opacity: 0.72;
+    transform: translateY(-1.5vh) scale(0.992);
+  }
+
+  100% {
+    opacity: 0.06;
+    transform: translateY(-5vh) scale(0.972);
   }
 }
 
 @keyframes response-scroll-in {
-  from {
-    opacity: 0.25;
-    transform: translateY(44px);
+  0% {
+    opacity: 0;
+    transform: translateY(72px) scale(0.985);
   }
-  to {
+
+  35% {
+    opacity: 0.32;
+  }
+
+  72% {
+    opacity: 0.9;
+  }
+
+  100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -1612,13 +1717,13 @@ summary:focus-visible {
     transform-origin: center top;
     animation: landing-scroll-away linear both;
     animation-timeline: view();
-    animation-range: exit 0% exit 86%;
+    animation-range: exit 0% exit 100%;
   }
 
   .question-page.has-answer .response-section {
     animation: response-scroll-in linear both;
     animation-timeline: view();
-    animation-range: entry 0% entry 48%;
+    animation-range: entry 0% entry 82%;
   }
 }
 

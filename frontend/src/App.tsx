@@ -592,14 +592,63 @@ function QuestionMode({
     if (!answer || !answerHeadingRef.current) return;
 
     const heading = answerHeadingRef.current;
-    const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      ? "auto"
-      : "smooth";
-    const frame = window.requestAnimationFrame(() => {
-      heading.focus({ preventScroll: true });
-      heading.closest<HTMLElement>(".response-section")?.scrollIntoView({ behavior, block: "start" });
-    });
-    return () => window.cancelAnimationFrame(frame);
+    const response = heading.closest<HTMLElement>(".response-section");
+    if (!response) return;
+
+    heading.focus({ preventScroll: true });
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      response.scrollIntoView({ behavior: "auto", block: "start" });
+      return;
+    }
+
+    let targetY = 0;
+    let offsetNode: HTMLElement | null = response;
+    while (offsetNode) {
+      targetY += offsetNode.offsetTop;
+      offsetNode = offsetNode.offsetParent as HTMLElement | null;
+    }
+    const startY = window.scrollY;
+    const distance = targetY - startY;
+    if (Math.abs(distance) < 2) return;
+
+    const duration = Math.min(1800, Math.max(1350, Math.abs(distance) * 1.1));
+    const startedAt = window.performance.now();
+    let frame = 0;
+    let cancelled = false;
+
+    const removeCancellationListeners = () => {
+      window.removeEventListener("wheel", cancelScroll);
+      window.removeEventListener("touchstart", cancelScroll);
+      window.removeEventListener("pointerdown", cancelScroll);
+      window.removeEventListener("keydown", cancelScroll);
+      window.removeEventListener("resize", cancelScroll);
+    };
+    const cancelScroll = () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      removeCancellationListeners();
+    };
+    const step = (now: number) => {
+      if (cancelled) return;
+      const progress = Math.min((now - startedAt) / duration, 1);
+      const eased = progress * progress * progress * (progress * (progress * 6 - 15) + 10);
+      window.scrollTo({ top: startY + distance * eased, behavior: "auto" });
+      if (progress < 1) {
+        frame = window.requestAnimationFrame(step);
+      } else {
+        removeCancellationListeners();
+      }
+    };
+
+    window.addEventListener("wheel", cancelScroll, { passive: true });
+    window.addEventListener("touchstart", cancelScroll, { passive: true });
+    window.addEventListener("pointerdown", cancelScroll, { passive: true });
+    window.addEventListener("keydown", cancelScroll);
+    window.addEventListener("resize", cancelScroll);
+    frame = window.requestAnimationFrame(step);
+
+    return cancelScroll;
   }, [answer]);
 
   async function submit(event: FormEvent) {
@@ -713,8 +762,11 @@ function QuestionMode({
       {answer ? (
         <section className="response-section" aria-labelledby="response-question">
           <header className="response-header">
-            <p>Answer from the manuscript</p>
-            <h2 id="response-question" ref={answerHeadingRef} tabIndex={-1}>{submittedQuestion}</h2>
+            <div className="submitted-question">
+              <p>You asked</p>
+              <h2 id="response-question" ref={answerHeadingRef} tabIndex={-1}>{submittedQuestion}</h2>
+            </div>
+            <p className="response-provenance"><i aria-hidden="true" />Answer assembled from cited manuscript passages</p>
           </header>
           <div className="answer-workspace">
             <OutputBlock title="Answer" body={answer} empty="" sources={sources} />
