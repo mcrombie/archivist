@@ -24,7 +24,8 @@ from importers import (
     chapter_title_from_text,
 )
 from ingest import clean_title_from_filename, extract_chapter_title
-from prompts import build_answer_prompt, build_index_prompt_web
+from perspectives import AnswerPerspective
+from prompts import build_answer_prompt, build_index_prompt_web, build_perspective_answer_prompt
 from retrieval import (
     embed_query,
     finalize_context_chunks,
@@ -463,10 +464,19 @@ def merge_adjacent_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
-def answer_project_question(project_id: str, question: str, n_results: int = 5) -> tuple[str, list[dict[str, Any]]]:
+def answer_project_question(
+    project_id: str,
+    question: str,
+    n_results: int = 5,
+    perspective: AnswerPerspective = AnswerPerspective.NEUTRAL,
+) -> tuple[str, list[dict[str, Any]]]:
     results = retrieve_project(project_id, question, n_results=n_results)
     final_chunks = finalize_context_chunks(results, chunks=load_project_chunks(project_id))
-    prompt = build_answer_prompt(question, final_chunks)
+    prompt = (
+        build_answer_prompt(question, final_chunks)
+        if perspective is AnswerPerspective.NEUTRAL
+        else build_perspective_answer_prompt(question, final_chunks, perspective)
+    )
     response = openai_client().responses.create(model=CHAT_MODEL, input=prompt)
     return response.output_text, final_chunks
 

@@ -45,6 +45,19 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-21] Perspective prototype advanced before the Phase 2 measurement gate
+Phase/Brief: Phase 2 perspective-mode prototype, requested during Phase 1
+Symptom: the reader-facing web application now needs selectable historical perspectives before
+         the neutral Answer Mode baseline and faithfulness calibration are complete.
+Cause: Phase 2 concern in Phase 1 work — the owner deliberately advanced the interactive
+       demonstration ahead of its scheduled brief.
+Resolution and verification: perspective is confined to an optional, allowlisted generation
+       overlay in the web path. Neutral remains the default and produces the frozen Answer Mode
+       prompt byte-for-byte; retrieval, ordered source context, citation syntax, abstention, and
+       the CLI/evaluation path remain unchanged. Contract tests verify those boundaries. The
+       non-neutral perspectives are provisional and must not be treated as evaluated until each
+       passes the same Phase 1 faithfulness and citation checks.
+
 ## [2026-07-21] Web index comparison context had a second Source namespace
 Phase/Brief: Phase 1, Brief 1
 Symptom: applying `[Source N]` independently to manuscript and existing-index blocks produced two `[Source 1]` headers, while the verbatim format example still requested `<citation label>`.

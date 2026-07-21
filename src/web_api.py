@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from importers import chapter_title_from_text
+from perspectives import AnswerPerspective
 
 from web_project import (
     BASE_DIR,
@@ -55,6 +56,7 @@ if FRONTEND_DIST.exists():
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=1)
     n_results: int = Field(default=5, ge=1, le=12)
+    perspective: AnswerPerspective = AnswerPerspective.NEUTRAL
 
 
 class IndexEntryRequest(BaseModel):
@@ -122,8 +124,17 @@ def embed(project_id: str) -> dict[str, object]:
 @app.post("/api/projects/{project_id}/question")
 def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
     try:
-        answer, chunks = answer_project_question(project_id, request.question, n_results=request.n_results)
-        return {"answer": answer, **source_payload(chunks)}
+        answer, chunks = answer_project_question(
+            project_id,
+            request.question,
+            n_results=request.n_results,
+            perspective=request.perspective,
+        )
+        return {
+            "answer": answer,
+            "perspective": request.perspective.value,
+            **source_payload(chunks),
+        }
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

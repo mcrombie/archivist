@@ -1,3 +1,4 @@
+from perspectives import AnswerPerspective, build_perspective_prompt_block
 from retrieval import build_comparison_context, build_context
 
 
@@ -102,6 +103,26 @@ def build_answer_prompt(question: str, final_chunks: list[dict]) -> str:
     return ANSWER_PROMPT_TEMPLATE.format(
         question=question,
         context=build_context(final_chunks),
+    )
+
+
+def build_perspective_answer_prompt(
+    question: str,
+    final_chunks: list[dict],
+    perspective: AnswerPerspective | str,
+) -> str:
+    prompt = build_answer_prompt(question, final_chunks)
+    perspective_block = build_perspective_prompt_block(perspective)
+    if not perspective_block:
+        return prompt
+
+    question_marker = "\nQuestion:\n"
+    if ANSWER_PROMPT_TEMPLATE.count(question_marker) != 1:
+        raise RuntimeError("The answer prompt must contain exactly one Question section.")
+    return prompt.replace(
+        question_marker,
+        f"\n{perspective_block}\n\nQuestion:\n",
+        1,
     )
 
 

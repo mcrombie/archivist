@@ -1221,6 +1221,81 @@ select:focus {
   color: #b8ab91;
 }
 
+.perspective-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 238px);
+  align-items: center;
+  gap: 18px;
+  border-top: 1px solid rgba(226, 189, 121, 0.13);
+  padding: 15px 0;
+}
+
+.perspective-copy {
+  min-width: 0;
+}
+
+.perspective-copy label {
+  display: block;
+}
+
+.perspective-copy p {
+  max-width: 420px;
+  margin: 5px 0 0;
+  color: #9f937c;
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.45;
+}
+
+.perspective-select-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.question-composer .perspective-select-shell select {
+  min-height: 44px;
+  appearance: none;
+  border: 1px solid rgba(226, 189, 121, 0.28);
+  border-radius: 999px;
+  background: linear-gradient(145deg, rgba(51, 45, 35, 0.96), rgba(31, 29, 24, 0.96));
+  box-shadow: inset 0 1px rgba(255, 247, 226, 0.035);
+  color: var(--paper);
+  padding: 10px 42px 10px 16px;
+  font-size: 13px;
+  font-weight: 720;
+  letter-spacing: 0.015em;
+  cursor: pointer;
+}
+
+.question-composer .perspective-select-shell select:hover:not(:disabled) {
+  border-color: rgba(226, 189, 121, 0.58);
+}
+
+.question-composer .perspective-select-shell select:focus-visible {
+  border-color: var(--brass-bright);
+  outline: 3px solid rgba(195, 149, 83, 0.2);
+  outline-offset: 2px;
+}
+
+.question-composer .perspective-select-shell select:disabled {
+  color: #9e927c;
+  cursor: not-allowed;
+}
+
+.question-composer .perspective-select-shell option {
+  background: #201d18;
+  color: var(--paper);
+}
+
+.perspective-select-shell svg {
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  color: var(--brass-bright);
+  transform: translateY(-50%);
+}
+
 .composer-footer {
   display: flex;
   align-items: center;
@@ -1350,11 +1425,41 @@ select:focus {
   outline-offset: 10px;
 }
 
+.response-context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  margin-top: 20px;
+}
+
+.response-perspective {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(226, 189, 121, 0.25);
+  border-radius: 999px;
+  background: rgba(226, 189, 121, 0.07);
+  color: #a99c84;
+  padding: 5px 11px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.response-perspective strong {
+  color: var(--brass-bright);
+  font-size: 10px;
+}
+
 .response-provenance {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  margin: 20px 0 0;
+  margin: 0;
   color: #9f937d;
   font-size: 10px;
   font-weight: 750;
@@ -1859,6 +1964,16 @@ summary:focus-visible {
     font-size: 16px;
   }
 
+  .perspective-control {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 14px 0;
+  }
+
+  .perspective-copy p {
+    max-width: none;
+  }
+
   .composer-footer {
     align-items: stretch;
     flex-direction: column;
@@ -1894,6 +2009,21 @@ summary:focus-visible {
     top: 12px;
     right: 12px;
     width: calc(100% - 24px);
+  }
+}
+
+@media (forced-colors: active) {
+  .question-composer .perspective-select-shell select {
+    appearance: auto;
+    border: 1px solid ButtonText;
+  }
+
+  .perspective-select-shell svg {
+    display: none;
+  }
+
+  .response-perspective {
+    border: 1px solid ButtonText;
   }
 }
 

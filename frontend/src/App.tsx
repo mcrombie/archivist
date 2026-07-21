@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Copy,
   FileSearch,
   FileText,
@@ -17,6 +18,7 @@ import {
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import {
+  AnswerPerspective,
   CandidateTerm,
   DisplayGroup,
   Project,
@@ -34,6 +36,43 @@ import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
 
 type AppStage = "loading" | "unavailable" | "question";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
+
+const PERSPECTIVE_OPTIONS: ReadonlyArray<{
+  value: AnswerPerspective;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "neutral",
+    label: "Neutral",
+    description: "Measured and evidence-first, without a preferred moral frame."
+  },
+  {
+    value: "triumphalist",
+    label: "Triumphalist",
+    description: "Emphasizes achievement, confidence, expansion, and success."
+  },
+  {
+    value: "tragic",
+    label: "Tragic",
+    description: "Emphasizes loss, contingency, conflict, and human cost."
+  },
+  {
+    value: "pious",
+    label: "Pious",
+    description: "Attends to faith, providence, duty, and moral consequence."
+  },
+  {
+    value: "romantic",
+    label: "Romantic",
+    description: "Emphasizes atmosphere, longing, character, and dramatic meaning."
+  }
+];
+
+function perspectiveOption(perspective: AnswerPerspective) {
+  return PERSPECTIVE_OPTIONS.find((option) => option.value === perspective)
+    ?? PERSPECTIVE_OPTIONS[0];
+}
 
 function ProcessStatus({ messages }: { messages: string[] }) {
   const [messageIndex, setMessageIndex] = useState(0);
@@ -581,12 +620,16 @@ function QuestionMode({
   setNotice: (notice: Notice) => void;
 }) {
   const [question, setQuestion] = useState("");
+  const [perspective, setPerspective] = useState<AnswerPerspective>("neutral");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<SourceChunk[]>([]);
   const [displayGroups, setDisplayGroups] = useState<DisplayGroup[]>([]);
   const [submittedQuestion, setSubmittedQuestion] = useState("");
+  const [submittedPerspective, setSubmittedPerspective] = useState<AnswerPerspective>("neutral");
   const [loading, setLoading] = useState(false);
   const answerHeadingRef = useRef<HTMLHeadingElement>(null);
+  const selectedPerspective = perspectiveOption(perspective);
+  const answeredPerspective = perspectiveOption(submittedPerspective);
 
   useEffect(() => {
     if (!answer || !answerHeadingRef.current) return;
@@ -660,13 +703,15 @@ function QuestionMode({
     }
 
     setSubmittedQuestion(trimmedQuestion);
+    setSubmittedPerspective(perspective);
     setAnswer("");
     setSources([]);
     setDisplayGroups([]);
     setLoading(true);
     try {
-      const result = await askQuestion(project.id, trimmedQuestion, 5);
+      const result = await askQuestion(project.id, trimmedQuestion, 5, perspective);
       setAnswer(result.answer);
+      setSubmittedPerspective(result.perspective);
       setSources(result.sources);
       setDisplayGroups(result.display_groups);
     } catch (error) {
@@ -743,6 +788,30 @@ function QuestionMode({
                 placeholder="What does the manuscript say about..."
               />
             </label>
+            <div className="perspective-control">
+              <div className="perspective-copy">
+                <label htmlFor="archivist-perspective">
+                  <span>Archivist perspective</span>
+                </label>
+                <p id="perspective-description" aria-live="polite">
+                  {selectedPerspective.description} Framing changes; cited evidence does not.
+                </p>
+              </div>
+              <div className="perspective-select-shell">
+                <select
+                  id="archivist-perspective"
+                  value={perspective}
+                  disabled={loading}
+                  aria-describedby="perspective-description"
+                  onChange={(event) => setPerspective(event.target.value as AnswerPerspective)}
+                >
+                  {PERSPECTIVE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <ChevronDown size={16} aria-hidden="true" />
+              </div>
+            </div>
             <div className="composer-footer">
               <span id="question-grounding-note" className="grounding-note">
                 <i aria-hidden="true" />
@@ -766,7 +835,13 @@ function QuestionMode({
               <p>You asked</p>
               <h2 id="response-question" ref={answerHeadingRef} tabIndex={-1}>{submittedQuestion}</h2>
             </div>
-            <p className="response-provenance"><i aria-hidden="true" />Answer assembled from cited manuscript passages</p>
+            <div className="response-context">
+              <span className="response-perspective">
+                <span>Perspective</span>
+                <strong>{answeredPerspective.label}</strong>
+              </span>
+              <p className="response-provenance"><i aria-hidden="true" />Answer assembled from cited manuscript passages</p>
+            </div>
           </header>
           <div className="answer-workspace">
             <OutputBlock title="Answer" body={answer} empty="" sources={sources} />

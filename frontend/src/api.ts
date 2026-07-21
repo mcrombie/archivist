@@ -44,6 +44,13 @@ export type CandidateTerm = {
   count: number;
 };
 
+export type AnswerPerspective =
+  | "neutral"
+  | "triumphalist"
+  | "tragic"
+  | "pious"
+  | "romantic";
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   const contentType = response.headers.get("content-type") ?? "";
@@ -91,13 +98,23 @@ export async function embedProject(projectId: string): Promise<Project> {
   return data.project;
 }
 
-export async function askQuestion(projectId: string, question: string, nResults: number) {
-  return requestJson<{ answer: string; sources: SourceChunk[]; display_groups: DisplayGroup[] }>(
+export async function askQuestion(
+  projectId: string,
+  question: string,
+  nResults: number,
+  perspective: AnswerPerspective = "neutral"
+) {
+  return requestJson<{
+    answer: string;
+    perspective: AnswerPerspective;
+    sources: SourceChunk[];
+    display_groups: DisplayGroup[];
+  }>(
     `/api/projects/${projectId}/question`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, n_results: nResults })
+      body: JSON.stringify({ question, n_results: nResults, perspective })
     }
   );
 }
