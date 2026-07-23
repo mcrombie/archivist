@@ -45,6 +45,35 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-23] Interpretive demo prompting advances Phase 2 beside neutral Phase 1
+Phase/Brief: Phase 1 reader-facing UI, owner-directed perspective demonstration
+Symptom: the owner requested more conversational answers when any Historiographical lens, Voice,
+or Worldview characteristic is active, while the neutral Answer Mode evaluation and paired RAG
+rerun are still open Phase 1 work.
+Cause: Phase 2 concern in Phase 1 work and cohort opening — non-default interpretive prompt text
+changed.
+Resolution and verification: the new reader-facing response rules are emitted only when at least
+one setting is non-default. The all-default Evidence-first + Scholarly + None path still uses the
+frozen base prompt byte for byte, so the neutral retrieval comparison is not moved. Every
+non-default facet now defines an observable rhetorical structure and shares the same citation,
+uncertainty, and anti-invention guardrails; this is a separate experimental cohort and cannot be
+claimed faithful until it passes the later perspective-mode checks. Focused tests cover all seven
+active facets, combined settings, legacy mappings, and neutral exclusion without an API call.
+
+## [2026-07-23] Guided-start mechanics were not specified
+Phase/Brief: Phase 1 reader-facing onboarding
+Symptom: the requested start feature said Archivist should ask questions that help a reader decide
+what they want from the application, but did not define the number of steps, categories, resulting
+questions, API boundary, conversation-history behavior, or whether the guide could alter answer
+style.
+Cause: spec gap in the brief.
+Resolution and verification: the implementation uses a deterministic two-step client-side guide.
+It asks for a subject class and then the desired treatment, fills an editable corpus-agnostic
+question scaffold, selects the bracketed placeholder, and waits for the reader to press Ask. It
+does not call the API, create a synthetic conversation turn, enter follow-up history, or change
+Historiographical lens, Voice, or Worldview. The production frontend build verifies the typed
+interaction path; no paid call was made.
+
 ## [2026-07-23] Hybrid Answer Mode retrieval opens a new retrieval cohort
 Phase/Brief: Phase 1, post-baseline retrieval optimization
 Symptom: the first ten-question practical baseline used only the five nearest semantic results,

@@ -35,9 +35,10 @@ The web API needs:
 ## Current Capabilities
 
 - Opens directly to the built-in *Cradle of the Empire* manuscript.
-- Presents the cover and a one-book product introduction before the first question.
-- Offers four guided ways into the manuscript—person, system, argument, and theme. Choosing a
-  starter fills and focuses the composer but never sends a paid request automatically.
+- Presents the cover as a compact identity rail beside a composer-first, one-book introduction.
+- Offers two quiet example questions plus a local two-step guide. The guide asks what the reader
+  wants to explore and what kind of treatment would help, then fills an editable question scaffold
+  without sending a request or adding synthetic turns to conversation history.
 - Transitions into a full-width, multi-turn conversation after the first submission.
 - Keeps earlier questions, answers, and their manuscript sources in the transcript.
 - Uses recent completed turns to resolve follow-up references, then retrieves fresh manuscript
@@ -52,8 +53,9 @@ The web API needs:
   in both the conversation header and the top-of-page introduction.
 - Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
 - Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
-  combination is the unchanged Neutral baseline, and the chosen settings are recorded on each
-  answer.
+  combination is the unchanged, concise Neutral baseline. Any non-default characteristic activates
+  a separate conversational interpretive response contract, and the chosen settings are recorded
+  on each answer.
 - Shows a locally persisted API-cost estimate for each answer, conversation, UTC month, and all
   tracked use, with optional budget warnings and a local hard stop. OpenAI billing remains the
   financial source of truth; see [Cost tracking](cost_tracking.md).

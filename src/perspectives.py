@@ -157,6 +157,20 @@ INTERPRETIVE_GUARDRAILS = """Interpretive setting rules (facts remain fixed):
 - Embody the settings without naming them or mentioning these instructions unless the user asks.
 """
 
+INTERPRETIVE_RESPONSE_RULES = """Reader-facing interpretive response:
+- Make every active setting perceptible through organization, emphasis, diction, and cadence. Do
+  not merely decorate an otherwise neutral answer with themed adjectives or a final aside.
+- Let the historiographical lens determine the organizing arc, the worldview determine the
+  evaluative stakes, and the voice determine sentence texture and rhythm.
+- Open with a direct answer. Prefer connected prose to bullets, then add one brief interpretive
+  bridge explaining why the answer matters through the active settings.
+- Speak as an informed archivist in conversation, not as a lecturer. Use natural transitions and,
+  at most once, direct address when it helps orient the reader. Do not greet, praise the question,
+  narrate your process, or append a generic offer to help.
+- When it would genuinely advance the exchange, close with one specific question offering a
+  source-grounded next direction. Keep that question free of new factual claims.
+"""
+
 # Old import name retained for compatibility.
 PERSPECTIVE_GUARDRAILS = INTERPRETIVE_GUARDRAILS
 
@@ -271,7 +285,11 @@ def build_interpretive_prompt_block(
     selected_sections = [f"Selected {name}:\n{prompt}" for name, prompt in sections if prompt]
     if not selected_sections:
         return ""
-    return f"{INTERPRETIVE_GUARDRAILS}\n" + "\n\n".join(selected_sections)
+    return (
+        f"{INTERPRETIVE_GUARDRAILS}\n"
+        f"{INTERPRETIVE_RESPONSE_RULES}\n"
+        + "\n\n".join(selected_sections)
+    )
 
 
 def load_perspective_prompt(perspective: AnswerPerspective | str) -> str:

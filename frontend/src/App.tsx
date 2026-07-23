@@ -62,29 +62,127 @@ type FacetOption<T extends string> = {
   description: string;
 };
 
-type ConversationStarter = {
-  route: string;
+type GuidedStartIntent = "person" | "event" | "theme" | "passage";
+
+type OpeningQuestion = {
+  label: string;
   question: string;
 };
 
-const CONVERSATION_STARTERS: ReadonlyArray<ConversationStarter> = [
+type GuidedStartChoice = {
+  label: string;
+  description: string;
+  template: string;
+};
+
+type GuidedStartRoute = {
+  label: string;
+  description: string;
+  followUp: string;
+  choices: ReadonlyArray<GuidedStartChoice>;
+};
+
+const OPENING_QUESTIONS: ReadonlyArray<OpeningQuestion> = [
   {
-    route: "Meet a person",
+    label: "Meet a person",
     question: "Who was Edwin Sandys, and what did he do?"
   },
   {
-    route: "Understand a system",
-    question: "How did the headright system work?"
-  },
-  {
-    route: "Explore an argument",
-    question: "What role did Jamestown play as a corporate experiment?"
-  },
-  {
-    route: "Trace a theme",
+    label: "Trace a theme",
     question: "How does the manuscript connect tobacco to labor?"
   }
 ];
+
+const GUIDED_START_ROUTES: Record<GuidedStartIntent, GuidedStartRoute> = {
+  person: {
+    label: "A person",
+    description: "Understand someone’s role, choices, or place in the larger story.",
+    followUp: "What would you like to understand about this person?",
+    choices: [
+      {
+        label: "A concise account",
+        description: "Start with who they were and what they did.",
+        template: "Who was [person], and what did they do?"
+      },
+      {
+        label: "Why they matter",
+        description: "Connect their actions to the manuscript’s larger story.",
+        template: "Why does [person] matter to the manuscript's larger argument?"
+      },
+      {
+        label: "How the book portrays them",
+        description: "Examine the manuscript’s interpretation and evidence.",
+        template: "How does the manuscript portray [person], and what evidence supports that portrayal?"
+      }
+    ]
+  },
+  event: {
+    label: "An event or system",
+    description: "Work out how something operated, happened, or changed.",
+    followUp: "What kind of explanation would be most useful?",
+    choices: [
+      {
+        label: "How it worked",
+        description: "Get a direct explanation of the mechanics.",
+        template: "How did [event or system] work?"
+      },
+      {
+        label: "Causes and consequences",
+        description: "Follow what produced it and what followed.",
+        template: "How does the manuscript explain the causes and consequences of [event or system]?"
+      },
+      {
+        label: "Why it matters",
+        description: "Place it in the book’s larger historical argument.",
+        template: "Why does [event or system] matter to the book's larger story?"
+      }
+    ]
+  },
+  theme: {
+    label: "An argument or theme",
+    description: "Follow an idea, tension, or claim through the manuscript.",
+    followUp: "How would you like to follow this idea?",
+    choices: [
+      {
+        label: "Clarify the idea",
+        description: "Begin with what the manuscript means by it.",
+        template: "What does the manuscript mean by [idea or theme]?"
+      },
+      {
+        label: "Trace it through the book",
+        description: "Connect evidence from more than one part of the story.",
+        template: "How does the manuscript develop [idea or theme] across the book?"
+      },
+      {
+        label: "Look for change over time",
+        description: "Compare how the idea appears in different periods.",
+        template: "How does [idea or theme] change between different periods in the manuscript?"
+      }
+    ]
+  },
+  passage: {
+    label: "A passage or topic",
+    description: "Find where the book discusses something and what it says.",
+    followUp: "What should Archivist do with this topic?",
+    choices: [
+      {
+        label: "Locate and explain it",
+        description: "Find the relevant passages and summarize them.",
+        template: "Where does the manuscript discuss [topic], and what does it say there?"
+      },
+      {
+        label: "Synthesize its claims",
+        description: "Bring the manuscript’s main points together.",
+        template: "What are the manuscript's main claims about [topic]?"
+      },
+      {
+        label: "Add historical context",
+        description: "Connect the topic to the wider story told by the book.",
+        template: "How does the manuscript place [topic] in its wider historical context?"
+      }
+    ]
+  }
+};
 
 const LENS_OPTIONS: ReadonlyArray<FacetOption<HistoriographicalLens>> = [
   {
@@ -1190,42 +1288,165 @@ function NewConversationButton({
   );
 }
 
-function ConversationStarters({
+function OpeningGuidance({
   selectedQuestion,
-  onSelect
+  onPrepareQuestion,
+  onFocusQuestion
 }: {
   selectedQuestion: string;
-  onSelect: (question: string) => void;
+  onPrepareQuestion: (question: string, selectPlaceholder?: boolean) => void;
+  onFocusQuestion: () => void;
 }) {
-  return (
-    <section className="conversation-starters" aria-labelledby="conversation-starters-title">
-      <header className="conversation-starters-header">
-        <div>
-          <p>Ways into the manuscript</p>
-          <h2 id="conversation-starters-title">Choose a place to begin</h2>
-        </div>
-        <p>
-          A starter fills the question box for you to edit. Nothing is sent until you ask.
-        </p>
-      </header>
-      <ul className="conversation-starter-grid">
-        {CONVERSATION_STARTERS.map((starter, index) => (
-          <li key={starter.route}>
+  const [open, setOpen] = useState(false);
+  const [intent, setIntent] = useState<GuidedStartIntent | null>(null);
+  const guideTriggerRef = useRef<HTMLButtonElement>(null);
+  const guideQuestionRef = useRef<HTMLHeadingElement>(null);
+  const route = intent ? GUIDED_START_ROUTES[intent] : null;
+
+  useEffect(() => {
+    if (!open) return;
+    window.requestAnimationFrame(() => guideQuestionRef.current?.focus({ preventScroll: true }));
+  }, [intent, open]);
+
+  function closeGuide(focusTrigger = true) {
+    setOpen(false);
+    setIntent(null);
+    if (focusTrigger) {
+      window.requestAnimationFrame(() => guideTriggerRef.current?.focus({ preventScroll: true }));
+    }
+  }
+
+  if (open) {
+    return (
+      <section className="guided-start" aria-labelledby="guided-start-question">
+        <header className="guided-start-header">
+          <div className="guided-start-identity">
+            <span><Library size={15} aria-hidden="true" /></span>
+            <div>
+              <strong>Archivist</strong>
+              <small>Let’s shape a useful first question</small>
+            </div>
+          </div>
+          <button type="button" aria-label="Close guided start" onClick={() => closeGuide()}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </header>
+
+        {route ? (
+          <div className="guided-start-step">
             <button
               type="button"
-              aria-pressed={selectedQuestion === starter.question}
-              onClick={() => onSelect(starter.question)}
+              className="guided-start-back"
+              onClick={() => setIntent(null)}
             >
-              <span className="conversation-starter-route">
-                <i aria-hidden="true">{String(index + 1).padStart(2, "0")}</i>
-                {starter.route}
-              </span>
-              <span>{starter.question}</span>
+              <ArrowLeft size={14} aria-hidden="true" />
+              Back
             </button>
-          </li>
+            <p>You chose {route.label.toLowerCase()}</p>
+            <h2 id="guided-start-question" ref={guideQuestionRef} tabIndex={-1}>
+              {route.followUp}
+            </h2>
+            <ul className="guided-start-options">
+              {route.choices.map((choice) => (
+                <li key={choice.label}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeGuide(false);
+                      onPrepareQuestion(choice.template, true);
+                    }}
+                  >
+                    <strong>{choice.label}</strong>
+                    <span>{choice.description}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="guided-start-step">
+            <p>One quick question</p>
+            <h2 id="guided-start-question" ref={guideQuestionRef} tabIndex={-1}>
+              What are you hoping to explore?
+            </h2>
+            <ul className="guided-start-options is-intent-list">
+              {(Object.entries(GUIDED_START_ROUTES) as Array<
+                [GuidedStartIntent, GuidedStartRoute]
+              >).map(([routeId, routeOption]) => (
+                <li key={routeId}>
+                  <button type="button" onClick={() => setIntent(routeId)}>
+                    <strong>{routeOption.label}</strong>
+                    <span>{routeOption.description}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="guided-start-direct"
+              onClick={() => {
+                closeGuide(false);
+                onFocusQuestion();
+              }}
+            >
+              I already have a question
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="opening-suggestions" aria-labelledby="opening-suggestions-title">
+      <p id="opening-suggestions-title">Or start here</p>
+      <div>
+        {OPENING_QUESTIONS.map((starter) => (
+          <button
+            type="button"
+            key={starter.label}
+            aria-pressed={selectedQuestion === starter.question}
+            onClick={() => onPrepareQuestion(starter.question)}
+          >
+            <span>{starter.label}</span>
+            <strong>{starter.question}</strong>
+          </button>
         ))}
-      </ul>
+        <button
+          ref={guideTriggerRef}
+          type="button"
+          className="opening-guide-trigger"
+          onClick={() => setOpen(true)}
+        >
+          <MessageCircle size={15} aria-hidden="true" />
+          <span>
+            <small>Not sure what to ask?</small>
+            <strong>Let Archivist guide me</strong>
+          </span>
+        </button>
+      </div>
     </section>
+  );
+}
+
+function NewConversationSummary({
+  projectName
+}: {
+  projectName: string;
+}) {
+  return (
+    <div className="chat-open-summary">
+      <p className="chat-kicker">Conversation in progress</p>
+      <h1 id="question-page-title">Your thread is open.</h1>
+      <p>
+        Continue below with <cite>{projectName}</cite>, or use Start new conversation above
+        to begin again.
+      </p>
+      <a href="#conversation-thread-start">
+        <MessageCircle size={15} aria-hidden="true" />
+        Continue conversation
+      </a>
+    </div>
   );
 }
 
@@ -1435,13 +1656,18 @@ function QuestionMode({
     window.setTimeout(() => landingQuestionRef.current?.focus({ preventScroll: true }), 0);
   }
 
-  function selectConversationStarter(starterQuestion: string) {
-    setQuestion(starterQuestion);
+  function focusLandingQuestion(candidateQuestion = question, selectPlaceholder = false) {
     window.requestAnimationFrame(() => {
       const input = landingQuestionRef.current;
       if (!input) return;
       input.focus({ preventScroll: true });
-      input.setSelectionRange(starterQuestion.length, starterQuestion.length);
+      const placeholderStart = selectPlaceholder ? candidateQuestion.indexOf("[") : -1;
+      const placeholderEnd = selectPlaceholder ? candidateQuestion.indexOf("]", placeholderStart) : -1;
+      if (placeholderStart >= 0 && placeholderEnd > placeholderStart) {
+        input.setSelectionRange(placeholderStart, placeholderEnd + 1);
+      } else {
+        input.setSelectionRange(candidateQuestion.length, candidateQuestion.length);
+      }
       const bounds = input.getBoundingClientRect();
       if (bounds.top < 24 || bounds.bottom > window.innerHeight - 24) {
         const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -1450,6 +1676,11 @@ function QuestionMode({
         input.scrollIntoView({ behavior, block: "center" });
       }
     });
+  }
+
+  function prepareLandingQuestion(candidateQuestion: string, selectPlaceholder = false) {
+    setQuestion(candidateQuestion);
+    focusLandingQuestion(candidateQuestion, selectPlaceholder);
   }
 
   return (
@@ -1496,30 +1727,16 @@ function QuestionMode({
             )}
           </header>
 
-          <div className="chat-intro-copy">
-            <p className="chat-kicker">A source-grounded conversation with the book</p>
-            <h1 id="question-page-title">
-              <span>Ask the book.</span>
-              <em>Stay for the conversation.</em>
-            </h1>
-            <p className="chat-intro-description">
-              Archivist is a conversation with one book—<cite>{project.name}</cite>—not a
-              general-purpose chatbot. Ask about its people, events, arguments, or long arcs;
-              every reply returns to the manuscript for evidence.
-            </p>
-            <div className="chat-method-line" aria-label="How Archivist works">
-              <span><Search size={14} aria-hidden="true" />Searches this book</span>
-              <span><MessageCircle size={14} aria-hidden="true" />Remembers the thread</span>
-              <span><BookOpen size={14} aria-hidden="true" />Shows supporting passages</span>
-            </div>
-          </div>
-
           {!chatStarted ? (
-            <>
-              <ConversationStarters
-                selectedQuestion={question}
-                onSelect={selectConversationStarter}
-              />
+            <div className="chat-start-hub">
+              <div className="chat-intro-copy">
+                <p className="chat-kicker">A conversation grounded in one manuscript</p>
+                <h1 id="question-page-title">What would you like to uncover?</h1>
+                <p className="chat-intro-description">
+                  Ask <cite>{project.name}</cite> directly, or let Archivist help shape a
+                  useful first question.
+                </p>
+              </div>
               <ConversationComposer
                 location="landing"
                 project={project}
@@ -1531,21 +1748,31 @@ function QuestionMode({
                 onFacetsChange={setFacets}
                 onSubmit={submit}
               />
+              <OpeningGuidance
+                selectedQuestion={question}
+                onPrepareQuestion={prepareLandingQuestion}
+                onFocusQuestion={() => focusLandingQuestion()}
+              />
               <p className="chat-evidence-caveat">
-                Archivist can miss nuance. Open the cited passages when precision matters.
+                Searches this manuscript · cites supporting passages · remembers follow-ups.
+                Nothing is sent until you press Ask.
               </p>
-            </>
+            </div>
           ) : (
-            <div className="chat-transition-note" aria-hidden="true">
-              <MessageCircle size={18} />
-              Conversation opened
+            <div className="chat-start-hub is-conversation-open">
+              <NewConversationSummary projectName={project.name} />
             </div>
           )}
         </div>
       </section>
 
       {chatStarted ? (
-        <section className="conversation-shell" ref={conversationRef} aria-label="Conversation with Archivist">
+        <section
+          className="conversation-shell"
+          id="conversation-thread-start"
+          ref={conversationRef}
+          aria-label="Conversation with Archivist"
+        >
           <header className="conversation-header">
             <a className="conversation-brand" href="#question-page-title" aria-label="Return to the Archivist introduction">
               <span><Library size={16} /></span>
@@ -1692,7 +1919,7 @@ function ConversationComposer({
         <textarea
           ref={inputRef}
           id={questionId}
-          rows={location === "landing" ? 3 : 1}
+          rows={location === "landing" ? 2 : 1}
           required
           maxLength={4_000}
           aria-describedby={groundingId}
@@ -1711,19 +1938,17 @@ function ConversationComposer({
       </label>
 
       <div className="chat-composer-options">
-        {location === "thread" ? (
-          <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
-            <summary aria-label={`Answer style: ${answerFacetSummary(facets)}`}>
-              <SlidersHorizontal size={16} aria-hidden="true" />
-              <span>
-                <small>Answer style</small>
-                <strong>{compactAnswerFacetSummary(facets)}</strong>
-              </span>
-              <ChevronDown size={14} aria-hidden="true" />
-            </summary>
-            {answerSettings}
-          </details>
-        ) : answerSettings}
+        <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
+          <summary aria-label={`Answer style: ${answerFacetSummary(facets)}`}>
+            <SlidersHorizontal size={16} aria-hidden="true" />
+            <span>
+              <small>Answer style</small>
+              <strong>{compactAnswerFacetSummary(facets)}</strong>
+            </span>
+            <ChevronDown size={14} aria-hidden="true" />
+          </summary>
+          {answerSettings}
+        </details>
 
         <div className="chat-composer-submit">
           <span id={groundingId}>
@@ -1734,7 +1959,7 @@ function ConversationComposer({
           </span>
           <button type="submit" disabled={pending || !question.trim()}>
             {pending ? <Loader2 size={17} className="spin" /> : <Send size={16} />}
-            <span>{pending ? "Reading" : location === "landing" ? "Ask Archivist" : "Send"}</span>
+            <span>{pending ? "Reading" : location === "landing" ? "Ask" : "Send"}</span>
           </button>
         </div>
       </div>

@@ -13,6 +13,7 @@ from perspectives import (
     HISTORIOGRAPHICAL_LENSES,
     INTERPRETIVE_GUARDRAILS,
     INTERPRETIVE_PROMPT_DIR,
+    INTERPRETIVE_RESPONSE_RULES,
     PERSPECTIVE_PROMPT_DIR,
     PERSPECTIVES,
     WORLDVIEWS,
@@ -20,6 +21,7 @@ from perspectives import (
     AnswerVoice,
     HistoriographicalLens,
     Worldview,
+    build_interpretive_prompt_block,
     load_answer_voice_prompt,
     load_historiographical_lens_prompt,
     load_perspective_prompt,
@@ -100,6 +102,7 @@ def test_all_default_settings_preserve_the_frozen_answer_prompt_byte_for_byte():
     assert build_perspective_answer_prompt(
         "What happened?", CHUNKS, AnswerPerspective.NEUTRAL
     ) == expected
+    assert INTERPRETIVE_RESPONSE_RULES not in expected
 
 
 def test_interpretive_markdown_is_not_interpreted_as_format_placeholders(monkeypatch):
@@ -154,6 +157,88 @@ def test_each_facet_changes_framing_without_changing_question_or_sources(
     assert prompt.endswith(f"Sources:\n{context}\n")
     assert prompt.count("[Source 1]") == 1
     assert prompt.count("[Source 2]") == 1
+
+
+@pytest.mark.parametrize(
+    ("lens", "voice", "worldview"),
+    [
+        (
+            HistoriographicalLens.TRIUMPHALIST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.NONE,
+        ),
+        (
+            HistoriographicalLens.TRAGIC,
+            AnswerVoice.SCHOLARLY,
+            Worldview.NONE,
+        ),
+        (
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.PLAINSPOKEN,
+            Worldview.NONE,
+        ),
+        (
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.ROMANTIC,
+            Worldview.NONE,
+        ),
+        (
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.PIOUS,
+        ),
+        (
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.SECULAR_HUMANIST,
+        ),
+        (
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.ENLIGHTENMENT_RATIONALIST,
+        ),
+    ],
+)
+def test_each_non_default_facet_enables_conversational_interpretive_rules(
+    lens, voice, worldview
+):
+    prompt = build_interpretive_answer_prompt(
+        "What happened?",
+        CHUNKS,
+        lens,
+        voice,
+        worldview,
+    )
+
+    assert prompt.count(INTERPRETIVE_RESPONSE_RULES) == 1
+
+
+def test_single_active_facet_does_not_emit_default_facet_sections():
+    block = build_interpretive_prompt_block(
+        HistoriographicalLens.EVIDENCE_FIRST,
+        AnswerVoice.ROMANTIC,
+        Worldview.NONE,
+    )
+
+    assert block.count(INTERPRETIVE_RESPONSE_RULES) == 1
+    assert "Selected Voice:" in block
+    assert "Selected Historiographical lens:" not in block
+    assert "Selected Worldview:" not in block
+
+
+@pytest.mark.parametrize(
+    "perspective",
+    [
+        AnswerPerspective.TRIUMPHALIST,
+        AnswerPerspective.TRAGIC,
+        AnswerPerspective.PIOUS,
+        AnswerPerspective.ROMANTIC,
+    ],
+)
+def test_legacy_non_neutral_perspectives_enable_interpretive_rules_once(perspective):
+    prompt = build_perspective_answer_prompt("What happened?", CHUNKS, perspective)
+
+    assert prompt.count(INTERPRETIVE_RESPONSE_RULES) == 1
 
 
 def test_combined_facets_have_deterministic_prompt_precedence():

@@ -314,6 +314,51 @@ Useful blog lesson: visual identity does not require every answer to behave like
 The paper texture and typography can carry the archive metaphor while the surrounding interaction
 adopts the compact, continuous rhythm readers already understand from modern chat products.
 
+### 2026-07-23 — A quieter opening and an Archivist that helps readers begin
+
+- Compared the opening hierarchy with current ChatGPT and Claude entry screens. The transferable
+  lesson was to make one composer the dominant object, then disclose examples, settings, and help
+  only when the reader asks for them.
+- Reduced the cover from nearly half the desktop viewport to a bounded identity rail while retaining
+  the commissioned art and title. On narrow screens the cover now becomes a short banner so the
+  question box appears without an introductory scroll.
+- Replaced the two-line marketing headline, long explanation, three capability pills, four large
+  starter cards, and permanently expanded style controls with one question, one sentence, a compact
+  composer, two quiet examples, and one guided-start action.
+- Reused the conversation composer’s Answer style disclosure on the opening screen. Historiographical
+  lens, Voice, and Worldview remain available, but their three selectors no longer compete with the
+  first question.
+- Added a two-step, client-side guided start. Archivist first asks whether the reader wants to
+  explore a person, event or system, argument or theme, or passage or topic. It then asks what kind
+  of treatment would be useful and places an editable question scaffold in the composer with its
+  bracketed placeholder selected.
+- The guide neither submits a request nor creates a synthetic chat turn. Its questions never enter
+  RAG history, never trigger follow-up resolution, never change interpretive settings, and never
+  spend an API call.
+- Preserved the all-neutral generation path byte for byte so the planned paired ten-question RAG
+  rerun remains comparable. Neutral therefore continues to favor a short, direct evidence-based
+  answer.
+- Added a separate response contract that appears only when at least one interpretive characteristic
+  is non-default. It makes the active lens control the answer’s organizing arc, the worldview control
+  its stakes, and the voice control diction and cadence. It asks for a direct answer plus a brief
+  interpretive bridge and permits one specific, source-grounded next question when that genuinely
+  advances the conversation.
+- Rewrote each non-default Markdown fragment as a concrete rhetorical pattern rather than a list of
+  mood adjectives—for example, tragic answers move from open possibility through consequential
+  choice to cost, while triumphalist answers move from challenge through adaptation to durable
+  capacity. Evidence, citation, uncertainty, and anti-invention guardrails remain shared.
+- No model, retrieval, embedding, corpus, neutral prompt, or paid evaluation setting changed, and no
+  API call was made during this pass.
+- Verification: the TypeScript check and Vite production build passed; the focused interpretive
+  suite passed all 28 tests. The full backend suite reached 149 passing and one skipped test, with
+  three failures isolated to a pre-existing uncommitted `src/web_project.py` change that removes
+  corpus hashes and the semantic-only index helper; that unrelated edit was deliberately preserved.
+
+Useful blog lesson: conversational onboarding does not require another model call. A small local
+exchange can teach the product’s shape, help a reader form a better query, and protect both privacy
+and evaluation integrity. Personality also becomes more legible when prompts prescribe observable
+organization and sentence behavior instead of asking the model to “sound tragic” or “be romantic.”
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
