@@ -359,6 +359,101 @@ exchange can teach the product’s shape, help a reader form a better query, and
 and evaluation integrity. Personality also becomes more legible when prompts prescribe observable
 organization and sentence behavior instead of asking the model to “sound tragic” or “be romantic.”
 
+### 2026-07-23 — Clean semantic/hybrid paired rerun
+
+- Before spending on the comparison, found and corrected an accidental evaluation-boundary
+  regression introduced during the UI work. Answer traces again carry corpus hashes, and deferred
+  Index Mode again uses its semantic-only helper rather than the new hybrid Answer Mode path.
+- Recorded the correction as commit
+  `c6c54f00e02afc7e20485c6bda6b9b2eb860a018`. Preflight verification passed 152 backend tests with
+  one skipped.
+- Built the semantic side from the clean pre-hybrid commit
+  `f92e4a882090f78512f651f71f04c8b7e0e1853d` in an isolated worktree and the hybrid side from the
+  corrected current commit. Both used the same frozen ten questions, 58-claim rubric, 481-passage
+  corpus, neutral prompt, model configuration, empty histories, and request settings.
+- The first three semantic calls exposed a harness problem: the OpenAI SDK still had its implicit
+  two-retry allowance even though the evaluation runner itself never retried. No retry was observed,
+  but those outputs were excluded. Both cohorts restarted with SDK retries explicitly disabled and
+  a private live-server identity checked before any paid question.
+- Each clean cohort completed exactly ten query embeddings and ten answer generations. There were
+  no follow-up, judge, corpus-embedding, failed, duplicate, or unpriced events.
+- Estimated spend:
+  - clean semantic: `$0.23756083`;
+  - clean hybrid: `$0.35567608`;
+  - clean pair: `$0.59323691`;
+  - excluded diagnostic: `$0.11546479`;
+  - total against the owner's `$0.90` authorization: `$0.70870170`.
+- Do not use the raw semantic-versus-hybrid price difference as a retrieval-cost claim. The repeated
+  semantic questions received cache reads after the aborted diagnostic, while the hybrid cohort
+  began with cold cache writes. The hybrid run also sent more context.
+- Hybrid retrieval increased final source breadth:
+  - 62 to 79 final passages;
+  - 1.8 to 3.0 distinct documents per question on average;
+  - 12/26 to 15/26 expected document groups represented in final context.
+- That broader context did not improve strict answer completeness in this single paired sample.
+  Both cohorts covered 19 of 58 essential claims. Semantic recorded 36 absent and three
+  contradicted claims; hybrid recorded 35 absent and four contradicted claims.
+- The most revealing result was the separation between retrieval and generation:
+  - the conceptual question gained its missing Afterword target without gaining the omitted
+    argumentative nuance;
+  - the broad war-and-power question gained two historical target groups but still covered none of
+    its seven composite answer claims;
+  - the clean-abstention question acquired analogous chartered-company material and became worse;
+  - the false 1898-origin premise remained uncorrected in both cohorts.
+- Median response time remained similar: 7.048 seconds for semantic and 7.905 seconds for hybrid.
+- All source-number citations were syntactically valid and resolved to returned sources. That still
+  measures citation plumbing rather than citation faithfulness.
+- This remains a directional development result, not a formal run of record. The generator is an
+  undated `gpt-5.6-sol` alias, each retrieval mode has only one sample, and generation is
+  nondeterministic.
+- Full requests, responses, source passages, exact answer spans, and claim-level grading remain
+  private under gitignored `runtime/evaluations/`. No manuscript text was added to the repository.
+
+Useful blog lesson: retrieval breadth and answer completeness are different engineering problems.
+Hybrid fusion can put more of the right book in front of the model without making the final answer
+more complete. The next gains require query decomposition, premise checking, absence handling, and
+a source-bounded completeness pass rather than a still larger undifferentiated context window.
+
+### 2026-07-23 — Designing the evidence-planned RAG pass
+
+- Converted the paired-run failure modes into an implementation design at
+  `docs/rag_next_optimization_design.md`. This was a design-only step: it made no OpenAI calls and
+  changed no application behavior.
+- Designed one shared Answer Mode pipeline rather than four independent patches:
+  - query decomposition turns broad and multi-part questions into bounded retrieval facets;
+  - premise checking reserves both supporting and counterevidence searches before the answer is
+    written;
+  - a local corpus scanner separates direct mentions, bounded related material, and misleading
+    analogues;
+  - a structured evidence-coverage answer maps each user-requested facet to sources before
+    rendering concise prose.
+- Kept the original question as a global search lane, capped the first design at eight final
+  sources, and required all supplemental facet embeddings to share one batched request.
+- Chose a one-call structured answer with deterministic validation instead of a draft followed by a
+  second model critic. The latter would add serial cost and latency without guaranteeing that the
+  critic notices or safely repairs an omission.
+- Protected absence claims with a trust boundary: only surface forms mechanically derived from the
+  reader's question can certify a direct mention or its absence. Model-suggested synonyms and
+  analogues may help discovery but can never prove that the manuscript treats the requested
+  subject.
+- Defined calibrated outcomes for direct answers, partial answers, bounded near matches, clean
+  abstentions, and indeterminate searches. A certified clean abstention skips answer generation
+  instead of paying a model to improvise from irrelevant sources.
+- Renamed the proposed “source-bounded completeness pass” to `evidence_coverage_v1` in the technical
+  design. The evaluation contract already uses “completeness” for citation coverage, so keeping the
+  terms separate avoids quietly changing a locked metric.
+- Verified against current OpenAI documentation and the installed SDK that the Responses API can
+  return strict schema-shaped output through native Pydantic parsing. The design still requires
+  application validation because a valid structure does not make a factual decision correct.
+- Planned isolation before integration: first test the structured answer against frozen retrieved
+  contexts, then test decomposition and evidence routing without answer generation, and only then
+  rerun the unchanged ten-question set as a new cohort.
+
+Useful blog lesson: a trustworthy RAG system needs to know more than which passages are “similar.”
+It needs an explicit account of what the reader asked, which premise is being tested, whether the
+named subject is actually present, which requested facets the sources support, and where the
+evidence stops.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
@@ -412,7 +507,8 @@ organization and sentence behavior instead of asking the model to “sound tragi
 
 ## Open threads for later entries
 
-- Paired after-run results against the unchanged ten-question practical baseline.
+- A second optimization cohort focused on query decomposition, adversarial-premise routing,
+  corpus-level absence checks, and generation evidence coverage.
 - Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
   retrieval and citation metrics require it.
 - Retrieval-only pilot results before any answer generation is graded.
