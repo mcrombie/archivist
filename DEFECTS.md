@@ -45,6 +45,19 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-23] Opening-screen commit absorbed an unrelated retrieval regression
+Phase/Brief: Phase 1 paired practical rerun preflight
+Symptom: clean commit `c1ab639` failed three backend tests: Answer retrieval traces no longer
+included the frozen chunk and corpus hashes, the semantic-only web helper had disappeared, and
+deferred Index generation was routed through hybrid Answer retrieval.
+Cause: presentation work crossed the system-under-test boundary — a pre-existing unstaged
+`src/web_project.py` edit was included with the opening-screen commit even though it was unrelated
+to that UI task.
+Resolution and verification: restored the exact post-optimization boundary from `d4656df`.
+Answer Mode retains hybrid retrieval and its text-free corpus identity; Index Mode again calls the
+semantic-only helper. The full offline backend suite passes with 152 tests and one opt-in test
+skipped. No API call was made, and no paid evaluation began while the regression was present.
+
 ## [2026-07-23] Interpretive demo prompting advances Phase 2 beside neutral Phase 1
 Phase/Brief: Phase 1 reader-facing UI, owner-directed perspective demonstration
 Symptom: the owner requested more conversational answers when any Historiographical lens, Voice,
