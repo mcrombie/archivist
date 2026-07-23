@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 import web_api
 import web_project
-from perspectives import AnswerPerspective
+from perspectives import AnswerVoice, HistoriographicalLens, Worldview
 
 
 CHUNKS = [
@@ -79,8 +79,26 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
         calls.append(("resolve", question, history))
         return "What happened to John Doe afterward?"
 
-    def fake_answer(project_id, question, n_results, perspective):
-        calls.append(("answer", project_id, question, n_results, perspective))
+    def fake_answer(
+        project_id,
+        question,
+        n_results,
+        *,
+        historiographical_lens,
+        voice,
+        worldview,
+    ):
+        calls.append(
+            (
+                "answer",
+                project_id,
+                question,
+                n_results,
+                historiographical_lens,
+                voice,
+                worldview,
+            )
+        )
         return "A newly grounded answer [Source 1].", CHUNKS
 
     monkeypatch.setattr(web_api, "resolve_conversation_query", fake_resolve)
@@ -113,7 +131,9 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
             "current",
             "What happened to John Doe afterward?",
             5,
-            AnswerPerspective.NEUTRAL,
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.NONE,
         ),
     ]
     assert response["resolved_query"] == "What happened to John Doe afterward?"

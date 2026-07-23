@@ -45,6 +45,20 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-22] Combined perspective prototype split into three prompt facets
+Phase/Brief: Phase 2 perspective-mode prototype, requested during Phase 1
+Symptom: the combined perspective selector conflated historiographical framing, prose voice, and
+         moral or metaphysical worldview, preventing those dimensions from being selected
+         independently in the reader-facing demonstration.
+Cause: cohort opening - non-neutral generation prompts now compose three independent,
+       allowlisted Markdown facets in a fixed order.
+Resolution and verification: historiographical lens, voice, and worldview are separate request
+fields and their values are recorded on each answer; every all-default request still produces the
+frozen neutral prompt byte-for-byte, and the settings do not enter retrieval or change the model.
+Legacy combined requests map to their corresponding single facet. Tests cover the registries,
+prompt composition, API mapping, and retrieval boundary. This remains an unevaluated reader-facing
+prototype and is not a run-of-record cohort.
+
 ## [2026-07-22] Conversational follow-ups opened a separate reader-facing cohort
 Phase/Brief: Phase 1 reader-facing UI, owner-directed conversation design pass
 Symptom: follow-up questions such as pronouns or implicit references cannot be retrieved reliably

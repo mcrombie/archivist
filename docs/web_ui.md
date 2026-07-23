@@ -45,7 +45,9 @@ The web API needs:
 - Keeps sources collapsed beneath the answer they support and scopes citation links to that turn.
 - Provides retry, copy-answer, and new-conversation controls.
 - Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
-- Keeps Neutral as the default answer perspective.
+- Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
+  combination is the unchanged Neutral baseline, and the chosen settings are recorded on each
+  answer.
 
 Conversation history currently lasts for the open page. Starting a new conversation or reloading
 the page clears it; durable saved conversations are not part of this UI pass.

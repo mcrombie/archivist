@@ -1,4 +1,11 @@
-from perspectives import AnswerPerspective, build_perspective_prompt_block
+from perspectives import (
+    AnswerPerspective,
+    AnswerVoice,
+    HistoriographicalLens,
+    Worldview,
+    build_interpretive_prompt_block,
+    build_perspective_prompt_block,
+)
 from retrieval import build_comparison_context, build_context
 
 
@@ -106,6 +113,26 @@ def build_answer_prompt(question: str, final_chunks: list[dict]) -> str:
     )
 
 
+def build_interpretive_answer_prompt(
+    question: str,
+    final_chunks: list[dict],
+    historiographical_lens: HistoriographicalLens | str = (
+        HistoriographicalLens.EVIDENCE_FIRST
+    ),
+    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
+    worldview: Worldview | str = Worldview.NONE,
+) -> str:
+    prompt = build_answer_prompt(question, final_chunks)
+    interpretive_block = build_interpretive_prompt_block(
+        historiographical_lens,
+        voice,
+        worldview,
+    )
+    if not interpretive_block:
+        return prompt
+    return _insert_answer_prompt_block(prompt, interpretive_block)
+
+
 def build_perspective_answer_prompt(
     question: str,
     final_chunks: list[dict],
@@ -116,12 +143,17 @@ def build_perspective_answer_prompt(
     if not perspective_block:
         return prompt
 
+    return _insert_answer_prompt_block(prompt, perspective_block)
+
+
+def _insert_answer_prompt_block(prompt: str, block: str) -> str:
+
     question_marker = "\nQuestion:\n"
     if ANSWER_PROMPT_TEMPLATE.count(question_marker) != 1:
         raise RuntimeError("The answer prompt must contain exactly one Question section.")
     return prompt.replace(
         question_marker,
-        f"\n{perspective_block}\n\nQuestion:\n",
+        f"\n{block}\n\nQuestion:\n",
         1,
     )
 

@@ -56,6 +56,34 @@ export type AnswerPerspective =
   | "pious"
   | "romantic";
 
+export type HistoriographicalLens =
+  | "evidence_first"
+  | "triumphalist"
+  | "tragic";
+
+export type AnswerVoice =
+  | "scholarly"
+  | "plainspoken"
+  | "romantic";
+
+export type AnswerWorldview =
+  | "none"
+  | "pious"
+  | "secular_humanist"
+  | "enlightenment_rationalist";
+
+export type AnswerFacets = {
+  historiographicalLens: HistoriographicalLens;
+  voice: AnswerVoice;
+  worldview: AnswerWorldview;
+};
+
+export const DEFAULT_ANSWER_FACETS: AnswerFacets = {
+  historiographicalLens: "evidence_first",
+  voice: "scholarly",
+  worldview: "none"
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   const contentType = response.headers.get("content-type") ?? "";
@@ -107,13 +135,15 @@ export async function askQuestion(
   projectId: string,
   question: string,
   nResults: number,
-  perspective: AnswerPerspective = "neutral",
+  facets: AnswerFacets = DEFAULT_ANSWER_FACETS,
   history: ConversationHistoryTurn[] = []
 ) {
   return requestJson<{
     answer: string;
     resolved_query: string;
-    perspective: AnswerPerspective;
+    historiographical_lens: HistoriographicalLens;
+    voice: AnswerVoice;
+    worldview: AnswerWorldview;
     sources: SourceChunk[];
     display_groups: DisplayGroup[];
   }>(
@@ -121,7 +151,14 @@ export async function askQuestion(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, n_results: nResults, perspective, history })
+      body: JSON.stringify({
+        question,
+        n_results: nResults,
+        historiographical_lens: facets.historiographicalLens,
+        voice: facets.voice,
+        worldview: facets.worldview,
+        history
+      })
     }
   );
 }

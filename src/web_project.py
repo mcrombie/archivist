@@ -25,8 +25,14 @@ from importers import (
     chapter_title_from_text,
 )
 from ingest import clean_title_from_filename, extract_chapter_title
-from perspectives import AnswerPerspective
-from prompts import build_answer_prompt, build_index_prompt_web, build_perspective_answer_prompt
+from perspectives import (
+    AnswerPerspective,
+    AnswerVoice,
+    HistoriographicalLens,
+    Worldview,
+    settings_for_legacy_perspective,
+)
+from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
 from retrieval import (
     embed_query,
     finalize_context_chunks,
@@ -546,14 +552,40 @@ def answer_project_question(
     project_id: str,
     question: str,
     n_results: int = 5,
-    perspective: AnswerPerspective = AnswerPerspective.NEUTRAL,
+    perspective: AnswerPerspective | str | None = None,
+    *,
+    historiographical_lens: HistoriographicalLens | str = (
+        HistoriographicalLens.EVIDENCE_FIRST
+    ),
+    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
+    worldview: Worldview | str = Worldview.NONE,
 ) -> tuple[str, list[dict[str, Any]]]:
     results = retrieve_project(project_id, question, n_results=n_results)
     final_chunks = finalize_context_chunks(results, chunks=load_project_chunks(project_id))
+    if perspective is not None:
+        legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(perspective)
+        if historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST:
+            historiographical_lens = legacy_lens
+        if voice == AnswerVoice.SCHOLARLY:
+            voice = legacy_voice
+        if worldview == Worldview.NONE:
+            worldview = legacy_worldview
+
+    all_defaults = (
+        historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST
+        and voice == AnswerVoice.SCHOLARLY
+        and worldview == Worldview.NONE
+    )
     prompt = (
         build_answer_prompt(question, final_chunks)
-        if perspective is AnswerPerspective.NEUTRAL
-        else build_perspective_answer_prompt(question, final_chunks, perspective)
+        if all_defaults
+        else build_interpretive_answer_prompt(
+            question,
+            final_chunks,
+            historiographical_lens,
+            voice,
+            worldview,
+        )
     )
     response = openai_client().responses.create(model=CHAT_MODEL, input=prompt)
     return response.output_text, final_chunks

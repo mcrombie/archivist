@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated
 
@@ -12,10 +13,16 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from importers import chapter_title_from_text
-from perspectives import AnswerPerspective
+from perspectives import (
+    AnswerPerspective,
+    AnswerVoice,
+    HistoriographicalLens,
+    Worldview,
+    settings_for_legacy_perspective,
+)
 
 from web_project import (
     BASE_DIR,
@@ -62,8 +69,24 @@ class ConversationTurn(BaseModel):
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=1)
     n_results: int = Field(default=5, ge=1, le=12)
-    perspective: AnswerPerspective = AnswerPerspective.NEUTRAL
+    historiographical_lens: HistoriographicalLens = HistoriographicalLens.EVIDENCE_FIRST
+    voice: AnswerVoice = AnswerVoice.SCHOLARLY
+    worldview: Worldview = Worldview.NONE
+    perspective: AnswerPerspective | None = None
     history: list[ConversationTurn] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="before")
+    @classmethod
+    def translate_legacy_perspective(cls, data: object) -> object:
+        if not isinstance(data, Mapping) or data.get("perspective") is None:
+            return data
+
+        values = dict(data)
+        lens, voice, worldview = settings_for_legacy_perspective(values["perspective"])
+        values.setdefault("historiographical_lens", lens)
+        values.setdefault("voice", voice)
+        values.setdefault("worldview", worldview)
+        return values
 
 
 class IndexEntryRequest(BaseModel):
@@ -139,12 +162,17 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             project_id,
             resolved_query,
             n_results=request.n_results,
-            perspective=request.perspective,
+            historiographical_lens=request.historiographical_lens,
+            voice=request.voice,
+            worldview=request.worldview,
         )
         return {
             "answer": answer,
             "resolved_query": resolved_query,
-            "perspective": request.perspective.value,
+            "historiographical_lens": request.historiographical_lens.value,
+            "voice": request.voice.value,
+            "worldview": request.worldview.value,
+            "perspective": request.perspective.value if request.perspective is not None else None,
             **source_payload(chunks),
         }
     except FileNotFoundError as exc:

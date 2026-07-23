@@ -18,6 +18,8 @@ Answer Mode prompt, or the generation model.
 ## Current UI scope
 
 The reader-facing interface is being treated separately from retrieval quality. It may support a
-multi-turn transcript, contextual follow-up resolution, and selectable visual vibes while Neutral
-remains the default answer perspective. Visual vibes are presentation only and must never alter
-retrieval, source ordering, citations, or answer prompts.
+multi-turn transcript, contextual follow-up resolution, and selectable visual vibes. Answer
+framing is exposed as three provisional, independent settings: Historiographical lens, Voice, and
+Worldview. Evidence-first + Scholarly + None remains the unchanged Neutral baseline. These answer
+settings affect generation only; visual vibes are presentation only. Neither may alter retrieval,
+source ordering, or citation rules.

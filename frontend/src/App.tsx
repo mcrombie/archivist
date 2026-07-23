@@ -21,9 +21,13 @@ import {
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import {
-  AnswerPerspective,
+  AnswerFacets,
+  AnswerVoice,
+  AnswerWorldview,
   CandidateTerm,
+  DEFAULT_ANSWER_FACETS,
   DisplayGroup,
+  HistoriographicalLens,
   Project,
   SourceChunk,
   askQuestion,
@@ -41,15 +45,17 @@ import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
 type AppStage = "loading" | "unavailable" | "question";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
 
-const PERSPECTIVE_OPTIONS: ReadonlyArray<{
-  value: AnswerPerspective;
+type FacetOption<T extends string> = {
+  value: T;
   label: string;
   description: string;
-}> = [
+};
+
+const LENS_OPTIONS: ReadonlyArray<FacetOption<HistoriographicalLens>> = [
   {
-    value: "neutral",
-    label: "Neutral",
-    description: "Measured and evidence-first, without a preferred moral frame."
+    value: "evidence_first",
+    label: "Evidence-first",
+    description: "Organizes the answer around the strongest support in the manuscript."
   },
   {
     value: "triumphalist",
@@ -60,22 +66,67 @@ const PERSPECTIVE_OPTIONS: ReadonlyArray<{
     value: "tragic",
     label: "Tragic",
     description: "Emphasizes loss, contingency, conflict, and human cost."
+  }
+];
+
+const VOICE_OPTIONS: ReadonlyArray<FacetOption<AnswerVoice>> = [
+  {
+    value: "scholarly",
+    label: "Scholarly",
+    description: "Uses the measured historical prose of the neutral baseline."
   },
   {
-    value: "pious",
-    label: "Pious",
-    description: "Attends to faith, providence, duty, and moral consequence."
+    value: "plainspoken",
+    label: "Plainspoken",
+    description: "Uses direct, accessible language with minimal ornament."
   },
   {
     value: "romantic",
     label: "Romantic",
-    description: "Emphasizes atmosphere, longing, character, and dramatic meaning."
+    description: "Uses evocative language attentive to atmosphere, character, and drama."
   }
 ];
 
-function perspectiveOption(perspective: AnswerPerspective) {
-  return PERSPECTIVE_OPTIONS.find((option) => option.value === perspective)
-    ?? PERSPECTIVE_OPTIONS[0];
+const WORLDVIEW_OPTIONS: ReadonlyArray<FacetOption<AnswerWorldview>> = [
+  {
+    value: "none",
+    label: "None",
+    description: "Adds no moral or metaphysical frame beyond the evidence-first baseline."
+  },
+  {
+    value: "pious",
+    label: "Pious / providential",
+    description: "Attends to faith, providence, duty, and moral consequence."
+  },
+  {
+    value: "secular_humanist",
+    label: "Secular humanist",
+    description: "Emphasizes human agency, dignity, institutions, and material consequence."
+  },
+  {
+    value: "enlightenment_rationalist",
+    label: "Enlightenment rationalist",
+    description: "Emphasizes reason, inquiry, reform, and skepticism toward inherited claims."
+  }
+];
+
+function facetOption<T extends string>(options: ReadonlyArray<FacetOption<T>>, value: T) {
+  return options.find((option) => option.value === value) ?? options[0];
+}
+
+function answerFacetSummary(facets: AnswerFacets) {
+  if (
+    facets.historiographicalLens === DEFAULT_ANSWER_FACETS.historiographicalLens
+    && facets.voice === DEFAULT_ANSWER_FACETS.voice
+    && facets.worldview === DEFAULT_ANSWER_FACETS.worldview
+  ) {
+    return "Neutral baseline";
+  }
+  return [
+    facetOption(LENS_OPTIONS, facets.historiographicalLens).label,
+    facetOption(VOICE_OPTIONS, facets.voice).label,
+    facetOption(WORLDVIEW_OPTIONS, facets.worldview).label
+  ].join(" · ");
 }
 
 function ProcessStatus({ messages }: { messages: string[] }) {
@@ -621,7 +672,7 @@ type ChatTurnStatus = "pending" | "complete" | "error";
 type ChatTurn = {
   id: string;
   question: string;
-  perspective: AnswerPerspective;
+  facets: AnswerFacets;
   status: ChatTurnStatus;
   answer: string;
   resolvedQuery?: string;
@@ -644,7 +695,7 @@ function QuestionMode({
   setNotice: (notice: Notice) => void;
 }) {
   const [question, setQuestion] = useState("");
-  const [perspective, setPerspective] = useState<AnswerPerspective>("neutral");
+  const [facets, setFacets] = useState<AnswerFacets>({ ...DEFAULT_ANSWER_FACETS });
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const conversationRef = useRef<HTMLElement>(null);
@@ -667,7 +718,7 @@ function QuestionMode({
   async function runTurn(
     turnId: string,
     turnQuestion: string,
-    turnPerspective: AnswerPerspective,
+    turnFacets: AnswerFacets,
     history: Array<{ question: string; answer: string }>
   ) {
     try {
@@ -675,7 +726,7 @@ function QuestionMode({
         project.id,
         turnQuestion,
         5,
-        turnPerspective,
+        turnFacets,
         history.slice(-6)
       );
       setTurns((current) => current.map((turn) => turn.id === turnId ? {
@@ -683,7 +734,11 @@ function QuestionMode({
         status: "complete",
         answer: result.answer,
         resolvedQuery: result.resolved_query,
-        perspective: result.perspective,
+        facets: {
+          historiographicalLens: result.historiographical_lens,
+          voice: result.voice,
+          worldview: result.worldview
+        },
         sources: result.sources,
         displayGroups: result.display_groups,
         error: undefined
@@ -714,7 +769,7 @@ function QuestionMode({
     const nextTurn: ChatTurn = {
       id: turnId,
       question: trimmedQuestion,
-      perspective,
+      facets: { ...facets },
       status: "pending",
       answer: "",
       sources: [],
@@ -724,7 +779,7 @@ function QuestionMode({
     setTurns((current) => [...current, nextTurn]);
     setQuestion("");
     scrollToTurn(turnId, firstTurn);
-    await runTurn(turnId, trimmedQuestion, perspective, history);
+    await runTurn(turnId, trimmedQuestion, facets, history);
   }
 
   async function retryTurn(turnId: string) {
@@ -747,7 +802,7 @@ function QuestionMode({
       error: undefined
     } : candidate));
     scrollToTurn(turnId, false);
-    await runTurn(turnId, turn.question, turn.perspective, history);
+    await runTurn(turnId, turn.question, turn.facets, history);
   }
 
   async function copyAnswer(turn: ChatTurn) {
@@ -764,7 +819,7 @@ function QuestionMode({
     if (pending) return;
     setTurns([]);
     setQuestion("");
-    setPerspective("neutral");
+    setFacets({ ...DEFAULT_ANSWER_FACETS });
     setCopiedTurnId(null);
     const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ? "auto"
@@ -821,10 +876,10 @@ function QuestionMode({
               location="landing"
               project={project}
               question={question}
-              perspective={perspective}
+              facets={facets}
               pending={pending}
               onQuestionChange={setQuestion}
-              onPerspectiveChange={setPerspective}
+              onFacetsChange={setFacets}
               onSubmit={submit}
             />
           ) : (
@@ -879,10 +934,10 @@ function QuestionMode({
               location="thread"
               project={project}
               question={question}
-              perspective={perspective}
+              facets={facets}
               pending={pending}
               onQuestionChange={setQuestion}
-              onPerspectiveChange={setPerspective}
+              onFacetsChange={setFacets}
               onSubmit={submit}
             />
           </div>
@@ -896,24 +951,26 @@ function ConversationComposer({
   location,
   project,
   question,
-  perspective,
+  facets,
   pending,
   onQuestionChange,
-  onPerspectiveChange,
+  onFacetsChange,
   onSubmit
 }: {
   location: "landing" | "thread";
   project: Project;
   question: string;
-  perspective: AnswerPerspective;
+  facets: AnswerFacets;
   pending: boolean;
   onQuestionChange: (question: string) => void;
-  onPerspectiveChange: (perspective: AnswerPerspective) => void;
+  onFacetsChange: (facets: AnswerFacets) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const selectedPerspective = perspectiveOption(perspective);
   const questionId = `archivist-question-${location}`;
-  const perspectiveId = `archivist-perspective-${location}`;
+  const lensId = `archivist-lens-${location}`;
+  const voiceId = `archivist-voice-${location}`;
+  const worldviewId = `archivist-worldview-${location}`;
+  const facetDescriptionId = `archivist-facet-description-${location}`;
   const groundingId = `question-grounding-note-${location}`;
 
   return (
@@ -947,23 +1004,44 @@ function ConversationComposer({
       </label>
 
       <div className="chat-composer-options">
-        <div className="chat-perspective-control">
-          <label htmlFor={perspectiveId}>Answer perspective</label>
-          <div>
-            <select
-              id={perspectiveId}
-              value={perspective}
-              disabled={pending}
-              title={selectedPerspective.description}
-              onChange={(event) => onPerspectiveChange(event.target.value as AnswerPerspective)}
-            >
-              {PERSPECTIVE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <ChevronDown size={14} aria-hidden="true" />
+        <fieldset className="chat-answer-settings" aria-describedby={facetDescriptionId}>
+          <legend>Interpretive settings</legend>
+          <div className="chat-answer-settings-heading">
+            <p id={facetDescriptionId}>
+              These choices change interpretation and expression, not the manuscript evidence.
+            </p>
+            <span>{answerFacetSummary(facets)}</span>
           </div>
-        </div>
+          <div className="chat-facet-grid">
+            <FacetSelect
+              id={lensId}
+              label="Historiographical lens"
+              value={facets.historiographicalLens}
+              options={LENS_OPTIONS}
+              disabled={pending}
+              onChange={(historiographicalLens) => onFacetsChange({
+                ...facets,
+                historiographicalLens
+              })}
+            />
+            <FacetSelect
+              id={voiceId}
+              label="Voice"
+              value={facets.voice}
+              options={VOICE_OPTIONS}
+              disabled={pending}
+              onChange={(voice) => onFacetsChange({ ...facets, voice })}
+            />
+            <FacetSelect
+              id={worldviewId}
+              label="Worldview"
+              value={facets.worldview}
+              options={WORLDVIEW_OPTIONS}
+              disabled={pending}
+              onChange={(worldview) => onFacetsChange({ ...facets, worldview })}
+            />
+          </div>
+        </fieldset>
 
         <div className="chat-composer-submit">
           <span id={groundingId}>
@@ -983,6 +1061,43 @@ function ConversationComposer({
   );
 }
 
+function FacetSelect<T extends string>({
+  id,
+  label,
+  value,
+  options,
+  disabled,
+  onChange
+}: {
+  id: string;
+  label: string;
+  value: T;
+  options: ReadonlyArray<FacetOption<T>>;
+  disabled: boolean;
+  onChange: (value: T) => void;
+}) {
+  const selected = facetOption(options, value);
+  return (
+    <div className="chat-facet-control">
+      <label htmlFor={id}>{label}</label>
+      <div>
+        <select
+          id={id}
+          value={value}
+          disabled={disabled}
+          title={selected.description}
+          onChange={(event) => onChange(event.target.value as T)}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        <ChevronDown size={14} aria-hidden="true" />
+      </div>
+    </div>
+  );
+}
+
 function ConversationTurn({
   turn,
   turnNumber,
@@ -996,7 +1111,9 @@ function ConversationTurn({
   onCopy: () => void;
   onRetry: () => void;
 }) {
-  const perspective = perspectiveOption(turn.perspective);
+  const lens = facetOption(LENS_OPTIONS, turn.facets.historiographicalLens);
+  const voice = facetOption(VOICE_OPTIONS, turn.facets.voice);
+  const worldview = facetOption(WORLDVIEW_OPTIONS, turn.facets.worldview);
   const headingId = `turn-${turn.id}-question`;
   const sourceScopeId = `turn-${turn.id}-sources`;
 
@@ -1013,7 +1130,12 @@ function ConversationTurn({
             <span><Library size={15} /></span>
             <div>
               <strong>Archivist</strong>
-              <small>Turn {turnNumber} · {perspective.label}</small>
+              <small>Turn {turnNumber}</small>
+              <span className="turn-facet-summary">
+                <span><i>Lens</i>{lens.label}</span>
+                <span><i>Voice</i>{voice.label}</span>
+                <span><i>Worldview</i>{worldview.label}</span>
+              </span>
             </div>
           </div>
           {turn.status === "complete" ? (
