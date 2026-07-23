@@ -164,6 +164,11 @@ function answerFacetSummary(facets: AnswerFacets) {
   ].join(" · ");
 }
 
+function compactAnswerFacetSummary(facets: AnswerFacets) {
+  const summary = answerFacetSummary(facets);
+  return summary === "Neutral baseline" ? "Neutral" : summary;
+}
+
 function ProcessStatus({ messages }: { messages: string[] }) {
   const [messageIndex, setMessageIndex] = useState(0);
 
@@ -1563,7 +1568,7 @@ function QuestionMode({
 
           <ol className="conversation-thread" aria-label="Conversation turns">
             {turns.map((turn, index) => (
-              <li key={turn.id}>
+              <li key={turn.id} className={`turn-list-item is-${turn.status}`}>
                 <ConversationTurn
                   turn={turn}
                   turnNumber={index + 1}
@@ -1712,7 +1717,7 @@ function ConversationComposer({
               <SlidersHorizontal size={16} aria-hidden="true" />
               <span>
                 <small>Answer style</small>
-                <strong>{answerFacetSummary(facets)}</strong>
+                <strong>{compactAnswerFacetSummary(facets)}</strong>
               </span>
               <ChevronDown size={14} aria-hidden="true" />
             </summary>
@@ -1793,6 +1798,7 @@ function ConversationTurn({
   const headingId = `turn-${turn.id}-question`;
   const sourceScopeId = `turn-${turn.id}-sources`;
   const sourceCount = turn.displayGroups.reduce((count, group) => count + group.source_numbers.length, 0);
+  const facetSummary = answerFacetSummary(turn.facets);
 
   return (
     <article className={`conversation-turn is-${turn.status}`} id={`turn-${turn.id}`} aria-labelledby={headingId}>
@@ -1807,23 +1813,14 @@ function ConversationTurn({
             <span><Library size={15} /></span>
             <div>
               <strong>Archivist</strong>
-              <small>Turn {turnNumber}</small>
-              <span className="turn-facet-summary">
-                <span><i>Style</i>{answerFacetSummary(turn.facets)}</span>
-              </span>
+              <small className="sr-only">Turn {turnNumber}</small>
+              {facetSummary !== "Neutral baseline" ? (
+                <span className="turn-facet-summary">
+                  <span><i>Style</i>{facetSummary}</span>
+                </span>
+              ) : null}
             </div>
           </div>
-          {turn.status === "complete" ? (
-            <div className="turn-response-actions">
-              {turn.turnCostUsd !== undefined ? (
-                <span className="turn-cost-chip">Estimated cost {formatTurnCost(turn.turnCostUsd)}</span>
-              ) : null}
-              <button type="button" className="copy-answer-button" onClick={onCopy}>
-                {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-          ) : null}
         </header>
 
         {turn.status === "pending" ? (
@@ -1859,30 +1856,49 @@ function ConversationTurn({
             <span className="sr-only" role="status">Archivist's answer is ready.</span>
             <div className="assistant-paper">
               <OutputBlock
-                title="Answer from the manuscript"
+                title="From the manuscript"
                 body={turn.answer}
                 empty=""
                 sources={turn.sources}
                 sourceScopeId={sourceScopeId}
               />
             </div>
-            {turn.displayGroups.length ? (
-              <details className="turn-sources-disclosure">
-                <summary>
-                  <span>
-                    <BookOpen size={16} aria-hidden="true" />
-                    <strong>Manuscript sources</strong>
-                    <small>{sourceCount} {sourceCount === 1 ? "passage" : "passages"}</small>
-                  </span>
-                  <ChevronDown size={16} aria-hidden="true" />
-                </summary>
-                <DisplayGroups
-                  title="Manuscript sources"
-                  groups={turn.displayGroups}
-                  sourceScopeId={sourceScopeId}
-                />
-              </details>
-            ) : null}
+            <div className="archivist-response-footer">
+              {turn.displayGroups.length ? (
+                <details className="turn-sources-disclosure">
+                  <summary>
+                    <span>
+                      <BookOpen size={15} aria-hidden="true" />
+                      <strong>Sources</strong>
+                      <small>{sourceCount} {sourceCount === 1 ? "passage" : "passages"}</small>
+                    </span>
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </summary>
+                  <DisplayGroups
+                    title="Manuscript sources"
+                    groups={turn.displayGroups}
+                    sourceScopeId={sourceScopeId}
+                  />
+                </details>
+              ) : null}
+              <div className="turn-response-actions">
+                {turn.turnCostUsd !== undefined ? (
+                  <span className="turn-cost-chip">Est. {formatTurnCost(turn.turnCostUsd)}</span>
+                ) : null}
+                <button
+                  type="button"
+                  className="copy-answer-button"
+                  aria-label={copied ? "Answer copied" : "Copy answer"}
+                  title={copied ? "Answer copied" : "Copy answer"}
+                  onClick={onCopy}
+                >
+                  {copied
+                    ? <CheckCircle2 size={15} aria-hidden="true" />
+                    : <Copy size={15} aria-hidden="true" />}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
       </div>
@@ -2129,9 +2145,10 @@ function CitationText({
             type="button"
             aria-label={`Open source: ${humanLabels}`}
             aria-controls={controlledSourceId}
+            title={humanLabels}
             onClick={() => openSource(firstSource, sourceScopeId)}
           >
-            [{humanLabels}]
+            [{sourceNumbers.join(", ")}]
             <span className="citation-preview" aria-hidden="true">{excerpt}{excerptText.length > 220 ? "…" : ""}</span>
           </button>
         );

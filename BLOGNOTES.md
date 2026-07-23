@@ -272,11 +272,47 @@ which choice helped or hurt.
   scope, and conversation identifier; durable conversation history remains a later feature.
 - Retrieval, generation, prompts, model settings, and the frozen evaluation set were deliberately
   unchanged. No paid evaluation call was made during this UI pass.
-- Verification: the TypeScript check and Vite production build completed successfully.
+- Verification: the TypeScript check and Vite production build completed successfully; 140
+  backend tests passed and one opt-in live test was skipped.
 
 Useful blog lesson: onboarding can teach both capability and restraint. A good starter should show
 what kinds of questions fit the product while leaving the paid send action explicit and preserving
 the integrity of the benchmark used to measure later RAG changes.
+
+### 2026-07-23 — Making the chat spend its space on reading
+
+- Compared Archivist’s active conversation with the spatial hierarchy used by ChatGPT and Claude.
+  The useful lesson was not to copy their brands or add a sidebar; it was to favor one restrained
+  reading column, content-sized user messages, low-weight metadata, and a compact persistent
+  composer.
+- Narrowed the conversation and composer to a shared 840-pixel reading rail, tightened turn rhythm,
+  and made short user questions size to their contents rather than filling most of the column.
+- Reduced the sticky conversation header from 72 to 56 pixels. Monthly spend remains available as
+  an icon and amount, Start new conversation stays explicit, and the vibe control becomes compact
+  without losing its menu.
+- Flattened the assistant hierarchy: the turn number is now screen-reader context, the Neutral
+  baseline chip is omitted, and customized answer styles remain visible only when they add useful
+  information.
+- Preserved the archival-paper answer identity while reducing ceremonial chrome: smaller padding,
+  a quiet provenance eyebrow instead of a large repeated title, a lighter shadow, denser line
+  spacing, and shorter paragraph gaps.
+- Replaced long in-answer citation banners with compact numbered markers. Full citation labels
+  remain available to assistive technology, native hover text, previews, and the expandable source
+  records, so the density gain does not remove inspectability.
+- Moved Sources, estimated turn cost, and Copy into one understated post-answer utility row.
+  Sources remain keyboard-accessible and expand into the same manuscript evidence cards.
+- Reduced the fixed composer footprint and shortened its visible style summary to “Neutral” at the
+  default while preserving all three selectors in the disclosure.
+- Limited the large last-turn spacer to the pending state; completed turns retain only enough
+  clearance to stay readable above the fixed composer.
+- Retrieval, prompts, model configuration, conversation context, and the frozen evaluation set did
+  not change. No paid API call was made during this redesign.
+- Verification: the TypeScript check and Vite production build completed successfully; 140
+  backend tests passed and one opt-in live test was skipped.
+
+Useful blog lesson: visual identity does not require every answer to behave like a framed artifact.
+The paper texture and typography can carry the archive metaphor while the surrounding interaction
+adopts the compact, continuous rhythm readers already understand from modern chat products.
 
 ## Suggested demo sequence
 

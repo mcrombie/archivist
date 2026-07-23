@@ -44,7 +44,10 @@ The web API needs:
   evidence for each answer.
 - Keeps the composer available at the bottom of the conversation and supports Enter to send or
   Shift+Enter for a new line.
-- Keeps sources collapsed beneath the answer they support and scopes citation links to that turn.
+- Uses compact numbered citations in the answer while preserving the full reference in accessible
+  labels, hover text, and the source details.
+- Keeps sources collapsed in a compact post-answer utility row and scopes citation links to the
+  turn they support.
 - Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
   in both the conversation header and the top-of-page introduction.
 - Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
