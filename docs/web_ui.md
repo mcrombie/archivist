@@ -34,18 +34,18 @@ The web API needs:
 
 ## Current Capabilities
 
-- Opens to a simple upload-first manuscript screen.
-- Processes the manuscript before presenting mode selection.
-- Offers Q&A mode and index mode as separate focused workspaces.
-- Upload one or more `.md` / `.txt` / `.docx` / `.pdf` files, or a `.zip` containing them.
-- Convert `.docx` paragraphs/tables and selectable `.pdf` text into Archivist chunks.
-- Split a final `Index`, `General Index`, or `Index of Names` section into existing-index consultation chunks.
-- Process a manuscript into a local project under `projects/`.
-- Ignore detected index files and embedded index sections when building the searchable manuscript corpus.
-- Store detected index chunks separately for consultation.
-- Build or rebuild a Chroma search index for uploaded projects.
-- Retry the search-index build from the mode-selection screen if embedding fails after import.
-- Ask source-cited questions against a project.
-- Generate candidate index entries for a term.
-- Search an existing index when one is present.
-- Browse candidate index terms extracted from the manuscript.
+- Opens directly to the built-in *Cradle of the Empire* manuscript.
+- Presents the cover and introduction before the first question.
+- Transitions into a full-width, multi-turn conversation after the first submission.
+- Keeps earlier questions, answers, and their manuscript sources in the transcript.
+- Uses recent completed turns to resolve follow-up references, then retrieves fresh manuscript
+  evidence for each answer.
+- Keeps the composer available at the bottom of the conversation and supports Enter to send or
+  Shift+Enter for a new line.
+- Keeps sources collapsed beneath the answer they support and scopes citation links to that turn.
+- Provides retry, copy-answer, and new-conversation controls.
+- Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
+- Keeps Neutral as the default answer perspective.
+
+Conversation history currently lasts for the open page. Starting a new conversation or reloading
+the page clears it; durable saved conversations are not part of this UI pass.

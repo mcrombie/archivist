@@ -39,6 +39,11 @@ export type DisplayGroup = {
   citation_labels: string[];
 };
 
+export type ConversationHistoryTurn = {
+  question: string;
+  answer: string;
+};
+
 export type CandidateTerm = {
   term: string;
   count: number;
@@ -102,10 +107,12 @@ export async function askQuestion(
   projectId: string,
   question: string,
   nResults: number,
-  perspective: AnswerPerspective = "neutral"
+  perspective: AnswerPerspective = "neutral",
+  history: ConversationHistoryTurn[] = []
 ) {
   return requestJson<{
     answer: string;
+    resolved_query: string;
     perspective: AnswerPerspective;
     sources: SourceChunk[];
     display_groups: DisplayGroup[];
@@ -114,7 +121,7 @@ export async function askQuestion(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, n_results: nResults, perspective })
+      body: JSON.stringify({ question, n_results: nResults, perspective, history })
     }
   );
 }

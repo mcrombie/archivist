@@ -45,6 +45,18 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-22] Conversational follow-ups opened a separate reader-facing cohort
+Phase/Brief: Phase 1 reader-facing UI, owner-directed conversation design pass
+Symptom: follow-up questions such as pronouns or implicit references cannot be retrieved reliably
+         when every request is treated as an isolated question.
+Cause: cohort opening — multi-turn requests now use a separate query-resolution prompt before the
+       unchanged Answer Mode retrieval and generation path.
+Resolution and verification: first-turn requests remain byte-for-byte on the existing path. For a
+follow-up, only the newest bounded completed turns enter the resolver; its standalone question is
+used for fresh retrieval, and prior assistant prose never enters the evidence or answer prompt.
+Contract tests cover the boundary. This conversational cohort is not a run of record and must be
+evaluated separately from the frozen single-turn neutral cohort.
+
 ## [2026-07-21] Perspective prototype advanced before the Phase 2 measurement gate
 Phase/Brief: Phase 2 perspective-mode prototype, requested during Phase 1
 Symptom: the reader-facing web application now needs selectable historical perspectives before

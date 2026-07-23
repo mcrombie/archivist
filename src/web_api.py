@@ -27,6 +27,7 @@ from web_project import (
     list_projects,
     load_manifest,
     load_project_chunks,
+    resolve_conversation_query,
     search_existing_index,
     source_payload,
     source_dir,
@@ -53,10 +54,16 @@ if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
 
+class ConversationTurn(BaseModel):
+    question: str = Field(min_length=1, max_length=4_000)
+    answer: str = Field(min_length=1, max_length=12_000)
+
+
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=1)
     n_results: int = Field(default=5, ge=1, le=12)
     perspective: AnswerPerspective = AnswerPerspective.NEUTRAL
+    history: list[ConversationTurn] = Field(default_factory=list, max_length=12)
 
 
 class IndexEntryRequest(BaseModel):
@@ -124,14 +131,19 @@ def embed(project_id: str) -> dict[str, object]:
 @app.post("/api/projects/{project_id}/question")
 def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
     try:
+        resolved_query = resolve_conversation_query(
+            request.question,
+            [turn.model_dump() for turn in request.history],
+        )
         answer, chunks = answer_project_question(
             project_id,
-            request.question,
+            resolved_query,
             n_results=request.n_results,
             perspective=request.perspective,
         )
         return {
             "answer": answer,
+            "resolved_query": resolved_query,
             "perspective": request.perspective.value,
             **source_payload(chunks),
         }

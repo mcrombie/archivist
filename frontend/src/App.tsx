@@ -11,6 +11,9 @@ import {
   Library,
   ListTree,
   Loader2,
+  MessageCircle,
+  Plus,
+  RotateCcw,
   Search,
   Send,
   Upload,
@@ -32,6 +35,7 @@ import {
   listProjects,
   searchExistingIndex
 } from "./api";
+import { VibeControl } from "./VibeControl";
 import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
 
 type AppStage = "loading" | "unavailable" | "question";
@@ -612,6 +616,26 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
+type ChatTurnStatus = "pending" | "complete" | "error";
+
+type ChatTurn = {
+  id: string;
+  question: string;
+  perspective: AnswerPerspective;
+  status: ChatTurnStatus;
+  answer: string;
+  resolvedQuery?: string;
+  sources: SourceChunk[];
+  displayGroups: DisplayGroup[];
+  error?: string;
+};
+
+function createTurnId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `turn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function QuestionMode({
   project,
   setNotice
@@ -621,113 +645,140 @@ function QuestionMode({
 }) {
   const [question, setQuestion] = useState("");
   const [perspective, setPerspective] = useState<AnswerPerspective>("neutral");
-  const [answer, setAnswer] = useState("");
-  const [sources, setSources] = useState<SourceChunk[]>([]);
-  const [displayGroups, setDisplayGroups] = useState<DisplayGroup[]>([]);
-  const [submittedQuestion, setSubmittedQuestion] = useState("");
-  const [submittedPerspective, setSubmittedPerspective] = useState<AnswerPerspective>("neutral");
-  const [loading, setLoading] = useState(false);
-  const answerHeadingRef = useRef<HTMLHeadingElement>(null);
-  const selectedPerspective = perspectiveOption(perspective);
-  const answeredPerspective = perspectiveOption(submittedPerspective);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
+  const conversationRef = useRef<HTMLElement>(null);
+  const pending = turns.some((turn) => turn.status === "pending");
+  const chatStarted = turns.length > 0;
 
-  useEffect(() => {
-    if (!answer || !answerHeadingRef.current) return;
+  function scrollToTurn(turnId: string, firstTurn: boolean) {
+    window.setTimeout(() => {
+      const target = firstTurn
+        ? conversationRef.current
+        : document.getElementById(`turn-${turnId}`);
+      if (!target) return;
+      const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
+      target.scrollIntoView({ behavior, block: "start" });
+    }, 80);
+  }
 
-    const heading = answerHeadingRef.current;
-    const response = heading.closest<HTMLElement>(".response-section");
-    if (!response) return;
-
-    heading.focus({ preventScroll: true });
-
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      response.scrollIntoView({ behavior: "auto", block: "start" });
-      return;
+  async function runTurn(
+    turnId: string,
+    turnQuestion: string,
+    turnPerspective: AnswerPerspective,
+    history: Array<{ question: string; answer: string }>
+  ) {
+    try {
+      const result = await askQuestion(
+        project.id,
+        turnQuestion,
+        5,
+        turnPerspective,
+        history.slice(-6)
+      );
+      setTurns((current) => current.map((turn) => turn.id === turnId ? {
+        ...turn,
+        status: "complete",
+        answer: result.answer,
+        resolvedQuery: result.resolved_query,
+        perspective: result.perspective,
+        sources: result.sources,
+        displayGroups: result.display_groups,
+        error: undefined
+      } : turn));
+    } catch (error) {
+      setTurns((current) => current.map((turn) => turn.id === turnId ? {
+        ...turn,
+        status: "error",
+        error: errorMessage(error)
+      } : turn));
     }
+  }
 
-    let targetY = 0;
-    let offsetNode: HTMLElement | null = response;
-    while (offsetNode) {
-      targetY += offsetNode.offsetTop;
-      offsetNode = offsetNode.offsetParent as HTMLElement | null;
-    }
-    const startY = window.scrollY;
-    const distance = targetY - startY;
-    if (Math.abs(distance) < 2) return;
-
-    const duration = Math.min(1800, Math.max(1350, Math.abs(distance) * 1.1));
-    const startedAt = window.performance.now();
-    let frame = 0;
-    let cancelled = false;
-
-    const removeCancellationListeners = () => {
-      window.removeEventListener("wheel", cancelScroll);
-      window.removeEventListener("touchstart", cancelScroll);
-      window.removeEventListener("pointerdown", cancelScroll);
-      window.removeEventListener("keydown", cancelScroll);
-      window.removeEventListener("resize", cancelScroll);
-    };
-    const cancelScroll = () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frame);
-      removeCancellationListeners();
-    };
-    const step = (now: number) => {
-      if (cancelled) return;
-      const progress = Math.min((now - startedAt) / duration, 1);
-      const eased = progress * progress * progress * (progress * (progress * 6 - 15) + 10);
-      window.scrollTo({ top: startY + distance * eased, behavior: "auto" });
-      if (progress < 1) {
-        frame = window.requestAnimationFrame(step);
-      } else {
-        removeCancellationListeners();
-      }
-    };
-
-    window.addEventListener("wheel", cancelScroll, { passive: true });
-    window.addEventListener("touchstart", cancelScroll, { passive: true });
-    window.addEventListener("pointerdown", cancelScroll, { passive: true });
-    window.addEventListener("keydown", cancelScroll);
-    window.addEventListener("resize", cancelScroll);
-    frame = window.requestAnimationFrame(step);
-
-    return cancelScroll;
-  }, [answer]);
-
-  async function submit(event: FormEvent) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmedQuestion = question.trim();
-    if (!trimmedQuestion) {
-      setNotice({ type: "error", text: "Enter a question." });
-      return;
-    }
+    if (!trimmedQuestion || pending) return;
 
-    setSubmittedQuestion(trimmedQuestion);
-    setSubmittedPerspective(perspective);
-    setAnswer("");
-    setSources([]);
-    setDisplayGroups([]);
-    setLoading(true);
+    const history = turns
+      .filter((turn) => turn.status === "complete")
+      .slice(-6)
+      .map((turn) => ({
+        question: turn.question.slice(0, 4_000),
+        answer: turn.answer.slice(0, 12_000)
+      }));
+    const turnId = createTurnId();
+    const firstTurn = turns.length === 0;
+    const nextTurn: ChatTurn = {
+      id: turnId,
+      question: trimmedQuestion,
+      perspective,
+      status: "pending",
+      answer: "",
+      sources: [],
+      displayGroups: []
+    };
+
+    setTurns((current) => [...current, nextTurn]);
+    setQuestion("");
+    scrollToTurn(turnId, firstTurn);
+    await runTurn(turnId, trimmedQuestion, perspective, history);
+  }
+
+  async function retryTurn(turnId: string) {
+    if (pending) return;
+    const turnIndex = turns.findIndex((turn) => turn.id === turnId);
+    const turn = turns[turnIndex];
+    if (!turn) return;
+    const history = turns
+      .slice(0, turnIndex)
+      .filter((candidate) => candidate.status === "complete")
+      .slice(-6)
+      .map((candidate) => ({
+        question: candidate.question.slice(0, 4_000),
+        answer: candidate.answer.slice(0, 12_000)
+      }));
+
+    setTurns((current) => current.map((candidate) => candidate.id === turnId ? {
+      ...candidate,
+      status: "pending",
+      error: undefined
+    } : candidate));
+    scrollToTurn(turnId, false);
+    await runTurn(turnId, turn.question, turn.perspective, history);
+  }
+
+  async function copyAnswer(turn: ChatTurn) {
     try {
-      const result = await askQuestion(project.id, trimmedQuestion, 5, perspective);
-      setAnswer(result.answer);
-      setSubmittedPerspective(result.perspective);
-      setSources(result.sources);
-      setDisplayGroups(result.display_groups);
-    } catch (error) {
-      setNotice({ type: "error", text: errorMessage(error) });
-    } finally {
-      setLoading(false);
+      await navigator.clipboard.writeText(turn.answer);
+      setCopiedTurnId(turn.id);
+      window.setTimeout(() => setCopiedTurnId((current) => current === turn.id ? null : current), 1800);
+    } catch {
+      setNotice({ type: "error", text: "The answer could not be copied." });
     }
+  }
+
+  function startNewConversation() {
+    if (pending) return;
+    setTurns([]);
+    setQuestion("");
+    setPerspective("neutral");
+    setCopiedTurnId(null);
+    const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth";
+    window.scrollTo({ top: 0, behavior });
   }
 
   return (
     <section
-      className={`question-page${answer ? " has-answer" : ""}`}
+      className={`chat-page${chatStarted ? " has-conversation" : ""}`}
       aria-labelledby="question-page-title"
     >
-      <div className="question-stage">
-        <figure className="cover-panel">
+      <section className="chat-landing">
+        <figure className="chat-cover-panel">
           <img
             src={coverArt}
             alt="Cover art for Cradle of the Empire: an ancient tree overlooking sailing ships"
@@ -735,121 +786,286 @@ function QuestionMode({
             height="1344"
             decoding="async"
           />
-          <span className="cover-vignette" aria-hidden="true" />
+          <span className="chat-cover-vignette" aria-hidden="true" />
           <figcaption>
             <span>Featured manuscript</span>
             <strong>{project.name}</strong>
           </figcaption>
         </figure>
 
-        <div className="question-workspace">
-          <header className="workspace-brand">
-            <span className="brand-glyph"><Library size={17} /></span>
-            <strong>Archivist</strong>
-            <span className="brand-rule" aria-hidden="true" />
-            <small>Manuscript Q&amp;A</small>
+        <div className="chat-intro-panel">
+          <header className="chat-landing-header">
+            <div className="chat-brand">
+              <span><Library size={17} /></span>
+              <strong>Archivist</strong>
+              <i aria-hidden="true" />
+              <small>Manuscript conversation</small>
+            </div>
+            {!chatStarted ? <VibeControl /> : null}
           </header>
 
-          <div className="question-intro">
-            <p className="kicker">Source-grounded book companion</p>
+          <div className="chat-intro-copy">
+            <p className="chat-kicker">A source-grounded conversation with the book</p>
             <h1 id="question-page-title">
               <span>Ask the book.</span>
-              <em>Follow the evidence.</em>
+              <em>Stay for the conversation.</em>
             </h1>
-            <p className="question-introduction">
-              Archivist is a research companion for <cite>{project.name}</cite>. Ask about a person,
-              place, event, theme, or connection. Every answer is assembled from the manuscript and
-              linked to the passages that support it.
+            <p>
+              Explore <cite>{project.name}</cite> as you would with a knowledgeable reading companion.
+              Begin anywhere, ask follow-up questions, and open the manuscript passages behind each answer.
             </p>
           </div>
 
-          <form
-            className="question-composer"
-            aria-label={`Ask a question about ${project.name}`}
-            aria-busy={loading}
-            onSubmit={submit}
-          >
-            <label htmlFor="archivist-question">
-              <span>Your question</span>
-              <textarea
-                id="archivist-question"
-                rows={4}
-                required
-                disabled={loading}
-                aria-describedby="question-grounding-note"
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }
-                }}
-                placeholder="What does the manuscript say about..."
-              />
-            </label>
-            <div className="perspective-control">
-              <div className="perspective-copy">
-                <label htmlFor="archivist-perspective">
-                  <span>Archivist perspective</span>
-                </label>
-                <p id="perspective-description" aria-live="polite">
-                  {selectedPerspective.description} Framing changes; cited evidence does not.
-                </p>
-              </div>
-              <div className="perspective-select-shell">
-                <select
-                  id="archivist-perspective"
-                  value={perspective}
-                  disabled={loading}
-                  aria-describedby="perspective-description"
-                  onChange={(event) => setPerspective(event.target.value as AnswerPerspective)}
-                >
-                  {PERSPECTIVE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <ChevronDown size={16} aria-hidden="true" />
-              </div>
+          {!chatStarted ? (
+            <ConversationComposer
+              location="landing"
+              project={project}
+              question={question}
+              perspective={perspective}
+              pending={pending}
+              onQuestionChange={setQuestion}
+              onPerspectiveChange={setPerspective}
+              onSubmit={submit}
+            />
+          ) : (
+            <div className="chat-transition-note" aria-hidden="true">
+              <MessageCircle size={18} />
+              Conversation opened
             </div>
-            <div className="composer-footer">
-              <span id="question-grounding-note" className="grounding-note">
-                <i aria-hidden="true" />
-                Grounded in {project.stats.searchable_chunks.toLocaleString()} searchable passages
-              </span>
-              <button className="ask-button" type="submit" disabled={loading || !question.trim()}>
-                {loading ? <Loader2 size={17} className="spin" /> : null}
-                {loading ? "Searching" : "Ask Archivist"}
-                {!loading ? <Send size={16} /> : null}
-              </button>
-            </div>
-            {loading ? <ProcessStatus messages={QUESTION_STEPS} /> : null}
-          </form>
+          )}
         </div>
-      </div>
+      </section>
 
-      {answer ? (
-        <section className="response-section" aria-labelledby="response-question">
-          <header className="response-header">
-            <div className="submitted-question">
-              <p>You asked</p>
-              <h2 id="response-question" ref={answerHeadingRef} tabIndex={-1}>{submittedQuestion}</h2>
-            </div>
-            <div className="response-context">
-              <span className="response-perspective">
-                <span>Perspective</span>
-                <strong>{answeredPerspective.label}</strong>
+      {chatStarted ? (
+        <section className="conversation-shell" ref={conversationRef} aria-label="Conversation with Archivist">
+          <header className="conversation-header">
+            <a className="conversation-brand" href="#question-page-title" aria-label="Return to the Archivist introduction">
+              <span><Library size={16} /></span>
+              <span>
+                <strong>Archivist</strong>
+                <small>{project.name}</small>
               </span>
-              <p className="response-provenance"><i aria-hidden="true" />Answer assembled from cited manuscript passages</p>
+            </a>
+            <div className="conversation-actions">
+              <button
+                type="button"
+                className="new-conversation-button"
+                disabled={pending}
+                onClick={startNewConversation}
+              >
+                <Plus size={15} />
+                <span>New conversation</span>
+              </button>
+              <VibeControl compact />
             </div>
           </header>
-          <div className="answer-workspace">
-            <OutputBlock title="Answer" body={answer} empty="" sources={sources} />
-            <DisplayGroups title="Sources" groups={displayGroups} />
+
+          <ol className="conversation-thread" aria-label="Conversation turns">
+            {turns.map((turn, index) => (
+              <li key={turn.id}>
+                <ConversationTurn
+                  turn={turn}
+                  turnNumber={index + 1}
+                  copied={copiedTurnId === turn.id}
+                  onCopy={() => copyAnswer(turn)}
+                  onRetry={() => retryTurn(turn.id)}
+                />
+              </li>
+            ))}
+          </ol>
+
+          <div className="conversation-composer-dock">
+            <ConversationComposer
+              location="thread"
+              project={project}
+              question={question}
+              perspective={perspective}
+              pending={pending}
+              onQuestionChange={setQuestion}
+              onPerspectiveChange={setPerspective}
+              onSubmit={submit}
+            />
           </div>
         </section>
       ) : null}
     </section>
+  );
+}
+
+function ConversationComposer({
+  location,
+  project,
+  question,
+  perspective,
+  pending,
+  onQuestionChange,
+  onPerspectiveChange,
+  onSubmit
+}: {
+  location: "landing" | "thread";
+  project: Project;
+  question: string;
+  perspective: AnswerPerspective;
+  pending: boolean;
+  onQuestionChange: (question: string) => void;
+  onPerspectiveChange: (perspective: AnswerPerspective) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const selectedPerspective = perspectiveOption(perspective);
+  const questionId = `archivist-question-${location}`;
+  const perspectiveId = `archivist-perspective-${location}`;
+  const groundingId = `question-grounding-note-${location}`;
+
+  return (
+    <form
+      className={`chat-composer ${location === "thread" ? "is-docked" : "is-landing"}`}
+      aria-label={`Ask a question about ${project.name}`}
+      aria-busy={pending}
+      onSubmit={onSubmit}
+    >
+      <label className="chat-question-field" htmlFor={questionId}>
+        <span>{location === "landing" ? "Begin the conversation" : "Your next question"}</span>
+        <textarea
+          id={questionId}
+          rows={location === "landing" ? 3 : 2}
+          required
+          maxLength={4_000}
+          aria-describedby={groundingId}
+          value={question}
+          onChange={(event) => onQuestionChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              if (!pending && question.trim()) event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          placeholder={location === "landing"
+            ? "What would you like to know about Cradle of the Empire?"
+            : "Ask a follow-up question..."}
+          autoFocus={location === "thread"}
+        />
+      </label>
+
+      <div className="chat-composer-options">
+        <div className="chat-perspective-control">
+          <label htmlFor={perspectiveId}>Answer perspective</label>
+          <div>
+            <select
+              id={perspectiveId}
+              value={perspective}
+              disabled={pending}
+              title={selectedPerspective.description}
+              onChange={(event) => onPerspectiveChange(event.target.value as AnswerPerspective)}
+            >
+              {PERSPECTIVE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <ChevronDown size={14} aria-hidden="true" />
+          </div>
+        </div>
+
+        <div className="chat-composer-submit">
+          <span id={groundingId}>
+            <i aria-hidden="true" />
+            {pending
+              ? "You can draft the next question while Archivist works"
+              : `${project.stats.searchable_chunks.toLocaleString()} searchable manuscript passages`}
+          </span>
+          <button type="submit" disabled={pending || !question.trim()}>
+            {pending ? <Loader2 size={17} className="spin" /> : <Send size={16} />}
+            <span>{pending ? "Reading" : location === "landing" ? "Ask Archivist" : "Send"}</span>
+          </button>
+        </div>
+      </div>
+      <small className="composer-key-hint">Enter to send · Shift + Enter for a new line</small>
+    </form>
+  );
+}
+
+function ConversationTurn({
+  turn,
+  turnNumber,
+  copied,
+  onCopy,
+  onRetry
+}: {
+  turn: ChatTurn;
+  turnNumber: number;
+  copied: boolean;
+  onCopy: () => void;
+  onRetry: () => void;
+}) {
+  const perspective = perspectiveOption(turn.perspective);
+  const headingId = `turn-${turn.id}-question`;
+  const sourceScopeId = `turn-${turn.id}-sources`;
+
+  return (
+    <article className={`conversation-turn is-${turn.status}`} id={`turn-${turn.id}`} aria-labelledby={headingId}>
+      <div className="user-turn">
+        <span>You</span>
+        <h2 id={headingId}>{turn.question}</h2>
+      </div>
+
+      <div className="archivist-turn">
+        <header className="archivist-turn-header">
+          <div className="archivist-identity">
+            <span><Library size={15} /></span>
+            <div>
+              <strong>Archivist</strong>
+              <small>Turn {turnNumber} · {perspective.label}</small>
+            </div>
+          </div>
+          {turn.status === "complete" ? (
+            <button type="button" className="copy-answer-button" onClick={onCopy}>
+              {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+          ) : null}
+        </header>
+
+        {turn.status === "pending" ? (
+          <div className="archivist-thinking">
+            <ProcessStatus messages={QUESTION_STEPS} />
+            <p>{turnNumber > 1 ? "Following the thread, then returning to the manuscript." : "Finding the passages that best answer your question."}</p>
+          </div>
+        ) : null}
+
+        {turn.status === "error" ? (
+          <div className="turn-error" role="alert">
+            <AlertCircle size={18} />
+            <div>
+              <strong>Archivist could not complete this answer.</strong>
+              <p>{turn.error}</p>
+            </div>
+            <button type="button" onClick={onRetry}>
+              <RotateCcw size={15} />
+              Try again
+            </button>
+          </div>
+        ) : null}
+
+        {turn.status === "complete" ? (
+          <div className="archivist-response">
+            <span className="sr-only" role="status">Archivist's answer is ready.</span>
+            <div className="assistant-paper">
+              <OutputBlock
+                title="Answer from the manuscript"
+                body={turn.answer}
+                empty=""
+                sources={turn.sources}
+                sourceScopeId={sourceScopeId}
+              />
+            </div>
+            <DisplayGroups
+              title="Manuscript sources"
+              groups={turn.displayGroups}
+              sourceScopeId={sourceScopeId}
+            />
+          </div>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -1023,7 +1239,19 @@ function ModeHeader({
   );
 }
 
-function OutputBlock({ title, body, empty, sources = [] }: { title: string; body: string; empty: string; sources?: SourceChunk[] }) {
+function OutputBlock({
+  title,
+  body,
+  empty,
+  sources = [],
+  sourceScopeId
+}: {
+  title: string;
+  body: string;
+  empty: string;
+  sources?: SourceChunk[];
+  sourceScopeId?: string;
+}) {
   return (
     <section className="output-block">
       <div className="panel-title">
@@ -1033,7 +1261,9 @@ function OutputBlock({ title, body, empty, sources = [] }: { title: string; body
       {body ? (
         <div className="answer-copy">
           {body.split(/\n{2,}/).map((paragraph, index) => (
-            <p key={index}><CitationText body={paragraph} sources={sources} /></p>
+            <p key={index}>
+              <CitationText body={paragraph} sources={sources} sourceScopeId={sourceScopeId} />
+            </p>
           ))}
         </div>
       ) : <p className="empty-state">{empty}</p>}
@@ -1041,7 +1271,15 @@ function OutputBlock({ title, body, empty, sources = [] }: { title: string; body
   );
 }
 
-function CitationText({ body, sources }: { body: string; sources: SourceChunk[] }) {
+function CitationText({
+  body,
+  sources,
+  sourceScopeId
+}: {
+  body: string;
+  sources: SourceChunk[];
+  sourceScopeId?: string;
+}) {
   if (!sources.length) return <>{body}</>;
   const sourceByNumber = new Map(sources.map((source) => [source.source_number, source]));
   const parts = body.split(/(\[Source \d+(?:, Source \d+)*\])/g);
@@ -1060,13 +1298,17 @@ function CitationText({ body, sources }: { body: string; sources: SourceChunk[] 
         const excerptText = firstSource.text.replace(/\s+/g, " ").trim();
         const excerpt = excerptText.slice(0, 220);
         const humanLabels = resolvedSources.map((source) => source.citation_label).join("; ");
+        const controlledSourceId = sourceScopeId
+          ? scopedSourceAnchor(sourceScopeId, firstSource.source_number)
+          : undefined;
         return (
           <button
             key={`${part}-${index}`}
             className="inline-citation"
             type="button"
             aria-label={`Open source: ${humanLabels}`}
-            onClick={() => openSource(firstSource)}
+            aria-controls={controlledSourceId}
+            onClick={() => openSource(firstSource, sourceScopeId)}
           >
             [{humanLabels}]
             <span className="citation-preview" aria-hidden="true">{excerpt}{excerptText.length > 220 ? "…" : ""}</span>
@@ -1081,36 +1323,56 @@ function sourceAnchor(source: SourceChunk) {
   return `source-${source.chunk_ids.join("-").replace(/[^a-z0-9_-]/gi, "-")}`;
 }
 
-function openSource(source: SourceChunk) {
-  const element = document.querySelector<HTMLElement>(
-    `[data-source-numbers~="${source.source_number}"]`
-  ) ?? document.getElementById(sourceAnchor(source));
-  if (element instanceof HTMLDetailsElement) element.open = true;
-  const summary = element?.querySelector<HTMLElement>("summary");
+function scopedSourceAnchor(scopeId: string, sourceNumber: number) {
+  return `${scopeId}-source-${sourceNumber}`;
+}
+
+function openSource(source: SourceChunk, sourceScopeId?: string) {
+  const anchor = sourceScopeId
+    ? document.getElementById(scopedSourceAnchor(sourceScopeId, source.source_number))
+    : document.querySelector<HTMLElement>(`[data-source-numbers~="${source.source_number}"]`)
+      ?? document.getElementById(sourceAnchor(source));
+  const details = anchor instanceof HTMLDetailsElement
+    ? anchor
+    : anchor?.closest<HTMLDetailsElement>("details");
+  if (details) details.open = true;
+  const summary = details?.querySelector<HTMLElement>("summary");
   summary?.focus({ preventScroll: true });
   const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ? "auto"
     : "smooth";
-  element?.scrollIntoView({ behavior, block: "center" });
+  details?.scrollIntoView({ behavior, block: "center" });
 }
 
-function DisplayGroups({ title, groups }: { title: string; groups: DisplayGroup[] }) {
+function DisplayGroups({
+  title,
+  groups,
+  sourceScopeId
+}: {
+  title: string;
+  groups: DisplayGroup[];
+  sourceScopeId?: string;
+}) {
   const sourceCount = groups.reduce((count, group) => count + group.source_numbers.length, 0);
 
   return (
-    <section className="sources-block">
+    <section className="sources-block" id={sourceScopeId}>
       <div className="panel-title">
         <h2>{title}</h2>
         <span>{sourceCount} {sourceCount === 1 ? "source" : "sources"}</span>
       </div>
       {groups.length ? (
         <div className="source-stack">
-          {groups.map((group) => {
+          {groups.map((group, groupIndex) => {
             const sourceNumbers = group.source_numbers.join(" ");
             const sourceLabel = group.source_numbers.map((sourceNumber) => `Source ${sourceNumber}`).join(", ");
+            const primarySourceAnchor = sourceScopeId
+              ? scopedSourceAnchor(sourceScopeId, group.source_numbers[0])
+              : undefined;
             return (
               <details
-                key={sourceNumbers}
+                id={primarySourceAnchor}
+                key={`${sourceNumbers}-${groupIndex}`}
                 className="source-card"
                 data-source-numbers={sourceNumbers}
               >
@@ -1118,6 +1380,14 @@ function DisplayGroups({ title, groups }: { title: string; groups: DisplayGroup[
                   <strong>{group.citation_labels.join("; ")}</strong>
                   <span>{sourceLabel}</span>
                 </summary>
+                {sourceScopeId ? group.source_numbers.slice(1).map((sourceNumber) => (
+                  <span
+                    key={sourceNumber}
+                    id={scopedSourceAnchor(sourceScopeId, sourceNumber)}
+                    className="sr-only"
+                    aria-hidden="true"
+                  />
+                )) : null}
                 <div className="source-card-body">
                   <p>{group.text}</p>
                   <button
