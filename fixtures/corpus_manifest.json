@@ -7547,8 +7547,8 @@
     "document_count": 36,
     "paragraph_count": 2986,
     "chunk_count": 910,
-    "searchable_chunk_count": 488,
-    "skipped_document_count": 4,
+    "searchable_chunk_count": 481,
+    "skipped_document_count": 7,
     "body_paragraph_count": 3129,
     "break_count": 313,
     "emitted_paragraph_count": 3072,
@@ -7567,7 +7567,10 @@
     "paragraph_overlap": 1,
     "ingest_commit": "1a902d68f6ff5670d71ecf97b683e61eb6488e35",
     "skip_files": [
+      "01_Front Matter.md",
       "02_Table of Contents.md",
+      "03_Acknowledgments.md",
+      "04_Note on Illustrations.md",
       "32_Bibliography.md"
     ]
   },
@@ -7575,7 +7578,7 @@
     "hnsw_space": "l2",
     "embedding_model": "text-embedding-3-small",
     "collection_name": "manuscript",
-    "embedded_chunk_count": 488
+    "embedded_chunk_count": 481
   },
   "chunks_sha256": "02e87cd42dc366a04f4b1ec43936599475cf18d120e26ce729da482a5949d6cc"
 }

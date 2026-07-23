@@ -84,6 +84,21 @@ The validator cannot establish that a claim is historically correct, that a
 location genuinely supports it, that prose was paraphrased, or that the owner
 authored it. Those are human provenance checks.
 
+## Current corpus-scope decision
+
+On 2026-07-23, the manuscript owner set the evaluated retrieval boundary to
+begin with `05_Introduction.md`. `01_Front Matter.md`,
+`02_Table of Contents.md`, `03_Acknowledgments.md`, and
+`04_Note on Illustrations.md` are structural matter outside the evaluated
+corpus. The Epilogue, Afterword, and Appendices A through D are retrieval
+targets; bibliography-tagged documents remain excluded.
+
+This decision is reflected in the retrieval filter, active 481-vector store,
+and corpus manifest. The empty pilot template is bound to that manifest, but a
+pilot gold file must not be created until the owner approves its exact claim
+locations. See `docs/gold_set_pilot_intake.md` for the pre-run provenance
+ledger.
+
 ## Expanding to the final set
 
 The pilot version must retain its `-pilot` marker. Pilot validation requires
@@ -108,10 +123,11 @@ That produces 34–46 items. Check it with the explicit stronger mode:
 uv run python scripts\validate_gold_set.py fixtures\gold_set.json --mode run-of-record
 ```
 
-Before completing the final set, the owner must also record whether front
-matter, the Afterword, and the appendices are intended retrieval targets. A
-schema-valid final file is still not a run of record by itself; the clean-tree
-and complete run-identity requirements apply separately.
+The Introduction-first retrieval boundary recorded above remains binding for
+the final set. Any later boundary change must be recorded before new locations
+are authored and triggers the carry-over review below. A schema-valid final
+file is still not a run of record by itself; the clean-tree and complete
+run-identity requirements apply separately.
 
 If the corpus manifest changes, do not merely replace
 `authored_against_corpus`. Re-verify every stored location against the new

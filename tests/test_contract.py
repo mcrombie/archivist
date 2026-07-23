@@ -42,7 +42,13 @@ def test_frozen_parameters():
     assert (MAX_PRIMARY_DISTANCE, MAX_FINAL_SOURCES) == (1.05, 8)
     assert inspect.signature(retrieve).parameters["n_results"].default == 5
     assert (PARAGRAPHS_PER_CHUNK, PARAGRAPH_OVERLAP) == (4, 1)
-    assert SKIP_FILES == {"02_Table of Contents.md", "32_Bibliography.md"}
+    assert SKIP_FILES == {
+        "01_Front Matter.md",
+        "02_Table of Contents.md",
+        "03_Acknowledgments.md",
+        "04_Note on Illustrations.md",
+        "32_Bibliography.md",
+    }
 
 
 def test_context_snapshot_and_prompt_contract():

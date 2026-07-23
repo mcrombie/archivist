@@ -144,7 +144,7 @@ def validate_gold_set(
             "$manifest: corpus_manifest_sha256 must be a lowercase 64-character SHA-256"
         )
 
-    manifest_chunk_ids = _validate_manifest(corpus_manifest, errors)
+    manifest_chunk_ids, eligible_chunk_ids = _validate_manifest(corpus_manifest, errors)
 
     if not isinstance(gold_set, dict):
         raise GoldSetValidationError(
@@ -197,6 +197,7 @@ def validate_gold_set(
             item,
             index=index,
             manifest_chunk_ids=manifest_chunk_ids,
+            eligible_chunk_ids=eligible_chunk_ids,
             item_ids=item_ids,
             claim_ids=claim_ids,
             normalized_questions=normalized_questions,
@@ -242,34 +243,74 @@ def validate_gold_set(
 def _validate_manifest(
     corpus_manifest: object,
     errors: list[str],
-) -> set[str]:
+) -> tuple[set[str], set[str]]:
     if not isinstance(corpus_manifest, dict):
         errors.append("$manifest: corpus manifest must be a JSON object")
-        return set()
+        return set(), set()
     if corpus_manifest.get("manifest_schema") != CORPUS_MANIFEST_SCHEMA:
         errors.append(
             "$manifest.manifest_schema: must be exactly "
             f"{CORPUS_MANIFEST_SCHEMA!r}"
         )
+
+    ingest = corpus_manifest.get("ingest")
+    if not isinstance(ingest, dict):
+        errors.append("$manifest.ingest: must be an object")
+        skip_files: list[str] = []
+        skip_files_valid = False
+    else:
+        raw_skip_files = ingest.get("skip_files")
+        if (
+            not isinstance(raw_skip_files, list)
+            or any(not _is_nonempty_string(value) for value in raw_skip_files)
+        ):
+            errors.append(
+                "$manifest.ingest.skip_files: must be an array of non-empty strings"
+            )
+            skip_files = []
+            skip_files_valid = False
+        else:
+            skip_files = [str(value) for value in raw_skip_files]
+            skip_files_valid = True
+            if len(skip_files) != len(set(skip_files)):
+                errors.append("$manifest.ingest.skip_files: contains duplicate values")
+
     chunks = corpus_manifest.get("chunks")
     if not isinstance(chunks, list):
         errors.append("$manifest.chunks: must be an array")
-        return set()
+        return set(), set()
 
     chunk_ids: set[str] = set()
+    eligible_chunk_ids: set[str] = set()
     for index, chunk in enumerate(chunks):
         path = f"$manifest.chunks[{index}].chunk_id"
         if not isinstance(chunk, dict):
             errors.append(f"$manifest.chunks[{index}]: must be an object")
             continue
         chunk_id = chunk.get("chunk_id")
+        document = chunk.get("document")
+        if not _is_nonempty_string(document):
+            errors.append(
+                f"$manifest.chunks[{index}].document: must be a non-empty string"
+            )
         if not _is_nonempty_string(chunk_id):
             errors.append(f"{path}: must be a non-empty string")
         elif chunk_id in chunk_ids:
             errors.append(f"{path}: duplicate corpus chunk ID {chunk_id!r}")
         else:
             chunk_ids.add(chunk_id)
-    return chunk_ids
+            if (
+                skip_files_valid
+                and _is_nonempty_string(document)
+                and not _document_is_skipped(str(document), skip_files)
+            ):
+                eligible_chunk_ids.add(chunk_id)
+    return chunk_ids, eligible_chunk_ids
+
+
+def _document_is_skipped(document: str, skip_files: list[str]) -> bool:
+    normalized = document.casefold()
+    return any(skip_file.casefold() in normalized for skip_file in skip_files)
 
 
 def _validate_item(
@@ -277,6 +318,7 @@ def _validate_item(
     *,
     index: int,
     manifest_chunk_ids: set[str],
+    eligible_chunk_ids: set[str],
     item_ids: set[str],
     claim_ids: set[str],
     normalized_questions: dict[str, str],
@@ -335,6 +377,7 @@ def _validate_item(
         item.get("relevant_chunk_ids"),
         path=f"{path}.relevant_chunk_ids",
         manifest_chunk_ids=manifest_chunk_ids,
+        eligible_chunk_ids=eligible_chunk_ids,
         is_location=True,
         allow_empty=True,
         errors=errors,
@@ -343,6 +386,7 @@ def _validate_item(
         item.get("must_not_claim"),
         path=f"{path}.must_not_claim",
         manifest_chunk_ids=manifest_chunk_ids,
+        eligible_chunk_ids=eligible_chunk_ids,
         is_location=False,
         allow_empty=True,
         errors=errors,
@@ -391,6 +435,7 @@ def _validate_item(
             claim.get("supporting_chunk_ids"),
             path=f"{claim_path}.supporting_chunk_ids",
             manifest_chunk_ids=manifest_chunk_ids,
+            eligible_chunk_ids=eligible_chunk_ids,
             is_location=True,
             allow_empty=False,
             errors=errors,
@@ -425,6 +470,7 @@ def _validate_string_list(
     *,
     path: str,
     manifest_chunk_ids: set[str],
+    eligible_chunk_ids: set[str],
     is_location: bool,
     allow_empty: bool,
     errors: list[str],
@@ -450,6 +496,11 @@ def _validate_string_list(
         if is_location and member not in manifest_chunk_ids:
             errors.append(
                 f"{member_path}: chunk ID {member!r} is absent from the corpus manifest"
+            )
+        elif is_location and member not in eligible_chunk_ids:
+            errors.append(
+                f"{member_path}: chunk ID {member!r} is not retrieval-eligible "
+                "under the corpus manifest skip_files"
             )
     return result
 

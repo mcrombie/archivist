@@ -44,7 +44,13 @@ Note the lazy corpus accessor is **Brief 1's**, not this brief's — Brief 1's o
 
 ⚠ **Model assistance is limited to formatting, deduplication, and schema validation.** A model may not decide what the correct answer is or where it lives. A model-authored gold set measures agreement between two runs of the same system and will systematically omit the questions the system is bad at, because the author had the same blind spots.
 
-Also decided here, explicitly rather than by default: whether the Afterword — filename-marked `(Tentative)` — the two appendices, and front matter are in scope as retrieval targets. `filters.py` currently excludes only the Table of Contents and the Bibliography, so everything else is live whether or not anyone chose that.
+The owner has now settled the scope explicitly: retrieval and evaluation begin with
+`05_Introduction.md`. `01_Front Matter.md`, `02_Table of Contents.md`,
+`03_Acknowledgments.md`, and `04_Note on Illustrations.md` are excluded, along with every document
+matched by the existing `32_Bibliography.md` sentinel under substring matching. The Epilogue,
+Afterword, and appendices remain in scope. That leaves 481 of 910 chunks retrieval-eligible across
+a corpus with seven skipped documents. Gold supporting and relevant locations must name chunks in
+that eligible set, not merely chunks present in the manifest.
 
 This is the tedious brief. It is also the one everything else is blocked on.
 

@@ -20,7 +20,14 @@ STRATA = (
 def _manifest(chunk_ids=("synthetic_001", "synthetic_002")):
     return {
         "manifest_schema": "archivist.corpus_manifest/1",
-        "chunks": [{"chunk_id": chunk_id} for chunk_id in chunk_ids],
+        "ingest": {"skip_files": ["00_Structural.md"]},
+        "chunks": [
+            {
+                "chunk_id": chunk_id,
+                "document": "01_Introduction.md",
+            }
+            for chunk_id in chunk_ids
+        ],
     }
 
 
@@ -218,6 +225,23 @@ def test_manifest_hash_schema_and_chunk_identity_are_bound():
     assert "does not match the exact corpus manifest" in errors
     assert "must be exactly 'archivist.corpus_manifest/1'" in errors
     assert "duplicate corpus chunk ID" in errors
+
+
+def test_gold_locations_must_be_retrieval_eligible():
+    gold_set = _pilot()
+    gold_set["items"][0]["claims"][0]["supporting_chunk_ids"] = ["structural_001"]
+    gold_set["items"][0]["relevant_chunk_ids"] = ["structural_001"]
+    manifest = _manifest()
+    manifest["chunks"].append(
+        {
+            "chunk_id": "structural_001",
+            "document": "00_Structural.md",
+        }
+    )
+
+    errors = _error_text(gold_set, manifest=manifest)
+
+    assert errors.count("is not retrieval-eligible") == 2
 
 
 def test_invalid_strata_and_pilot_composition_are_rejected():

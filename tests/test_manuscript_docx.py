@@ -206,7 +206,9 @@ def test_prepare_splits_nested_sdt_and_preserves_supported_content(tmp_path: Pat
         "05_Illustration Credits and Generation Notes__32_Bibliography.md",
         "06_Index__32_Bibliography.md",
     ]
+    assert should_skip_document(names[0])
     assert should_skip_document(names[1])
+    assert not should_skip_document(names[2])
     assert all(should_skip_document(name) for name in names[3:])
     assert len(set(names[3:])) == 3
 

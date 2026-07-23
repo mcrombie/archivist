@@ -45,6 +45,32 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-23] Gold locations could name chunks excluded from retrieval
+Phase/Brief: Phase 1, Brief 3 preparation
+Symptom: gold-set validation accepted any chunk ID present in the corpus manifest, even when the
+chunk's document matched `ingest.skip_files` and could never enter evaluated retrieval context.
+Cause: contract/spec gap — existence and retrieval eligibility had not been distinguished in the
+gold validation rule.
+Resolution and verification: `EVAL_CONTRACT.md` §§2.5, 3.6, and 4.1 now require every supporting
+and relevant location to both exist and be retrieval-eligible under the referenced manifest. The
+validator now derives the eligible ID set from `chunks[*].document` and `ingest.skip_files` and
+rejects skipped locations as hard errors. This clarification was made before a gold pilot or run
+of record, so it invalidates no earlier gold entry or run-of-record evidence.
+
+## [2026-07-23] Retrieval and evaluation had no settled opening boundary
+Phase/Brief: Phase 1, Brief 3 preparation
+Symptom: the contract and roadmap left front matter, the tentative Afterword, and appendices as an
+open owner decision while the implementation default made most of them retrieval targets.
+Cause: contract clarification and corpus-cohort opening — the brief intentionally deferred a scope
+decision that became necessary before authoring gold locations.
+Resolution and verification: the owner selected an Introduction-first boundary. Retrieval and
+evaluation begin at `05_Introduction.md`; the four preceding structural documents and documents
+matched by the existing `32_Bibliography.md` sentinel are excluded, while the Epilogue, Afterword,
+and appendices remain eligible. The frozen counts are 910 total chunks, 481 eligible chunks, and
+seven skipped documents. The decision preceded all gold queries and runs of record, so no result
+informed it and no prior run-of-record evidence is invalidated; the revised corpus snapshot opens
+the first evaluable cohort.
+
 ## [2026-07-23] Ten-item gold pilot had no mechanical final-set boundary
 Phase/Brief: Phase 1, Brief 3 preparation and Brief 6 calibration pilot
 Symptom: `EVAL_CONTRACT.md` defines the final 34–46-item composition, and Brief 6 calls for a

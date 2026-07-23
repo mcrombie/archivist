@@ -1,5 +1,8 @@
 SKIP_FILES = {
+    "01_Front Matter.md",
     "02_Table of Contents.md",
+    "03_Acknowledgments.md",
+    "04_Note on Illustrations.md",
     "32_Bibliography.md",
 }
 

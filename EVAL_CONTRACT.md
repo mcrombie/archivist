@@ -131,15 +131,20 @@ The corpus is frozen as `fixtures/corpus_manifest.json`, which is **committed** 
 | `store` | `hnsw_space` as determined empirically, `embedding_model`, `collection_name`, `embedded_chunk_count` |
 | `chunks_sha256` | SHA-256 of `output/chunks.json` |
 
+Retrieval eligibility is defined by the manifest's `ingest.skip_files`: a chunk can remain listed
+in `chunks[]` for corpus identity while being ineligible for retrieval and evaluation because its
+`document` matches a skip sentinel. Matching follows the application rule: a sentinel occurring
+anywhere in the document filename excludes that document.
+
 `text_sha256` per chunk is what makes gold-set carry-over checkable without storing text: a chunk whose ID and text hash both survive a re-ingest still supports whatever it supported before.
 
 ### 2.5 Re-ingest procedure
 
 When the manuscript or the ingest parameters change, a new manifest is generated and the gold set is **re-verified**, not assumed:
 
-1. For each gold location chunk ID: if the ID exists in the new manifest **and** its `text_sha256` is unchanged, the location carries over unmodified.
+1. For each gold location chunk ID: if the ID exists in the new manifest, remains retrieval-eligible, **and** its `text_sha256` is unchanged, the location carries over unmodified.
 2. If the ID exists but the hash changed, the location is **invalidated** and must be re-located by hand against the new corpus.
-3. If the ID no longer exists, the location is invalidated.
+3. If the ID no longer exists or is no longer retrieval-eligible, the location is invalidated.
 4. Any gold entry with an invalidated location is quarantined until re-located. **A gold set with unverified locations may not be used for a run of record.**
 
 Re-verification is a mechanical check and must be implemented as one. It is not a judgement call, and it is not optional because "probably nothing moved."
@@ -231,7 +236,7 @@ This is stated in advance, deliberately, and it **bounds what the post-baseline 
 
 A gold set is invalid, and may not be used, if any of the following fail:
 
-- every `chunk_id` in every location field exists in the corpus manifest referenced by `authored_against_corpus`
+- every `chunk_id` in `supporting_chunk_ids` and `relevant_chunk_ids` exists in the corpus manifest referenced by `authored_against_corpus` **and is retrieval-eligible under that manifest's `ingest.skip_files`**
 - every claim has a non-empty `supporting_chunk_ids`
 - `relevant_chunk_ids` ⊇ ⋃ `supporting_chunk_ids`, per item
 - every item with `expected_behavior: "abstain"` has an empty `claims` list and an empty `relevant_chunk_ids`
@@ -256,7 +261,7 @@ essential(q, S)   = fraction of q's essential claims c for which
                     supporting_chunk_ids(c) ∩ S ≠ ∅
 ```
 
-Set membership is exact string equality on `chunk_id`. **A gold `chunk_id` absent from the corpus manifest is a hard error that aborts the run**, never a miss — a miss and a typo must not be able to look the same.
+Set membership is exact string equality on `chunk_id`. **A gold `chunk_id` absent from the corpus manifest, or present only in a skipped document, is a hard error that aborts the run**, never a miss — a miss, a typo, and unreachable ground truth must not be able to look the same.
 
 ### 4.2 Two retrieved sets, measured separately
 
@@ -439,10 +444,15 @@ Cohort-opening. Recorded in every run identity.
 | `MAX_FINAL_SOURCES` | 8 | `retrieval.py` |
 | `PARAGRAPHS_PER_CHUNK` | 4 | `ingest.py` |
 | `PARAGRAPH_OVERLAP` | 1 (realized 0–2) | `ingest.py` |
-| `SKIP_FILES` | Table of Contents, Bibliography | `filters.py` |
+| `SKIP_FILES` | `01_Front Matter.md`; `02_Table of Contents.md`; `03_Acknowledgments.md`; `04_Note on Illustrations.md`; `32_Bibliography.md` sentinel | `filters.py` |
 | `hnsw_space` | **undetermined** — Chroma default, never set explicitly | Brief 2 must record it |
 
-Note that only two documents are excluded. Front matter, both appendices, and the Afterword — whose filename marks it `(Tentative)` — are all live in retrieval. Whether that is correct is a gold-set authoring decision, made explicitly in Brief 3 and recorded, not left to whatever `filters.py` happens to do.
+The owner settled the retrieval and evaluation boundary before any gold run: the corpus begins with
+`05_Introduction.md`. The four preceding structural documents are excluded, as are all documents
+matched by the existing `32_Bibliography.md` sentinel; substring matching also excludes its
+bibliography-tagged derived documents. The Introduction and all later non-bibliography manuscript
+documents remain in scope, including the Epilogue, Afterword, and appendices. In this corpus
+snapshot, 481 of 910 chunks are retrieval-eligible and seven documents are skipped.
 
 ### 8.2 Envelopes — authored after the pilot, before the baseline
 
