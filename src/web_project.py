@@ -16,6 +16,7 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
+from costs import tracked_embeddings_create, tracked_responses_create
 from filters import should_skip_document
 from importers import (
     SUPPORTED_DOCUMENT_SUFFIXES,
@@ -366,7 +367,12 @@ def chroma_collection_count(project_id: str) -> int:
 
 def embed_texts(client: OpenAI, texts: list[str]) -> list[list[float]]:
     try:
-        response = client.embeddings.create(model=EMBED_MODEL, input=texts)
+        response = tracked_embeddings_create(
+            client,
+            operation="corpus_embedding",
+            model=EMBED_MODEL,
+            input=texts,
+        )
         return [item.embedding for item in response.data]
     except OpenAIError as exc:
         raise RuntimeError(friendly_openai_error(exc)) from exc
@@ -461,7 +467,9 @@ def resolve_conversation_query(
     if not bounded_history:
         return question
 
-    response = openai_client().responses.create(
+    response = tracked_responses_create(
+        openai_client(),
+        operation="followup_resolution",
         model=CHAT_MODEL,
         instructions=CONVERSATION_QUERY_INSTRUCTIONS,
         input=build_conversation_query_input(question, bounded_history),
@@ -587,7 +595,12 @@ def answer_project_question(
             worldview,
         )
     )
-    response = openai_client().responses.create(model=CHAT_MODEL, input=prompt)
+    response = tracked_responses_create(
+        openai_client(),
+        operation="answer_generation",
+        model=CHAT_MODEL,
+        input=prompt,
+    )
     return response.output_text, final_chunks
 
 
@@ -608,7 +621,12 @@ def generate_index_entry(project_id: str, term: str, consult_existing_index: boo
     )
     existing_index_chunks = search_existing_index(project_id, term) if consult_existing_index else []
     prompt = build_index_prompt_web(term, final_chunks, existing_index_chunks)
-    response = openai_client().responses.create(model=CHAT_MODEL, input=prompt)
+    response = tracked_responses_create(
+        openai_client(),
+        operation="index_generation",
+        model=CHAT_MODEL,
+        input=prompt,
+    )
     return response.output_text, final_chunks, existing_index_chunks
 
 

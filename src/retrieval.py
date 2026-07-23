@@ -12,6 +12,7 @@ from corpus import (
     get_chunk_lookup,
     get_neighbor_chunk_ids,
 )
+from costs import tracked_embeddings_create
 from filters import should_skip_document
 
 load_dotenv()
@@ -32,9 +33,11 @@ def default_openai_client() -> OpenAI:
 
 
 def embed_query(query: str, embedding_client: OpenAI | None = None) -> list[float]:
-    response = (embedding_client or default_openai_client()).embeddings.create(
+    response = tracked_embeddings_create(
+        embedding_client or default_openai_client(),
+        operation="query_embedding",
         model="text-embedding-3-small",
-        input=query
+        input=query,
     )
     return response.data[0].embedding
 

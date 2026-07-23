@@ -44,6 +44,47 @@ export type ConversationHistoryTurn = {
   answer: string;
 };
 
+export type CostEvent = {
+  operation: string;
+  model: string;
+  tokens: number;
+  cost_usd: number | null;
+  timestamp: string;
+};
+
+export type CostOperationBreakdown = {
+  operation: string;
+  calls: number;
+  tokens: number;
+  cost_usd: number;
+};
+
+export type CostSettings = {
+  monthly_budget_usd: number | null;
+  warning_threshold_percent: number;
+  hard_limit_enabled: boolean;
+};
+
+export type CostSummary = {
+  currency: "USD";
+  pricing_version: string;
+  accuracy: "estimated";
+  tracking_started_at: string | null;
+  turn_usd: number;
+  conversation_usd: number;
+  month_usd: number;
+  all_time_usd: number;
+  unpriced_events: number;
+  budget: CostSettings & {
+    percent_used: number | null;
+    remaining_usd: number | null;
+    warning: boolean;
+    exceeded: boolean;
+  };
+  operations: CostOperationBreakdown[];
+  recent_events: CostEvent[];
+};
+
 export type CandidateTerm = {
   term: string;
   count: number;
@@ -84,6 +125,27 @@ export const DEFAULT_ANSWER_FACETS: AnswerFacets = {
   worldview: "none"
 };
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly detail: unknown;
+
+  constructor(status: number, message: string, detail: unknown) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function detailMessage(detail: unknown, fallback: string) {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (detail && typeof detail === "object") {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   const contentType = response.headers.get("content-type") ?? "";
@@ -91,7 +153,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const detail = data?.detail ?? response.statusText;
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new ApiRequestError(response.status, detailMessage(detail, response.statusText), detail);
   }
 
   return data as T;
@@ -135,8 +197,13 @@ export async function askQuestion(
   projectId: string,
   question: string,
   nResults: number,
-  facets: AnswerFacets = DEFAULT_ANSWER_FACETS,
-  history: ConversationHistoryTurn[] = []
+  facets: AnswerFacets,
+  history: ConversationHistoryTurn[],
+  options: {
+    conversationId: string;
+    turnId: string;
+    allowOverBudget?: boolean;
+  }
 ) {
   return requestJson<{
     answer: string;
@@ -146,6 +213,7 @@ export async function askQuestion(
     worldview: AnswerWorldview;
     sources: SourceChunk[];
     display_groups: DisplayGroup[];
+    costs: CostSummary | null;
   }>(
     `/api/projects/${projectId}/question`,
     {
@@ -157,10 +225,66 @@ export async function askQuestion(
         historiographical_lens: facets.historiographicalLens,
         voice: facets.voice,
         worldview: facets.worldview,
-        history
+        history,
+        conversation_id: options.conversationId,
+        turn_id: options.turnId,
+        allow_over_budget: options.allowOverBudget ?? false
       })
     }
   );
+}
+
+function unwrapCostSummary(data: CostSummary | { costs?: CostSummary; summary?: CostSummary }) {
+  if ("costs" in data && data.costs) return data.costs;
+  if ("summary" in data && data.summary) return data.summary;
+  return data as CostSummary;
+}
+
+function unwrapCostSettings(
+  data: CostSettings
+    | CostSummary
+    | { settings?: CostSettings; costs?: CostSummary; summary?: CostSummary }
+): CostSettings {
+  let settings: CostSettings;
+  if ("settings" in data && data.settings) settings = data.settings;
+  else if ("costs" in data && data.costs) settings = data.costs.budget;
+  else if ("summary" in data && data.summary) settings = data.summary.budget;
+  else if ("budget" in data) settings = data.budget;
+  else settings = data as CostSettings;
+  return {
+    monthly_budget_usd: settings.monthly_budget_usd,
+    warning_threshold_percent: settings.warning_threshold_percent,
+    hard_limit_enabled: settings.hard_limit_enabled
+  };
+}
+
+export async function getCostSummary(projectId: string, conversationId: string) {
+  const params = new URLSearchParams({
+    project_id: projectId,
+    conversation_id: conversationId
+  });
+  const data = await requestJson<CostSummary | { costs?: CostSummary; summary?: CostSummary }>(
+    `/api/costs/summary?${params.toString()}`
+  );
+  return unwrapCostSummary(data);
+}
+
+export async function getCostSettings() {
+  const data = await requestJson<
+    CostSettings | CostSummary | { settings?: CostSettings; costs?: CostSummary; summary?: CostSummary }
+  >("/api/costs/settings");
+  return unwrapCostSettings(data);
+}
+
+export async function updateCostSettings(settings: CostSettings) {
+  const data = await requestJson<
+    CostSettings | CostSummary | { settings?: CostSettings; costs?: CostSummary; summary?: CostSummary }
+  >("/api/costs/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings)
+  });
+  return unwrapCostSettings(data);
 }
 
 export async function generateIndexEntry(

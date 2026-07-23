@@ -8,6 +8,7 @@ load_dotenv()
 import chromadb
 from openai import OpenAI
 
+from costs import tracked_embeddings_create
 from filters import should_skip_document
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,9 +32,11 @@ def load_chunks():
 
 
 def embed_texts(texts):
-    response = client.embeddings.create(
+    response = tracked_embeddings_create(
+        client,
+        operation="corpus_embedding",
         model="text-embedding-3-small",
-        input=texts
+        input=texts,
     )
     return [item.embedding for item in response.data]
 

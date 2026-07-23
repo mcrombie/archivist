@@ -1,3 +1,4 @@
+from costs import tracked_responses_create
 from prompts import build_answer_prompt
 from retrieval import default_openai_client, finalize_context_chunks, retrieve
 
@@ -7,9 +8,11 @@ def answer_question(question: str, n_results: int = 5):
     final_chunks = finalize_context_chunks(results)
     prompt = build_answer_prompt(question, final_chunks)
 
-    response = default_openai_client().responses.create(
+    response = tracked_responses_create(
+        default_openai_client(),
+        operation="answer_generation",
         model="gpt-5",
-        input=prompt
+        input=prompt,
     )
 
     return response.output_text, final_chunks

@@ -48,6 +48,9 @@ The web API needs:
 - Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
   combination is the unchanged Neutral baseline, and the chosen settings are recorded on each
   answer.
+- Shows a locally persisted API-cost estimate for each answer, conversation, UTC month, and all
+  tracked use, with optional budget warnings and a local hard stop. OpenAI billing remains the
+  financial source of truth; see [Cost tracking](cost_tracking.md).
 
 Conversation history currently lasts for the open page. Starting a new conversation or reloading
 the page clears it; durable saved conversations are not part of this UI pass.

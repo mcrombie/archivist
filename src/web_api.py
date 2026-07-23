@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Mapping
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
+from costs import UsageLedger, usage_scope
 from importers import chapter_title_from_text
 from perspectives import (
     AnswerPerspective,
@@ -42,6 +45,8 @@ from web_project import (
 
 
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+SAFE_USAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Archivist API",
@@ -74,6 +79,17 @@ class QuestionRequest(BaseModel):
     worldview: Worldview = Worldview.NONE
     perspective: AnswerPerspective | None = None
     history: list[ConversationTurn] = Field(default_factory=list, max_length=12)
+    conversation_id: str | None = Field(
+        default=None,
+        pattern=SAFE_USAGE_ID_PATTERN,
+        max_length=128,
+    )
+    turn_id: str | None = Field(
+        default=None,
+        pattern=SAFE_USAGE_ID_PATTERN,
+        max_length=128,
+    )
+    allow_over_budget: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -94,9 +110,48 @@ class IndexEntryRequest(BaseModel):
     consult_existing_index: bool = False
 
 
+class CostSettingsRequest(BaseModel):
+    monthly_budget_usd: Decimal | None = Field(ge=Decimal("0.01"), le=Decimal("100000"))
+    warning_threshold_percent: int = Field(ge=1, le=100)
+    hard_limit_enabled: bool
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/costs/summary")
+def cost_summary(
+    project_id: Annotated[str | None, Query(max_length=128)] = None,
+    conversation_id: Annotated[
+        str | None,
+        Query(pattern=SAFE_USAGE_ID_PATTERN, max_length=128),
+    ] = None,
+    turn_id: Annotated[
+        str | None,
+        Query(pattern=SAFE_USAGE_ID_PATTERN, max_length=128),
+    ] = None,
+) -> dict[str, object]:
+    return UsageLedger().summary(
+        project_id=project_id,
+        conversation_id=conversation_id,
+        turn_id=turn_id,
+    )
+
+
+@app.get("/api/costs/settings")
+def cost_settings() -> dict[str, object]:
+    return UsageLedger().get_settings()
+
+
+@app.put("/api/costs/settings")
+def update_cost_settings(request: CostSettingsRequest) -> dict[str, object]:
+    return UsageLedger().update_settings(
+        monthly_budget_usd=request.monthly_budget_usd,
+        warning_threshold_percent=request.warning_threshold_percent,
+        hard_limit_enabled=request.hard_limit_enabled,
+    )
 
 
 @app.get("/api/projects")
@@ -142,7 +197,8 @@ async def create_project(
 @app.post("/api/projects/{project_id}/embed")
 def embed(project_id: str) -> dict[str, object]:
     try:
-        return {"project": embed_project(project_id)}
+        with usage_scope(project_id=project_id):
+            return {"project": embed_project(project_id)}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -153,27 +209,63 @@ def embed(project_id: str) -> dict[str, object]:
 
 @app.post("/api/projects/{project_id}/question")
 def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
+    ledger = UsageLedger()
+    budget = ledger.budget_state()
+    if (
+        budget["hard_limit_enabled"]
+        and budget["exceeded"]
+        and not request.allow_over_budget
+    ):
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "cost_limit_exceeded",
+                "message": (
+                    "The local monthly OpenAI cost limit has been reached. "
+                    "Set allow_over_budget to true to run this request anyway."
+                ),
+                "budget": budget,
+            },
+        )
+
     try:
-        resolved_query = resolve_conversation_query(
-            request.question,
-            [turn.model_dump() for turn in request.history],
-        )
-        answer, chunks = answer_project_question(
-            project_id,
-            resolved_query,
-            n_results=request.n_results,
-            historiographical_lens=request.historiographical_lens,
-            voice=request.voice,
-            worldview=request.worldview,
-        )
+        with usage_scope(
+            project_id=project_id,
+            conversation_id=request.conversation_id,
+            turn_id=request.turn_id,
+        ):
+            resolved_query = resolve_conversation_query(
+                request.question,
+                [turn.model_dump() for turn in request.history],
+            )
+            answer, chunks = answer_project_question(
+                project_id,
+                resolved_query,
+                n_results=request.n_results,
+                historiographical_lens=request.historiographical_lens,
+                voice=request.voice,
+                worldview=request.worldview,
+            )
+        try:
+            costs = ledger.summary(
+                project_id=project_id,
+                conversation_id=request.conversation_id,
+                turn_id=request.turn_id,
+            )
+        except Exception:
+            logger.exception("Could not load the post-answer local cost summary")
+            costs = None
         return {
             "answer": answer,
             "resolved_query": resolved_query,
+            "conversation_id": request.conversation_id,
+            "turn_id": request.turn_id,
             "historiographical_lens": request.historiographical_lens.value,
             "voice": request.voice.value,
             "worldview": request.worldview.value,
             "perspective": request.perspective.value if request.perspective is not None else None,
             **source_payload(chunks),
+            "costs": costs,
         }
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -184,11 +276,12 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
 @app.post("/api/projects/{project_id}/index/entry")
 def index_entry(project_id: str, request: IndexEntryRequest) -> dict[str, object]:
     try:
-        output, chunks, existing_index_chunks = generate_index_entry(
-            project_id=project_id,
-            term=request.term,
-            consult_existing_index=request.consult_existing_index,
-        )
+        with usage_scope(project_id=project_id):
+            output, chunks, existing_index_chunks = generate_index_entry(
+                project_id=project_id,
+                term=request.term,
+                consult_existing_index=request.consult_existing_index,
+            )
         payload = source_payload(chunks)
         return {
             "entry": output,

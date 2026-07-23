@@ -142,6 +142,11 @@ Create a `.env` file in the project root:
 
 OPENAI_API_KEY=your_api_key_here
 
+For clean spend attribution, use a project-scoped key from a dedicated OpenAI API project named
+`Archivist`. The web interface keeps a local per-call estimate and optional budget controls; see
+[`docs/cost_tracking.md`](docs/cost_tracking.md). OpenAI's Usage Dashboard remains the billing
+source of truth.
+
 
 ### 3. Build embeddings
 
@@ -189,7 +194,7 @@ Structural documents (e.g., bibliography, table of contents) are excluded from r
 
 - Broad thematic questions may overweight a single section of the manuscript
 - No page-number mapping (pending final manuscript formatting)
-- CLI-only interface (no UI yet)
+- The local web conversation history is not yet durable across page reloads
 - Retrieval tuning is heuristic, not learned
 
 ---

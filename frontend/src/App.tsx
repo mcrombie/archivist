@@ -5,7 +5,9 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronDown,
+  CircleDollarSign,
   Copy,
+  ExternalLink,
   FileSearch,
   FileText,
   Library,
@@ -14,6 +16,7 @@ import {
   MessageCircle,
   Plus,
   RotateCcw,
+  Save,
   Search,
   Send,
   Upload,
@@ -21,10 +24,13 @@ import {
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import {
+  ApiRequestError,
   AnswerFacets,
   AnswerVoice,
   AnswerWorldview,
   CandidateTerm,
+  CostSettings,
+  CostSummary,
   DEFAULT_ANSWER_FACETS,
   DisplayGroup,
   HistoriographicalLens,
@@ -35,9 +41,12 @@ import {
   embedProject,
   generateIndexEntry,
   getCandidateTerms,
+  getCostSettings,
+  getCostSummary,
   getManuscriptSources,
   listProjects,
-  searchExistingIndex
+  searchExistingIndex,
+  updateCostSettings
 } from "./api";
 import { VibeControl } from "./VibeControl";
 import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
@@ -679,12 +688,452 @@ type ChatTurn = {
   sources: SourceChunk[];
   displayGroups: DisplayGroup[];
   error?: string;
+  budgetBlocked?: boolean;
+  turnCostUsd?: number;
 };
 
-function createTurnId() {
+function createClientId(prefix: "turn" | "conversation") {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
-    : `turn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    : `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createTurnId() {
+  return createClientId("turn");
+}
+
+function createConversationId() {
+  return createClientId("conversation");
+}
+
+const DEFAULT_COST_SETTINGS: CostSettings = {
+  monthly_budget_usd: null,
+  warning_threshold_percent: 80,
+  hard_limit_enabled: false
+};
+
+function formatUsd(value: number) {
+  if (value === 0) return "$0.00";
+  const absolute = Math.abs(value);
+  if (absolute > 0 && absolute < 0.0001) return value < 0 ? "−<$0.0001" : "<$0.0001";
+  if (absolute < 0.01) return `$${value.toFixed(4)}`;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
+function formatTurnCost(value: number) {
+  if (value > 0 && value < 0.0001) return "<$0.0001";
+  return value < 1 ? `$${value.toFixed(4)}` : formatUsd(value);
+}
+
+function formatCostTimestamp(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC"
+  }).format(date) + " UTC";
+}
+
+function operationLabel(operation: string) {
+  return operation
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toLocaleUpperCase());
+}
+
+function CostMeterButton({
+  summary,
+  loading,
+  open,
+  onOpen
+}: {
+  summary: CostSummary | null;
+  loading: boolean;
+  open: boolean;
+  onOpen: () => void;
+}) {
+  const budget = summary?.budget;
+  const percent = budget?.percent_used;
+  const state = budget?.exceeded ? "is-exceeded" : budget?.warning ? "is-warning" : "";
+  const status = !summary
+    ? loading ? "Loading cost ledger" : "Cost ledger unavailable"
+    : budget?.monthly_budget_usd === null
+      ? `${formatUsd(summary.month_usd)} this month; no local budget set`
+      : `${formatUsd(summary.month_usd)} this month; ${Math.round(percent ?? 0)} percent of local budget`;
+
+  return (
+    <button
+      type="button"
+      className={`cost-meter ${state}`}
+      aria-label={`Open cost ledger. ${status}.`}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-controls="archivist-cost-ledger"
+      onClick={onOpen}
+    >
+      {budget?.warning || budget?.exceeded
+        ? <AlertCircle size={16} aria-hidden="true" />
+        : <CircleDollarSign size={16} aria-hidden="true" />}
+      <span className="cost-meter-copy">
+        <small>This month</small>
+        <strong>{summary ? formatUsd(summary.month_usd) : loading ? "Loading…" : "Unavailable"}</strong>
+      </span>
+      {budget?.monthly_budget_usd !== null && percent !== null && percent !== undefined ? (
+        <span className="cost-meter-track" aria-hidden="true">
+          <i style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+type CostSettingsSaveState = "idle" | "saving" | "success" | "error";
+
+function CostLedgerDrawer({
+  open,
+  summary,
+  loading,
+  error,
+  onClose,
+  onRefresh
+}: {
+  open: boolean;
+  summary: CostSummary | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [settings, setSettings] = useState<CostSettings | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<CostSettings>({ ...DEFAULT_COST_SETTINGS });
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsSaveState, setSettingsSaveState] = useState<CostSettingsSaveState>("idle");
+  const [settingsSaveMessage, setSettingsSaveMessage] = useState("");
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      dialog.showModal();
+      window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
+
+  async function loadSettings() {
+    setSettingsLoading(true);
+    setSettingsError(null);
+    try {
+      const loaded = await getCostSettings();
+      setSettings(loaded);
+      setSettingsDraft({ ...loaded });
+    } catch (loadError) {
+      setSettingsError(errorMessage(loadError));
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadSettings();
+  }, []);
+
+  function updateSettingsDraft(next: CostSettings) {
+    setSettingsDraft(next);
+    setSettingsSaveState("idle");
+    setSettingsSaveMessage("");
+  }
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSettingsSaveState("saving");
+    setSettingsSaveMessage("");
+    try {
+      const saved = await updateCostSettings({
+        ...settingsDraft,
+        hard_limit_enabled: settingsDraft.monthly_budget_usd === null
+          ? false
+          : settingsDraft.hard_limit_enabled
+      });
+      setSettings(saved);
+      setSettingsDraft({ ...saved });
+      setSettingsSaveState("success");
+      setSettingsSaveMessage("Budget settings saved.");
+      await onRefresh();
+    } catch (saveError) {
+      setSettingsSaveState("error");
+      setSettingsSaveMessage(errorMessage(saveError));
+    }
+  }
+
+  const budget = summary?.budget;
+  const budgetPercent = budget?.percent_used;
+  const trackingStarted = summary?.tracking_started_at
+    ? formatCostTimestamp(summary.tracking_started_at)
+    : null;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      id="archivist-cost-ledger"
+      className="cost-ledger-dialog"
+      aria-labelledby="cost-ledger-title"
+      aria-describedby="cost-ledger-authority-note"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClose={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="cost-ledger-drawer">
+        <header className="cost-ledger-header">
+          <div>
+            <span>Live cost ledger</span>
+            <h2 id="cost-ledger-title">Usage &amp; budget</h2>
+          </div>
+          <button ref={closeButtonRef} type="button" aria-label="Close cost ledger" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="cost-ledger-content">
+          {loading && !summary ? (
+            <div className="cost-ledger-loading" role="status">
+              <Loader2 size={18} className="spin" />
+              Reading the local ledger…
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="cost-ledger-error" role="alert">
+              <AlertCircle size={17} />
+              <span>{error}</span>
+              <button type="button" onClick={() => void onRefresh()}>Try again</button>
+            </div>
+          ) : null}
+
+          {summary ? (
+            <>
+              <section className="cost-overview" aria-labelledby="cost-overview-title">
+                <div className="cost-section-heading">
+                  <span>Estimated spend</span>
+                  <h3 id="cost-overview-title">At a glance</h3>
+                </div>
+                <dl className="cost-total-grid">
+                  <div>
+                    <dt>This conversation</dt>
+                    <dd>{formatUsd(summary.conversation_usd)}</dd>
+                  </div>
+                  <div>
+                    <dt>This month <small>UTC</small></dt>
+                    <dd>{formatUsd(summary.month_usd)}</dd>
+                  </div>
+                  <div>
+                    <dt>All time</dt>
+                    <dd>{formatUsd(summary.all_time_usd)}</dd>
+                  </div>
+                </dl>
+                {budget?.monthly_budget_usd !== null ? (
+                  <div className={`cost-budget-progress${budget?.warning ? " is-warning" : ""}${budget?.exceeded ? " is-exceeded" : ""}`}>
+                    <div>
+                      <span>Local monthly budget</span>
+                      <strong>
+                        {Math.round(budgetPercent ?? 0)}% of {formatUsd(budget?.monthly_budget_usd ?? 0)}
+                      </strong>
+                    </div>
+                    <progress max={100} value={Math.min(100, Math.max(0, budgetPercent ?? 0))}>
+                      {Math.round(budgetPercent ?? 0)}%
+                    </progress>
+                    <small>
+                      {budget?.exceeded
+                        ? "Budget exceeded"
+                        : budget?.remaining_usd !== null
+                          ? `${formatUsd(budget?.remaining_usd ?? 0)} remaining`
+                          : "Remaining amount unavailable"}
+                    </small>
+                  </div>
+                ) : (
+                  <p className="cost-no-budget">No local monthly budget is set.</p>
+                )}
+              </section>
+
+              <section className="cost-ledger-section" aria-labelledby="cost-operations-title">
+                <div className="cost-section-heading">
+                  <span>Where it went</span>
+                  <h3 id="cost-operations-title">Operation breakdown</h3>
+                </div>
+                {summary.operations.length ? (
+                  <dl className="cost-operation-list">
+                    {summary.operations.map((operation) => (
+                      <div key={operation.operation}>
+                        <dt>{operationLabel(operation.operation)}</dt>
+                        <dd>
+                          <span>{operation.calls.toLocaleString()} {operation.calls === 1 ? "call" : "calls"}</span>
+                          <span>{operation.tokens.toLocaleString()} tokens</span>
+                          <strong>{formatUsd(operation.cost_usd)}</strong>
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : <p className="cost-ledger-empty">No priced operations yet.</p>}
+              </section>
+
+              <section className="cost-ledger-section" aria-labelledby="cost-events-title">
+                <div className="cost-section-heading">
+                  <span>Latest activity</span>
+                  <h3 id="cost-events-title">Recent calls</h3>
+                </div>
+                {summary.recent_events.length ? (
+                  <ol className="cost-event-list">
+                    {summary.recent_events.map((costEvent, index) => (
+                      <li key={`${costEvent.timestamp}-${costEvent.operation}-${index}`}>
+                        <div>
+                          <strong>{operationLabel(costEvent.operation)}</strong>
+                          <span>{costEvent.model}</span>
+                        </div>
+                        <div>
+                          <strong>{costEvent.cost_usd === null ? "Unpriced" : formatUsd(costEvent.cost_usd)}</strong>
+                          <span>{costEvent.tokens.toLocaleString()} tokens · {formatCostTimestamp(costEvent.timestamp)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : <p className="cost-ledger-empty">No calls recorded yet.</p>}
+              </section>
+
+              <div className="cost-ledger-provenance">
+                <p>
+                  Totals begin when local tracking was enabled{trackingStarted ? ` (${trackingStarted})` : ""};
+                  earlier OpenAI spend was not backfilled. Monthly periods use UTC.
+                </p>
+                <p>
+                  Pricing {summary.pricing_version || "version unavailable"} · {summary.unpriced_events.toLocaleString()} unpriced {summary.unpriced_events === 1 ? "event" : "events"}.
+                </p>
+              </div>
+            </>
+          ) : null}
+
+          <section className="cost-ledger-section cost-settings-section" aria-labelledby="cost-settings-title">
+            <div className="cost-section-heading">
+              <span>Guardrails</span>
+              <h3 id="cost-settings-title">Local budget controls</h3>
+            </div>
+            <p className="cost-settings-explainer">
+              OpenAI project budgets are soft alerts. This local hard stop blocks the next Archivist request
+              after the limit is reached; it does not change OpenAI billing controls.
+            </p>
+
+            {settingsError ? (
+              <div className="cost-settings-message is-error" role="alert">
+                <span>{settingsError}</span>
+                <button type="button" onClick={() => void loadSettings()}>Reload</button>
+              </div>
+            ) : null}
+
+            {settingsLoading && !settings ? (
+              <div className="cost-ledger-loading" role="status">
+                <Loader2 size={16} className="spin" />
+                Loading budget settings…
+              </div>
+            ) : (
+              <form className="cost-settings-form" onSubmit={saveSettings}>
+                <label>
+                  <span>Monthly budget (USD)</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0.01"
+                    max="100000"
+                    step="0.01"
+                    placeholder="No budget"
+                    value={settingsDraft.monthly_budget_usd ?? ""}
+                    disabled={settingsSaveState === "saving"}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      updateSettingsDraft({
+                        ...settingsDraft,
+                        monthly_budget_usd: value === "" ? null : Number(value),
+                        hard_limit_enabled: value === "" ? false : settingsDraft.hard_limit_enabled
+                      });
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Warn at</span>
+                  <span className="cost-percent-input">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      max="100"
+                      step="1"
+                      required
+                      value={settingsDraft.warning_threshold_percent}
+                      disabled={settingsSaveState === "saving"}
+                      onChange={(event) => updateSettingsDraft({
+                        ...settingsDraft,
+                        warning_threshold_percent: Number(event.currentTarget.value)
+                      })}
+                    />
+                    <i aria-hidden="true">%</i>
+                  </span>
+                </label>
+                <label className="cost-hard-stop-toggle">
+                  <input
+                    type="checkbox"
+                    checked={settingsDraft.hard_limit_enabled}
+                    disabled={settingsDraft.monthly_budget_usd === null || settingsSaveState === "saving"}
+                    onChange={(event) => updateSettingsDraft({
+                      ...settingsDraft,
+                      hard_limit_enabled: event.currentTarget.checked
+                    })}
+                  />
+                  <span>
+                    <strong>Hard stop</strong>
+                    <small>{settingsDraft.monthly_budget_usd === null ? "Set a budget to enable" : "Block the next request at the limit"}</small>
+                  </span>
+                </label>
+                <div className="cost-settings-submit">
+                  <button type="submit" disabled={settingsSaveState === "saving" || settingsLoading}>
+                    {settingsSaveState === "saving" ? <Loader2 size={15} className="spin" /> : <Save size={15} />}
+                    {settingsSaveState === "saving" ? "Saving…" : "Save"}
+                  </button>
+                  {settingsSaveMessage ? (
+                    <span
+                      className={settingsSaveState === "error" ? "is-error" : "is-success"}
+                      role={settingsSaveState === "error" ? "alert" : "status"}
+                    >
+                      {settingsSaveMessage}
+                    </span>
+                  ) : null}
+                </div>
+              </form>
+            )}
+          </section>
+
+          <footer className="cost-ledger-footer" id="cost-ledger-authority-note">
+            <strong>Local estimate; OpenAI billing is authoritative.</strong>
+            <a href="https://platform.openai.com/usage" target="_blank" rel="noreferrer">
+              Open OpenAI usage
+              <ExternalLink size={14} />
+            </a>
+          </footer>
+        </div>
+      </div>
+    </dialog>
+  );
 }
 
 function QuestionMode({
@@ -698,9 +1147,45 @@ function QuestionMode({
   const [facets, setFacets] = useState<AnswerFacets>({ ...DEFAULT_ANSWER_FACETS });
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState(createConversationId);
+  const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
+  const [costSummaryLoading, setCostSummaryLoading] = useState(true);
+  const [costSummaryError, setCostSummaryError] = useState<string | null>(null);
+  const [costDrawerOpen, setCostDrawerOpen] = useState(false);
   const conversationRef = useRef<HTMLElement>(null);
   const pending = turns.some((turn) => turn.status === "pending");
   const chatStarted = turns.length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    setCostSummaryLoading(true);
+    setCostSummaryError(null);
+    getCostSummary(project.id, conversationId)
+      .then((summary) => {
+        if (!cancelled) setCostSummary(summary);
+      })
+      .catch((loadError) => {
+        if (!cancelled) setCostSummaryError(errorMessage(loadError));
+      })
+      .finally(() => {
+        if (!cancelled) setCostSummaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, project.id]);
+
+  async function refreshCostSummary() {
+    setCostSummaryLoading(true);
+    setCostSummaryError(null);
+    try {
+      setCostSummary(await getCostSummary(project.id, conversationId));
+    } catch (loadError) {
+      setCostSummaryError(errorMessage(loadError));
+    } finally {
+      setCostSummaryLoading(false);
+    }
+  }
 
   function scrollToTurn(turnId: string, firstTurn: boolean) {
     window.setTimeout(() => {
@@ -719,7 +1204,8 @@ function QuestionMode({
     turnId: string,
     turnQuestion: string,
     turnFacets: AnswerFacets,
-    history: Array<{ question: string; answer: string }>
+    history: Array<{ question: string; answer: string }>,
+    allowOverBudget = false
   ) {
     try {
       const result = await askQuestion(
@@ -727,8 +1213,15 @@ function QuestionMode({
         turnQuestion,
         5,
         turnFacets,
-        history.slice(-6)
+        history.slice(-6),
+        {
+          conversationId,
+          turnId,
+          allowOverBudget
+        }
       );
+      if (result.costs) setCostSummary(result.costs);
+      else void refreshCostSummary();
       setTurns((current) => current.map((turn) => turn.id === turnId ? {
         ...turn,
         status: "complete",
@@ -741,14 +1234,21 @@ function QuestionMode({
         },
         sources: result.sources,
         displayGroups: result.display_groups,
-        error: undefined
+        error: undefined,
+        budgetBlocked: false,
+        turnCostUsd: result.costs?.turn_usd
       } : turn));
     } catch (error) {
+      const budgetBlocked = error instanceof ApiRequestError && error.status === 402;
       setTurns((current) => current.map((turn) => turn.id === turnId ? {
         ...turn,
         status: "error",
-        error: errorMessage(error)
+        error: errorMessage(error),
+        budgetBlocked
       } : turn));
+      // A later call in the turn can fail after an earlier paid call succeeded.
+      // Refresh on every failure so the ledger never looks artificially stale.
+      void refreshCostSummary();
     }
   }
 
@@ -773,7 +1273,8 @@ function QuestionMode({
       status: "pending",
       answer: "",
       sources: [],
-      displayGroups: []
+      displayGroups: [],
+      budgetBlocked: false
     };
 
     setTurns((current) => [...current, nextTurn]);
@@ -782,7 +1283,7 @@ function QuestionMode({
     await runTurn(turnId, trimmedQuestion, facets, history);
   }
 
-  async function retryTurn(turnId: string) {
+  async function retryTurn(turnId: string, allowOverBudget = false) {
     if (pending) return;
     const turnIndex = turns.findIndex((turn) => turn.id === turnId);
     const turn = turns[turnIndex];
@@ -799,10 +1300,19 @@ function QuestionMode({
     setTurns((current) => current.map((candidate) => candidate.id === turnId ? {
       ...candidate,
       status: "pending",
-      error: undefined
+      error: undefined,
+      budgetBlocked: false
     } : candidate));
     scrollToTurn(turnId, false);
-    await runTurn(turnId, turn.question, turn.facets, history);
+    await runTurn(turnId, turn.question, turn.facets, history, allowOverBudget);
+  }
+
+  async function approveTurn(turnId: string) {
+    const approved = window.confirm(
+      "Approve one Archivist request above the local monthly budget? This does not change your saved limit."
+    );
+    if (!approved) return;
+    await retryTurn(turnId, true);
   }
 
   async function copyAnswer(turn: ChatTurn) {
@@ -821,6 +1331,9 @@ function QuestionMode({
     setQuestion("");
     setFacets({ ...DEFAULT_ANSWER_FACETS });
     setCopiedTurnId(null);
+    setConversationId(createConversationId());
+    setCostSummary(null);
+    setCostSummaryError(null);
     const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ? "auto"
       : "smooth";
@@ -856,7 +1369,17 @@ function QuestionMode({
               <i aria-hidden="true" />
               <small>Manuscript conversation</small>
             </div>
-            {!chatStarted ? <VibeControl /> : null}
+            {!chatStarted ? (
+              <div className="chat-header-actions">
+                <CostMeterButton
+                  summary={costSummary}
+                  loading={costSummaryLoading}
+                  open={costDrawerOpen}
+                  onOpen={() => setCostDrawerOpen(true)}
+                />
+                <VibeControl />
+              </div>
+            ) : null}
           </header>
 
           <div className="chat-intro-copy">
@@ -902,6 +1425,12 @@ function QuestionMode({
               </span>
             </a>
             <div className="conversation-actions">
+              <CostMeterButton
+                summary={costSummary}
+                loading={costSummaryLoading}
+                open={costDrawerOpen}
+                onOpen={() => setCostDrawerOpen(true)}
+              />
               <button
                 type="button"
                 className="new-conversation-button"
@@ -924,6 +1453,7 @@ function QuestionMode({
                   copied={copiedTurnId === turn.id}
                   onCopy={() => copyAnswer(turn)}
                   onRetry={() => retryTurn(turn.id)}
+                  onApprove={() => approveTurn(turn.id)}
                 />
               </li>
             ))}
@@ -943,6 +1473,15 @@ function QuestionMode({
           </div>
         </section>
       ) : null}
+
+      <CostLedgerDrawer
+        open={costDrawerOpen}
+        summary={costSummary}
+        loading={costSummaryLoading}
+        error={costSummaryError}
+        onClose={() => setCostDrawerOpen(false)}
+        onRefresh={refreshCostSummary}
+      />
     </section>
   );
 }
@@ -1103,13 +1642,15 @@ function ConversationTurn({
   turnNumber,
   copied,
   onCopy,
-  onRetry
+  onRetry,
+  onApprove
 }: {
   turn: ChatTurn;
   turnNumber: number;
   copied: boolean;
   onCopy: () => void;
   onRetry: () => void;
+  onApprove: () => void;
 }) {
   const lens = facetOption(LENS_OPTIONS, turn.facets.historiographicalLens);
   const voice = facetOption(VOICE_OPTIONS, turn.facets.voice);
@@ -1139,10 +1680,15 @@ function ConversationTurn({
             </div>
           </div>
           {turn.status === "complete" ? (
-            <button type="button" className="copy-answer-button" onClick={onCopy}>
-              {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
-              {copied ? "Copied" : "Copy"}
-            </button>
+            <div className="turn-response-actions">
+              {turn.turnCostUsd !== undefined ? (
+                <span className="turn-cost-chip">Estimated cost {formatTurnCost(turn.turnCostUsd)}</span>
+              ) : null}
+              <button type="button" className="copy-answer-button" onClick={onCopy}>
+                {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
           ) : null}
         </header>
 
@@ -1157,13 +1703,20 @@ function ConversationTurn({
           <div className="turn-error" role="alert">
             <AlertCircle size={18} />
             <div>
-              <strong>Archivist could not complete this answer.</strong>
+              <strong>{turn.budgetBlocked ? "The local monthly cost limit stopped this request." : "Archivist could not complete this answer."}</strong>
               <p>{turn.error}</p>
             </div>
-            <button type="button" onClick={onRetry}>
-              <RotateCcw size={15} />
-              Try again
-            </button>
+            {turn.budgetBlocked ? (
+              <button type="button" onClick={onApprove}>
+                <CircleDollarSign size={15} />
+                Approve one request
+              </button>
+            ) : (
+              <button type="button" onClick={onRetry}>
+                <RotateCcw size={15} />
+                Try again
+              </button>
+            )}
           </div>
         ) : null}
 

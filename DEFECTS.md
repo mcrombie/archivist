@@ -45,6 +45,19 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-22] Reader-facing cost tracking required a new local accounting contract
+Phase/Brief: Phase 1 reader-facing UI, owner-directed cost visibility pass
+Symptom: the application made several independently billed API calls per conversation turn but
+         exposed neither their returned usage nor an estimate of cumulative spend.
+Cause: spec gap in the brief -- the requested cost meter did not define persistence, price-version
+       handling, unknown models, invoice reconciliation, or whether a budget was a warning or cap.
+Resolution and verification: completed API responses are recorded in a local SQLite ledger using
+       returned token usage and a versioned rate table. The UI distinguishes this estimate from
+       OpenAI's authoritative Costs data. Budgets default to disabled; the optional local hard stop
+       blocks only the next request and permits an explicit one-request override. Contract tests
+       cover pricing, idempotency, aggregation, unknown models, and the enforcement boundary. No
+       prompt, retrieval parameter, model setting, or manuscript context changed.
+
 ## [2026-07-22] Combined perspective prototype split into three prompt facets
 Phase/Brief: Phase 2 perspective-mode prototype, requested during Phase 1
 Symptom: the combined perspective selector conflated historiographical framing, prose voice, and
