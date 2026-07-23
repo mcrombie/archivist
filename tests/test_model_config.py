@@ -113,7 +113,11 @@ def test_web_index_generation_uses_central_generator_settings(monkeypatch):
             captured.update(request)
             return SimpleNamespace(output_text="Synthetic web index entry.")
 
-    monkeypatch.setattr(web_project, "retrieve_project", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        web_project,
+        "retrieve_project_semantic",
+        lambda *_args, **_kwargs: {},
+    )
     monkeypatch.setattr(web_project, "load_project_chunks", lambda _project_id: [])
     monkeypatch.setattr(
         web_project,

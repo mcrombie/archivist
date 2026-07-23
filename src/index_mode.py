@@ -1,7 +1,11 @@
 from costs import tracked_responses_create
 from model_config import GENERATOR_SETTINGS
 from prompts import build_index_prompt_cli
-from retrieval import default_openai_client, finalize_index_context, retrieve
+from retrieval import (
+    default_openai_client,
+    finalize_index_context,
+    retrieve_semantic,
+)
 
 
 def generate_index_entry(term: str, final_chunks: list[dict]) -> str:
@@ -24,7 +28,7 @@ def main() -> None:
         if term.lower() == "exit":
             break
 
-        results = retrieve(term)
+        results = retrieve_semantic(term)
         final_chunks = finalize_index_context(term, results)
         output = generate_index_entry(term, final_chunks)
 

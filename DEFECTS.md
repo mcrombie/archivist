@@ -45,6 +45,45 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-23] Hybrid Answer Mode retrieval opens a new retrieval cohort
+Phase/Brief: Phase 1, post-baseline retrieval optimization
+Symptom: the first ten-question practical baseline used only the five nearest semantic results,
+then interleaved each primary with neighbors before applying the eight-source cap. Exact names
+could be missed, optional neighbors could displace later primary evidence, and broad questions
+could collapse to one document.
+Cause: cohort opening — Answer Mode retrieval parameters and context ordering changed.
+Resolution and verification: Answer Mode now makes the same single query-embedding call but asks
+Chroma for a 20-candidate semantic pool, ranks the eligible corpus locally with deterministic
+BM25, and fuses the two ranks with equal-weight reciprocal-rank fusion (`k=60`). Standard queries
+remain relevance-ordered. Queries classified as broad synthesis may apply a three-primary
+per-document diversity pass only when an alternative remains within 75% of the strongest deferred
+candidate, then backfill by fused rank. Every selected primary is reserved before immediate
+neighbors. The raw semantic top five remain separately visible, Index Mode retains its prior
+exact-match and semantic-fallback behavior, and the generation prompt and model are unchanged.
+Synthetic no-API tests cover lexical promotion, semantic-only fallback, deterministic fusion,
+guarded diversity, primary-first expansion, shared CLI/web behavior, Index Mode isolation,
+contract-facing displacement attribution, and private diagnostics. The full suite passes with
+140 tests and one opt-in test skipped. The semantic-only practical
+baseline belongs to the previous cohort; improvement must be established by rerunning the same
+frozen ten questions.
+
+## [2026-07-23] Hybrid retrieval mechanics were not specified
+Phase/Brief: Phase 1, post-baseline retrieval optimization
+Symptom: the approved next step called for hybrid lexical/semantic retrieval, diagnostics, and
+source diversity but did not define tokenization, lexical scoring, fusion weights, candidate
+depth, tie-breaking, diversity safeguards, neighbor priority, trace privacy, or persistence.
+Cause: spec gap in the brief.
+Resolution and verification: the implementation uses a corpus-agnostic NFKD Unicode word
+tokenizer with possessive normalization, a versioned dependency-free BM25 scorer
+(`k1=1.2`, `b=0.75`), equal-weight RRF with deterministic rank and chunk-ID tie-breaking, and the
+guarded broad-query diversity rule recorded above. A versioned text-free trace records hashes,
+ranks, scores, distance/fallback states, selection reasons, context order, document
+distribution, corpus hashes, Chroma distance space, and every effective parameter; raw questions,
+prompts, metadata blobs, and chunk text are rejected from persisted traces. Persistence is opt-in
+under gitignored `runtime/` and a sink failure cannot prevent an answer. These choices are now
+explicit and tested, but remain
+tunable retrieval parameters rather than changes to `EVAL_CONTRACT.md`.
+
 ## [2026-07-23] Gold locations could name chunks excluded from retrieval
 Phase/Brief: Phase 1, Brief 3 preparation
 Symptom: gold-set validation accepted any chunk ID present in the corpus manifest, even when the

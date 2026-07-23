@@ -110,7 +110,7 @@ def test_prompts_never_receive_presentation_labels():
 def test_shared_finalizers_and_presentation_partition():
     results = {"metadatas": [[CHUNKS[1]]], "distances": [[0.2]]}
     assert [c["chunk_id"] for c in finalize_context_chunks(results, chunks=CHUNKS)] == [
-        "a_001", "a_002",
+        "a_002", "a_001",
     ]
     semantic = {"metadatas": [[CHUNKS[2]]], "distances": [[0.2]]}
     assert [c["chunk_id"] for c in finalize_index_context("needle", semantic, chunks=CHUNKS)] == [

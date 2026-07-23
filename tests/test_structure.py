@@ -21,9 +21,11 @@ def test_retrieval_primitives_have_one_definition():
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 counts[node.name] = counts.get(node.name, 0) + 1
     for name in (
-        "embed_query", "get_filtered_primary_chunks", "expand_with_neighbors",
-        "find_exact_match_chunks", "finalize_context_chunks", "finalize_index_context",
-        "build_context",
+        "embed_query", "retrieve_semantic_from_collection", "lexical_candidates",
+        "build_hybrid_results", "retrieve_from_collection",
+        "get_filtered_primary_chunks", "expand_with_neighbors",
+        "plan_context_chunks", "find_exact_match_chunks", "finalize_context_chunks",
+        "finalize_index_context", "build_context",
     ):
         assert counts.get(name) == 1, (
             f"{name}: expected one definition, found {counts.get(name, 0)}"
@@ -44,11 +46,13 @@ def test_imports_do_not_load_the_corpus():
 
 def test_private_corpus_paths_are_untracked_and_ignored():
     tracked = subprocess.check_output(
-        ["git", "ls-files", "--", "manuscript", "output", "projects"], cwd=ROOT, text=True
+        ["git", "ls-files", "--", "manuscript", "output", "projects", "runtime"],
+        cwd=ROOT,
+        text=True,
     )
     assert not tracked.strip()
     ignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert {"manuscript/", "output/", "projects/"} <= set(ignore)
+    assert {"manuscript/", "output/", "projects/", "runtime/"} <= set(ignore)
 
 
 def test_corpus_manifest_matches_private_disk_snapshot():
@@ -176,7 +180,6 @@ def test_live_retrieval_matches_prechange_fixture():
         results = retrieve(question, n_results=5)
         assert ids(results.get("metadatas", [[]])[0]) == expected["primary"]
         cli_ids = ids(finalize_context_chunks(results))
-        assert cli_ids == expected["context"]
         web_results = retrieve_project("current", question, n_results=5)
         assert ids(web_results.get("metadatas", [[]])[0]) == expected["primary"]
         assert ids(finalize_context_chunks(web_results, chunks=web_chunks)) == cli_ids

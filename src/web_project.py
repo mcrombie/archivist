@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -36,10 +37,11 @@ from perspectives import (
 )
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
 from retrieval import (
-    embed_query,
     finalize_context_chunks,
     finalize_index_context,
     find_exact_match_chunks,
+    retrieve_from_collection,
+    retrieve_semantic_from_collection,
 )
 
 
@@ -409,11 +411,39 @@ def embed_project(project_id: str) -> dict[str, Any]:
 
 def retrieve_project(project_id: str, query: str, n_results: int = 5) -> dict[str, Any]:
     collection = chroma_client().get_collection(name=collection_name(project_id))
-    embedding = embed_query(query, embedding_client=openai_client())
-    return collection.query(
-        query_embeddings=[embedding],
+    chunks_file = LEGACY_CHUNKS_FILE if project_id == "current" else chunks_path(project_id)
+    corpus_trace: dict[str, object] = {
+        "project_id": project_id,
+        "collection_name": collection_name(project_id),
+    }
+    if chunks_file.is_file():
+        corpus_trace["chunks_sha256"] = hashlib.sha256(chunks_file.read_bytes()).hexdigest()
+    corpus_manifest = BASE_DIR / "fixtures" / "corpus_manifest.json"
+    if project_id == "current" and corpus_manifest.is_file():
+        corpus_trace["corpus_manifest_sha256"] = hashlib.sha256(
+            corpus_manifest.read_bytes()
+        ).hexdigest()
+    return retrieve_from_collection(
+        query,
+        collection,
+        load_project_chunks(project_id),
         n_results=n_results,
-        include=["metadatas", "distances"],
+        embedding_client=openai_client(),
+        corpus=corpus_trace,
+    )
+
+
+def retrieve_project_semantic(
+    project_id: str,
+    query: str,
+    n_results: int = 5,
+) -> dict[str, Any]:
+    collection = chroma_client().get_collection(name=collection_name(project_id))
+    return retrieve_semantic_from_collection(
+        query,
+        collection,
+        n_results=n_results,
+        embedding_client=openai_client(),
     )
 
 
@@ -611,7 +641,7 @@ def search_existing_index(project_id: str, term: str, limit: int = 8) -> list[di
 
 
 def generate_index_entry(project_id: str, term: str, consult_existing_index: bool) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    semantic_results = retrieve_project(project_id, term, n_results=5)
+    semantic_results = retrieve_project_semantic(project_id, term, n_results=5)
     chunks = load_project_chunks(project_id)
     final_chunks = finalize_index_context(
         term,

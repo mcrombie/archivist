@@ -206,6 +206,54 @@ system fails. Fluent prose concealed a catastrophic false-premise error, while s
 answers had already retrieved the facts they failed to use. Retrieval and generation therefore
 need to be measured and improved separately.
 
+### 2026-07-23 — First retrieval optimization cohort
+
+- Replaced Answer Mode's semantic-only selection with one shared deterministic hybrid retrieval
+  path for the CLI and conversational web app.
+- Each question still makes one paid query-embedding call. Archivist now requests a 20-result
+  semantic candidate pool from the existing Chroma index and computes a second lexical ranking
+  locally, so the lexical work adds no OpenAI API charge.
+- The local ranker uses versioned BM25 scoring and normalizes Unicode and possessives, improving
+  the chance that complete names and distinctive phrases enter consideration.
+- Semantic and lexical ranks are fused with equal-weight reciprocal-rank fusion (`k=60`).
+- Source diversity is deliberately guarded:
+  - it runs only for questions classified as broad synthesis;
+  - it initially limits one document to three primary passages;
+  - a different-document candidate cannot replace stronger evidence unless its fused score is at
+    least 75% of the strongest deferred candidate;
+  - if useful diversity is unavailable, the selector backfills in fused-rank order.
+- All selected primary passages are now placed into the model context before optional immediate
+  neighbors. This prevents neighbors of the first result from consuming the eight-source limit
+  before later primary evidence can appear.
+- The raw semantic top five remain intact and separately inspectable. This matters because the
+  project can now distinguish “what vector search returned” from “what hybrid retrieval selected”
+  and from “what the model actually saw.”
+- Added an opt-in, text-free retrieval trace under gitignored
+  `runtime/retrieval-diagnostics/`. It records ranks, distances, scores, fallback states,
+  contract-facing displacement causes, source order, corpus hashes, Chroma distance space, and
+  effective parameters, but rejects raw questions, prompts, Chroma metadata blobs, and manuscript
+  text.
+- Index Mode was intentionally left on its previous exact-match and five-result semantic-fallback
+  behavior through a separate wrapper around the same semantic-query primitive; it does not run
+  lexical ranking or hybrid fusion.
+  The neutral answer prompt, GPT-5.6 Sol settings, conversation behavior, citations, and public API
+  response shape were also left unchanged.
+- Implementation verification made no OpenAI calls: 140 backend tests passed, one opt-in live test
+  was skipped, Ruff passed, and the diff check passed.
+- This change opens a new retrieval cohort. It is not yet evidence that the RAG is better. The next
+  valid comparison is a paired rerun of the same frozen ten-question test.
+- Expected limits remain:
+  - lexical fusion cannot retrieve a subject that truly has no literal corpus match;
+  - semantic-only near matches still depend on vector quality;
+  - a phrase match can reinforce a false premise rather than detect it;
+  - broad-query classification and source diversity do not replace future query decomposition,
+    reranking, corpus-level absence checks, or adversarial-premise routing.
+
+Useful blog lesson: “hybrid search” is not one switch. It is a chain of explicit, reproducible
+choices—candidate depth, tokenization, score fusion, diversity safeguards, and context ordering.
+Keeping the untouched vector-search results beside the final context makes it possible to tell
+which choice helped or hurt.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
