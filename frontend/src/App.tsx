@@ -23,7 +23,8 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import {
   ApiRequestError,
   AnswerFacets,
@@ -60,6 +61,30 @@ type FacetOption<T extends string> = {
   label: string;
   description: string;
 };
+
+type ConversationStarter = {
+  route: string;
+  question: string;
+};
+
+const CONVERSATION_STARTERS: ReadonlyArray<ConversationStarter> = [
+  {
+    route: "Meet a person",
+    question: "Who was Edwin Sandys, and what did he do?"
+  },
+  {
+    route: "Understand a system",
+    question: "How did the headright system work?"
+  },
+  {
+    route: "Explore an argument",
+    question: "What role did Jamestown play as a corporate experiment?"
+  },
+  {
+    route: "Trace a theme",
+    question: "How does the manuscript connect tobacco to labor?"
+  }
+];
 
 const LENS_OPTIONS: ReadonlyArray<FacetOption<HistoriographicalLens>> = [
   {
@@ -1137,6 +1162,68 @@ function CostLedgerDrawer({
   );
 }
 
+function NewConversationButton({
+  pending,
+  onStart
+}: {
+  pending: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="new-conversation-button"
+      disabled={pending}
+      aria-label="Start a new conversation"
+      title="Start a new conversation"
+      onClick={onStart}
+    >
+      <Plus size={15} aria-hidden="true" />
+      <span className="new-conversation-label-full">Start new conversation</span>
+      <span className="new-conversation-label-short" aria-hidden="true">New</span>
+    </button>
+  );
+}
+
+function ConversationStarters({
+  selectedQuestion,
+  onSelect
+}: {
+  selectedQuestion: string;
+  onSelect: (question: string) => void;
+}) {
+  return (
+    <section className="conversation-starters" aria-labelledby="conversation-starters-title">
+      <header className="conversation-starters-header">
+        <div>
+          <p>Ways into the manuscript</p>
+          <h2 id="conversation-starters-title">Choose a place to begin</h2>
+        </div>
+        <p>
+          A starter fills the question box for you to edit. Nothing is sent until you ask.
+        </p>
+      </header>
+      <ul className="conversation-starter-grid">
+        {CONVERSATION_STARTERS.map((starter, index) => (
+          <li key={starter.route}>
+            <button
+              type="button"
+              aria-pressed={selectedQuestion === starter.question}
+              onClick={() => onSelect(starter.question)}
+            >
+              <span className="conversation-starter-route">
+                <i aria-hidden="true">{String(index + 1).padStart(2, "0")}</i>
+                {starter.route}
+              </span>
+              <span>{starter.question}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function QuestionMode({
   project,
   setNotice
@@ -1154,6 +1241,7 @@ function QuestionMode({
   const [costSummaryError, setCostSummaryError] = useState<string | null>(null);
   const [costDrawerOpen, setCostDrawerOpen] = useState(false);
   const conversationRef = useRef<HTMLElement>(null);
+  const landingQuestionRef = useRef<HTMLTextAreaElement>(null);
   const pending = turns.some((turn) => turn.status === "pending");
   const chatStarted = turns.length > 0;
 
@@ -1339,6 +1427,24 @@ function QuestionMode({
       ? "auto"
       : "smooth";
     window.scrollTo({ top: 0, behavior });
+    window.setTimeout(() => landingQuestionRef.current?.focus({ preventScroll: true }), 0);
+  }
+
+  function selectConversationStarter(starterQuestion: string) {
+    setQuestion(starterQuestion);
+    window.requestAnimationFrame(() => {
+      const input = landingQuestionRef.current;
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(starterQuestion.length, starterQuestion.length);
+      const bounds = input.getBoundingClientRect();
+      if (bounds.top < 24 || bounds.bottom > window.innerHeight - 24) {
+        const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth";
+        input.scrollIntoView({ behavior, block: "center" });
+      }
+    });
   }
 
   return (
@@ -1380,7 +1486,9 @@ function QuestionMode({
                 />
                 <VibeControl />
               </div>
-            ) : null}
+            ) : (
+              <NewConversationButton pending={pending} onStart={startNewConversation} />
+            )}
           </header>
 
           <div className="chat-intro-copy">
@@ -1389,23 +1497,39 @@ function QuestionMode({
               <span>Ask the book.</span>
               <em>Stay for the conversation.</em>
             </h1>
-            <p>
-              Explore <cite>{project.name}</cite> as you would with a knowledgeable reading companion.
-              Begin anywhere, ask follow-up questions, and open the manuscript passages behind each answer.
+            <p className="chat-intro-description">
+              Archivist is a conversation with one book—<cite>{project.name}</cite>—not a
+              general-purpose chatbot. Ask about its people, events, arguments, or long arcs;
+              every reply returns to the manuscript for evidence.
             </p>
+            <div className="chat-method-line" aria-label="How Archivist works">
+              <span><Search size={14} aria-hidden="true" />Searches this book</span>
+              <span><MessageCircle size={14} aria-hidden="true" />Remembers the thread</span>
+              <span><BookOpen size={14} aria-hidden="true" />Shows supporting passages</span>
+            </div>
           </div>
 
           {!chatStarted ? (
-            <ConversationComposer
-              location="landing"
-              project={project}
-              question={question}
-              facets={facets}
-              pending={pending}
-              onQuestionChange={setQuestion}
-              onFacetsChange={setFacets}
-              onSubmit={submit}
-            />
+            <>
+              <ConversationStarters
+                selectedQuestion={question}
+                onSelect={selectConversationStarter}
+              />
+              <ConversationComposer
+                location="landing"
+                project={project}
+                question={question}
+                facets={facets}
+                pending={pending}
+                inputRef={landingQuestionRef}
+                onQuestionChange={setQuestion}
+                onFacetsChange={setFacets}
+                onSubmit={submit}
+              />
+              <p className="chat-evidence-caveat">
+                Archivist can miss nuance. Open the cited passages when precision matters.
+              </p>
+            </>
           ) : (
             <div className="chat-transition-note" aria-hidden="true">
               <MessageCircle size={18} />
@@ -1432,15 +1556,7 @@ function QuestionMode({
                 open={costDrawerOpen}
                 onOpen={() => setCostDrawerOpen(true)}
               />
-              <button
-                type="button"
-                className="new-conversation-button"
-                disabled={pending}
-                onClick={startNewConversation}
-              >
-                <Plus size={15} />
-                <span>New conversation</span>
-              </button>
+              <NewConversationButton pending={pending} onStart={startNewConversation} />
               <VibeControl compact />
             </div>
           </header>
@@ -1493,6 +1609,7 @@ function ConversationComposer({
   question,
   facets,
   pending,
+  inputRef,
   onQuestionChange,
   onFacetsChange,
   onSubmit
@@ -1502,6 +1619,7 @@ function ConversationComposer({
   question: string;
   facets: AnswerFacets;
   pending: boolean;
+  inputRef?: RefObject<HTMLTextAreaElement>;
   onQuestionChange: (question: string) => void;
   onFacetsChange: (facets: AnswerFacets) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -1567,6 +1685,7 @@ function ConversationComposer({
       <label className="chat-question-field" htmlFor={questionId}>
         <span>{location === "landing" ? "Begin the conversation" : "Your next question"}</span>
         <textarea
+          ref={inputRef}
           id={questionId}
           rows={location === "landing" ? 3 : 1}
           required

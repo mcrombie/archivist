@@ -254,6 +254,30 @@ choices—candidate depth, tokenization, score fusion, diversity safeguards, and
 Keeping the untouched vector-search results beside the final context makes it possible to tell
 which choice helped or hurt.
 
+### 2026-07-23 — A guided first conversation
+
+- Reworked the opening copy so the product declares its scope immediately: Archivist is a
+  conversation with one specific book, not a general-purpose chatbot or an open-web search tool.
+- Added three compact orientation cues—searches this book, remembers the thread, and shows
+  supporting passages—so readers can understand the interaction model before spending a query.
+- Added four catalog-style conversation starters organized by intent: meet a person, understand a
+  system, explore an argument, and trace a theme. Selecting one only fills and focuses the
+  composer; the reader can edit it, and no API call occurs until Ask Archivist is pressed.
+- Chose starter prompts from the earlier non-gold demo pool rather than exposing any of the frozen
+  ten-question pilot or its expected claims before the paired rerun.
+- Made Start new conversation explicit in the sticky conversation header and at the top of the
+  introduction after a thread has opened. The responsive header now keeps a visible “New” label
+  instead of reducing the action to an ambiguous plus icon.
+- Starting over still clears the page-local transcript, answer-style choices, conversation cost
+  scope, and conversation identifier; durable conversation history remains a later feature.
+- Retrieval, generation, prompts, model settings, and the frozen evaluation set were deliberately
+  unchanged. No paid evaluation call was made during this UI pass.
+- Verification: the TypeScript check and Vite production build completed successfully.
+
+Useful blog lesson: onboarding can teach both capability and restraint. A good starter should show
+what kinds of questions fit the product while leaving the paid send action explicit and preserving
+the integrity of the benchmark used to measure later RAG changes.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific

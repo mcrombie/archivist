@@ -5,7 +5,7 @@ Archivist now has a local-first FastAPI and React interface.
 ## Run the Built UI
 
 ```powershell
-.\venv\Scripts\python.exe -m uvicorn src.web_api:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn src.web_api:app --host 127.0.0.1 --port 8000
 ```
 
 Open:
@@ -29,13 +29,15 @@ The Vite dev server proxies `/api` requests to FastAPI at `http://127.0.0.1:8000
 The web API needs:
 
 ```powershell
-.\venv\Scripts\python.exe -m pip install -r requirements-web.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-web.txt
 ```
 
 ## Current Capabilities
 
 - Opens directly to the built-in *Cradle of the Empire* manuscript.
-- Presents the cover and introduction before the first question.
+- Presents the cover and a one-book product introduction before the first question.
+- Offers four guided ways into the manuscript—person, system, argument, and theme. Choosing a
+  starter fills and focuses the composer but never sends a paid request automatically.
 - Transitions into a full-width, multi-turn conversation after the first submission.
 - Keeps earlier questions, answers, and their manuscript sources in the transcript.
 - Uses recent completed turns to resolve follow-up references, then retrieves fresh manuscript
@@ -43,7 +45,8 @@ The web API needs:
 - Keeps the composer available at the bottom of the conversation and supports Enter to send or
   Shift+Enter for a new line.
 - Keeps sources collapsed beneath the answer they support and scopes citation links to that turn.
-- Provides retry, copy-answer, and new-conversation controls.
+- Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
+  in both the conversation header and the top-of-page introduction.
 - Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
 - Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
   combination is the unchanged Neutral baseline, and the chosen settings are recorded on each
