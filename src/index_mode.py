@@ -1,4 +1,5 @@
 from costs import tracked_responses_create
+from model_config import GENERATOR_SETTINGS
 from prompts import build_index_prompt_cli
 from retrieval import default_openai_client, finalize_index_context, retrieve
 
@@ -9,8 +10,8 @@ def generate_index_entry(term: str, final_chunks: list[dict]) -> str:
     response = tracked_responses_create(
         default_openai_client(),
         operation="index_generation",
-        model="gpt-5",
         input=prompt,
+        **GENERATOR_SETTINGS.responses_create_kwargs(),
     )
 
     return response.output_text

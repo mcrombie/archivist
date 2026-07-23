@@ -26,6 +26,7 @@ from importers import (
     chapter_title_from_text,
 )
 from ingest import clean_title_from_filename, extract_chapter_title
+from model_config import FOLLOWUP_RESOLVER_SETTINGS, GENERATOR_SETTINGS
 from perspectives import (
     AnswerPerspective,
     AnswerVoice,
@@ -48,7 +49,6 @@ CHROMA_DIR = BASE_DIR / "chroma_db"
 LEGACY_CHUNKS_FILE = BASE_DIR / "output" / "chunks.json"
 LEGACY_MANUSCRIPT_DIR = BASE_DIR / "manuscript"
 EMBED_MODEL = "text-embedding-3-small"
-CHAT_MODEL = "gpt-5"
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -470,9 +470,9 @@ def resolve_conversation_query(
     response = tracked_responses_create(
         openai_client(),
         operation="followup_resolution",
-        model=CHAT_MODEL,
         instructions=CONVERSATION_QUERY_INSTRUCTIONS,
         input=build_conversation_query_input(question, bounded_history),
+        **FOLLOWUP_RESOLVER_SETTINGS.responses_create_kwargs(),
     )
     resolved_query = response.output_text.strip()
     if not resolved_query or len(resolved_query) > MAX_RESOLVED_QUERY_CHARS:
@@ -598,8 +598,8 @@ def answer_project_question(
     response = tracked_responses_create(
         openai_client(),
         operation="answer_generation",
-        model=CHAT_MODEL,
         input=prompt,
+        **GENERATOR_SETTINGS.responses_create_kwargs(),
     )
     return response.output_text, final_chunks
 
@@ -624,8 +624,8 @@ def generate_index_entry(project_id: str, term: str, consult_existing_index: boo
     response = tracked_responses_create(
         openai_client(),
         operation="index_generation",
-        model=CHAT_MODEL,
         input=prompt,
+        **GENERATOR_SETTINGS.responses_create_kwargs(),
     )
     return response.output_text, final_chunks, existing_index_chunks
 

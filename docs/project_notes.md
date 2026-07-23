@@ -24,9 +24,26 @@ non-reader collections were preserved with identical records and metadata.
 
 The present RAG is a basic semantic-retrieval baseline. Potential improvements—including hybrid
 retrieval, reranking, threshold calibration, query routing, and chunking changes—remain deferred
-until the canonical manuscript is installed and the neutral evaluation baseline exists. This
-conversation-design pass deliberately does not change embeddings, retrieval parameters, the
-Answer Mode prompt, or the generation model.
+until the canonical manuscript is installed and the neutral evaluation baseline exists. The
+earlier conversation-design pass deliberately left embeddings, retrieval parameters, the Answer
+Mode prompt, and the generation model unchanged. The subsequent model-configuration step changes
+only the generation model and its explicit settings; it does not tune retrieval or the Answer Mode
+prompt.
+
+## Current generation-model configuration
+
+The interactive answer generator and conversational follow-up resolver are separate roles in the
+central model configuration. Both currently use the official `gpt-5.6-sol` model through the
+Responses API with explicit `medium` reasoning effort and `medium` verbosity. Those values preserve
+the effective defaults of the former `gpt-5` integration while preventing future default changes
+from silently changing those two sampling choices. The deferred index-generation path shares the
+generator settings.
+
+This development configuration is **not** a formal evaluation pin. OpenAI's currently documented
+identifier is `gpt-5.6-sol`, without a dated snapshot suffix. Archivist therefore rejects it when
+asked to validate a run-of-record model; no dated identifier has been invented, and the stricter
+rule in `EVAL_CONTRACT.md` remains unchanged. A formal baseline stays blocked until an official
+dated snapshot is available and selected.
 
 ## Current UI scope
 

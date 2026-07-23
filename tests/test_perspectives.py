@@ -7,6 +7,7 @@ from pydantic import ValidationError
 import prompts
 import web_api
 import web_project
+from model_config import GENERATOR_SETTINGS
 from perspectives import (
     ANSWER_VOICES,
     HISTORIOGRAPHICAL_LENSES,
@@ -218,7 +219,12 @@ def test_generation_settings_do_not_change_retrieval(monkeypatch):
     )
 
     class FakeResponses:
-        def create(self, *, model, input):
+        def create(self, *, model, reasoning, text, input):
+            assert {
+                "model": model,
+                "reasoning": reasoning,
+                "text": text,
+            } == GENERATOR_SETTINGS.responses_create_kwargs()
             generated_prompts.append((model, input))
             return SimpleNamespace(output_text="Synthetic answer [Source 1].")
 

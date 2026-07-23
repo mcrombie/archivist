@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 import web_api
 import web_project
+from model_config import FOLLOWUP_RESOLVER_SETTINGS, GENERATOR_SETTINGS
 from perspectives import AnswerVoice, HistoriographicalLens, Worldview
 
 
@@ -47,8 +48,14 @@ def test_context_resolver_receives_only_bounded_dialogue(monkeypatch):
     captured = {}
 
     class FakeResponses:
-        def create(self, *, model, instructions, input):
-            captured.update(model=model, instructions=instructions, input=input)
+        def create(self, *, model, reasoning, text, instructions, input):
+            captured.update(
+                model=model,
+                reasoning=reasoning,
+                text=text,
+                instructions=instructions,
+                input=input,
+            )
             return SimpleNamespace(output_text="What happened to the named person afterward?")
 
     monkeypatch.setattr(
@@ -64,7 +71,11 @@ def test_context_resolver_receives_only_bounded_dialogue(monkeypatch):
     resolved = web_project.resolve_conversation_query("What happened next?", history)
 
     assert resolved == "What happened to the named person afterward?"
-    assert captured["model"] == web_project.CHAT_MODEL
+    assert {
+        "model": captured["model"],
+        "reasoning": captured["reasoning"],
+        "text": captured["text"],
+    } == FOLLOWUP_RESOLVER_SETTINGS.responses_create_kwargs()
     assert "Question 0" not in captured["input"]
     assert "Question 1" not in captured["input"]
     assert "Question 2" in captured["input"]
@@ -163,7 +174,17 @@ def test_prior_assistant_output_never_enters_answer_prompt(monkeypatch):
     )
 
     class FakeResponses:
-        def create(self, *, model, input, instructions=None):
+        def create(self, *, model, reasoning, text, input, instructions=None):
+            expected = (
+                FOLLOWUP_RESOLVER_SETTINGS
+                if instructions is not None
+                else GENERATOR_SETTINGS
+            )
+            assert {
+                "model": model,
+                "reasoning": reasoning,
+                "text": text,
+            } == expected.responses_create_kwargs()
             if instructions is not None:
                 resolver_inputs.append(input)
                 return SimpleNamespace(output_text="What happened to John Doe afterward?")

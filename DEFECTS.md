@@ -45,6 +45,44 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-23] Ten-item gold pilot had no mechanical final-set boundary
+Phase/Brief: Phase 1, Brief 3 preparation and Brief 6 calibration pilot
+Symptom: `EVAL_CONTRACT.md` defines the final 34–46-item composition, and Brief 6 calls for a
+ten-item pilot spanning at least four strata, but neither specifies how an `archivist.gold/1`
+pilot file is mechanically distinguished from a final gold set or prevented from being used under
+the weaker validation profile.
+Cause: spec gap in the brief.
+Resolution and verification: gold validation now has explicit `pilot` and `run-of-record` modes.
+Pilot mode requires exactly ten items, at least four represented strata, and a `-pilot` semantic
+version marker; run-of-record mode rejects prerelease versions and enforces every locked §3.4
+stratum range. The committed template is empty, manifest-bound, and marked `0.1.0-pilot`. Tests
+prove a valid pilot cannot pass run-of-record validation. `EVAL_CONTRACT.md` is unchanged.
+
+## [2026-07-23] Official GPT-5.6 Sol identifier does not satisfy the dated-snapshot contract
+Phase/Brief: Phase 1, Brief 2
+Symptom: the requested and currently documented flagship model identifier is `gpt-5.6-sol`,
+but Brief 2 also requires startup rejection of every model identifier without a date suffix.
+No official dated GPT-5.6 Sol identifier is documented, so those requirements cannot both govern
+the interactive application without either inventing an identifier or preventing it from starting.
+Cause: spec gap in the brief, surfaced by a change in available model identifiers.
+Resolution and verification: interactive runtime settings and formal evaluation validation are
+separated. The runtime uses the documented `gpt-5.6-sol` identifier, while
+`require_run_of_record_snapshot` rejects it for a formal run. Tests prove the documented identifier
+is not represented as a pin and that the contract's known dated `gpt-5-2025-08-07` form passes the
+date-suffix check. `EVAL_CONTRACT.md` is unchanged, no dated identifier was invented, and a formal
+run of record remains blocked until an official dated snapshot is available and selected.
+
+## [2026-07-23] GPT-5.6 Sol opens a new generation cohort
+Phase/Brief: Phase 1, Brief 2
+Symptom: active answer, follow-up-resolution, and deferred index-generation requests previously
+used the bare `gpt-5` alias with implicit reasoning and verbosity defaults.
+Cause: cohort opening — the generation model and recorded sampling settings changed.
+Resolution and verification: the generation roles now use centralized `gpt-5.6-sol` settings with
+explicit `medium` reasoning effort and `medium` verbosity, preserving the former documented
+effective defaults while changing the model. Focused request-capture tests verify all active
+generation paths receive the correct role settings. Earlier generated outputs, if retained, belong
+to the previous cohort and are not directly comparable.
+
 ## [2026-07-22] Reader-facing cost tracking required a new local accounting contract
 Phase/Brief: Phase 1 reader-facing UI, owner-directed cost visibility pass
 Symptom: the application made several independently billed API calls per conversation turn but
