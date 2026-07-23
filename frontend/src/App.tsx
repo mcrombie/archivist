@@ -19,6 +19,7 @@ import {
   Save,
   Search,
   Send,
+  SlidersHorizontal,
   Upload,
   X
 } from "lucide-react";
@@ -1505,25 +1506,69 @@ function ConversationComposer({
   onFacetsChange: (facets: AnswerFacets) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const settingsDisclosureRef = useRef<HTMLDetailsElement>(null);
   const questionId = `archivist-question-${location}`;
   const lensId = `archivist-lens-${location}`;
   const voiceId = `archivist-voice-${location}`;
   const worldviewId = `archivist-worldview-${location}`;
   const facetDescriptionId = `archivist-facet-description-${location}`;
   const groundingId = `question-grounding-note-${location}`;
+  const answerSettings = (
+    <fieldset className="chat-answer-settings" aria-describedby={facetDescriptionId}>
+      <legend>Interpretive settings</legend>
+      <div className="chat-answer-settings-heading">
+        <p id={facetDescriptionId}>
+          These choices change interpretation and expression, not the manuscript evidence.
+        </p>
+        <span>{answerFacetSummary(facets)}</span>
+      </div>
+      <div className="chat-facet-grid">
+        <FacetSelect
+          id={lensId}
+          label="Historiographical lens"
+          value={facets.historiographicalLens}
+          options={LENS_OPTIONS}
+          disabled={pending}
+          onChange={(historiographicalLens) => onFacetsChange({
+            ...facets,
+            historiographicalLens
+          })}
+        />
+        <FacetSelect
+          id={voiceId}
+          label="Voice"
+          value={facets.voice}
+          options={VOICE_OPTIONS}
+          disabled={pending}
+          onChange={(voice) => onFacetsChange({ ...facets, voice })}
+        />
+        <FacetSelect
+          id={worldviewId}
+          label="Worldview"
+          value={facets.worldview}
+          options={WORLDVIEW_OPTIONS}
+          disabled={pending}
+          onChange={(worldview) => onFacetsChange({ ...facets, worldview })}
+        />
+      </div>
+    </fieldset>
+  );
 
   return (
     <form
       className={`chat-composer ${location === "thread" ? "is-docked" : "is-landing"}`}
       aria-label={`Ask a question about ${project.name}`}
       aria-busy={pending}
-      onSubmit={onSubmit}
+      onSubmit={(event) => {
+        if (settingsDisclosureRef.current) settingsDisclosureRef.current.open = false;
+        onSubmit(event);
+      }}
     >
       <label className="chat-question-field" htmlFor={questionId}>
         <span>{location === "landing" ? "Begin the conversation" : "Your next question"}</span>
         <textarea
           id={questionId}
-          rows={location === "landing" ? 3 : 2}
+          rows={location === "landing" ? 3 : 1}
           required
           maxLength={4_000}
           aria-describedby={groundingId}
@@ -1538,49 +1583,23 @@ function ConversationComposer({
           placeholder={location === "landing"
             ? "What would you like to know about Cradle of the Empire?"
             : "Ask a follow-up question..."}
-          autoFocus={location === "thread"}
         />
       </label>
 
       <div className="chat-composer-options">
-        <fieldset className="chat-answer-settings" aria-describedby={facetDescriptionId}>
-          <legend>Interpretive settings</legend>
-          <div className="chat-answer-settings-heading">
-            <p id={facetDescriptionId}>
-              These choices change interpretation and expression, not the manuscript evidence.
-            </p>
-            <span>{answerFacetSummary(facets)}</span>
-          </div>
-          <div className="chat-facet-grid">
-            <FacetSelect
-              id={lensId}
-              label="Historiographical lens"
-              value={facets.historiographicalLens}
-              options={LENS_OPTIONS}
-              disabled={pending}
-              onChange={(historiographicalLens) => onFacetsChange({
-                ...facets,
-                historiographicalLens
-              })}
-            />
-            <FacetSelect
-              id={voiceId}
-              label="Voice"
-              value={facets.voice}
-              options={VOICE_OPTIONS}
-              disabled={pending}
-              onChange={(voice) => onFacetsChange({ ...facets, voice })}
-            />
-            <FacetSelect
-              id={worldviewId}
-              label="Worldview"
-              value={facets.worldview}
-              options={WORLDVIEW_OPTIONS}
-              disabled={pending}
-              onChange={(worldview) => onFacetsChange({ ...facets, worldview })}
-            />
-          </div>
-        </fieldset>
+        {location === "thread" ? (
+          <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
+            <summary aria-label={`Answer style: ${answerFacetSummary(facets)}`}>
+              <SlidersHorizontal size={16} aria-hidden="true" />
+              <span>
+                <small>Answer style</small>
+                <strong>{answerFacetSummary(facets)}</strong>
+              </span>
+              <ChevronDown size={14} aria-hidden="true" />
+            </summary>
+            {answerSettings}
+          </details>
+        ) : answerSettings}
 
         <div className="chat-composer-submit">
           <span id={groundingId}>
@@ -1652,11 +1671,9 @@ function ConversationTurn({
   onRetry: () => void;
   onApprove: () => void;
 }) {
-  const lens = facetOption(LENS_OPTIONS, turn.facets.historiographicalLens);
-  const voice = facetOption(VOICE_OPTIONS, turn.facets.voice);
-  const worldview = facetOption(WORLDVIEW_OPTIONS, turn.facets.worldview);
   const headingId = `turn-${turn.id}-question`;
   const sourceScopeId = `turn-${turn.id}-sources`;
+  const sourceCount = turn.displayGroups.reduce((count, group) => count + group.source_numbers.length, 0);
 
   return (
     <article className={`conversation-turn is-${turn.status}`} id={`turn-${turn.id}`} aria-labelledby={headingId}>
@@ -1673,9 +1690,7 @@ function ConversationTurn({
               <strong>Archivist</strong>
               <small>Turn {turnNumber}</small>
               <span className="turn-facet-summary">
-                <span><i>Lens</i>{lens.label}</span>
-                <span><i>Voice</i>{voice.label}</span>
-                <span><i>Worldview</i>{worldview.label}</span>
+                <span><i>Style</i>{answerFacetSummary(turn.facets)}</span>
               </span>
             </div>
           </div>
@@ -1732,11 +1747,23 @@ function ConversationTurn({
                 sourceScopeId={sourceScopeId}
               />
             </div>
-            <DisplayGroups
-              title="Manuscript sources"
-              groups={turn.displayGroups}
-              sourceScopeId={sourceScopeId}
-            />
+            {turn.displayGroups.length ? (
+              <details className="turn-sources-disclosure">
+                <summary>
+                  <span>
+                    <BookOpen size={16} aria-hidden="true" />
+                    <strong>Manuscript sources</strong>
+                    <small>{sourceCount} {sourceCount === 1 ? "passage" : "passages"}</small>
+                  </span>
+                  <ChevronDown size={16} aria-hidden="true" />
+                </summary>
+                <DisplayGroups
+                  title="Manuscript sources"
+                  groups={turn.displayGroups}
+                  sourceScopeId={sourceScopeId}
+                />
+              </details>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -2010,7 +2037,11 @@ function openSource(source: SourceChunk, sourceScopeId?: string) {
   const details = anchor instanceof HTMLDetailsElement
     ? anchor
     : anchor?.closest<HTMLDetailsElement>("details");
-  if (details) details.open = true;
+  let disclosure = details;
+  while (disclosure) {
+    disclosure.open = true;
+    disclosure = disclosure.parentElement?.closest<HTMLDetailsElement>("details") ?? null;
+  }
   const summary = details?.querySelector<HTMLElement>("summary");
   summary?.focus({ preventScroll: true });
   const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
