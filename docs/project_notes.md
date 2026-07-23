@@ -4,15 +4,21 @@
 
 Michael supplied the authoritative July 6 DOCX for *Cradle of the Empire*. Its SHA-256 is
 `81d172186475e8f9a63070ceacb85cac0ffb411159b02cf4acc59fb78eedc3b8`. The deterministic
-offline preparation is staged and verified: 36 Markdown documents, 910 total chunks, 488
+preparation is active and verified: 36 Markdown documents, 910 total chunks, 488
 retrieval-eligible chunks, 34 Heading 1 sections, and 629 resolved footnotes. A matching
 594-page July 6 PDF was used only for secondary visual and pagination checks because its text
 is not identical to the newer DOCX.
 
-The reader still uses the April 1 corpus. Promotion is intentionally paused before embedding:
-the next step would send the 488 retrieval-eligible manuscript chunks to OpenAI's
-`text-embedding-3-small` endpoint. That data transfer requires explicit owner authorization.
-No manuscript text has left the machine and no embedding cost has been incurred during staging.
+After explicit owner authorization, the 488 retrieval-eligible chunks were embedded with
+`text-embedding-3-small` in 10 calls totaling 215,381 tokens. Archivist's local ledger estimates
+the indexing cost at `$0.00430762`. The active collection uses explicit L2 distance and matches
+the text-free corpus manifest, whose SHA-256 is
+`d5025ffe1b6b873a54cc2959535d2c8d10d3410bcf505366a45b2c8dcc5c1109`.
+
+The former April reader corpus remains recoverable under
+`old_manuscript/snapshots/2026-04-active-before-0706/`; a second pre-promotion holding copy is
+retained under `runtime/corpus-staging/0706/replaced-active/`. The shared Chroma store's nine
+non-reader collections were preserved with identical records and metadata.
 
 ## Deferred: characterize the current RAG before optimizing it
 

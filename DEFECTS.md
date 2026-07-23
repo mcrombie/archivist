@@ -71,8 +71,11 @@ Resolution and verification: added a deterministic OOXML preparation path that r
        text-free corpus manifest; added a budget-aware fresh-index builder that reopens and verifies
        persisted vectors; and added an offline promotion assembler that preserves every unrelated
        collection. Synthetic tests cover failure atomicity and a real local Chroma round trip.
-       The July 6 corpus passed two byte-identical offline preparations. Paid embedding and active
-       promotion remain paused pending explicit authorization to send manuscript chunks to OpenAI.
+       The July 6 corpus passed two byte-identical offline preparations. After explicit owner
+       authorization, 488 chunks were embedded in 10 tracked calls and the new corpus was activated
+       with exact ID, metadata, text-hash, vector, and L2 checks. All nine unrelated Chroma
+       collections retained identical records and metadata. The full backend suite passed against
+       the active corpus, and the production frontend build succeeded.
 
 ## [2026-07-22] Combined perspective prototype split into three prompt facets
 Phase/Brief: Phase 2 perspective-mode prototype, requested during Phase 1
