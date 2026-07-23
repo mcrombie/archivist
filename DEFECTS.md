@@ -58,6 +58,22 @@ Resolution and verification: completed API responses are recorded in a local SQL
        cover pricing, idempotency, aggregation, unknown models, and the enforcement boundary. No
        prompt, retrieval parameter, model setting, or manuscript context changed.
 
+## [2026-07-23] Authoritative DOCX ingest and safe index promotion were unspecified
+Phase/Brief: Phase 1 corpus replacement, before Brief 2
+Symptom: the repository could not mechanically prove that a supplied Word manuscript became the
+         reader-active Markdown, chunks, and vectors without losing footnotes or overwriting
+         unrelated project collections in the shared Chroma store.
+Cause: spec gap - the corpus contract defined the finished manifest but not Word body-order
+       extraction, structural end-matter mapping, note handling, staged paid embedding, rollback,
+       or preservation of non-reader Chroma collections.
+Resolution and verification: added a deterministic OOXML preparation path that rejects ambiguous
+       revisions, comments, unresolved notes, real endnotes, and malformed structure; added a
+       text-free corpus manifest; added a budget-aware fresh-index builder that reopens and verifies
+       persisted vectors; and added an offline promotion assembler that preserves every unrelated
+       collection. Synthetic tests cover failure atomicity and a real local Chroma round trip.
+       The July 6 corpus passed two byte-identical offline preparations. Paid embedding and active
+       promotion remain paused pending explicit authorization to send manuscript chunks to OpenAI.
+
 ## [2026-07-22] Combined perspective prototype split into three prompt facets
 Phase/Brief: Phase 2 perspective-mode prototype, requested during Phase 1
 Symptom: the combined perspective selector conflated historiographical framing, prose voice, and

@@ -1,11 +1,18 @@
 # Archivist Project Notes
 
-## Owner follow-up: replace the manuscript snapshot
+## Canonical manuscript status
 
-Before corpus or retrieval work resumes, Michael should provide or identify the authoritative,
-current manuscript for *Cradle of the Empire*. Archivist is still indexed from the April 1, 2026
-Markdown export. A clean re-ingest must be accompanied by the source/chunk hash manifest planned
-for Brief 2 so the application can identify exactly which manuscript version it is using.
+Michael supplied the authoritative July 6 DOCX for *Cradle of the Empire*. Its SHA-256 is
+`81d172186475e8f9a63070ceacb85cac0ffb411159b02cf4acc59fb78eedc3b8`. The deterministic
+offline preparation is staged and verified: 36 Markdown documents, 910 total chunks, 488
+retrieval-eligible chunks, 34 Heading 1 sections, and 629 resolved footnotes. A matching
+594-page July 6 PDF was used only for secondary visual and pagination checks because its text
+is not identical to the newer DOCX.
+
+The reader still uses the April 1 corpus. Promotion is intentionally paused before embedding:
+the next step would send the 488 retrieval-eligible manuscript chunks to OpenAI's
+`text-embedding-3-small` endpoint. That data transfer requires explicit owner authorization.
+No manuscript text has left the machine and no embedding cost has been incurred during staging.
 
 ## Deferred: characterize the current RAG before optimizing it
 
