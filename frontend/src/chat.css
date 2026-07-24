@@ -1472,6 +1472,28 @@ body {
   font-size: 13px;
 }
 
+.turn-error-details {
+  margin-top: 9px;
+  color: var(--chat-muted);
+  font-size: 11px;
+}
+
+.turn-error-details summary {
+  width: fit-content;
+  color: var(--chat-muted);
+  cursor: pointer;
+}
+
+.turn-error-details[open] {
+  display: grid;
+  gap: 4px;
+}
+
+.turn-error-details code {
+  color: var(--chat-text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .archivist-response {
   display: grid;
   gap: 9px;

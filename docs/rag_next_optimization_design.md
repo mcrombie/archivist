@@ -7,7 +7,11 @@ boundary; the legacy answer path remains callable
 
 ## Implementation status
 
-Version 1 is now implemented as `evidence-planned-v1` in the shared CLI/web answer pipeline.
+Version 1 was implemented as `evidence-planned-v1` in the shared CLI/web answer pipeline.
+The current `evidence-planned-v2` keeps that bounded-call design and adds conservative local
+normalization for redundant evidence mappings, relational-query decomposition that does not need
+an extra planner call, and durable text-free post-validation diagnostics.
+
 The implementation follows the bounded-call design in this document:
 
 - a follow-up resolver runs only when conversation history exists;

@@ -43,6 +43,109 @@ def ledger_path(request):
         pass
 
 
+def answer_run_diagnostics_payload(**overrides):
+    payload = {
+        "schema": "archivist.answer_run_diagnostics/1",
+        "cohort": {
+            "rag_policy_version": "evidence-planned-v2",
+            "query_planner_prompt_version": "query-planner-v2",
+            "coverage_prompt_version": "evidence-coverage-v1",
+            "normalizer_version": "evidence-coverage-normalizer/1",
+            "coverage_instructions_sha256": "a" * 64,
+            "coverage_schema_sha256": "b" * 64,
+            "generator_model": "gpt-5.6-sol",
+            "generator_reasoning_effort": "high",
+            "generator_verbosity": "low",
+        },
+        "answer_status": "generation_contract_failed",
+        "evidence_decision": "direct_answer",
+        "validation_result": "invalid",
+        "validation_error_code": "citation_source_mismatch",
+        "repair_applied": False,
+        "repair_codes": [],
+        "stage_timings_ms": {
+            "retrieval": 12.5,
+            "answer_generation": 240.125,
+            "answer_validation": 0.75,
+            "total": 260.0,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path):
+    ledger = UsageLedger(ledger_path)
+    payload = answer_run_diagnostics_payload()
+
+    assert ledger.record_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+        diagnostics=payload,
+        recorded_at="2026-07-24T12:00:00+00:00",
+    )
+    stored = ledger.get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+    )
+
+    assert stored is not None
+    assert stored["validation_error_code"] == "citation_source_mismatch"
+    assert stored["cohort"]["rag_policy_version"] == "evidence-planned-v2"
+    assert stored["stage_timings_ms"]["answer_generation"] == 240.125
+    assert "question" not in str(stored).casefold()
+    first_run_id = stored["run_id"]
+
+    repaired = answer_run_diagnostics_payload(
+        answer_status="answered",
+        validation_result="valid",
+        validation_error_code=None,
+        repair_applied=True,
+        repair_codes=["source_mapping_mismatch"],
+    )
+    assert ledger.record_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+        diagnostics=repaired,
+    )
+    updated = ledger.get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+    )
+    assert updated is not None
+    assert updated["run_id"] != first_run_id
+    assert updated["answer_status"] == "answered"
+    assert updated["repair_codes"] == ["source_mapping_mismatch"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        answer_run_diagnostics_payload(answer_text="must not persist"),
+        answer_run_diagnostics_payload(stage_timings_ms={"retrieval": -1}),
+        answer_run_diagnostics_payload(
+            validation_result="valid",
+            validation_error_code="citation_source_mismatch",
+        ),
+    ],
+)
+def test_answer_run_diagnostics_reject_content_and_inconsistent_metadata(
+    ledger_path,
+    payload,
+):
+    with pytest.raises(ValueError):
+        UsageLedger(ledger_path).record_answer_run_diagnostics(
+            project_id="current",
+            conversation_id="conversation-1",
+            turn_id="turn-1",
+            diagnostics=payload,
+        )
+
+
 def test_versioned_pricing_handles_cached_writes_and_reasoning_without_double_charge():
     usage = TokenUsage(
         input_tokens=1_000,
@@ -472,12 +575,74 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["conversation_id"] == "conversation-1"
     assert response["turn_id"] == "turn-1"
     assert response["resolved_query"] == "Standalone question?"
+    run_diagnostics = dict(response["run_diagnostics"])
+    cohort = run_diagnostics.pop("cohort")
+    assert cohort["rag_policy_version"] == "evidence-planned-v2"
+    assert cohort["query_planner_prompt_version"] == "query-planner-v2"
+    assert len(cohort["coverage_instructions_sha256"]) == 64
+    assert run_diagnostics == {
+        "schema": "archivist.answer_run_diagnostics/1",
+        "answer_status": "answered",
+        "evidence_decision": "direct_answer",
+        "validation_result": "not_run",
+        "validation_error_code": None,
+        "repair_applied": False,
+        "repair_codes": [],
+        "stage_timings_ms": {},
+    }
     assert response["costs"]["turn_usd"] > 0
     assert response["costs"]["turn_usd"] == response["costs"]["conversation_usd"]
     assert {item["operation"] for item in response["costs"]["operations"]} == {
         "followup_resolution",
         "answer_generation",
     }
+    persisted = UsageLedger().get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+    )
+    assert persisted is not None
+    assert persisted["answer_status"] == "answered"
+    assert persisted["validation_result"] == "not_run"
+
+
+def test_question_api_persists_explicit_legacy_cohort(monkeypatch, ledger_path):
+    monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(ledger_path))
+
+    def fake_answer(*_args, **_kwargs):
+        return SimpleNamespace(
+            answer="Legacy answer.",
+            final_chunks=[],
+            status="legacy_answer",
+            evidence_decision="legacy_unclassified",
+            resolved_question="Legacy question?",
+            diagnostics={},
+        )
+
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    request = web_api.QuestionRequest(
+        question="Legacy question?",
+        conversation_id="legacy-conversation",
+        turn_id="legacy-turn",
+    )
+
+    response = web_api.question("custom-project", request)
+
+    cohort = response["run_diagnostics"]["cohort"]
+    assert cohort["rag_policy_version"] == "legacy-answer-v1"
+    assert cohort["query_planner_prompt_version"] == "not-applicable"
+    assert cohort["coverage_prompt_version"] == "not-applicable"
+    assert cohort["normalizer_version"] == "not-applicable"
+    assert cohort["coverage_instructions_sha256"] == "not-applicable"
+    assert cohort["coverage_schema_sha256"] == "not-applicable"
+
+    persisted = UsageLedger().get_answer_run_diagnostics(
+        project_id="custom-project",
+        conversation_id="legacy-conversation",
+        turn_id="legacy-turn",
+    )
+    assert persisted is not None
+    assert persisted["cohort"] == cohort
 
 
 def test_question_api_hard_stop_and_explicit_override(monkeypatch, ledger_path):

@@ -217,6 +217,57 @@ def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch)
     assert {
         key: calls[0][key] for key in ("model", "reasoning", "text")
     } == GENERATOR_SETTINGS.responses_create_kwargs()
+    run_diagnostics = rag_pipeline.answer_run_diagnostics(result)
+    assert run_diagnostics["validation_result"] == "valid"
+    assert run_diagnostics["validation_error_code"] is None
+    assert {
+        "corpus_integrity",
+        "query_planning",
+        "retrieval",
+        "evidence_gate",
+        "context_preparation",
+        "answer_generation",
+        "answer_validation",
+        "pipeline_total",
+    }.issubset(run_diagnostics["stage_timings_ms"])
+    assert all(value >= 0 for value in run_diagnostics["stage_timings_ms"].values())
+
+
+def test_homepage_relationship_question_decomposes_locally_and_reaches_answer(
+    monkeypatch,
+):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    calls: list[str] = []
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        return SimpleNamespace(
+            output_parsed=supported_answer(("R1", "R2", "R3")),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="How does the manuscript connect tobacco to labor?",
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert calls == ["answer_generation"]
+    assert result.status == "answered"
+    assert [facet.search_query for facet in result.plan.facets] == [
+        "How does the manuscript connect tobacco to labor?",
+        "tobacco context",
+        "labor context",
+        "tobacco labor connect",
+    ]
+    assert "Synthetic supported point 3" in result.answer
 
 
 def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
@@ -346,6 +397,10 @@ def test_invalid_structured_answer_fails_closed_without_retry(monkeypatch):
     assert calls == ["answer_generation"]
     assert result.status == "generation_contract_failed"
     assert "validated source-grounded answer" in result.answer
+    run_diagnostics = rag_pipeline.answer_run_diagnostics(result)
+    assert run_diagnostics["validation_result"] == "invalid"
+    assert run_diagnostics["validation_error_code"] == "source_number_out_of_range"
+    assert "validated source-grounded answer" not in str(run_diagnostics)
 
 
 def test_answer_input_contains_resolved_structure_not_prior_assistant_prose(

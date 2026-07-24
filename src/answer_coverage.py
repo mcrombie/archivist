@@ -28,6 +28,7 @@ __all__ = [
     "ALL_UNSUPPORTED_MESSAGE",
     "CITATION_GRAMMAR",
     "EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA",
+    "EVIDENCE_COVERAGE_NORMALIZER_VERSION",
     "EVIDENCE_COVERAGE_RENDERER_VERSION",
     "EVIDENCE_COVERAGE_SCHEMA",
     "GENERATION_CONTRACT_FAILED_MESSAGE",
@@ -57,8 +58,9 @@ __all__ = [
 
 
 EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/1"
-EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/1"
+EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/2"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
+EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/1"
 
 MAX_REQUIREMENTS = 8
 MAX_PREMISES = 2
@@ -291,10 +293,12 @@ class PremiseStatusCounts(_ContractModel):
 
 
 class CoverageDiagnosticSummary(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage_diagnostics/1"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage_diagnostics/2"] = Field(alias="schema")
     renderer_version: Literal["evidence-coverage-renderer/1"]
     validation_result: DiagnosticValidationResult
     error_code: CoverageValidationErrorCode | None
+    repair_applied: bool
+    repair_codes: tuple[CoverageValidationErrorCode, ...]
     requirement_ids: tuple[Identifier, ...]
     premise_ids: tuple[Identifier, ...]
     requirement_count: int = Field(ge=0, le=MAX_REQUIREMENTS)
@@ -323,8 +327,14 @@ class EvidenceCoverageResult(_ContractModel):
 class CoverageContractError(ValueError):
     """A fail-closed semantic contract error with a stable, text-free code."""
 
-    def __init__(self, code: CoverageValidationErrorCode):
+    def __init__(
+        self,
+        code: CoverageValidationErrorCode,
+        *,
+        repair_codes: Sequence[CoverageValidationErrorCode] = (),
+    ):
         self.code = code
+        self.repair_codes = tuple(dict.fromkeys(repair_codes))
         super().__init__(code.value)
 
 
@@ -445,33 +455,23 @@ def validate_evidence_coverage(
         elif decision.source_numbers:
             raise CoverageContractError(CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH)
         if decision.status is PremiseStatus.NOT_APPLICABLE:
-            raise CoverageContractError(
-                CoverageValidationErrorCode.PREMISE_STATUS_INVALID
-            )
+            raise CoverageContractError(CoverageValidationErrorCode.PREMISE_STATUS_INVALID)
         if decision.status is PremiseStatus.CONTRADICTED:
             if decision.correction_unit_id is None:
-                raise CoverageContractError(
-                    CoverageValidationErrorCode.PREMISE_CORRECTION_MISSING
-                )
+                raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_MISSING)
             correction = units_by_id.get(decision.correction_unit_id)
             if (
                 correction is None
                 or correction.role is not AnswerUnitRole.PREMISE_CORRECTION
-                or not set(decision.source_numbers).issubset(
-                    correction.source_numbers
-                )
+                or not set(decision.source_numbers).issubset(correction.source_numbers)
             ):
-                raise CoverageContractError(
-                    CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID
-                )
+                raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID)
             if decision.correction_unit_id != first_rendered_unit_id:
                 raise CoverageContractError(
                     CoverageValidationErrorCode.PREMISE_CORRECTION_NOT_FIRST
                 )
         elif decision.correction_unit_id is not None:
-            raise CoverageContractError(
-                CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID
-            )
+            raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID)
 
     coverage_by_requirement = {record.requirement_id: record for record in answer.coverage}
     for record in answer.coverage:
@@ -563,10 +563,13 @@ def render_evidence_coverage(
 
 def coverage_diagnostic_summary(
     validated: ValidatedEvidenceCoverage,
+    *,
+    repair_codes: Sequence[CoverageValidationErrorCode] = (),
 ) -> CoverageDiagnosticSummary:
     """Return a trace-safe summary with no generated or question-derived prose."""
 
     answer = validated.answer
+    normalized_repair_codes = tuple(dict.fromkeys(repair_codes))
     coverage_counts = Counter(record.status for record in answer.coverage)
     premise_counts = Counter(record.status for record in answer.premise_decisions)
     return CoverageDiagnosticSummary(
@@ -574,6 +577,8 @@ def coverage_diagnostic_summary(
         renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
         validation_result=DiagnosticValidationResult.VALID,
         error_code=None,
+        repair_applied=bool(normalized_repair_codes),
+        repair_codes=normalized_repair_codes,
         requirement_ids=validated.context.requirement_ids,
         premise_ids=validated.context.premise_ids,
         requirement_count=len(validated.context.requirement_ids),
@@ -666,9 +671,14 @@ def process_evidence_coverage(
             error_code=CoverageValidationErrorCode.GENERATION_REFUSED,
         )
 
+    repair_codes: tuple[CoverageValidationErrorCode, ...] = ()
     try:
-        validated = validate_evidence_coverage(
+        normalized_payload, repair_codes = _normalize_mechanical_contract(
             payload,
+            context=context,
+        )
+        validated = validate_evidence_coverage(
+            normalized_payload,
             requirement_ids=context.requirement_ids,
             premise_ids=context.premise_ids,
             source_count=context.source_count,
@@ -677,6 +687,7 @@ def process_evidence_coverage(
         return _contract_failure_result(
             context=context,
             error_code=error.code,
+            repair_codes=error.repair_codes or repair_codes,
         )
 
     rendered = render_evidence_coverage(
@@ -694,7 +705,10 @@ def process_evidence_coverage(
         ),
         answer=rendered,
         error_code=None,
-        diagnostics=coverage_diagnostic_summary(validated),
+        diagnostics=coverage_diagnostic_summary(
+            validated,
+            repair_codes=repair_codes,
+        ),
     )
 
 
@@ -729,6 +743,151 @@ def _parse_payload(
         return EvidenceCoverageAnswer.model_validate(payload)
     except ValidationError:
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
+
+
+def _normalize_mechanical_contract(
+    payload: EvidenceCoverageAnswer | Mapping[str, Any],
+    *,
+    context: CoverageValidationContext,
+) -> tuple[EvidenceCoverageAnswer, tuple[CoverageValidationErrorCode, ...]]:
+    """Canonicalize only redundant ordering and derived coverage mappings.
+
+    Model output occasionally contains the right factual units and citation
+    sets but serializes redundant bookkeeping in a different order or with a
+    stale derived mapping.  Repairing those fields cannot add a claim or a
+    source.  Every semantic field remains untouched, and malformed/unknown
+    identifiers, invalid source numbers, unsupported claims, and citation-set
+    disagreements are deliberately left for the strict validator to reject
+    with their precise contract code.
+    """
+
+    answer = _parse_payload(payload)
+    repair_codes: list[CoverageValidationErrorCode] = []
+    requirement_order = {
+        requirement_id: index for index, requirement_id in enumerate(context.requirement_ids)
+    }
+
+    normalized_units: list[AnswerUnit] = []
+    for unit in answer.answer_units:
+        requirement_ids = unit.requirement_ids
+        if not _has_duplicates(requirement_ids) and all(
+            requirement_id in requirement_order for requirement_id in requirement_ids
+        ):
+            canonical_requirement_ids = tuple(
+                sorted(requirement_ids, key=requirement_order.__getitem__)
+            )
+            if canonical_requirement_ids != requirement_ids:
+                repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_REQUIREMENT_ID)
+                requirement_ids = canonical_requirement_ids
+
+        source_numbers = unit.source_numbers
+        try:
+            cited_numbers = parse_citation_numbers(unit.text)
+        except CoverageContractError as error:
+            raise CoverageContractError(
+                error.code,
+                repair_codes=repair_codes,
+            ) from None
+        canonical_citations = _ordered_unique(cited_numbers)
+        if not _has_duplicates(source_numbers) and set(source_numbers) == set(canonical_citations):
+            if canonical_citations != source_numbers:
+                repair_codes.append(CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH)
+            source_numbers = canonical_citations
+
+        normalized_units.append(
+            unit.model_copy(
+                update={
+                    "requirement_ids": requirement_ids,
+                    "source_numbers": source_numbers,
+                }
+            )
+        )
+
+    answer_units = tuple(normalized_units)
+    known_unit_ids = {unit.unit_id for unit in answer_units}
+
+    coverage = _reorder_exact_records(
+        answer.coverage,
+        expected_ids=context.requirement_ids,
+        id_attribute="requirement_id",
+    )
+    if coverage != answer.coverage:
+        repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_REQUIREMENT_ID)
+    normalized_coverage: list[RequirementCoverage] = []
+    for record in coverage:
+        # An unsupported record with any claim/source association is never
+        # repairable: the strict validator must reject it.
+        if record.status is RequirementStatus.UNSUPPORTED:
+            normalized_coverage.append(record)
+            continue
+
+        mappings_are_safe_to_derive = (
+            not _has_duplicates(record.unit_ids)
+            and all(unit_id in known_unit_ids for unit_id in record.unit_ids)
+            and not _has_duplicates(record.source_numbers)
+            and all(
+                1 <= source_number <= context.source_count
+                for source_number in record.source_numbers
+            )
+        )
+        if not mappings_are_safe_to_derive:
+            normalized_coverage.append(record)
+            continue
+
+        mapped_units = tuple(
+            unit for unit in answer_units if record.requirement_id in unit.requirement_ids
+        )
+        mapped_unit_ids = tuple(unit.unit_id for unit in mapped_units)
+        mapped_source_numbers = _ordered_unique(
+            source_number for unit in mapped_units for source_number in unit.source_numbers
+        )
+        if not record.unit_ids or not record.source_numbers:
+            if record.unit_ids != mapped_unit_ids or record.source_numbers != mapped_source_numbers:
+                repair_codes.append(CoverageValidationErrorCode.STATUS_UNIT_MISMATCH)
+        else:
+            if record.unit_ids != mapped_unit_ids:
+                repair_codes.append(CoverageValidationErrorCode.UNIT_MAPPING_MISMATCH)
+            if record.source_numbers != mapped_source_numbers:
+                repair_codes.append(CoverageValidationErrorCode.SOURCE_MAPPING_MISMATCH)
+        normalized_coverage.append(
+            record.model_copy(
+                update={
+                    "unit_ids": mapped_unit_ids,
+                    "source_numbers": mapped_source_numbers,
+                }
+            )
+        )
+
+    premise_decisions = _reorder_exact_records(
+        answer.premise_decisions,
+        expected_ids=context.premise_ids,
+        id_attribute="premise_id",
+    )
+    if premise_decisions != answer.premise_decisions:
+        repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_PREMISE_ID)
+    normalized_answer = answer.model_copy(
+        update={
+            "premise_decisions": premise_decisions,
+            "coverage": tuple(normalized_coverage),
+            "answer_units": answer_units,
+        }
+    )
+    return normalized_answer, tuple(dict.fromkeys(repair_codes))
+
+
+def _reorder_exact_records(
+    records: Sequence[Any],
+    *,
+    expected_ids: tuple[str, ...],
+    id_attribute: str,
+) -> tuple[Any, ...]:
+    """Return trusted-input order only when the record identity set is exact."""
+
+    actual_ids = tuple(getattr(record, id_attribute) for record in records)
+    if _has_duplicates(actual_ids) or set(actual_ids) != set(expected_ids):
+        return tuple(records)
+    by_id = {getattr(record, id_attribute): record for record in records}
+    return tuple(by_id[record_id] for record_id in expected_ids)
 
 
 def _validate_exact_ids(
@@ -808,12 +967,16 @@ def _empty_diagnostic_summary(
     *,
     validation_result: DiagnosticValidationResult,
     error_code: CoverageValidationErrorCode | None,
+    repair_codes: Sequence[CoverageValidationErrorCode] = (),
 ) -> CoverageDiagnosticSummary:
+    normalized_repair_codes = tuple(dict.fromkeys(repair_codes))
     return CoverageDiagnosticSummary(
         schema=EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA,
         renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
         validation_result=validation_result,
         error_code=error_code,
+        repair_applied=bool(normalized_repair_codes),
+        repair_codes=normalized_repair_codes,
         requirement_ids=context.requirement_ids,
         premise_ids=context.premise_ids,
         requirement_count=len(context.requirement_ids),
@@ -843,13 +1006,17 @@ def _contract_failure_result(
     *,
     context: CoverageValidationContext | None,
     error_code: CoverageValidationErrorCode,
+    repair_codes: Sequence[CoverageValidationErrorCode] = (),
 ) -> EvidenceCoverageResult:
+    normalized_repair_codes = tuple(dict.fromkeys(repair_codes))
     if context is None:
         diagnostics = CoverageDiagnosticSummary(
             schema=EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA,
             renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
             validation_result=DiagnosticValidationResult.INVALID,
             error_code=error_code,
+            repair_applied=bool(normalized_repair_codes),
+            repair_codes=normalized_repair_codes,
             requirement_ids=(),
             premise_ids=(),
             requirement_count=0,
@@ -878,6 +1045,7 @@ def _contract_failure_result(
             context,
             validation_result=DiagnosticValidationResult.INVALID,
             error_code=error_code,
+            repair_codes=normalized_repair_codes,
         )
     return EvidenceCoverageResult(
         status=CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED,

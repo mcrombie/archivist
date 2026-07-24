@@ -45,6 +45,29 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-24] A source-grounded draft was discarded without an actionable diagnosis
+Phase/Brief: Phase 1 post-optimization reader testing
+Symptom: a question recommended on the opening screen retrieved eight passages and incurred a full
+answer-generation charge, but the interface displayed the generic generation-contract failure as
+though it were the manuscript's answer. The local usage ledger showed substantial generated output,
+while the application did not persist the exact validation rule that rejected it.
+Cause: other and cohort opening — the evidence-coverage validator treated safe redundant
+bookkeeping mismatches like factual grounding failures, the relational request had only its
+unchanged original retrieval lane, and post-validation diagnostics stopped inside the backend.
+Resolution and verification: opened `evidence-planned-v2`. Relational prompts now receive separate
+local concept and connection lanes without a paid planner call. A conservative normalizer may
+reorder trusted IDs and recompute redundant mappings only when factual units and exact citation
+sets are unchanged; unsupported claims, unknown sources, malformed citations, and citation-set
+changes still fail closed. Exact validation and repair codes plus stage timings are returned and
+persisted with the relevant policy, prompt, normalizer, and generator cohort identifiers in a
+text-free turn-level ledger record. The chat renders a rejected generation as an error with
+collapsed technical details instead of archival answer paper. Homepage prompts are now data-backed
+regression inputs. Legacy custom-project turns carry an explicit `legacy-answer-v1` cohort rather
+than being misclassified as v2. The full offline backend suite passes with 296 tests and one
+skipped, Ruff lint passes, and the frontend production build passes. No OpenAI call was made, no
+gold entry or metric definition changed, and this cohort is not claimed better until a paid
+confirmation run.
+
 ## [2026-07-23] Opening-screen commit absorbed an unrelated retrieval regression
 Phase/Brief: Phase 1 paired practical rerun preflight
 Symptom: clean commit `c1ab639` failed three backend tests: Answer retrieval traces no longer

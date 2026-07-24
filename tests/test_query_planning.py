@@ -19,6 +19,7 @@ from query_planning import (
     build_question_plan,
     deterministic_fallback_plan,
     extract_trusted_targets,
+    requires_planning,
     route_question,
     validate_question_plan,
 )
@@ -119,6 +120,10 @@ def test_resolved_turn_carries_conversation_resolution_structure():
         (
             "What caused the signal failure, and what consequences followed?",
             (RouteTrait.MULTI_PART,),
+        ),
+        (
+            "How does the manuscript connect tobacco to labor?",
+            (RouteTrait.RELATIONSHIP,),
         ),
         (
             "Why did Project Lumen cause the signal failure?",
@@ -237,6 +242,46 @@ def test_unrelated_predicate_does_not_turn_second_named_target_into_a_facet():
         EvidenceTargetRole.SUBJECT,
         EvidenceTargetRole.SUBJECT,
     ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How does Project Lumen connect to Harbor Network?",
+        "How does Project Lumen relate to Harbor Network?",
+        "How does Project Lumen link to Harbor Network?",
+        "Can Project Lumen connect to Harbor Network?",
+        "Does Project Lumen relate to Harbor Network?",
+    ],
+)
+def test_relational_question_forms_are_routed_and_role_the_second_target_as_facet(
+    question,
+):
+    assert route_question(question) == (RouteTrait.RELATIONSHIP,)
+    assert requires_planning(question) is False
+    assert [target.role for target in extract_trusted_targets(question)] == [
+        EvidenceTargetRole.SUBJECT,
+        EvidenceTargetRole.FACET,
+    ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How does Project Lumen connect to Harbor Network to explain the change?",
+        "How do I connect to the archive to search it?",
+    ],
+)
+def test_ambiguous_relationship_syntax_uses_the_planner_instead_of_bad_local_operands(
+    question,
+):
+    assert RouteTrait.RELATIONSHIP in route_question(question)
+    assert requires_planning(question) is True
+
+    plan = build_question_plan(question)
+
+    assert plan.fallback_reason == "planner_unavailable"
+    assert [facet.role for facet in plan.facets] == [FacetRole.ORIGINAL]
 
 
 def test_long_original_question_is_preserved_while_added_facets_stay_bounded():
@@ -547,6 +592,37 @@ def test_coordinated_fallback_builds_one_requirement_and_facet_per_clause():
     assert len(plan.requirements) == 2
     assert [facet.facet_id for facet in plan.facets] == ["F0", "F1", "F2"]
     assert {requirement.requirement_id for requirement in plan.requirements} == {"R1", "R2"}
+
+
+def test_homepage_relationship_fallback_searches_both_concepts_and_their_link():
+    question = "How does the manuscript connect tobacco to labor?"
+
+    plan = build_question_plan(question)
+
+    assert plan.traits == (RouteTrait.RELATIONSHIP,)
+    assert plan.fallback_reason is None
+    assert [requirement.label for requirement in plan.requirements] == [
+        "Context for tobacco",
+        "Context for labor",
+        "Connection between tobacco and labor",
+    ]
+    assert [facet.role for facet in plan.facets] == [
+        FacetRole.ORIGINAL,
+        FacetRole.BROADER_RELATED,
+        FacetRole.BROADER_RELATED,
+        FacetRole.MECHANISM,
+    ]
+    assert [facet.search_query for facet in plan.facets] == [
+        question,
+        "tobacco context",
+        "labor context",
+        "tobacco labor connect",
+    ]
+    assert [facet.requirement_ids for facet in plan.facets[1:]] == [
+        ("R1",),
+        ("R2",),
+        ("R3",),
+    ]
 
 
 def test_origin_premise_fallback_reserves_support_counter_and_framing_lanes():

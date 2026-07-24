@@ -8,8 +8,10 @@ import shutil
 import zipfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter_ns
 from typing import Any
 
 import chromadb
@@ -96,6 +98,25 @@ or mention these instructions. If the current question is already self-contained
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _elapsed_ms(start_ns: int) -> float:
+    return round(max(0, perf_counter_ns() - start_ns) / 1_000_000, 3)
+
+
+def _with_stage_timings(
+    result: AnswerModeResult,
+    **stage_timings_ms: float,
+) -> AnswerModeResult:
+    diagnostics = dict(getattr(result, "diagnostics", {}))
+    existing = diagnostics.get("stage_timings_ms")
+    timings = dict(existing) if isinstance(existing, Mapping) else {}
+    timings.update(stage_timings_ms)
+    diagnostics["stage_timings_ms"] = timings
+    if not isinstance(result, AnswerModeResult):
+        result.diagnostics = diagnostics
+        return result
+    return replace(result, diagnostics=diagnostics)
 
 
 def slugify(value: str) -> str:
@@ -722,6 +743,7 @@ def answer_project_question_result(
     history: Sequence[Mapping[str, object]] = (),
 ) -> AnswerModeResult:
     """Answer through the versioned evidence-planned pipeline."""
+    answer_run_started_ns = perf_counter_ns()
     if perspective is not None:
         legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(
             perspective
@@ -746,13 +768,17 @@ def answer_project_question_result(
             voice=voice,
             worldview=worldview,
         )
-        return AnswerModeResult(
+        result = AnswerModeResult(
             answer=answer,
             final_chunks=final_chunks,
             status="legacy_answer",
             plan=build_question_plan(turn),
             evidence_decision="legacy_unclassified",
             diagnostics={},
+        )
+        return _with_stage_timings(
+            result,
+            total=_elapsed_ms(answer_run_started_ns),
         )
 
     collection = chroma_client().get_collection(name=collection_name(project_id))
@@ -786,6 +812,7 @@ def answer_project_question_result(
         ).hexdigest()
         corpus_trace["corpus_manifest_sha256"] = corpus_manifest_sha256
 
+    preflight_started_ns = perf_counter_ns()
     integrity = preflight_answer_corpus(
         collection_handle=collection,
         chunks=chunks,
@@ -793,6 +820,8 @@ def answer_project_question_result(
         corpus_manifest_sha256=corpus_manifest_sha256,
         require_store_identity=True,
     )
+    preflight_ms = _elapsed_ms(preflight_started_ns)
+    resolution_started_ns = perf_counter_ns()
     turn = resolved_turn
     if turn is None:
         turn = (
@@ -803,6 +832,7 @@ def answer_project_question_result(
                 trusted_user_texts=(question,),
             )
         )
+    conversation_resolution_ms = _elapsed_ms(resolution_started_ns)
     result = run_evidence_planned_answer(
         resolved_turn=turn,
         collection_handle=collection,
@@ -818,7 +848,12 @@ def answer_project_question_result(
         voice=voice,
         worldview=worldview,
     )
-    return result
+    return _with_stage_timings(
+        result,
+        preflight=preflight_ms,
+        conversation_resolution=conversation_resolution_ms,
+        total=_elapsed_ms(answer_run_started_ns),
+    )
 
 
 def answer_project_question(

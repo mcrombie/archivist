@@ -52,6 +52,7 @@ import {
 } from "./api";
 import { VibeControl } from "./VibeControl";
 import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
+import openingQuestions from "./openingQuestions.json";
 
 type AppStage = "loading" | "unavailable" | "question";
 type Notice = { type: "error" | "success" | "info"; text: string } | null;
@@ -82,16 +83,7 @@ type GuidedStartRoute = {
   choices: ReadonlyArray<GuidedStartChoice>;
 };
 
-const OPENING_QUESTIONS: ReadonlyArray<OpeningQuestion> = [
-  {
-    label: "Meet a person",
-    question: "Who was Edwin Sandys, and what did he do?"
-  },
-  {
-    label: "Trace a theme",
-    question: "How does the manuscript connect tobacco to labor?"
-  }
-];
+const OPENING_QUESTIONS: ReadonlyArray<OpeningQuestion> = openingQuestions;
 
 const GUIDED_START_ROUTES: Record<GuidedStartIntent, GuidedStartRoute> = {
   person: {
@@ -813,10 +805,13 @@ type ChatTurn = {
   facets: AnswerFacets;
   status: ChatTurnStatus;
   answer: string;
+  answerStatus?: string;
   resolvedQuery?: string;
   sources: SourceChunk[];
   displayGroups: DisplayGroup[];
   error?: string;
+  validationErrorCode?: string;
+  stageTimingsMs?: Record<string, number>;
   budgetBlocked?: boolean;
   turnCostUsd?: number;
 };
@@ -1537,10 +1532,13 @@ function QuestionMode({
       );
       if (result.costs) setCostSummary(result.costs);
       else void refreshCostSummary();
+      const validationFailed = result.answer_status === "generation_contract_failed";
+      const pipelineFailed = validationFailed || result.answer_status === "corpus_integrity_failed";
       setTurns((current) => current.map((turn) => turn.id === turnId ? {
         ...turn,
-        status: "complete",
-        answer: result.answer,
+        status: pipelineFailed ? "error" : "complete",
+        answer: pipelineFailed ? "" : result.answer,
+        answerStatus: result.answer_status,
         resolvedQuery: result.resolved_query,
         facets: {
           historiographicalLens: result.historiographical_lens,
@@ -1549,7 +1547,13 @@ function QuestionMode({
         },
         sources: result.sources,
         displayGroups: result.display_groups,
-        error: undefined,
+        error: validationFailed
+          ? "Relevant passages were found, but the generated response did not pass Archivist's evidence checks. No answer was presented as manuscript-grounded."
+          : pipelineFailed
+            ? result.answer
+            : undefined,
+        validationErrorCode: result.run_diagnostics.validation_error_code ?? undefined,
+        stageTimingsMs: result.run_diagnostics.stage_timings_ms,
         budgetBlocked: false,
         turnCostUsd: result.costs?.turn_usd
       } : turn));
@@ -1616,6 +1620,9 @@ function QuestionMode({
       ...candidate,
       status: "pending",
       error: undefined,
+      answerStatus: undefined,
+      validationErrorCode: undefined,
+      stageTimingsMs: undefined,
       budgetBlocked: false
     } : candidate));
     scrollToTurn(turnId, false);
@@ -2059,8 +2066,28 @@ function ConversationTurn({
           <div className="turn-error" role="alert">
             <AlertCircle size={18} />
             <div>
-              <strong>{turn.budgetBlocked ? "The local monthly cost limit stopped this request." : "Archivist could not complete this answer."}</strong>
+              <strong>
+                {turn.budgetBlocked
+                  ? "The local monthly cost limit stopped this request."
+                  : turn.answerStatus === "generation_contract_failed"
+                    ? "Archivist rejected an unverified response."
+                    : "Archivist could not complete this answer."}
+              </strong>
               <p>{turn.error}</p>
+              {turn.validationErrorCode || turn.turnCostUsd !== undefined ? (
+                <details className="turn-error-details">
+                  <summary>Technical details</summary>
+                  {turn.validationErrorCode ? (
+                    <span>Validation code: <code>{turn.validationErrorCode}</code></span>
+                  ) : null}
+                  {turn.stageTimingsMs?.total !== undefined ? (
+                    <span>Total time: {(turn.stageTimingsMs.total / 1000).toFixed(1)} seconds</span>
+                  ) : null}
+                  {turn.turnCostUsd !== undefined ? (
+                    <span>Estimated API cost: {formatTurnCost(turn.turnCostUsd)}</span>
+                  ) : null}
+                </details>
+              ) : null}
             </div>
             {turn.budgetBlocked ? (
               <button type="button" onClick={onApprove}>
@@ -2070,7 +2097,7 @@ function ConversationTurn({
             ) : (
               <button type="button" onClick={onRetry}>
                 <RotateCcw size={15} />
-                Try again
+                {turn.answerStatus === "generation_contract_failed" ? "Retry request" : "Try again"}
               </button>
             )}
           </div>

@@ -26,6 +26,7 @@ from perspectives import (
     Worldview,
     settings_for_legacy_perspective,
 )
+from rag_pipeline import answer_run_diagnostics
 
 from web_project import (
     BASE_DIR,
@@ -255,6 +256,16 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             resolved_query = answer_result.resolved_question
             answer = answer_result.answer
             chunks = answer_result.final_chunks
+            run_diagnostics = answer_run_diagnostics(answer_result)
+        try:
+            ledger.record_answer_run_diagnostics(
+                project_id=project_id,
+                conversation_id=request.conversation_id,
+                turn_id=request.turn_id,
+                diagnostics=run_diagnostics,
+            )
+        except Exception:
+            logger.exception("Could not persist text-free answer-run diagnostics")
         try:
             costs = ledger.summary(
                 project_id=project_id,
@@ -268,6 +279,7 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             "answer": answer,
             "answer_status": answer_result.status,
             "evidence_decision": answer_result.evidence_decision,
+            "run_diagnostics": run_diagnostics,
             "resolved_query": resolved_query,
             "conversation_id": request.conversation_id,
             "turn_id": request.turn_id,

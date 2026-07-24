@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
+import math
 import os
+import re
 import sqlite3
 from collections.abc import Iterator, Mapping
 from contextlib import closing, contextmanager
@@ -20,6 +23,38 @@ PRICING_VERSION = "2026-07-22"
 CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
 TOKENS_PER_MILLION = Decimal("1000000")
+ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/1"
+ANSWER_RUN_TIMING_KEYS = frozenset(
+    {
+        "preflight",
+        "conversation_resolution",
+        "corpus_integrity",
+        "query_planning",
+        "retrieval",
+        "evidence_gate",
+        "context_preparation",
+        "answer_generation",
+        "answer_validation",
+        "pipeline_total",
+        "total",
+    }
+)
+ANSWER_RUN_COHORT_KEYS = frozenset(
+    {
+        "rag_policy_version",
+        "query_planner_prompt_version",
+        "coverage_prompt_version",
+        "normalizer_version",
+        "coverage_instructions_sha256",
+        "coverage_schema_sha256",
+        "generator_model",
+        "generator_reasoning_effort",
+        "generator_verbosity",
+    }
+)
+_DIAGNOSTIC_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
+_COHORT_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +317,108 @@ def _nano_from_usd(value: Decimal | float | int | str) -> int:
     return int(nano.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+def _diagnostic_code(value: object, *, nullable: bool = False) -> str | None:
+    if value is None and nullable:
+        return None
+    if not isinstance(value, str) or _DIAGNOSTIC_CODE_PATTERN.fullmatch(value) is None:
+        raise ValueError("answer-run diagnostics contain an invalid code")
+    return value
+
+
+def _normalized_answer_run_diagnostics(
+    diagnostics: Mapping[str, object],
+) -> dict[str, object]:
+    allowed_keys = {
+        "schema",
+        "cohort",
+        "answer_status",
+        "evidence_decision",
+        "validation_result",
+        "validation_error_code",
+        "repair_applied",
+        "repair_codes",
+        "stage_timings_ms",
+    }
+    if set(diagnostics) != allowed_keys:
+        raise ValueError("answer-run diagnostics contain unexpected fields")
+    if diagnostics.get("schema") != ANSWER_RUN_DIAGNOSTICS_SCHEMA:
+        raise ValueError("answer-run diagnostics use an unsupported schema")
+
+    raw_cohort = diagnostics.get("cohort")
+    if not isinstance(raw_cohort, Mapping) or set(raw_cohort) != ANSWER_RUN_COHORT_KEYS:
+        raise ValueError("answer-run diagnostics contain invalid cohort fields")
+    cohort: dict[str, str] = {}
+    for key, value in raw_cohort.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError("answer-run cohort values must be strings")
+        is_sha256_field = key in {
+            "coverage_instructions_sha256",
+            "coverage_schema_sha256",
+        }
+        if is_sha256_field:
+            valid_value = (
+                value == "not-applicable"
+                or _SHA256_PATTERN.fullmatch(value) is not None
+            )
+        else:
+            valid_value = _COHORT_VALUE_PATTERN.fullmatch(value) is not None
+        if not valid_value:
+            raise ValueError("answer-run diagnostics contain an invalid cohort value")
+        cohort[key] = value
+
+    repair_codes_value = diagnostics.get("repair_codes")
+    if not isinstance(repair_codes_value, (list, tuple)):
+        raise ValueError("answer-run repair codes must be a list")
+    repair_codes = tuple(
+        dict.fromkeys(
+            _diagnostic_code(code)
+            for code in repair_codes_value
+        )
+    )
+    repair_applied = diagnostics.get("repair_applied")
+    if not isinstance(repair_applied, bool) or repair_applied != bool(repair_codes):
+        raise ValueError("answer-run repair metadata is inconsistent")
+
+    raw_timings = diagnostics.get("stage_timings_ms")
+    if not isinstance(raw_timings, Mapping):
+        raise ValueError("answer-run stage timings must be an object")
+    if any(key not in ANSWER_RUN_TIMING_KEYS for key in raw_timings):
+        raise ValueError("answer-run diagnostics contain an unknown timing stage")
+    timings: dict[str, float] = {}
+    for key, value in raw_timings.items():
+        if (
+            not isinstance(key, str)
+            or not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or float(value) < 0
+        ):
+            raise ValueError("answer-run diagnostics contain an invalid timing")
+        timings[key] = round(float(value), 3)
+
+    validation_result = _diagnostic_code(diagnostics.get("validation_result"))
+    if validation_result not in {"valid", "invalid", "not_run"}:
+        raise ValueError("answer-run diagnostics contain an invalid validation result")
+    validation_error_code = _diagnostic_code(
+        diagnostics.get("validation_error_code"),
+        nullable=True,
+    )
+    if (validation_result == "invalid") != (validation_error_code is not None):
+        raise ValueError("answer-run validation metadata is inconsistent")
+
+    return {
+        "schema": ANSWER_RUN_DIAGNOSTICS_SCHEMA,
+        "cohort": cohort,
+        "answer_status": _diagnostic_code(diagnostics.get("answer_status")),
+        "evidence_decision": _diagnostic_code(diagnostics.get("evidence_decision")),
+        "validation_result": validation_result,
+        "validation_error_code": validation_error_code,
+        "repair_applied": repair_applied,
+        "repair_codes": repair_codes,
+        "stage_timings_ms": timings,
+    }
+
+
 class UsageLedger:
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path) if path is not None else usage_db_path()
@@ -324,6 +461,25 @@ class UsageLedger:
                 ON usage_events(recorded_at);
             CREATE INDEX IF NOT EXISTS usage_events_scope_idx
                 ON usage_events(project_id, conversation_id, turn_id);
+            CREATE TABLE IF NOT EXISTS answer_run_diagnostics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL UNIQUE,
+                recorded_at TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                answer_status TEXT NOT NULL,
+                evidence_decision TEXT NOT NULL,
+                validation_result TEXT NOT NULL,
+                validation_error_code TEXT,
+                repair_applied INTEGER NOT NULL CHECK (repair_applied IN (0, 1)),
+                repair_codes_json TEXT NOT NULL,
+                cohort_json TEXT NOT NULL,
+                stage_timings_json TEXT NOT NULL,
+                UNIQUE(project_id, conversation_id, turn_id)
+            );
+            CREATE INDEX IF NOT EXISTS answer_run_diagnostics_scope_idx
+                ON answer_run_diagnostics(project_id, conversation_id, turn_id);
             CREATE TABLE IF NOT EXISTS cost_settings (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 monthly_budget_nano_usd INTEGER,
@@ -339,6 +495,19 @@ class UsageLedger:
             ON CONFLICT(singleton) DO NOTHING;
             """
         )
+        diagnostic_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(answer_run_diagnostics)"
+            ).fetchall()
+        }
+        if "cohort_json" not in diagnostic_columns:
+            connection.execute(
+                """
+                ALTER TABLE answer_run_diagnostics
+                ADD COLUMN cohort_json TEXT NOT NULL DEFAULT '{}'
+                """
+            )
         connection.commit()
 
     def record(
@@ -389,6 +558,106 @@ class UsageLedger:
                 ),
             )
         return cursor.rowcount == 1
+
+    def record_answer_run_diagnostics(
+        self,
+        *,
+        project_id: str | None,
+        conversation_id: str | None,
+        turn_id: str | None,
+        diagnostics: Mapping[str, object],
+        recorded_at: str | None = None,
+    ) -> bool:
+        """Persist one text-free post-validation outcome for a UI-addressable turn."""
+
+        if not project_id or not conversation_id or not turn_id:
+            return False
+        normalized = _normalized_answer_run_diagnostics(diagnostics)
+        run_id = str(uuid4())
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO answer_run_diagnostics (
+                    run_id, recorded_at, project_id, conversation_id, turn_id,
+                    answer_status, evidence_decision, validation_result,
+                    validation_error_code, repair_applied, repair_codes_json,
+                    cohort_json, stage_timings_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, conversation_id, turn_id) DO UPDATE SET
+                    run_id = excluded.run_id,
+                    recorded_at = excluded.recorded_at,
+                    answer_status = excluded.answer_status,
+                    evidence_decision = excluded.evidence_decision,
+                    validation_result = excluded.validation_result,
+                    validation_error_code = excluded.validation_error_code,
+                    repair_applied = excluded.repair_applied,
+                    repair_codes_json = excluded.repair_codes_json,
+                    cohort_json = excluded.cohort_json,
+                    stage_timings_json = excluded.stage_timings_json
+                """,
+                (
+                    run_id,
+                    recorded_at or _utc_now(),
+                    project_id,
+                    conversation_id,
+                    turn_id,
+                    normalized["answer_status"],
+                    normalized["evidence_decision"],
+                    normalized["validation_result"],
+                    normalized["validation_error_code"],
+                    int(bool(normalized["repair_applied"])),
+                    json.dumps(normalized["repair_codes"], separators=(",", ":")),
+                    json.dumps(
+                        normalized["cohort"],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    json.dumps(
+                        normalized["stage_timings_ms"],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def get_answer_run_diagnostics(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        turn_id: str,
+    ) -> dict[str, object] | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT run_id, recorded_at, answer_status, evidence_decision,
+                       validation_result, validation_error_code, repair_applied,
+                       repair_codes_json, cohort_json, stage_timings_json
+                FROM answer_run_diagnostics
+                WHERE project_id = ? AND conversation_id = ? AND turn_id = ?
+                """,
+                (project_id, conversation_id, turn_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "schema": ANSWER_RUN_DIAGNOSTICS_SCHEMA,
+            "run_id": str(row["run_id"]),
+            "recorded_at": str(row["recorded_at"]),
+            "answer_status": str(row["answer_status"]),
+            "evidence_decision": str(row["evidence_decision"]),
+            "validation_result": str(row["validation_result"]),
+            "validation_error_code": (
+                str(row["validation_error_code"])
+                if row["validation_error_code"] is not None
+                else None
+            ),
+            "repair_applied": bool(row["repair_applied"]),
+            "repair_codes": json.loads(str(row["repair_codes_json"])),
+            "cohort": json.loads(str(row["cohort_json"])),
+            "stage_timings_ms": json.loads(str(row["stage_timings_json"])),
+        }
 
     @staticmethod
     def _filters(

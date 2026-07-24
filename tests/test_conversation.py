@@ -335,3 +335,9 @@ def test_failed_preflight_skips_paid_followup_resolution(monkeypatch):
 
     assert calls == ["preflight", "pipeline"]
     assert result.status == "corpus_integrity_failed"
+    assert {
+        "preflight",
+        "conversation_resolution",
+        "total",
+    }.issubset(result.diagnostics["stage_timings_ms"])
+    assert all(value >= 0 for value in result.diagnostics["stage_timings_ms"].values())

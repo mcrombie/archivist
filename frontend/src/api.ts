@@ -44,6 +44,28 @@ export type ConversationHistoryTurn = {
   answer: string;
 };
 
+export type AnswerRunDiagnostics = {
+  schema: "archivist.answer_run_diagnostics/1";
+  cohort: {
+    rag_policy_version: string;
+    query_planner_prompt_version: string;
+    coverage_prompt_version: string;
+    normalizer_version: string;
+    coverage_instructions_sha256: string;
+    coverage_schema_sha256: string;
+    generator_model: string;
+    generator_reasoning_effort: string;
+    generator_verbosity: string;
+  };
+  answer_status: string;
+  evidence_decision: string;
+  validation_result: "valid" | "invalid" | "not_run";
+  validation_error_code: string | null;
+  repair_applied: boolean;
+  repair_codes: string[];
+  stage_timings_ms: Record<string, number>;
+};
+
 export type CostEvent = {
   operation: string;
   model: string;
@@ -207,6 +229,9 @@ export async function askQuestion(
 ) {
   return requestJson<{
     answer: string;
+    answer_status: string;
+    evidence_decision: string;
+    run_diagnostics: AnswerRunDiagnostics;
     resolved_query: string;
     historiographical_lens: HistoriographicalLens;
     voice: AnswerVoice;

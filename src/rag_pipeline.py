@@ -9,15 +9,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from time import perf_counter_ns
 from typing import Any
 
 from answer_coverage import (
+    DiagnosticValidationResult,
+    EVIDENCE_COVERAGE_NORMALIZER_VERSION,
     EvidenceCoverageAnswer,
     EvidenceCoverageResult,
+    CoverageValidationErrorCode,
     process_evidence_coverage,
 )
 from costs import CostLimitExceeded, tracked_responses_parse
@@ -65,12 +70,30 @@ from retrieval import (
 )
 
 
-RAG_POLICY_VERSION = "evidence-planned-v1"
-QUERY_PLANNER_PROMPT_VERSION = "query-planner-v1"
+RAG_POLICY_VERSION = "evidence-planned-v2"
+LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
+NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
+ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/1"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v2"
 EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v1"
 MAX_PLANNER_OUTPUT_TOKENS = 3_000
 MAX_COVERAGE_OUTPUT_TOKENS = 8_000
 EMBEDDING_MODEL = "text-embedding-3-small"
+ANSWER_STAGE_TIMING_KEYS = frozenset(
+    {
+        "preflight",
+        "conversation_resolution",
+        "corpus_integrity",
+        "query_planning",
+        "retrieval",
+        "evidence_gate",
+        "context_preparation",
+        "answer_generation",
+        "answer_validation",
+        "pipeline_total",
+        "total",
+    }
+)
 CORPUS_INTEGRITY_FAILED_MESSAGE = (
     "The manuscript index could not be verified against its promoted corpus "
     "snapshot. Rebuild or restore the index before asking another question."
@@ -151,7 +174,114 @@ class AnswerModeResult:
         return original
 
 
+def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
+    """Project internal diagnostics into a stable, passage-free API/ledger record."""
+
+    raw_diagnostics = getattr(result, "diagnostics", {})
+    diagnostics = raw_diagnostics if isinstance(raw_diagnostics, Mapping) else {}
+    generation = diagnostics.get("generation")
+    generation = generation if isinstance(generation, Mapping) else {}
+    raw_timings = diagnostics.get("stage_timings_ms")
+    raw_timings = raw_timings if isinstance(raw_timings, Mapping) else {}
+    valid_error_codes = {code.value for code in CoverageValidationErrorCode}
+    valid_results = {value.value for value in DiagnosticValidationResult}
+
+    validation_result = generation.get("validation_result")
+    if validation_result not in valid_results:
+        validation_result = DiagnosticValidationResult.NOT_RUN.value
+    validation_error_code = generation.get("error_code")
+    if validation_error_code not in valid_error_codes:
+        validation_error_code = None
+
+    repair_codes = tuple(
+        dict.fromkeys(
+            code
+            for code in (generation.get("repair_codes") or ())
+            if code in valid_error_codes
+        )
+    )
+    stage_timings_ms = {
+        key: round(float(value), 3)
+        for key, value in raw_timings.items()
+        if (
+            key in ANSWER_STAGE_TIMING_KEYS
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value) >= 0
+        )
+    }
+    if result.status == "legacy_answer":
+        cohort = {
+            "rag_policy_version": LEGACY_RAG_POLICY_VERSION,
+            "query_planner_prompt_version": NOT_APPLICABLE_COHORT_VALUE,
+            "coverage_prompt_version": NOT_APPLICABLE_COHORT_VALUE,
+            "normalizer_version": NOT_APPLICABLE_COHORT_VALUE,
+            "coverage_instructions_sha256": NOT_APPLICABLE_COHORT_VALUE,
+            "coverage_schema_sha256": NOT_APPLICABLE_COHORT_VALUE,
+            "generator_model": GENERATOR_SETTINGS.model,
+            "generator_reasoning_effort": GENERATOR_SETTINGS.reasoning_effort,
+            "generator_verbosity": GENERATOR_SETTINGS.verbosity,
+        }
+    else:
+        cohort = {
+            "rag_policy_version": str(
+                diagnostics.get("rag_policy_version") or RAG_POLICY_VERSION
+            ),
+            "query_planner_prompt_version": QUERY_PLANNER_PROMPT_VERSION,
+            "coverage_prompt_version": str(
+                generation.get("prompt_version") or EVIDENCE_COVERAGE_PROMPT_VERSION
+            ),
+            "normalizer_version": str(
+                generation.get("normalizer_version")
+                or EVIDENCE_COVERAGE_NORMALIZER_VERSION
+            ),
+            "coverage_instructions_sha256": str(
+                generation.get("instructions_sha256")
+                or hashlib.sha256(
+                    EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")
+                ).hexdigest()
+            ),
+            "coverage_schema_sha256": str(
+                generation.get("schema_sha256")
+                or hashlib.sha256(
+                    json.dumps(
+                        EvidenceCoverageAnswer.model_json_schema(),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+            ),
+            "generator_model": str(
+                generation.get("generator_model") or GENERATOR_SETTINGS.model
+            ),
+            "generator_reasoning_effort": str(
+                generation.get("generator_reasoning_effort")
+                or GENERATOR_SETTINGS.reasoning_effort
+            ),
+            "generator_verbosity": str(
+                generation.get("generator_verbosity")
+                or GENERATOR_SETTINGS.verbosity
+            ),
+        }
+    return {
+        "schema": ANSWER_RUN_DIAGNOSTICS_SCHEMA,
+        "cohort": cohort,
+        "answer_status": result.status,
+        "evidence_decision": result.evidence_decision,
+        "validation_result": validation_result,
+        "validation_error_code": validation_error_code,
+        "repair_applied": bool(generation.get("repair_applied")) and bool(repair_codes),
+        "repair_codes": list(repair_codes),
+        "stage_timings_ms": stage_timings_ms,
+    }
+
+
 EVIDENCE_PLANNED_POLICY = RagPolicy()
+
+
+def _elapsed_ms(start_ns: int) -> float:
+    return round(max(0, perf_counter_ns() - start_ns) / 1_000_000, 3)
 
 
 def without_automatic_retries(client: object) -> object:
@@ -1038,6 +1168,7 @@ def _generation_trace(
         "generator_model": GENERATOR_SETTINGS.model,
         "generator_reasoning_effort": GENERATOR_SETTINGS.reasoning_effort,
         "generator_verbosity": GENERATOR_SETTINGS.verbosity,
+        "normalizer_version": EVIDENCE_COVERAGE_NORMALIZER_VERSION,
         "style_prompt_sha256": style_prompt_sha256,
     }
     if coverage is None:
@@ -1075,6 +1206,22 @@ def run_evidence_planned_answer(
     policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
 ) -> AnswerModeResult:
     """Execute one bounded evidence-planned Answer Mode turn."""
+    pipeline_started_ns = perf_counter_ns()
+    stage_timings_ms: dict[str, float] = {}
+
+    def result_diagnostics(
+        evidence: Mapping[str, Any],
+        generation: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        stage_timings_ms["pipeline_total"] = _elapsed_ms(pipeline_started_ns)
+        return {
+            "rag_policy_version": policy.version,
+            "evidence": dict(evidence),
+            "generation": dict(generation),
+            "stage_timings_ms": dict(stage_timings_ms),
+        }
+
+    integrity_started_ns = perf_counter_ns()
     eligible_chunks = [
         chunk
         for chunk in chunks
@@ -1088,12 +1235,14 @@ def run_evidence_planned_answer(
         corpus_manifest_sha256=corpus_manifest_sha256,
         require_store_identity=require_store_identity,
     )
+    stage_timings_ms["corpus_integrity"] = _elapsed_ms(integrity_started_ns)
     if not integrity.passed:
         plan = build_question_plan(
             resolved_turn,
             fallback_reason="corpus_integrity_failed",
         )
         diagnostics = {
+            "rag_policy_version": policy.version,
             "evidence": {
                 "schema": "archivist.evidence_policy_diagnostics/1",
                 "corpus": integrity.as_diagnostics(),
@@ -1102,11 +1251,10 @@ def run_evidence_planned_answer(
                     "rules_fired": ["corpus_integrity_failed"],
                 },
             },
-            "generation": {
-                "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
-                "status": "corpus_integrity_failed",
-                "structured_generation_called": False,
-            },
+            "generation": _generation_trace(
+                None,
+                status="corpus_integrity_failed",
+            ),
         }
         return AnswerModeResult(
             answer=CORPUS_INTEGRITY_FAILED_MESSAGE,
@@ -1114,17 +1262,26 @@ def run_evidence_planned_answer(
             status="corpus_integrity_failed",
             plan=plan,
             evidence_decision=EvidenceDecision.INDETERMINATE.value,
-            diagnostics=diagnostics,
+            diagnostics={
+                **diagnostics,
+                "stage_timings_ms": {
+                    **stage_timings_ms,
+                    "pipeline_total": _elapsed_ms(pipeline_started_ns),
+                },
+            },
         )
 
     catalog = build_document_catalog(eligible_chunks)
     request_client = without_automatic_retries(client)
+    planning_started_ns = perf_counter_ns()
     plan = plan_question(
         request_client,
         resolved_turn,
         catalog,
         policy=policy,
     )
+    stage_timings_ms["query_planning"] = _elapsed_ms(planning_started_ns)
+    retrieval_started_ns = perf_counter_ns()
     planned = retrieve_plan_from_collection(
         plan,
         collection_handle,
@@ -1134,6 +1291,7 @@ def run_evidence_planned_answer(
         corpus=corpus_trace,
         max_final_sources=MAX_FINAL_SOURCES,
     )
+    stage_timings_ms["retrieval"] = _elapsed_ms(retrieval_started_ns)
     planned.trace["plan"].update(
         {
             "policy_version": policy.version,
@@ -1157,6 +1315,7 @@ def run_evidence_planned_answer(
             "planner_verbosity": QUERY_PLANNER_SETTINGS.verbosity,
         }
     )
+    gate_started_ns = perf_counter_ns()
     gate, gate_diagnostics, target_label = apply_evidence_gate(
         plan,
         planned,
@@ -1167,6 +1326,7 @@ def run_evidence_planned_answer(
         corpus_integrity=integrity,
         policy=policy,
     )
+    stage_timings_ms["evidence_gate"] = _elapsed_ms(gate_started_ns)
     planned.trace["evidence"] = gate_diagnostics
 
     if gate.skip_answer_generation:
@@ -1182,12 +1342,13 @@ def run_evidence_planned_answer(
             status="clean_abstention",
             plan=plan,
             evidence_decision=gate.decision.value,
-            diagnostics={
-                "evidence": gate_diagnostics,
-                "generation": planned.trace["generation_contract"],
-            },
+            diagnostics=result_diagnostics(
+                gate_diagnostics,
+                planned.trace["generation_contract"],
+            ),
         )
 
+    context_started_ns = perf_counter_ns()
     final_chunks, old_to_new, remapped_facets = _filter_context(
         planned,
         gate.allowed_source_numbers,
@@ -1201,8 +1362,10 @@ def run_evidence_planned_answer(
         requirement.requirement_id: requirement.label
         for requirement in plan.requirements
     }
+    stage_timings_ms["context_preparation"] = _elapsed_ms(context_started_ns)
 
     if not final_chunks:
+        validation_started_ns = perf_counter_ns()
         coverage = process_evidence_coverage(
             None,
             requirement_ids=requirement_ids,
@@ -1210,6 +1373,7 @@ def run_evidence_planned_answer(
             source_count=0,
             requirement_labels=requirement_labels,
         )
+        stage_timings_ms["answer_validation"] = _elapsed_ms(validation_started_ns)
         planned.trace["generation_contract"] = _generation_trace(
             coverage,
             status="insufficient_evidence",
@@ -1221,10 +1385,10 @@ def run_evidence_planned_answer(
             status=coverage.status.value,
             plan=plan,
             evidence_decision=gate.decision.value,
-            diagnostics={
-                "evidence": gate_diagnostics,
-                "generation": planned.trace["generation_contract"],
-            },
+            diagnostics=result_diagnostics(
+                gate_diagnostics,
+                planned.trace["generation_contract"],
+            ),
         )
 
     coverage_input = build_coverage_input(
@@ -1247,6 +1411,7 @@ def run_evidence_planned_answer(
         if style_block
         else None
     )
+    generation_started_ns = perf_counter_ns()
     try:
         response = tracked_responses_parse(
             request_client,
@@ -1264,7 +1429,9 @@ def run_evidence_planned_answer(
     except Exception:
         parsed = None
         refused = True
+    stage_timings_ms["answer_generation"] = _elapsed_ms(generation_started_ns)
 
+    validation_started_ns = perf_counter_ns()
     coverage = process_evidence_coverage(
         parsed,
         requirement_ids=requirement_ids,
@@ -1273,6 +1440,7 @@ def run_evidence_planned_answer(
         requirement_labels=requirement_labels,
         refused=refused,
     )
+    stage_timings_ms["answer_validation"] = _elapsed_ms(validation_started_ns)
     planned.trace["generation_contract"] = _generation_trace(
         coverage,
         status=coverage.status.value,
@@ -1285,10 +1453,10 @@ def run_evidence_planned_answer(
         status=coverage.status.value,
         plan=plan,
         evidence_decision=gate.decision.value,
-        diagnostics={
-            "evidence": gate_diagnostics,
-            "generation": planned.trace["generation_contract"],
-        },
+        diagnostics=result_diagnostics(
+            gate_diagnostics,
+            planned.trace["generation_contract"],
+        ),
     )
 
 
@@ -1298,6 +1466,7 @@ __all__ = [
     "EVIDENCE_COVERAGE_INSTRUCTIONS",
     "RAG_POLICY_VERSION",
     "RagPolicy",
+    "answer_run_diagnostics",
     "apply_evidence_gate",
     "assess_answer_corpus_integrity",
     "build_coverage_input",

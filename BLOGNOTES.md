@@ -515,6 +515,53 @@ Archivist can remember what the reader meant without treating its own earlier an
 proof. The same separation also makes absence claims safer and keeps every factual reply bounded by
 the current manuscript sources.
 
+### 2026-07-24 - Turning a paid validation failure into an actionable defect
+
+- Reader testing exposed a particularly bad failure: an opening-screen sample question retrieved
+  eight passages and paid for a substantial GPT-5.6 Sol response, but the local evidence contract
+  rejected the generated structure and the interface displayed only a generic failure sentence.
+  The existing ledger recorded about $0.061 of API usage but not the exact validation rule.
+- The private corpus plainly contained relevant material, so this was not an honest
+  insufficient-evidence answer. The immediate failure boundary was
+  `retrieval -> generation -> local validation -> discarded response`.
+- Opened the `evidence-planned-v2` cohort without changing the evaluation contract or gold set:
+  - relational requests now receive separate searches for each concept and for evidence explicitly
+    linking them;
+  - that decomposition is deterministic for simple `connect`, `relate`, and `link ... to` forms,
+    so it does not add a paid planning-model call;
+  - every opening-screen sample is now loaded from a test-visible data file and must pass a local
+    planning regression.
+- Added a deliberately narrow evidence-contract normalizer. It can repair ordering and recompute
+  redundant unit/source mappings when the factual answer units and exact citation sets are already
+  unchanged. It cannot rewrite prose, add or remove citations, resolve unknown source numbers,
+  repair malformed citations, or attach a factual unit to an unsupported requirement. The strict
+  validator still runs after normalization.
+- Added durable, text-free turn diagnostics alongside the cost ledger. Future turns preserve the
+  exact validation code, whether a safe repair occurred, the repair codes, and timings for
+  preflight, conversation resolution, planning, retrieval, evidence gating, generation,
+  validation, and total latency. The record also carries the retrieval policy, planner,
+  coverage-contract, normalizer, and generator identifiers needed to separate future cohorts. No
+  manuscript passage, user question, or generated answer is written to this diagnostics table.
+  Custom-project turns that still use the legacy answer path are explicitly labeled
+  `legacy-answer-v1`, with the inapplicable v2 components marked as such.
+- Changed the failure presentation. A rejected generation is no longer styled as an answer from
+  the manuscript. It appears as an error with optional collapsed technical details, estimated cost,
+  and an explicit user-controlled retry; Archivist never performs an automatic paid retry.
+- Verification was entirely local and made no OpenAI calls:
+  - 137 focused backend tests passed across coverage, routing, the pipeline, homepage prompts,
+    conversation behavior, and cost diagnostics;
+  - the full backend suite passed with 296 tests and one skipped;
+  - Ruff lint and whitespace checks passed;
+  - the frontend TypeScript/Vite production build passed.
+- This work makes the failure safer and diagnosable and gives the relationship question better
+  retrieval coverage. It does not yet prove that the live answer is better. That claim waits for
+  an explicitly authorized paid confirmation under the new cohort.
+
+Useful blog lesson: strict grounding is not enough by itself. A safety check that discards a useful
+answer for harmless bookkeeping and cannot say why creates an expensive black box. The better
+boundary separates factual safety failures from locally repairable structure, then records exactly
+what happened without retaining the private source text.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
@@ -568,8 +615,8 @@ the current manuscript sources.
 
 ## Open threads for later entries
 
-- A second optimization cohort focused on query decomposition, adversarial-premise routing,
-  corpus-level absence checks, and generation evidence coverage.
+- A paid post-fix confirmation of the opening-screen relationship question, followed by the
+  unchanged ten-question comparison under the new `evidence-planned-v2` cohort.
 - Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
   retrieval and citation metrics require it.
 - Retrieval-only pilot results before any answer generation is graded.

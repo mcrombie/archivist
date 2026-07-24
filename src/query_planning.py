@@ -45,6 +45,7 @@ _SAFE_ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 class RouteTrait(StrEnum):
     BROAD_SYNTHESIS = "broad_synthesis"
     MULTI_PART = "multi_part"
+    RELATIONSHIP = "relationship"
     PREMISE_SENSITIVE = "premise_sensitive"
     ABSENCE_SENSITIVE = "absence_sensitive"
 
@@ -467,6 +468,9 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
     ):
         traits.add(RouteTrait.MULTI_PART)
 
+    if _RELATIONAL_QUERY.search(text):
+        traits.add(RouteTrait.RELATIONSHIP)
+
     neutral_manuscript_request = bool(
         _ABSENCE_REQUEST.search(text) or _ABSENCE_REQUEST_REVERSED.search(text)
     )
@@ -492,7 +496,16 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
 
 
 def requires_planning(question: str | ResolvedTurn) -> bool:
-    return bool(route_question(question))
+    """Reserve the paid planner for ambiguity that local decomposition cannot resolve."""
+
+    turn = _coerce_resolved_turn(question)
+    traits = route_question(turn)
+    if (
+        traits == (RouteTrait.RELATIONSHIP,)
+        and _relational_parts(turn.standalone_question) is not None
+    ):
+        return False
+    return bool(traits)
 
 
 _QUOTED_TARGET = re.compile(
@@ -511,9 +524,16 @@ _NAMED_NUMBER_TARGET = re.compile(
     r"(?:No\.?\s*)?\d+[A-Za-z]?\b"
 )
 _ORDINAL_NAME_TARGET = re.compile(r"\b\d+(?:st|nd|rd|th)\s+[A-Z][^\W_]*\b")
+_RELATIONAL_VERB = (
+    r"(?:connect(?:s|ed|ing)?|relat(?:e|es|ed|ing)|link(?:s|ed|ing)?)"
+)
+_RELATIONAL_QUERY = re.compile(
+    rf"\b{_RELATIONAL_VERB}\b[^?.!]{{0,160}}\bto\b",
+    re.IGNORECASE,
+)
 _RELATIONSHIP_REQUEST = re.compile(
-    r"\b(?:between|compare|comparison|connection|relationship|relation|"
-    r"versus|vs\.?)\b",
+    rf"\b(?:between|compare|comparison|connection|relationship|relation|"
+    rf"{_RELATIONAL_VERB}|versus|vs\.?)\b",
     re.IGNORECASE,
 )
 _DIRECTIONAL_RELATIONSHIP_PREDICATE = re.compile(
@@ -929,6 +949,21 @@ _CLAUSE_SPLIT_PATTERN = re.compile(
     r"compare|identify|explain|describe)\b)",
     re.IGNORECASE,
 )
+_TRANSITIVE_RELATIONSHIP_PATTERN = re.compile(
+    r"^\s*(?:(?:how|why|where|when|what)\s+)?"
+    r"(?:does|do|did|can|could|would)\s+"
+    r"(?:(?:the|this|that)\s+)?(?:manuscript|book|text|author|account)\s+"
+    rf"(?P<predicate>{_RELATIONAL_VERB})\s+"
+    r"(?P<left>.+?)\s+to\s+(?P<right>.+?)(?:[?.!]|$)",
+    re.IGNORECASE,
+)
+_SUBJECT_RELATIONSHIP_PATTERN = re.compile(
+    rf"^\s*(?:(?:how|why|where|when|what)\s+)?"
+    r"(?:does|do|did|is|are|was|were|has|have|had|can|could|would)\s+"
+    rf"(?P<left>.+?)\s+(?P<predicate>{_RELATIONAL_VERB})\s+to\s+"
+    r"(?P<right>.+?)(?:[?.!]|$)",
+    re.IGNORECASE,
+)
 
 _DIMENSION_ROLE = {
     "cause": FacetRole.MECHANISM,
@@ -992,6 +1027,29 @@ def _coordinated_parts(question: str) -> tuple[str, ...]:
     return ()
 
 
+def _relational_parts(question: str) -> tuple[str, str, str] | None:
+    """Extract two explicit operands and their surface relationship predicate."""
+
+    if len(re.findall(r"\bto\b", question, flags=re.IGNORECASE)) != 1:
+        return None
+    match = _TRANSITIVE_RELATIONSHIP_PATTERN.search(question)
+    if match is None:
+        match = _SUBJECT_RELATIONSHIP_PATTERN.search(question)
+    if match is None:
+        return None
+
+    left = _bounded_text(match.group("left").strip(" ,;:?"))
+    right = _bounded_text(match.group("right").strip(" ,;:?"))
+    predicate = _bounded_text(match.group("predicate"))
+    if (
+        not left
+        or not right
+        or normalize_search_query(left) == normalize_search_query(right)
+    ):
+        return None
+    return left, right, predicate
+
+
 def deterministic_fallback_plan(
     resolved_turn: str | ResolvedTurn,
     *,
@@ -1008,6 +1066,7 @@ def deterministic_fallback_plan(
     premises: tuple[PremiseHypothesis, ...] = ()
 
     span = _START_END_PATTERN.search(question)
+    relational = _relational_parts(question)
     if span:
         start = _bounded_text(span.group("start"))
         end = _bounded_text(span.group("end"))
@@ -1036,6 +1095,36 @@ def deterministic_fallback_plan(
                 requirements[2],
                 FacetRole.TRANSITION,
                 f"transition {start} {end} {relationship}",
+            ),
+        )
+    elif relational is not None:
+        left, right, predicate = relational
+        relationship_label = _bounded_text(
+            f"Connection between {left} and {right}"
+        )
+        requirements = (
+            _fallback_requirement(1, f"Context for {left}"),
+            _fallback_requirement(2, f"Context for {right}"),
+            _fallback_requirement(3, relationship_label),
+        )
+        facets = (
+            _fallback_facet(
+                1,
+                requirements[0],
+                FacetRole.BROADER_RELATED,
+                f"{left} context",
+            ),
+            _fallback_facet(
+                2,
+                requirements[1],
+                FacetRole.BROADER_RELATED,
+                f"{right} context",
+            ),
+            _fallback_facet(
+                3,
+                requirements[2],
+                FacetRole.MECHANISM,
+                f"{left} {right} {predicate}",
             ),
         )
     elif coordinated := _coordinated_parts(question):
@@ -1138,6 +1227,7 @@ QUERY_PLANNER_INSTRUCTIONS = """\
 Decompose the standalone question into search requirements and facets without answering it.
 Return no F0 facet: the application inserts the unchanged original question.
 Use only IDs declared in the response, and map every requirement to at least one added facet.
+For relational questions, search each named concept plus evidence that explicitly links them.
 Treat factual premises as hypotheses with support and counter facets.
 Document hints must exactly match the supplied eligible catalog.
 Do not state conclusions, cite sources, invent aliases, or use prior assistant answers as evidence.

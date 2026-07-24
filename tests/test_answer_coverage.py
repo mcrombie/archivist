@@ -325,13 +325,9 @@ def test_contradicted_premise_requires_a_source_bound_leading_correction():
         premise_ids=("P1",),
         source_count=1,
     )
-    assert render_evidence_coverage(validated).startswith(
-        "The assumed premise is contradicted"
-    )
+    assert render_evidence_coverage(validated).startswith("The assumed premise is contradicted")
 
-    missing = answer.premise_decisions[0].model_copy(
-        update={"correction_unit_id": None}
-    )
+    missing = answer.premise_decisions[0].model_copy(update={"correction_unit_id": None})
     _assert_error(
         answer.model_copy(update={"premise_decisions": (missing,)}),
         CoverageValidationErrorCode.PREMISE_CORRECTION_MISSING,
@@ -403,9 +399,7 @@ def test_listed_premise_cannot_be_marked_not_applicable():
         status=PremiseStatus.NOT_APPLICABLE,
         source_numbers=(),
     )
-    changed = _valid_answer().model_copy(
-        update={"premise_decisions": (decision,)}
-    )
+    changed = _valid_answer().model_copy(update={"premise_decisions": (decision,)})
     _assert_error(
         changed,
         CoverageValidationErrorCode.PREMISE_STATUS_INVALID,
@@ -688,6 +682,176 @@ def test_refusal_and_invalid_payload_fail_closed_with_stable_codes():
     assert invalid.answer == GENERATION_CONTRACT_FAILED_MESSAGE
     assert "never display this" not in invalid.model_dump_json()
     assert invalid.diagnostics.error_code is CoverageValidationErrorCode.INVALID_PAYLOAD
+
+
+def test_process_normalizes_only_order_and_redundant_derived_mappings():
+    factual_text = "One synthetic unit answers both requests [Source 2, Source 1]."
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(
+            PremiseDecision(
+                premise_id="P2",
+                status=PremiseStatus.SUPPORTED,
+                source_numbers=(2,),
+            ),
+            PremiseDecision(
+                premise_id="P1",
+                status=PremiseStatus.SUPPORTED,
+                source_numbers=(1,),
+            ),
+        ),
+        coverage=(
+            _coverage(
+                "R2",
+                RequirementStatus.SUPPORTED,
+                (),
+                (),
+                GapReason.NONE,
+            ),
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(
+            _unit(
+                "U1",
+                ("R2", "R1"),
+                factual_text,
+                (1, 2),
+            ),
+        ),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1", "P2"),
+        source_count=2,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.answer == factual_text
+    assert result.diagnostics.repair_applied is True
+    assert result.diagnostics.repair_codes == (
+        CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_REQUIREMENT_ID,
+        CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH,
+        CoverageValidationErrorCode.OUT_OF_ORDER_REQUIREMENT_ID,
+        CoverageValidationErrorCode.SOURCE_MAPPING_MISMATCH,
+        CoverageValidationErrorCode.STATUS_UNIT_MISMATCH,
+        CoverageValidationErrorCode.OUT_OF_ORDER_PREMISE_ID,
+    )
+    assert tuple(record.requirement_id for record in result.diagnostics.coverage) == ("R1", "R2")
+    assert all(
+        record.unit_ids == ("U1",) and record.source_numbers == (2, 1)
+        for record in result.diagnostics.coverage
+    )
+    assert result.diagnostics.answer_units[0].requirement_ids == ("R1", "R2")
+    assert result.diagnostics.answer_units[0].source_numbers == (2, 1)
+    assert tuple(decision.premise_id for decision in result.diagnostics.premise_decisions) == (
+        "P1",
+        "P2",
+    )
+
+
+def test_process_never_repairs_an_unsupported_requirement_with_a_factual_unit():
+    unit = _unit(
+        "U1",
+        ("R1",),
+        "A factual unit remains forbidden for unsupported coverage [Source 1].",
+        (1,),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.UNSUPPORTED,
+                (),
+                (),
+                GapReason.NO_DIRECT_SUPPORT,
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert (
+        result.diagnostics.error_code
+        is CoverageValidationErrorCode.UNSUPPORTED_REQUIREMENT_HAS_UNIT
+    )
+    assert result.diagnostics.repair_applied is False
+    assert result.diagnostics.repair_codes == ()
+    assert unit.text not in result.answer
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (
+            lambda answer: answer.model_copy(
+                update={
+                    "answer_units": (
+                        answer.answer_units[0].model_copy(
+                            update={
+                                "text": "The citation set changed [Source 2].",
+                            }
+                        ),
+                        answer.answer_units[1],
+                    )
+                }
+            ),
+            CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH,
+        ),
+        (
+            lambda answer: answer.model_copy(
+                update={
+                    "coverage": (
+                        answer.coverage[0].model_copy(update={"unit_ids": ("UX",)}),
+                        answer.coverage[1],
+                    )
+                }
+            ),
+            CoverageValidationErrorCode.UNKNOWN_UNIT_ID,
+        ),
+        (
+            lambda answer: answer.model_copy(
+                update={
+                    "answer_units": (
+                        answer.answer_units[0].model_copy(
+                            update={"text": "Malformed [Sources 1]."}
+                        ),
+                        answer.answer_units[1],
+                    )
+                }
+            ),
+            CoverageValidationErrorCode.MALFORMED_CITATION,
+        ),
+    ],
+)
+def test_process_retains_precise_nonrepairable_error_codes_in_diagnostics(
+    mutate,
+    code,
+):
+    result = process_evidence_coverage(
+        mutate(_valid_answer()),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        source_count=3,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.diagnostics.error_code is code
 
 
 def test_total_unit_text_is_bounded_even_when_individual_units_fit():
