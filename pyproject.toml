@@ -9,6 +9,7 @@ dependencies = [
     "fastapi",
     "httpx",
     "openai",
+    "pydantic",
     "python-dotenv",
     "python-multipart",
     "uvicorn",

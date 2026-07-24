@@ -65,6 +65,13 @@ FOLLOWUP_RESOLVER_SETTINGS = ResponseModelSettings(
     verbosity="medium",
 )
 
+QUERY_PLANNER_SETTINGS = ResponseModelSettings(
+    role="query planner",
+    model=GPT_5_6_SOL_MODEL,
+    reasoning_effort="low",
+    verbosity="low",
+)
+
 
 def is_dated_model_snapshot(model: str) -> bool:
     """Return true only for a model identifier ending in a valid ISO date."""

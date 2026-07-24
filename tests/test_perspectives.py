@@ -7,7 +7,6 @@ from pydantic import ValidationError
 import prompts
 import web_api
 import web_project
-from model_config import GENERATOR_SETTINGS
 from perspectives import (
     ANSWER_VOICES,
     HISTORIOGRAPHICAL_LENSES,
@@ -288,35 +287,35 @@ def test_legacy_request_maps_combined_perspective_to_one_facet(
 
 
 def test_generation_settings_do_not_change_retrieval(monkeypatch):
-    retrieval_calls = []
-    generated_prompts = []
-
-    def fake_retrieve(project_id, question, n_results):
-        retrieval_calls.append((project_id, question, n_results))
-        return {"metadatas": [[]], "distances": [[]]}
-
-    monkeypatch.setattr(web_project, "retrieve_project", fake_retrieve)
+    pipeline_calls = []
     monkeypatch.setattr(web_project, "load_project_chunks", lambda _project_id: CHUNKS)
     monkeypatch.setattr(
         web_project,
-        "finalize_context_chunks",
-        lambda _results, *, chunks: list(chunks),
+        "chroma_client",
+        lambda: SimpleNamespace(
+            get_collection=lambda **_kwargs: SimpleNamespace(configuration={})
+        ),
     )
-
-    class FakeResponses:
-        def create(self, *, model, reasoning, text, input):
-            assert {
-                "model": model,
-                "reasoning": reasoning,
-                "text": text,
-            } == GENERATOR_SETTINGS.responses_create_kwargs()
-            generated_prompts.append((model, input))
-            return SimpleNamespace(output_text="Synthetic answer [Source 1].")
-
     monkeypatch.setattr(
         web_project,
         "openai_client",
-        lambda: SimpleNamespace(responses=FakeResponses()),
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        web_project,
+        "preflight_answer_corpus",
+        lambda **_kwargs: SimpleNamespace(passed=True),
+    )
+    monkeypatch.setattr(
+        web_project,
+        "run_evidence_planned_answer",
+        lambda **kwargs: (
+            pipeline_calls.append(kwargs)
+            or SimpleNamespace(
+                answer="Synthetic answer [Source 1].",
+                final_chunks=CHUNKS,
+            )
+        ),
     )
 
     settings = [
@@ -340,10 +339,32 @@ def test_generation_settings_do_not_change_retrieval(monkeypatch):
         for selected in settings
     ]
 
-    assert retrieval_calls == [("current", "What happened?", 5) for _settings in settings]
+    assert len(pipeline_calls) == len(settings)
+    assert all(call["chunks"] == CHUNKS for call in pipeline_calls)
+    assert all(call["n_results"] == 5 for call in pipeline_calls)
+    assert all(
+        call["resolved_turn"].standalone_question == "What happened?"
+        for call in pipeline_calls
+    )
     assert all(chunks == CHUNKS for _answer, chunks in outputs)
-    assert len({prompt.split("Sources:\n", 1)[1] for _model, prompt in generated_prompts}) == 1
-    assert generated_prompts[0][1] == build_answer_prompt("What happened?", CHUNKS)
+    assert {
+        (
+            call["historiographical_lens"],
+            call["voice"],
+            call["worldview"],
+        )
+        for call in pipeline_calls
+    } == {
+        (
+            selected.get(
+                "historiographical_lens",
+                HistoriographicalLens.EVIDENCE_FIRST,
+            ),
+            selected.get("voice", AnswerVoice.SCHOLARLY),
+            selected.get("worldview", Worldview.NONE),
+        )
+        for selected in settings
+    }
 
 
 def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
@@ -357,6 +378,7 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
         historiographical_lens,
         voice,
         worldview,
+        history,
     ):
         captured.update(
             project_id=project_id,
@@ -366,9 +388,15 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
             voice=voice,
             worldview=worldview,
         )
-        return "Synthetic answer [Source 1].", CHUNKS[:1]
+        return SimpleNamespace(
+            answer="Synthetic answer [Source 1].",
+            final_chunks=CHUNKS[:1],
+            status="answered",
+            evidence_decision="direct_answer",
+            resolved_question=question,
+        )
 
-    monkeypatch.setattr(web_api, "answer_project_question", fake_answer)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
     request = web_api.QuestionRequest(
         question="What happened?",
         n_results=7,

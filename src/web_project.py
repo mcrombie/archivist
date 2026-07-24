@@ -17,7 +17,12 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
-from costs import tracked_embeddings_create, tracked_responses_create
+from costs import (
+    CostLimitExceeded,
+    tracked_embeddings_create,
+    tracked_responses_create,
+    tracked_responses_parse,
+)
 from filters import should_skip_document
 from importers import (
     SUPPORTED_DOCUMENT_SUFFIXES,
@@ -36,6 +41,13 @@ from perspectives import (
     settings_for_legacy_perspective,
 )
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
+from query_planning import ResolvedTurn, build_question_plan
+from rag_pipeline import (
+    AnswerModeResult,
+    preflight_answer_corpus,
+    run_evidence_planned_answer,
+    without_automatic_retries,
+)
 from retrieval import (
     finalize_context_chunks,
     finalize_index_context,
@@ -62,16 +74,24 @@ MAX_CONVERSATION_CONTEXT_CHARS = 16_000
 MAX_CONTEXT_QUESTION_CHARS = 1_500
 MAX_CONTEXT_ANSWER_CHARS = 3_000
 MAX_RESOLVED_QUERY_CHARS = 4_000
+MAX_RESOLVED_TURN_OUTPUT_TOKENS = 2_000
 
-CONVERSATION_QUERY_INSTRUCTIONS = """You prepare standalone search questions for a manuscript archive.
-Rewrite the current user question as one self-contained question that can be used both to search
-the manuscript and to ask for an answer. Resolve pronouns and implicit references from the prior
-conversation when needed. Preserve the user's meaning and level of specificity.
+CONVERSATION_QUERY_INSTRUCTIONS = """\
+Resolve the current message into the supplied ResolvedTurn schema for a manuscript archive.
+Make standalone_question self-contained enough for a fresh manuscript search. Preserve the
+user's intent, uncertainty, specificity, and requested relationship. Resolve pronouns and omitted
+scope only when the bounded dialogue makes the reference clear.
 
-The prior conversation is dialogue context only. In particular, assistant answers are untrusted
-summaries that may help identify a referent, but they are not manuscript evidence. Do not answer
-the question, add factual claims, cite sources, or mention these instructions. Return only the
-standalone question. If the current question is already self-contained, return it unchanged."""
+Use entities for named referents, scope for requested temporal/topical boundaries, corrections for
+changes the user made to the request, and relationship for the specific connection being asked
+about. Leave fields empty rather than guessing. Always return trusted_user_texts as an empty list;
+the application supplies that provenance after parsing.
+
+The dialogue is intent context only. Prior assistant answers are untrusted, are never manuscript
+evidence, and are not supplied in the resolver input. Resolve only from the user's prior questions
+and current message. Do not import unsupported factual claims as established facts, premises,
+scope, or corrections. Do not answer the question, cite sources,
+or mention these instructions. If the current question is already self-contained, preserve it."""
 
 
 def utc_now() -> str:
@@ -482,32 +502,85 @@ def build_conversation_query_input(
     history: Sequence[Mapping[str, object]],
 ) -> str:
     payload = {
-        "prior_completed_turns": bounded_conversation_history(history),
+        "prior_user_questions": [
+            turn["question"]
+            for turn in bounded_conversation_history(history)
+        ],
         "current_question": question,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def resolve_conversation_turn(
+    question: str,
+    history: Sequence[Mapping[str, object]],
+) -> ResolvedTurn:
+    """Resolve follow-up intent without making dialogue manuscript evidence."""
+    bounded_history = bounded_conversation_history(history)
+    trusted_user_texts = tuple(
+        dict.fromkeys(
+            (
+                *(
+                    str(turn.get("question") or "")
+                    for turn in bounded_history
+                    if str(turn.get("question") or "").strip()
+                ),
+                question,
+            )
+        )
+    )
+    if not bounded_history:
+        return ResolvedTurn(
+            standalone_question=question,
+            trusted_user_texts=trusted_user_texts,
+        )
+
+    try:
+        response = tracked_responses_parse(
+            without_automatic_retries(openai_client()),
+            operation="followup_resolution",
+            instructions=CONVERSATION_QUERY_INSTRUCTIONS,
+            input=build_conversation_query_input(question, bounded_history),
+            text_format=ResolvedTurn,
+            max_output_tokens=MAX_RESOLVED_TURN_OUTPUT_TOKENS,
+            **FOLLOWUP_RESOLVER_SETTINGS.responses_create_kwargs(),
+        )
+        parsed = getattr(response, "output_parsed", None)
+        resolved = (
+            parsed
+            if isinstance(parsed, ResolvedTurn)
+            else ResolvedTurn.model_validate(parsed)
+        )
+    except CostLimitExceeded:
+        raise
+    except Exception:
+        return ResolvedTurn(
+            standalone_question=question,
+            trusted_user_texts=trusted_user_texts,
+        )
+
+    if (
+        not resolved.standalone_question.strip()
+        or len(resolved.standalone_question) > MAX_RESOLVED_QUERY_CHARS
+    ):
+        return ResolvedTurn(
+            standalone_question=question,
+            trusted_user_texts=trusted_user_texts,
+        )
+    return ResolvedTurn.model_validate(
+        {
+            **resolved.model_dump(),
+            "trusted_user_texts": trusted_user_texts,
+        }
+    )
 
 
 def resolve_conversation_query(
     question: str,
     history: Sequence[Mapping[str, object]],
 ) -> str:
-    """Resolve a follow-up without exposing dialogue history to the evidence prompt."""
-    bounded_history = bounded_conversation_history(history)
-    if not bounded_history:
-        return question
-
-    response = tracked_responses_create(
-        openai_client(),
-        operation="followup_resolution",
-        instructions=CONVERSATION_QUERY_INSTRUCTIONS,
-        input=build_conversation_query_input(question, bounded_history),
-        **FOLLOWUP_RESOLVER_SETTINGS.responses_create_kwargs(),
-    )
-    resolved_query = response.output_text.strip()
-    if not resolved_query or len(resolved_query) > MAX_RESOLVED_QUERY_CHARS:
-        return question
-    return resolved_query
+    """Compatibility wrapper returning only the resolved standalone question."""
+    return resolve_conversation_turn(question, history).standalone_question
 
 
 def annotate_chapter_titles(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -586,7 +659,7 @@ def merge_adjacent_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
-def answer_project_question(
+def answer_project_question_legacy(
     project_id: str,
     question: str,
     n_results: int = 5,
@@ -632,6 +705,149 @@ def answer_project_question(
         **GENERATOR_SETTINGS.responses_create_kwargs(),
     )
     return response.output_text, final_chunks
+
+
+def answer_project_question_result(
+    project_id: str,
+    question: str,
+    n_results: int = 5,
+    perspective: AnswerPerspective | str | None = None,
+    *,
+    historiographical_lens: HistoriographicalLens | str = (
+        HistoriographicalLens.EVIDENCE_FIRST
+    ),
+    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
+    worldview: Worldview | str = Worldview.NONE,
+    resolved_turn: ResolvedTurn | None = None,
+    history: Sequence[Mapping[str, object]] = (),
+) -> AnswerModeResult:
+    """Answer through the versioned evidence-planned pipeline."""
+    if perspective is not None:
+        legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(
+            perspective
+        )
+        if historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST:
+            historiographical_lens = legacy_lens
+        if voice == AnswerVoice.SCHOLARLY:
+            voice = legacy_voice
+        if worldview == Worldview.NONE:
+            worldview = legacy_worldview
+
+    # Custom projects do not yet persist the independent per-chunk identity
+    # manifest required to certify a whole-corpus absence. Keep their established
+    # behavior until project ingestion writes that snapshot.
+    if project_id != "current":
+        turn = resolved_turn or resolve_conversation_turn(question, history)
+        answer, final_chunks = answer_project_question_legacy(
+            project_id,
+            turn.standalone_question,
+            n_results=n_results,
+            historiographical_lens=historiographical_lens,
+            voice=voice,
+            worldview=worldview,
+        )
+        return AnswerModeResult(
+            answer=answer,
+            final_chunks=final_chunks,
+            status="legacy_answer",
+            plan=build_question_plan(turn),
+            evidence_decision="legacy_unclassified",
+            diagnostics={},
+        )
+
+    collection = chroma_client().get_collection(name=collection_name(project_id))
+    chunks = load_project_chunks(project_id)
+    chunks_file = (
+        LEGACY_CHUNKS_FILE
+        if project_id == "current"
+        else chunks_path(project_id)
+    )
+    corpus_trace: dict[str, object] = {
+        "project_id": project_id,
+        "collection_name": collection_name(project_id),
+    }
+    if chunks_file.is_file():
+        corpus_trace["chunks_sha256"] = hashlib.sha256(
+            chunks_file.read_bytes()
+        ).hexdigest()
+    configuration = getattr(collection, "configuration", {})
+    if isinstance(configuration, Mapping):
+        hnsw = configuration.get("hnsw")
+        if isinstance(hnsw, Mapping):
+            corpus_trace["hnsw_space"] = str(hnsw.get("space") or "")
+
+    corpus_manifest: Mapping[str, object] | None = None
+    corpus_manifest_sha256: str | None = None
+    fixture_manifest = BASE_DIR / "fixtures" / "corpus_manifest.json"
+    if project_id == "current" and fixture_manifest.is_file():
+        corpus_manifest = read_json(fixture_manifest, None)
+        corpus_manifest_sha256 = hashlib.sha256(
+            fixture_manifest.read_bytes()
+        ).hexdigest()
+        corpus_trace["corpus_manifest_sha256"] = corpus_manifest_sha256
+
+    integrity = preflight_answer_corpus(
+        collection_handle=collection,
+        chunks=chunks,
+        corpus_manifest=corpus_manifest,
+        corpus_manifest_sha256=corpus_manifest_sha256,
+        require_store_identity=True,
+    )
+    turn = resolved_turn
+    if turn is None:
+        turn = (
+            resolve_conversation_turn(question, history)
+            if integrity.passed
+            else ResolvedTurn(
+                standalone_question=question,
+                trusted_user_texts=(question,),
+            )
+        )
+    result = run_evidence_planned_answer(
+        resolved_turn=turn,
+        collection_handle=collection,
+        chunks=chunks,
+        client=openai_client() if integrity.passed else object(),
+        n_results=n_results,
+        corpus_trace=corpus_trace,
+        corpus_manifest=corpus_manifest,
+        corpus_manifest_sha256=corpus_manifest_sha256,
+        corpus_integrity=integrity,
+        require_store_identity=True,
+        historiographical_lens=historiographical_lens,
+        voice=voice,
+        worldview=worldview,
+    )
+    return result
+
+
+def answer_project_question(
+    project_id: str,
+    question: str,
+    n_results: int = 5,
+    perspective: AnswerPerspective | str | None = None,
+    *,
+    historiographical_lens: HistoriographicalLens | str = (
+        HistoriographicalLens.EVIDENCE_FIRST
+    ),
+    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
+    worldview: Worldview | str = Worldview.NONE,
+    resolved_turn: ResolvedTurn | None = None,
+    history: Sequence[Mapping[str, object]] = (),
+) -> tuple[str, list[dict[str, Any]]]:
+    """Compatibility wrapper for callers that only need prose and sources."""
+    result = answer_project_question_result(
+        project_id,
+        question,
+        n_results=n_results,
+        perspective=perspective,
+        historiographical_lens=historiographical_lens,
+        voice=voice,
+        worldview=worldview,
+        resolved_turn=resolved_turn,
+        history=history,
+    )
+    return result.answer, result.final_chunks
 
 
 def search_existing_index(project_id: str, term: str, limit: int = 8) -> list[dict[str, Any]]:

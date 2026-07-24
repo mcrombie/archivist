@@ -454,6 +454,67 @@ It needs an explicit account of what the reader asked, which premise is being te
 named subject is actually present, which requested facets the sources support, and where the
 evidence stops.
 
+### 2026-07-24 - Implementing evidence-planned answers
+
+- Implemented the four planned RAG mechanisms as one shared Answer Mode pipeline for the web app
+  and CLI:
+  - query decomposition gives broad and multi-part questions bounded retrieval facets;
+  - premise-sensitive questions reserve support, counterevidence, and framing lanes;
+  - a local evidence gate distinguishes direct treatment, bounded related material, broader
+    analogues, clean absence, and indeterminate corpus state;
+  - a structured evidence-coverage answer must account for requested requirements and premises
+    before deterministic prose rendering.
+- Added conversation-aware question resolution. Follow-ups can inherit entities, scope, and
+  relationships from earlier user turns. Prior assistant answer text is not sent to the resolver
+  and is never accepted as manuscript evidence. Absence certification can use only wording
+  traceable to the current or prior user.
+- Kept model-call growth bounded. A turn can use a resolver only when history exists, a planner only
+  when deterministic routing finds that it is useful, one batched embedding request for all search
+  facets, and one structured answer generation. There is no automatic critic, repair retry, or
+  second draft. A clean absence makes no generation call.
+- Added a strict preflight before paid work. The private corpus manifest, ordered chunk IDs, text
+  hashes, character counts, paragraph metadata, collection size, distance metric, and embedding
+  model must agree with the live index. The check reads the actual Chroma collection name,
+  collection metadata, stored IDs, and per-chunk metadata, so a same-count stale collection cannot
+  pass on count alone. A stale or corrupt index fails before paying for follow-up resolution,
+  planning, embedding, or an answer.
+- Exercised that preflight locally against the current private corpus: 481 eligible chunks matched
+  the 481-vector collection with the expected `manuscript` collection and L2 configuration. No
+  manuscript text or private evaluation claims were added to source control.
+- Improved absence handling so an exact corpus mention outside the initially retrieved eight
+  passages can be promoted into answer context. Generic analogues are suppressed after a direct
+  hit, and model-invented synonyms cannot certify a near match or an absence.
+- Added deterministic premise-correction ordering and source validation. A contradicted premise
+  must be corrected first and cite only admitted source numbers; unknown, malformed, duplicate, or
+  mismatched coverage data fails closed rather than producing polished unsupported prose.
+- Hardened two mechanical edge cases found during review:
+  - causal questions such as one named entity affecting another now treat the second entity as the
+    requested relationship facet instead of rejecting both as ambiguous subjects;
+  - a lowercase ordinary word can no longer masquerade as an acronym derived from a multiword
+    name, while explicit uppercase and dotted initialisms remain searchable.
+- Extended the local hard cost limit from a turn-start check to a check immediately before every
+  tracked OpenAI operation. If a resolver or planner crosses the limit, the next embedding or
+  generation call stops unless the reader explicitly authorized the per-request override.
+- Added text-free audit mappings from planned facets through selected chunks to final source
+  numbers, plus hashes for the active policy, prompts, schemas, style settings, and generator
+  configuration. The API now exposes answer status and the evidence decision to the interface.
+- Preserved the previous prompt and answer path as a rollback/baseline implementation. Deferred
+  Index Mode remains semantic-only, and custom projects without the new manifest identity contract
+  continue on the legacy route.
+- Verification was local and incurred no OpenAI spend:
+  - 274 backend tests passed and one was skipped;
+  - Ruff passed across `src` and `tests`;
+  - strict OpenAI schema conversion succeeded for the resolver, planner, and evidence answer;
+  - the frontend TypeScript/Vite production build passed.
+- This is a new retrieval-and-prompt cohort. Its effect on the unchanged ten-question set is not yet
+  measured, and no claims of improved answer quality, faithfulness, or abstention accuracy should
+  be made until a separately authorized paid run completes.
+
+Useful blog lesson: conversational memory and evidentiary memory should not be the same thing. The
+Archivist can remember what the reader meant without treating its own earlier answer as historical
+proof. The same separation also makes absence claims safer and keeps every factual reply bounded by
+the current manuscript sources.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific

@@ -15,9 +15,9 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from costs import UsageLedger, usage_scope
+from costs import CostLimitExceeded, UsageLedger, usage_scope
 from importers import chapter_title_from_text
 from perspectives import (
     AnswerPerspective,
@@ -29,7 +29,7 @@ from perspectives import (
 
 from web_project import (
     BASE_DIR,
-    answer_project_question,
+    answer_project_question_result,
     build_project,
     candidate_terms,
     embed_project,
@@ -37,7 +37,6 @@ from web_project import (
     list_projects,
     load_manifest,
     load_project_chunks,
-    resolve_conversation_query,
     search_existing_index,
     source_payload,
     source_dir,
@@ -72,7 +71,7 @@ class ConversationTurn(BaseModel):
 
 
 class QuestionRequest(BaseModel):
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=4_000)
     n_results: int = Field(default=5, ge=1, le=12)
     historiographical_lens: HistoriographicalLens = HistoriographicalLens.EVIDENCE_FIRST
     voice: AnswerVoice = AnswerVoice.SCHOLARLY
@@ -90,6 +89,14 @@ class QuestionRequest(BaseModel):
         max_length=128,
     )
     allow_over_budget: bool = False
+
+    @field_validator("question")
+    @classmethod
+    def question_is_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("question cannot be blank")
+        return stripped
 
     @model_validator(mode="before")
     @classmethod
@@ -233,19 +240,21 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             project_id=project_id,
             conversation_id=request.conversation_id,
             turn_id=request.turn_id,
+            enforce_budget=True,
+            allow_over_budget=request.allow_over_budget,
         ):
-            resolved_query = resolve_conversation_query(
-                request.question,
-                [turn.model_dump() for turn in request.history],
-            )
-            answer, chunks = answer_project_question(
+            answer_result = answer_project_question_result(
                 project_id,
-                resolved_query,
+                request.question,
                 n_results=request.n_results,
                 historiographical_lens=request.historiographical_lens,
                 voice=request.voice,
                 worldview=request.worldview,
+                history=[turn.model_dump() for turn in request.history],
             )
+            resolved_query = answer_result.resolved_question
+            answer = answer_result.answer
+            chunks = answer_result.final_chunks
         try:
             costs = ledger.summary(
                 project_id=project_id,
@@ -257,6 +266,8 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             costs = None
         return {
             "answer": answer,
+            "answer_status": answer_result.status,
+            "evidence_decision": answer_result.evidence_decision,
             "resolved_query": resolved_query,
             "conversation_id": request.conversation_id,
             "turn_id": request.turn_id,
@@ -267,6 +278,18 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             **source_payload(chunks),
             "costs": costs,
         }
+    except CostLimitExceeded as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "cost_limit_exceeded",
+                "message": (
+                    "The local monthly OpenAI cost limit has been reached. "
+                    "Set allow_over_budget to true to run this request anyway."
+                ),
+                "budget": exc.budget,
+            },
+        ) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

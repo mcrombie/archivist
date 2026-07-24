@@ -73,6 +73,18 @@ class UsageContext:
     project_id: str | None = None
     conversation_id: str | None = None
     turn_id: str | None = None
+    enforce_budget: bool = False
+    allow_over_budget: bool = False
+
+
+class CostLimitExceeded(RuntimeError):
+    """Raised before an OpenAI call when the configured hard limit is reached."""
+
+    def __init__(self, budget: Mapping[str, object]) -> None:
+        self.budget = dict(budget)
+        super().__init__(
+            "The local monthly OpenAI cost limit has been reached."
+        )
 
 
 _usage_context: ContextVar[UsageContext] = ContextVar(
@@ -91,6 +103,8 @@ def usage_scope(
     project_id: str | None = None,
     conversation_id: str | None = None,
     turn_id: str | None = None,
+    enforce_budget: bool | None = None,
+    allow_over_budget: bool | None = None,
 ) -> Iterator[UsageContext]:
     previous = current_usage_context()
     context = UsageContext(
@@ -99,6 +113,16 @@ def usage_scope(
             conversation_id if conversation_id is not None else previous.conversation_id
         ),
         turn_id=turn_id if turn_id is not None else previous.turn_id,
+        enforce_budget=(
+            previous.enforce_budget
+            if enforce_budget is None
+            else enforce_budget
+        ),
+        allow_over_budget=(
+            previous.allow_over_budget
+            if allow_over_budget is None
+            else allow_over_budget
+        ),
     )
     token = _usage_context.set(context)
     try:
@@ -721,7 +745,19 @@ def _track_without_breaking_response(
         logger.exception("Could not record local OpenAI usage")
 
 
+def enforce_usage_budget(ledger: UsageLedger | None = None) -> None:
+    """Recheck the hard limit immediately before a tracked OpenAI operation."""
+
+    context = current_usage_context()
+    if not context.enforce_budget or context.allow_over_budget:
+        return
+    budget = (ledger or UsageLedger()).budget_state()
+    if budget["hard_limit_enabled"] and budget["exceeded"]:
+        raise CostLimitExceeded(budget)
+
+
 def tracked_responses_create(client: object, *, operation: str, **request: Any) -> object:
+    enforce_usage_budget()
     response = client.responses.create(**request)
     _track_without_breaking_response(
         response,
@@ -731,7 +767,20 @@ def tracked_responses_create(client: object, *, operation: str, **request: Any) 
     return response
 
 
+def tracked_responses_parse(client: object, *, operation: str, **request: Any) -> object:
+    """Call the Responses structured-output helper without bypassing usage tracking."""
+    enforce_usage_budget()
+    response = client.responses.parse(**request)
+    _track_without_breaking_response(
+        response,
+        operation=operation,
+        requested_model=str(request.get("model", "")),
+    )
+    return response
+
+
 def tracked_embeddings_create(client: object, *, operation: str, **request: Any) -> object:
+    enforce_usage_budget()
     response = client.embeddings.create(**request)
     _track_without_breaking_response(
         response,

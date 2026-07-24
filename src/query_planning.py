@@ -1,0 +1,1187 @@
+"""Pure contracts and deterministic policy for evidence-planned queries.
+
+This module deliberately performs no network or model calls.  A caller may parse a
+planner response into :class:`QuestionPlan`, then pass it to
+``validate_question_plan``.  The validator owns the trusted parts of the plan:
+route traits, evidence targets, and the unchanged original ``F0`` facet.
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from collections.abc import Mapping, Sequence
+from enum import StrEnum
+from typing import Any, Literal
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+
+
+QUESTION_PLAN_SCHEMA = "archivist.question_plan/1"
+RESOLVED_TURN_SCHEMA = "archivist.resolved_turn/1"
+F0_FACET_ID = "F0"
+
+MAX_ANSWER_REQUIREMENTS = 8
+MAX_SEARCH_FACETS = 8
+MAX_ADDED_SEARCH_FACETS = MAX_SEARCH_FACETS - 1
+MAX_PREMISE_HYPOTHESES = 2
+MAX_EVIDENCE_TARGETS = 3
+MAX_DOCUMENT_HINTS_PER_FACET = 2
+MAX_SEARCH_QUERY_CHARS = 240
+MAX_ORIGINAL_QUERY_CHARS = 4_000
+MAX_ADDED_QUERY_CHARS = 1_200
+
+_SAFE_ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+
+
+class RouteTrait(StrEnum):
+    BROAD_SYNTHESIS = "broad_synthesis"
+    MULTI_PART = "multi_part"
+    PREMISE_SENSITIVE = "premise_sensitive"
+    ABSENCE_SENSITIVE = "absence_sensitive"
+
+
+class FacetRole(StrEnum):
+    ORIGINAL = "original"
+    ORIGIN = "origin"
+    TRANSITION = "transition"
+    MECHANISM = "mechanism"
+    ENDPOINT = "endpoint"
+    PREMISE_SUPPORT = "premise_support"
+    PREMISE_COUNTER = "premise_counter"
+    FRAMING = "framing"
+    BROADER_RELATED = "broader_related"
+
+
+class EvidenceTargetRole(StrEnum):
+    SUBJECT = "subject"
+    FACET = "facet"
+
+
+class _ContractModel(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+        validate_by_alias=True,
+        validate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+
+class ResolvedTurn(_ContractModel):
+    """Conversation resolution output consumed by planning.
+
+    The fields other than ``standalone_question`` preserve useful resolution
+    structure without making prior assistant prose evidence.
+    """
+
+    schema_: Literal["archivist.resolved_turn/1"] = Field(
+        default=RESOLVED_TURN_SCHEMA,
+        alias="schema",
+    )
+    standalone_question: str = Field(min_length=1, max_length=4_000)
+    entities: tuple[str, ...] = Field(default=(), max_length=16)
+    scope: str | None = Field(default=None, max_length=1_000)
+    corrections: tuple[str, ...] = Field(default=(), max_length=8)
+    relationship: str | None = Field(default=None, max_length=1_000)
+    # Application-owned provenance: raw user messages only, never assistant
+    # prose. Orchestration overwrites any model-produced value.
+    trusted_user_texts: tuple[str, ...] = Field(default=(), max_length=8)
+
+    @property
+    def schema(self) -> Literal["archivist.resolved_turn/1"]:
+        return self.schema_
+
+    @field_validator("entities", "corrections", "trusted_user_texts")
+    @classmethod
+    def validate_text_items(
+        cls,
+        values: tuple[str, ...],
+        info: ValidationInfo,
+    ) -> tuple[str, ...]:
+        cleaned = tuple(value.strip() for value in values)
+        if any(not value for value in cleaned):
+            raise ValueError("resolved-turn lists cannot contain blank values")
+        limit = (
+            MAX_ORIGINAL_QUERY_CHARS
+            if info.field_name == "trusted_user_texts"
+            else MAX_SEARCH_QUERY_CHARS
+        )
+        if any(len(value) > limit for value in cleaned):
+            raise ValueError(
+                f"resolved-turn list values cannot exceed {limit} characters"
+            )
+        normalized = [normalize_search_query(value) for value in cleaned]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("resolved-turn lists cannot contain duplicate values")
+        return cleaned
+
+
+class DocumentCatalogEntry(_ContractModel):
+    document_id: str = Field(min_length=1, max_length=300)
+    chapter_title: str = Field(min_length=1, max_length=500)
+    corpus_ordinal: int = Field(ge=0)
+
+
+class AnswerRequirement(_ContractModel):
+    requirement_id: str = Field(pattern=_SAFE_ID_PATTERN)
+    label: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
+    order: int = Field(ge=0)
+    required: bool = True
+
+
+class SearchFacet(_ContractModel):
+    facet_id: str = Field(pattern=_SAFE_ID_PATTERN)
+    requirement_ids: tuple[str, ...] = Field(
+        min_length=1,
+        max_length=MAX_ANSWER_REQUIREMENTS,
+    )
+    role: FacetRole
+    # F0 is application-owned and preserves the complete resolved question.
+    # Planner-added facets remain subject to MAX_SEARCH_QUERY_CHARS below.
+    search_query: str = Field(min_length=1, max_length=MAX_ORIGINAL_QUERY_CHARS)
+    document_hints: tuple[str, ...] = Field(
+        default=(),
+        max_length=MAX_DOCUMENT_HINTS_PER_FACET,
+    )
+
+    @field_validator("requirement_ids", "document_hints")
+    @classmethod
+    def values_are_unique(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("facet references cannot contain duplicates")
+        return values
+
+    @model_validator(mode="after")
+    def enforce_added_query_limit(self) -> SearchFacet:
+        application_owned_original = (
+            self.facet_id == F0_FACET_ID and self.role is FacetRole.ORIGINAL
+        )
+        if (
+            not application_owned_original
+            and len(self.search_query) > MAX_SEARCH_QUERY_CHARS
+        ):
+            raise ValueError(
+                f"planner-added search queries cannot exceed "
+                f"{MAX_SEARCH_QUERY_CHARS} characters"
+            )
+        return self
+
+
+class PremiseHypothesis(_ContractModel):
+    premise_id: str = Field(pattern=_SAFE_ID_PATTERN)
+    proposition: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
+    support_facet_id: str = Field(pattern=_SAFE_ID_PATTERN)
+    counter_facet_id: str = Field(pattern=_SAFE_ID_PATTERN)
+    framing_facet_id: str | None = Field(default=None, pattern=_SAFE_ID_PATTERN)
+
+
+class EvidenceTarget(_ContractModel):
+    target_id: str = Field(pattern=_SAFE_ID_PATTERN)
+    query_surface_span: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
+    role: EvidenceTargetRole
+    absence_checkable: bool
+
+
+class QuestionPlan(_ContractModel):
+    """Planner-shaped contract plus application provenance.
+
+    Model-produced plans omit ``F0``.  ``validate_question_plan`` performs
+    contextual validation and returns another ``QuestionPlan`` with ``F0`` in
+    the first position.
+    """
+
+    schema_: Literal["archivist.question_plan/1"] = Field(
+        default=QUESTION_PLAN_SCHEMA,
+        alias="schema",
+    )
+    traits: tuple[RouteTrait, ...] = Field(default=(), max_length=len(RouteTrait))
+    requirements: tuple[AnswerRequirement, ...] = Field(
+        min_length=1,
+        max_length=MAX_ANSWER_REQUIREMENTS,
+    )
+    facets: tuple[SearchFacet, ...] = Field(default=(), max_length=MAX_SEARCH_FACETS)
+    premises: tuple[PremiseHypothesis, ...] = Field(
+        default=(),
+        max_length=MAX_PREMISE_HYPOTHESES,
+    )
+    targets: tuple[EvidenceTarget, ...] = Field(
+        default=(),
+        max_length=MAX_EVIDENCE_TARGETS,
+    )
+    planner_used: bool = False
+    fallback_reason: str | None = Field(default=None, max_length=240)
+
+    @property
+    def schema(self) -> Literal["archivist.question_plan/1"]:
+        return self.schema_
+
+    @model_validator(mode="after")
+    def validate_internal_references(self) -> QuestionPlan:
+        _require_unique("route trait", [trait.value for trait in self.traits])
+        _require_unique(
+            "requirement ID",
+            [requirement.requirement_id for requirement in self.requirements],
+        )
+        _require_unique("facet ID", [facet.facet_id for facet in self.facets])
+        _require_unique(
+            "premise ID",
+            [premise.premise_id for premise in self.premises],
+        )
+        _require_unique("target ID", [target.target_id for target in self.targets])
+
+        all_ids = [
+            *(requirement.requirement_id for requirement in self.requirements),
+            *(facet.facet_id for facet in self.facets),
+            *(premise.premise_id for premise in self.premises),
+            *(target.target_id for target in self.targets),
+        ]
+        _require_unique("plan ID", all_ids)
+
+        orders = [requirement.order for requirement in self.requirements]
+        if orders != sorted(orders) or len(orders) != len(set(orders)):
+            raise ValueError("requirements must appear in strictly increasing order")
+
+        known_requirements = {requirement.requirement_id for requirement in self.requirements}
+        for facet in self.facets:
+            unknown = set(facet.requirement_ids) - known_requirements
+            if unknown:
+                raise ValueError(
+                    f"facet {facet.facet_id!r} has unknown requirement IDs: {sorted(unknown)!r}"
+                )
+
+        facets_by_id = {facet.facet_id: facet for facet in self.facets}
+        for premise in self.premises:
+            referenced_ids = [
+                premise.support_facet_id,
+                premise.counter_facet_id,
+                *([premise.framing_facet_id] if premise.framing_facet_id is not None else []),
+            ]
+            if len(referenced_ids) != len(set(referenced_ids)):
+                raise ValueError(f"premise {premise.premise_id!r} must use distinct facet IDs")
+            dangling = set(referenced_ids) - facets_by_id.keys()
+            if dangling:
+                raise ValueError(
+                    f"premise {premise.premise_id!r} has dangling facet IDs: {sorted(dangling)!r}"
+                )
+            if facets_by_id[premise.support_facet_id].role is not FacetRole.PREMISE_SUPPORT:
+                raise ValueError("premise support facet must use the premise_support role")
+            if facets_by_id[premise.counter_facet_id].role is not FacetRole.PREMISE_COUNTER:
+                raise ValueError("premise counter facet must use the premise_counter role")
+            if (
+                premise.framing_facet_id is not None
+                and facets_by_id[premise.framing_facet_id].role is not FacetRole.FRAMING
+            ):
+                raise ValueError("premise framing facet must use the framing role")
+
+        normalized_queries = [normalize_search_query(facet.search_query) for facet in self.facets]
+        if len(normalized_queries) != len(set(normalized_queries)):
+            raise ValueError("search queries must be unique after normalization")
+
+        normalized_targets = [
+            normalize_search_query(target.query_surface_span) for target in self.targets
+        ]
+        if len(normalized_targets) != len(set(normalized_targets)):
+            raise ValueError("evidence targets must be unique after normalization")
+
+        added_query_chars = sum(
+            len(facet.search_query) for facet in self.facets if facet.facet_id != F0_FACET_ID
+        )
+        if any(
+            len(facet.search_query) > MAX_SEARCH_QUERY_CHARS
+            for facet in self.facets
+            if facet.facet_id != F0_FACET_ID
+        ):
+            raise ValueError(
+                f"planner-added search queries cannot exceed "
+                f"{MAX_SEARCH_QUERY_CHARS} characters"
+            )
+        if added_query_chars > MAX_ADDED_QUERY_CHARS:
+            raise ValueError(f"added search queries exceed {MAX_ADDED_QUERY_CHARS} characters")
+        return self
+
+
+class PlanValidationError(ValueError):
+    """Stable local validation failure suitable for fallback diagnostics."""
+
+    def __init__(self, code: str, detail: str):
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}")
+
+
+def _require_unique(label: str, values: Sequence[str]) -> None:
+    if len(values) != len(set(values)):
+        raise ValueError(f"{label}s must be unique")
+
+
+def normalize_search_query(value: str) -> str:
+    """Normalize a query for duplicate and surface-form comparisons."""
+
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = normalized.replace("\N{RIGHT SINGLE QUOTATION MARK}", "'")
+    return " ".join(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE))
+
+
+_MEANINGLESS_QUERY_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "answer",
+    "about",
+    "book",
+    "by",
+    "did",
+    "do",
+    "does",
+    "evidence",
+    "for",
+    "from",
+    "how",
+    "in",
+    "is",
+    "it",
+    "manuscript",
+    "of",
+    "on",
+    "or",
+    "say",
+    "search",
+    "show",
+    "source",
+    "that",
+    "the",
+    "this",
+    "to",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+}
+
+
+def meaningful_query_tokens(value: str) -> frozenset[str]:
+    return frozenset(
+        token
+        for token in normalize_search_query(value).split()
+        if token not in _MEANINGLESS_QUERY_TOKENS and (len(token) >= 2 or token.isdigit())
+    )
+
+
+_BROAD_PATTERNS = (
+    re.compile(
+        r"\b(?:change(?:d|s|ing)?|develop(?:ed|ment|ments|ing)?|evolv(?:e|ed|es|ing)|"
+        r"trajectory|lineage|history)\b.{0,60}\b(?:over time|through time|across|"
+        r"throughout|from|between)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:trace|outline|survey)\b.{0,80}\b(?:change|development|evolution|"
+        r"history|lineage|stages?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bfrom\b.{1,160}\bto\b", re.IGNORECASE),
+    re.compile(r"\bbetween\b.{1,160}\band\b", re.IGNORECASE),
+    re.compile(r"\b(?:over time|throughout the|over the course of)\b", re.IGNORECASE),
+)
+
+_COORDINATED_INTERROGATIVE = re.compile(
+    r"(?:[;?]\s*|,\s*|\s+)(?:and|also)\s+"
+    r"(?:what|why|how|when|where|who|which|compare|identify|explain|describe)\b",
+    re.IGNORECASE,
+)
+_ENUMERATED_REQUEST = re.compile(r"(?:^|\n)\s*(?:\d+[\).]|[a-z][\).]|[-*])\s+", re.IGNORECASE)
+_PLURAL_REQUEST = re.compile(
+    r"\b(?:several|multiple|different|distinct|main|major)\s+"
+    r"(?:causes|mechanisms|stages|comparisons|consequences)\b",
+    re.IGNORECASE,
+)
+_MULTIPLE_DIMENSIONS = re.compile(r"\b(?:causes?|mechanisms?|stages?|comparisons?|consequences?)\b")
+
+_ATTRIBUTED_PREMISE = re.compile(
+    r"\b(?:why|how)\b.{0,60}\b(?:book|manuscript|author|account)\b.{0,60}"
+    r"\b(?:argues?|attributes?|claims?|dates?|describes?|identifies?|places?|says?)\b",
+    re.IGNORECASE,
+)
+_FACTIVE_INTRODUCTION = re.compile(
+    r"\b(?:given that|assuming that|because|in light of the fact that)\b",
+    re.IGNORECASE,
+)
+_WHY_PRESUPPOSITION = re.compile(
+    r"\bwhy\s+(?:did|does|do|was|were|is|are|has|have|had)\b",
+    re.IGNORECASE,
+)
+_HOW_FACTIVE_PREDICATE = re.compile(
+    r"\bhow\s+(?:did|does|do|was|were|is|are|has|have|had)\b.{0,180}"
+    r"\b(?:caus(?:e|ed|es|ing)|creat(?:e|ed|es|ing)|found(?:ed|ing)?|"
+    r"begin|began|start(?:ed|ing)?|originat(?:e|ed|es|ing)|lead|led|"
+    r"prevent(?:ed|ing)?|prov(?:e|ed|es|ing)|first)\b",
+    re.IGNORECASE,
+)
+
+_ABSENCE_REQUEST = re.compile(
+    r"\b(?:(?:does|do|did|how|whether|what)\s+)?"
+    r"(?:the\s+)?(?:book|manuscript|text|author|account)\b.{0,80}"
+    r"\b(?:address(?:es)?|cover(?:s|ed)?|discuss(?:es|ed)?|mention(?:s|ed)?|"
+    r"say(?:s)?\s+about|treat(?:s|ed)?)\b",
+    re.IGNORECASE,
+)
+_ABSENCE_REQUEST_REVERSED = re.compile(
+    r"\b(?:what|whether|how)\b.{0,100}\b(?:addressed|covered|discussed|mentioned|"
+    r"treated)\b.{0,50}\b(?:book|manuscript|text|account)\b",
+    re.IGNORECASE,
+)
+
+
+def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
+    """Return deterministic, composable route traits in a stable order."""
+
+    turn = _coerce_resolved_turn(question)
+    text = turn.standalone_question
+    traits: set[RouteTrait] = set()
+
+    if any(pattern.search(text) for pattern in _BROAD_PATTERNS):
+        traits.add(RouteTrait.BROAD_SYNTHESIS)
+
+    dimension_matches = _MULTIPLE_DIMENSIONS.findall(text.casefold())
+    if (
+        _COORDINATED_INTERROGATIVE.search(text)
+        or len(re.findall(r"\?", text)) > 1
+        or len(_ENUMERATED_REQUEST.findall(text)) > 1
+        or _PLURAL_REQUEST.search(text)
+        or len({match.rstrip("s") for match in dimension_matches}) > 1
+    ):
+        traits.add(RouteTrait.MULTI_PART)
+
+    neutral_manuscript_request = bool(
+        _ABSENCE_REQUEST.search(text) or _ABSENCE_REQUEST_REVERSED.search(text)
+    )
+    if neutral_manuscript_request:
+        traits.add(RouteTrait.ABSENCE_SENSITIVE)
+
+    if (
+        _ATTRIBUTED_PREMISE.search(text)
+        or _FACTIVE_INTRODUCTION.search(text)
+        or _WHY_PRESUPPOSITION.search(text)
+        or _HOW_FACTIVE_PREDICATE.search(text)
+    ) and not (
+        neutral_manuscript_request
+        and re.match(
+            r"^\s*(?:what|whether|how|does|do|did)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    ):
+        traits.add(RouteTrait.PREMISE_SENSITIVE)
+
+    return tuple(trait for trait in RouteTrait if trait in traits)
+
+
+def requires_planning(question: str | ResolvedTurn) -> bool:
+    return bool(route_question(question))
+
+
+_QUOTED_TARGET = re.compile(
+    r'"([^"\r\n]{1,240})"|“([^”\r\n]{1,240})”|'
+    r"'([^'\r\n]{2,240})'|‘([^’\r\n]{1,240})’"
+)
+_PROPER_NAME_TARGET = re.compile(
+    r"\b[A-Z][^\W_]*(?:[’'][A-Za-z][^\W_]*)?"
+    r"(?:\s+(?:(?:of|the|and|de|van|von)\s+)?"
+    r"[A-Z][^\W_]*(?:[’'][A-Za-z][^\W_]*)?)+\b"
+)
+_ACRONYM_TARGET = re.compile(r"\b(?:[A-Z]{2,10}|(?:[A-Z]\.){2,10})\b")
+_HYPHENATED_TARGET = re.compile(r"\b[\w]+(?:-[\w]+)+\b", re.UNICODE)
+_NAMED_NUMBER_TARGET = re.compile(
+    r"\b(?:[A-Z][^\W_]*(?:\s+[A-Z][^\W_]*){0,2})\s+"
+    r"(?:No\.?\s*)?\d+[A-Za-z]?\b"
+)
+_ORDINAL_NAME_TARGET = re.compile(r"\b\d+(?:st|nd|rd|th)\s+[A-Z][^\W_]*\b")
+_RELATIONSHIP_REQUEST = re.compile(
+    r"\b(?:between|compare|comparison|connection|relationship|relation|"
+    r"versus|vs\.?)\b",
+    re.IGNORECASE,
+)
+_DIRECTIONAL_RELATIONSHIP_PREDICATE = re.compile(
+    r"\b(?:"
+    r"affect(?:s|ed|ing)?|"
+    r"impact(?:s|ed|ing)?|"
+    r"influenc(?:e|es|ed|ing)|"
+    r"shap(?:e|es|ed|ing)|"
+    r"alter(?:s|ed|ing)?|"
+    r"transform(?:s|ed|ing)?|"
+    r"caus(?:e|es|ed|ing)|"
+    r"trigger(?:s|ed|ing)?|"
+    r"(?:lead(?:s|ing)?|led)\s+to|"
+    r"result(?:s|ed|ing)?\s+in|"
+    r"contribut(?:e|es|ed|ing)\s+to"
+    r")\b",
+    re.IGNORECASE,
+)
+_BETWEEN_NAMED_TARGETS = re.compile(
+    r"\bbetween\s+"
+    r"(?P<left>[A-Z][^\W_]*(?:\s+[A-Z][^\W_]*)+)\s+and\s+"
+    r"(?P<right>[A-Z][^\W_]*(?:\s+[A-Z][^\W_]*)+)"
+    r"(?=[\s?.!,;:]|$)",
+)
+
+_LEADING_TARGET_NOISE = {
+    "a",
+    "an",
+    "compare",
+    "describe",
+    "did",
+    "do",
+    "does",
+    "explain",
+    "how",
+    "identify",
+    "is",
+    "outline",
+    "survey",
+    "the",
+    "trace",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+}
+
+
+def _trim_target_noise(surface: str) -> str:
+    words = surface.split()
+    while len(words) > 1 and words[0].casefold().rstrip("?:,") in _LEADING_TARGET_NOISE:
+        words.pop(0)
+    return " ".join(words).strip(" \t\r\n,;:.?!")
+
+
+def _is_conservative_target_surface(surface: str) -> bool:
+    return bool(
+        _PROPER_NAME_TARGET.fullmatch(surface)
+        or _ACRONYM_TARGET.fullmatch(surface)
+        or _NAMED_NUMBER_TARGET.fullmatch(surface)
+        or _ORDINAL_NAME_TARGET.fullmatch(surface)
+        or (
+            _HYPHENATED_TARGET.fullmatch(surface)
+            and (any(character.isdigit() for character in surface) or not surface.islower())
+        )
+    )
+
+
+def extract_trusted_targets(
+    question: str | ResolvedTurn,
+) -> tuple[EvidenceTarget, ...]:
+    """Extract only conservative, user-surface evidence targets.
+
+    No synonyms or aliases are generated.  ``ResolvedTurn.entities`` can restore
+    conversation structure, but an entity is accepted only when its exact surface
+    occurs in the standalone question and is independently conservative.
+    """
+
+    turn = _coerce_resolved_turn(question)
+    text = turn.standalone_question
+    candidates: list[tuple[int, int, str, int]] = []
+    relationship_pair = _BETWEEN_NAMED_TARGETS.search(text)
+    if relationship_pair is not None:
+        for group_name in ("left", "right"):
+            candidates.append(
+                (
+                    relationship_pair.start(group_name),
+                    relationship_pair.end(group_name),
+                    relationship_pair.group(group_name),
+                    0,
+                )
+            )
+
+    for match in _QUOTED_TARGET.finditer(text):
+        surface = next(group for group in match.groups() if group is not None).strip()
+        if surface:
+            candidates.append((match.start(), match.end(), surface, 0))
+
+    patterns = (
+        _PROPER_NAME_TARGET,
+        _NAMED_NUMBER_TARGET,
+        _ORDINAL_NAME_TARGET,
+        _ACRONYM_TARGET,
+        _HYPHENATED_TARGET,
+    )
+    for priority, pattern in enumerate(patterns, start=1):
+        for match in pattern.finditer(text):
+            if (
+                pattern is _PROPER_NAME_TARGET
+                and relationship_pair is not None
+                and match.start() <= relationship_pair.start("left")
+                and match.end() >= relationship_pair.end("right")
+            ):
+                continue
+            surface = _trim_target_noise(match.group(0))
+            if not surface:
+                continue
+            if pattern is _ACRONYM_TARGET and surface.casefold() in _LEADING_TARGET_NOISE:
+                continue
+            if pattern is _HYPHENATED_TARGET and not (
+                any(character.isdigit() for character in surface) or not surface.islower()
+            ):
+                continue
+            candidates.append((match.start(), match.end(), surface, priority))
+
+    folded_text = unicodedata.normalize("NFKC", text).casefold()
+    for entity in turn.entities:
+        folded_entity = unicodedata.normalize("NFKC", entity).casefold()
+        start = folded_text.find(folded_entity)
+        if start < 0 or not _is_conservative_target_surface(entity):
+            continue
+        candidates.append((start, start + len(entity), entity, 0))
+
+    candidates.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[3]))
+    selected: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+    for start, end, surface, _priority in candidates:
+        normalized = normalize_search_query(surface)
+        if not normalized or normalized in seen:
+            continue
+        if any(
+            start < selected_end and end > selected_start
+            for selected_start, selected_end, _ in selected
+        ):
+            continue
+        seen.add(normalized)
+        selected.append((start, end, surface))
+        if len(selected) == MAX_EVIDENCE_TARGETS:
+            break
+
+    directional_relationship = bool(
+        len(selected) >= 2
+        and _DIRECTIONAL_RELATIONSHIP_PREDICATE.search(
+            text[selected[0][1] : selected[1][0]]
+        )
+    )
+    relationship_request = bool(
+        turn.relationship
+        or _RELATIONSHIP_REQUEST.search(turn.standalone_question)
+        or directional_relationship
+    )
+    trusted_user_texts = tuple(
+        f" {normalize_search_query(value)} "
+        for value in turn.trusted_user_texts
+    )
+    return tuple(
+        EvidenceTarget(
+            target_id=f"T{index}",
+            query_surface_span=surface,
+            role=(
+                EvidenceTargetRole.FACET
+                if relationship_request and index > 1
+                else EvidenceTargetRole.SUBJECT
+            ),
+            absence_checkable=any(
+                f" {normalize_search_query(surface)} " in trusted_text
+                for trusted_text in trusted_user_texts
+            ),
+        )
+        for index, (_start, _end, surface) in enumerate(selected, start=1)
+    )
+
+
+_ESTABLISHED_ANSWER_PATTERNS = (
+    re.compile(r"\b(?:the answer is|we know that)\b", re.IGNORECASE),
+    re.compile(
+        r"\bit is (?:certain|clear|established|proven) that\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:sources?|evidence) (?:confirm|confirms|prove|proves|show|shows) that\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\[Source\s+\d+\]", re.IGNORECASE),
+)
+
+
+def _contains_established_answer_claim(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _ESTABLISHED_ANSWER_PATTERNS)
+
+
+CatalogInput = (
+    Sequence[DocumentCatalogEntry | Mapping[str, object]]
+    | Mapping[str, str | Mapping[str, object] | DocumentCatalogEntry]
+)
+
+
+def _coerce_catalog(catalog: CatalogInput) -> tuple[DocumentCatalogEntry, ...]:
+    if isinstance(catalog, Mapping):
+        entries: list[DocumentCatalogEntry] = []
+        for ordinal, (document_id, value) in enumerate(catalog.items()):
+            if isinstance(value, DocumentCatalogEntry):
+                entry = value
+            elif isinstance(value, Mapping):
+                payload = dict(value)
+                payload.setdefault("document_id", document_id)
+                payload.setdefault("corpus_ordinal", ordinal)
+                entry = DocumentCatalogEntry.model_validate(payload)
+            else:
+                entry = DocumentCatalogEntry(
+                    document_id=document_id,
+                    chapter_title=str(value),
+                    corpus_ordinal=ordinal,
+                )
+            entries.append(entry)
+    else:
+        entries = [
+            (
+                value
+                if isinstance(value, DocumentCatalogEntry)
+                else DocumentCatalogEntry.model_validate(value)
+            )
+            for value in catalog
+        ]
+    _require_unique("catalog document ID", [entry.document_id for entry in entries])
+    return tuple(entries)
+
+
+def _coerce_resolved_turn(value: str | ResolvedTurn) -> ResolvedTurn:
+    if isinstance(value, ResolvedTurn):
+        return ResolvedTurn.model_validate(value.model_dump())
+    return ResolvedTurn(
+        standalone_question=value,
+        trusted_user_texts=(value,),
+    )
+
+
+def _coerce_plan(value: QuestionPlan | Mapping[str, Any]) -> QuestionPlan:
+    if isinstance(value, QuestionPlan):
+        return QuestionPlan.model_validate(value.model_dump())
+    return QuestionPlan.model_validate(value)
+
+
+def insert_original_facet(
+    plan: QuestionPlan | Mapping[str, Any],
+    resolved_turn: str | ResolvedTurn,
+) -> QuestionPlan:
+    """Insert application-owned ``F0`` as the first global retrieval lane."""
+
+    parsed = _coerce_plan(plan)
+    turn = _coerce_resolved_turn(resolved_turn)
+    if any(
+        facet.facet_id == F0_FACET_ID or facet.role is FacetRole.ORIGINAL for facet in parsed.facets
+    ):
+        raise PlanValidationError(
+            "planner_owned_original",
+            "planner output must not provide F0 or an original-role facet",
+        )
+    if len(parsed.facets) > MAX_ADDED_SEARCH_FACETS:
+        raise PlanValidationError(
+            "too_many_facets",
+            f"at most {MAX_ADDED_SEARCH_FACETS} planner-added facets are allowed",
+        )
+    if len(turn.standalone_question) > MAX_ORIGINAL_QUERY_CHARS:
+        raise PlanValidationError(
+            "original_query_too_long",
+            f"the unchanged F0 query exceeds {MAX_ORIGINAL_QUERY_CHARS} characters",
+        )
+
+    original = SearchFacet(
+        facet_id=F0_FACET_ID,
+        requirement_ids=tuple(requirement.requirement_id for requirement in parsed.requirements),
+        role=FacetRole.ORIGINAL,
+        search_query=turn.standalone_question,
+        document_hints=(),
+    )
+    payload = parsed.model_dump()
+    payload["facets"] = (original, *parsed.facets)
+    return QuestionPlan.model_validate(payload)
+
+
+def validate_question_plan(
+    plan: QuestionPlan | Mapping[str, Any],
+    resolved_turn: str | ResolvedTurn,
+    document_catalog: CatalogInput = (),
+) -> QuestionPlan:
+    """Validate planner output and return the application-finalized plan.
+
+    Contextual checks cover catalog identity, query drift, trusted targets,
+    requirement coverage, and the application-owned original lane.
+    """
+
+    parsed = _coerce_plan(plan)
+    turn = _coerce_resolved_turn(resolved_turn)
+    catalog = _coerce_catalog(document_catalog)
+
+    if any(
+        facet.facet_id == F0_FACET_ID or facet.role is FacetRole.ORIGINAL for facet in parsed.facets
+    ):
+        raise PlanValidationError(
+            "planner_owned_original",
+            "planner output must not provide F0 or an original-role facet",
+        )
+    if len(parsed.facets) > MAX_ADDED_SEARCH_FACETS:
+        raise PlanValidationError(
+            "too_many_facets",
+            f"at most {MAX_ADDED_SEARCH_FACETS} planner-added facets are allowed",
+        )
+
+    mapped_requirements = {
+        requirement_id for facet in parsed.facets for requirement_id in facet.requirement_ids
+    }
+    missing_mappings = [
+        requirement.requirement_id
+        for requirement in parsed.requirements
+        if requirement.requirement_id not in mapped_requirements
+    ]
+    if missing_mappings:
+        raise PlanValidationError(
+            "missing_requirement_mapping",
+            f"requirements lack planner-added facets: {missing_mappings!r}",
+        )
+
+    catalog_by_id = {entry.document_id: entry for entry in catalog}
+    question_tokens = meaningful_query_tokens(turn.standalone_question)
+    normalized_queries = {normalize_search_query(turn.standalone_question)}
+    for facet in parsed.facets:
+        unknown_hints = [hint for hint in facet.document_hints if hint not in catalog_by_id]
+        if unknown_hints:
+            raise PlanValidationError(
+                "unknown_document_hint",
+                f"facet {facet.facet_id!r} has unknown document hints: {unknown_hints!r}",
+            )
+
+        normalized_query = normalize_search_query(facet.search_query)
+        if normalized_query in normalized_queries:
+            raise PlanValidationError(
+                "duplicate_query",
+                f"facet {facet.facet_id!r} duplicates another search query",
+            )
+        normalized_queries.add(normalized_query)
+
+        allowed_tokens = set(question_tokens)
+        for hint in facet.document_hints:
+            allowed_tokens.update(meaningful_query_tokens(catalog_by_id[hint].chapter_title))
+        if not meaningful_query_tokens(facet.search_query) & allowed_tokens:
+            raise PlanValidationError(
+                "query_drift",
+                f"facet {facet.facet_id!r} shares no meaningful token with "
+                "the question or a selected catalog title",
+            )
+        if _contains_established_answer_claim(facet.search_query):
+            raise PlanValidationError(
+                "established_answer_claim",
+                f"facet {facet.facet_id!r} is framed as an established answer",
+            )
+
+    local_targets = extract_trusted_targets(turn)
+    local_targets_by_surface = {
+        normalize_search_query(target.query_surface_span): target for target in local_targets
+    }
+    for target in parsed.targets:
+        trusted = local_targets_by_surface.get(normalize_search_query(target.query_surface_span))
+        if trusted is None:
+            raise PlanValidationError(
+                "untrusted_target",
+                f"target {target.target_id!r} is not a trusted question surface",
+            )
+        if target.role is not trusted.role or target.absence_checkable != trusted.absence_checkable:
+            raise PlanValidationError(
+                "untrusted_target_classification",
+                f"target {target.target_id!r} changes a local trust decision",
+            )
+
+    deterministic_traits = set(route_question(turn))
+    payload = parsed.model_dump()
+    payload.update(
+        traits=tuple(trait for trait in RouteTrait if trait in deterministic_traits),
+        targets=local_targets,
+        planner_used=True,
+        fallback_reason=None,
+    )
+    finalized = insert_original_facet(QuestionPlan.model_validate(payload), turn)
+    if finalized.facets[0].search_query != turn.standalone_question:
+        raise PlanValidationError(
+            "original_query_changed",
+            "F0 must preserve the standalone question byte for byte",
+        )
+    return finalized
+
+
+_START_END_PATTERN = re.compile(
+    r"\bfrom\s+(?P<start>.+?)\s+to\s+(?P<end>.+?)(?:[?.!]|$)",
+    re.IGNORECASE,
+)
+_CLAUSE_SPLIT_PATTERN = re.compile(
+    r"\s*;\s*|\?\s+(?=\w)|"
+    r"\s+(?:and|also)\s+(?=(?:what|why|how|when|where|who|which|"
+    r"compare|identify|explain|describe)\b)",
+    re.IGNORECASE,
+)
+
+_DIMENSION_ROLE = {
+    "cause": FacetRole.MECHANISM,
+    "mechanism": FacetRole.MECHANISM,
+    "stage": FacetRole.TRANSITION,
+    "comparison": FacetRole.BROADER_RELATED,
+    "consequence": FacetRole.ENDPOINT,
+}
+
+
+def _bounded_text(value: str, limit: int = MAX_SEARCH_QUERY_CHARS) -> str:
+    collapsed = " ".join(value.split()).strip(" ,;")
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[:limit].rstrip()
+
+
+def _fallback_requirement(
+    index: int,
+    label: str,
+) -> AnswerRequirement:
+    return AnswerRequirement(
+        requirement_id=f"R{index}",
+        label=_bounded_text(label),
+        order=index - 1,
+        required=True,
+    )
+
+
+def _fallback_facet(
+    index: int,
+    requirement: AnswerRequirement,
+    role: FacetRole,
+    query: str,
+) -> SearchFacet:
+    return SearchFacet(
+        facet_id=f"F{index}",
+        requirement_ids=(requirement.requirement_id,),
+        role=role,
+        search_query=_bounded_text(query),
+        document_hints=(),
+    )
+
+
+def _coordinated_parts(question: str) -> tuple[str, ...]:
+    parts = tuple(
+        _bounded_text(part.strip(" ?"))
+        for part in _CLAUSE_SPLIT_PATTERN.split(question)
+        if part.strip(" ?")
+    )
+    if len(parts) > 1:
+        return parts[:MAX_ADDED_SEARCH_FACETS]
+
+    dimensions: list[str] = []
+    for match in _MULTIPLE_DIMENSIONS.finditer(question.casefold()):
+        singular = match.group(0).rstrip("s")
+        if singular not in dimensions:
+            dimensions.append(singular)
+    if len(dimensions) > 1:
+        return tuple(dimensions[:MAX_ADDED_SEARCH_FACETS])
+    return ()
+
+
+def deterministic_fallback_plan(
+    resolved_turn: str | ResolvedTurn,
+    *,
+    fallback_reason: str | None = None,
+) -> QuestionPlan:
+    """Build a bounded no-model plan using the design's fixed fallback order."""
+
+    turn = _coerce_resolved_turn(resolved_turn)
+    question = turn.standalone_question
+    traits = route_question(turn)
+    targets = extract_trusted_targets(turn)
+    requirements: tuple[AnswerRequirement, ...]
+    facets: tuple[SearchFacet, ...]
+    premises: tuple[PremiseHypothesis, ...] = ()
+
+    span = _START_END_PATTERN.search(question)
+    if span:
+        start = _bounded_text(span.group("start"))
+        end = _bounded_text(span.group("end"))
+        context = _bounded_text(question[: span.start()].strip(" ,;:?"))
+        relationship = _bounded_text(turn.relationship or f"{start} {end}")
+        requirements = (
+            _fallback_requirement(1, start),
+            _fallback_requirement(2, end),
+            _fallback_requirement(3, relationship),
+        )
+        facets = (
+            _fallback_facet(
+                1,
+                requirements[0],
+                FacetRole.ORIGIN,
+                f"origin {context} {start}",
+            ),
+            _fallback_facet(
+                2,
+                requirements[1],
+                FacetRole.ENDPOINT,
+                f"endpoint {context} {end}",
+            ),
+            _fallback_facet(
+                3,
+                requirements[2],
+                FacetRole.TRANSITION,
+                f"transition {start} {end} {relationship}",
+            ),
+        )
+    elif coordinated := _coordinated_parts(question):
+        requirements = tuple(
+            _fallback_requirement(index, part) for index, part in enumerate(coordinated, start=1)
+        )
+        facets = tuple(
+            _fallback_facet(
+                index,
+                requirement,
+                _DIMENSION_ROLE.get(
+                    normalize_search_query(part).split()[0].rstrip("s"),
+                    FacetRole.BROADER_RELATED,
+                ),
+                f"{part} {question}",
+            )
+            for index, (part, requirement) in enumerate(
+                zip(coordinated, requirements, strict=True),
+                start=1,
+            )
+        )
+    elif RouteTrait.PREMISE_SENSITIVE in traits:
+        requirements = (_fallback_requirement(1, question.strip(" ?")),)
+        facets = (
+            _fallback_facet(
+                1,
+                requirements[0],
+                FacetRole.PREMISE_SUPPORT,
+                f"event role {question}",
+            ),
+            _fallback_facet(
+                2,
+                requirements[0],
+                FacetRole.PREMISE_COUNTER,
+                f"earlier origin {question}",
+            ),
+            _fallback_facet(
+                3,
+                requirements[0],
+                FacetRole.FRAMING,
+                f"chronology framing {question}",
+            ),
+        )
+        premises = (
+            PremiseHypothesis(
+                premise_id="P1",
+                proposition=_bounded_text(question.strip(" ?")),
+                support_facet_id="F1",
+                counter_facet_id="F2",
+                framing_facet_id="F3",
+            ),
+        )
+    else:
+        requirements = (_fallback_requirement(1, question.strip(" ?")),)
+        facets = ()
+
+    reason = fallback_reason.strip() if fallback_reason else None
+    raw = QuestionPlan(
+        traits=traits,
+        requirements=requirements,
+        facets=facets,
+        premises=premises,
+        targets=targets,
+        planner_used=False,
+        fallback_reason=reason,
+    )
+    return insert_original_facet(raw, turn)
+
+
+def build_question_plan(
+    resolved_turn: str | ResolvedTurn,
+    planner_output: QuestionPlan | Mapping[str, Any] | None = None,
+    document_catalog: CatalogInput = (),
+    *,
+    fallback_reason: str | None = None,
+) -> QuestionPlan:
+    """Finalize one planner result or fall back once without retrying.
+
+    ``fallback_reason`` lets orchestration record refusal, timeout, or low budget
+    headroom without this pure layer knowing how those conditions were detected.
+    """
+
+    turn = _coerce_resolved_turn(resolved_turn)
+    if planner_output is None:
+        reason = fallback_reason
+        if reason is None and requires_planning(turn):
+            reason = "planner_unavailable"
+        return deterministic_fallback_plan(turn, fallback_reason=reason)
+
+    try:
+        return validate_question_plan(planner_output, turn, document_catalog)
+    except (PlanValidationError, ValidationError, ValueError):
+        return deterministic_fallback_plan(
+            turn,
+            fallback_reason=fallback_reason or "invalid_planner_output",
+        )
+
+
+QUERY_PLANNER_INSTRUCTIONS = """\
+Decompose the standalone question into search requirements and facets without answering it.
+Return no F0 facet: the application inserts the unchanged original question.
+Use only IDs declared in the response, and map every requirement to at least one added facet.
+Treat factual premises as hypotheses with support and counter facets.
+Document hints must exactly match the supplied eligible catalog.
+Do not state conclusions, cite sources, invent aliases, or use prior assistant answers as evidence.
+Respect the version-1 limits encoded in the response schema.
+"""
+
+
+def question_plan_json_schema() -> dict[str, Any]:
+    """Return the native Pydantic schema for a structured planner response."""
+
+    return QuestionPlan.model_json_schema()
+
+
+__all__ = [
+    "AnswerRequirement",
+    "DocumentCatalogEntry",
+    "EvidenceTarget",
+    "EvidenceTargetRole",
+    "F0_FACET_ID",
+    "FacetRole",
+    "MAX_ADDED_QUERY_CHARS",
+    "MAX_ADDED_SEARCH_FACETS",
+    "MAX_ORIGINAL_QUERY_CHARS",
+    "MAX_ANSWER_REQUIREMENTS",
+    "MAX_DOCUMENT_HINTS_PER_FACET",
+    "MAX_EVIDENCE_TARGETS",
+    "MAX_PREMISE_HYPOTHESES",
+    "MAX_SEARCH_FACETS",
+    "MAX_SEARCH_QUERY_CHARS",
+    "PlanValidationError",
+    "PremiseHypothesis",
+    "QUERY_PLANNER_INSTRUCTIONS",
+    "QUESTION_PLAN_SCHEMA",
+    "QuestionPlan",
+    "RESOLVED_TURN_SCHEMA",
+    "ResolvedTurn",
+    "RouteTrait",
+    "SearchFacet",
+    "build_question_plan",
+    "deterministic_fallback_plan",
+    "extract_trusted_targets",
+    "insert_original_facet",
+    "question_plan_json_schema",
+    "requires_planning",
+    "route_question",
+    "validate_question_plan",
+]

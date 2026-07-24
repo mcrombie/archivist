@@ -1,0 +1,1310 @@
+"""Versioned evidence-planned Answer Mode shared by CLI and web.
+
+The model may plan searches and phrase an answer. Local code owns routing, trusted
+anchors, corpus scans, source admission, schema validation, citation validation,
+rendering, tracing, and retry limits.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from answer_coverage import (
+    EvidenceCoverageAnswer,
+    EvidenceCoverageResult,
+    process_evidence_coverage,
+)
+from costs import CostLimitExceeded, tracked_responses_parse
+from evidence_policy import (
+    CorpusIntegrity,
+    EvidenceDecision,
+    EvidenceGateResult,
+    EvidenceLane,
+    EvidenceLaneAssignment,
+    EvidenceTargetScan,
+    EvidenceTargetRole as PolicyTargetRole,
+    assess_corpus_integrity,
+    build_immediate_neighbor_map,
+    classify_evidence_lanes,
+    decide_evidence,
+    evidence_diagnostics,
+    relationship_evidence_chunk_ids,
+    scan_broader_related,
+    scan_evidence_target,
+)
+from filters import should_skip_document
+from model_config import GENERATOR_SETTINGS, QUERY_PLANNER_SETTINGS
+from perspectives import (
+    AnswerVoice,
+    HistoriographicalLens,
+    Worldview,
+    build_interpretive_prompt_block,
+)
+from query_planning import (
+    QUERY_PLANNER_INSTRUCTIONS,
+    DocumentCatalogEntry,
+    FacetRole,
+    QuestionPlan,
+    ResolvedTurn,
+    build_question_plan,
+    normalize_search_query,
+    requires_planning,
+)
+from retrieval import (
+    MAX_FINAL_SOURCES,
+    PlannedContext,
+    build_context,
+    emit_retrieval_trace,
+    retrieve_plan_from_collection,
+)
+
+
+RAG_POLICY_VERSION = "evidence-planned-v1"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v1"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v1"
+MAX_PLANNER_OUTPUT_TOKENS = 3_000
+MAX_COVERAGE_OUTPUT_TOKENS = 8_000
+EMBEDDING_MODEL = "text-embedding-3-small"
+CORPUS_INTEGRITY_FAILED_MESSAGE = (
+    "The manuscript index could not be verified against its promoted corpus "
+    "snapshot. Rebuild or restore the index before asking another question."
+)
+
+_RELATED_PROBE_PATTERN = re.compile(
+    r"^\s*broader\s*:\s*(?P<broader>[^;]{1,120})\s*;\s*"
+    r"related\s*:\s*(?P<related>.+?)\s*$",
+    flags=re.IGNORECASE,
+)
+
+QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS = """\
+For a safe broader-class search on an absence-sensitive question, use role
+broader_related only when the result would not substitute a peer person or institution.
+Format that facet's search_query exactly as:
+broader: <one broader class term>; related: <one or more comma-separated relation terms>
+The broader facet is discovery only and never proves that the named subject is present.
+"""
+
+EVIDENCE_COVERAGE_INSTRUCTIONS = """\
+Answer a question about one manuscript using only the numbered sources in the input.
+Return the required structured evidence-coverage object; do not return prose outside it.
+
+For every ordered requirement:
+- inspect all supplied sources for directly relevant material;
+- include each supported requested point exactly once in concise answer units;
+- preserve causal links, mechanisms, quantities, chronology, counterarguments, and
+  qualifications when the sources support them;
+- ignore tangential sources and never use outside knowledge;
+- mark unsupported material unsupported rather than inventing connective tissue.
+
+Each factual answer unit must include immediate citations using exactly [Source N] or
+[Source N, Source N]. Its declared source_numbers must exactly match those citations.
+
+Treat every listed premise as a hypothesis. If sources contradict one, the first answer
+unit must use role premise_correction, correct it with citations before addressing the
+useful underlying question, and be named in correction_unit_id. If sources do not resolve
+it, mark it unresolved with a null correction_unit_id. Do not use not_applicable for a
+listed premise. Never validate a premise merely because the question assumes it.
+
+Respect the evidence-boundary decision. A qualified near match must begin by saying the
+searchable manuscript does not directly establish the named subject or relationship, and
+may then summarize only the explicitly supplied broader material. Do not turn an analogue
+into a direct answer.
+
+Neutral output should be compact but must not omit supported requirements. Use one short
+paragraph for focused questions or compact ordered paragraphs/bullets for broad questions.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class RagPolicy:
+    version: str = RAG_POLICY_VERSION
+    decomposition: bool = True
+    premise_checking: bool = True
+    absence_gate: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerModeResult:
+    answer: str
+    final_chunks: list[dict[str, Any]]
+    status: str
+    plan: QuestionPlan
+    evidence_decision: str
+    diagnostics: dict[str, Any]
+
+    @property
+    def resolved_question(self) -> str:
+        original = next(
+            (
+                facet.search_query
+                for facet in self.plan.facets
+                if facet.role is FacetRole.ORIGINAL
+            ),
+            "",
+        )
+        return original
+
+
+EVIDENCE_PLANNED_POLICY = RagPolicy()
+
+
+def without_automatic_retries(client: object) -> object:
+    """Return a no-retry client when the SDK supports scoped options."""
+    with_options = getattr(client, "with_options", None)
+    if callable(with_options):
+        return with_options(max_retries=0)
+    return client
+
+
+def build_document_catalog(
+    chunks: Sequence[Mapping[str, object]],
+) -> tuple[DocumentCatalogEntry, ...]:
+    """Build a passage-free eligible document catalog in corpus order."""
+    seen: set[str] = set()
+    catalog: list[DocumentCatalogEntry] = []
+    for ordinal, chunk in enumerate(chunks):
+        document = str(chunk.get("document") or "")
+        if not document or document in seen or should_skip_document(document):
+            continue
+        seen.add(document)
+        title = str(chunk.get("chapter_title") or "").strip() or document
+        catalog.append(
+            DocumentCatalogEntry(
+                document_id=document,
+                chapter_title=title,
+                corpus_ordinal=ordinal,
+            )
+        )
+    return tuple(catalog)
+
+
+def build_planner_input(
+    resolved_turn: ResolvedTurn,
+    document_catalog: Sequence[DocumentCatalogEntry],
+) -> str:
+    payload = {
+        "resolved_turn": resolved_turn.model_dump(mode="json", by_alias=True),
+        "eligible_document_catalog": [
+            entry.model_dump(mode="json") for entry in document_catalog
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def plan_question(
+    client: object,
+    resolved_turn: ResolvedTurn,
+    document_catalog: Sequence[DocumentCatalogEntry],
+    *,
+    policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
+) -> QuestionPlan:
+    """Run at most one structured planner call, then validate or fall back locally."""
+    if not policy.decomposition or not requires_planning(resolved_turn):
+        return build_question_plan(resolved_turn)
+    try:
+        response = tracked_responses_parse(
+            without_automatic_retries(client),
+            operation="query_planning",
+            instructions=(
+                QUERY_PLANNER_INSTRUCTIONS
+                + "\n"
+                + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS
+            ),
+            input=build_planner_input(resolved_turn, document_catalog),
+            text_format=QuestionPlan,
+            max_output_tokens=MAX_PLANNER_OUTPUT_TOKENS,
+            **QUERY_PLANNER_SETTINGS.responses_create_kwargs(),
+        )
+    except CostLimitExceeded:
+        raise
+    except Exception:
+        return build_question_plan(
+            resolved_turn,
+            fallback_reason="planner_call_failed",
+        )
+
+    parsed = getattr(response, "output_parsed", None)
+    return build_question_plan(
+        resolved_turn,
+        parsed,
+        document_catalog,
+        fallback_reason=(
+            None if parsed is not None else "planner_refused_or_unparsed"
+        ),
+    )
+
+
+def assess_answer_corpus_integrity(
+    eligible_chunks: Sequence[Mapping[str, object]],
+    collection_count: int,
+    corpus_manifest: Mapping[str, object] | None,
+    corpus_manifest_sha256: str | None,
+    *,
+    actual_collection_name: str | None = None,
+    actual_hnsw_space: str | None = None,
+    collection_metadata: Mapping[str, object] | None = None,
+    collection_records: Mapping[str, object] | None = None,
+    require_store_identity: bool = False,
+) -> CorpusIntegrity:
+    manifest_chunks: list[Mapping[str, object]] = []
+    expected_collection_count = len(eligible_chunks)
+    manifest_store: Mapping[str, object] = {}
+    if corpus_manifest is not None:
+        raw_chunks = corpus_manifest.get("chunks")
+        if isinstance(raw_chunks, list):
+            manifest_chunks = [
+                chunk
+                for chunk in raw_chunks
+                if isinstance(chunk, Mapping)
+                and not should_skip_document(str(chunk.get("document") or ""))
+            ]
+        store = corpus_manifest.get("store")
+        if isinstance(store, Mapping):
+            manifest_store = store
+            raw_count = store.get("embedded_chunk_count")
+            if isinstance(raw_count, int) and not isinstance(raw_count, bool):
+                expected_collection_count = raw_count
+    manifest_ids = [
+        str(chunk.get("chunk_id") or "")
+        for chunk in manifest_chunks
+    ]
+    if not manifest_ids:
+        manifest_ids = [
+            str(chunk.get("chunk_id") or "")
+            for chunk in eligible_chunks
+        ]
+    manifest_hash = corpus_manifest_sha256 or ""
+    integrity = assess_corpus_integrity(
+        eligible_chunks,
+        manifest_eligible_chunk_ids=manifest_ids,
+        expected_manifest_sha256=manifest_hash,
+        loaded_manifest_sha256=manifest_hash,
+        expected_collection_count=expected_collection_count,
+        collection_count=collection_count,
+    )
+    manifest_text_hashes = {
+        str(chunk.get("chunk_id") or ""): str(
+            chunk.get("text_sha256") or ""
+        ).casefold()
+        for chunk in manifest_chunks
+    }
+    if not manifest_chunks or any(
+        not re.fullmatch(r"[0-9a-f]{64}", manifest_text_hashes.get(chunk_id, ""))
+        for chunk_id in manifest_ids
+    ):
+        return integrity.with_failure("manifest_text_identity_missing")
+    loaded_ids = [
+        str(chunk.get("chunk_id") or "") for chunk in eligible_chunks
+    ]
+    if loaded_ids != manifest_ids:
+        integrity = integrity.with_failure("manifest_chunk_order_mismatch")
+    manifest_by_id = {
+        str(chunk.get("chunk_id") or ""): chunk for chunk in manifest_chunks
+    }
+    if any(
+        (
+            str(chunk.get("document") or "")
+            != str(manifest_by_id.get(chunk_id, {}).get("document") or "")
+            or chunk.get("paragraph_start")
+            != manifest_by_id.get(chunk_id, {}).get("paragraph_start")
+            or chunk.get("paragraph_end")
+            != manifest_by_id.get(chunk_id, {}).get("paragraph_end")
+            or len(str(chunk.get("text") or ""))
+            != manifest_by_id.get(chunk_id, {}).get("char_count")
+        )
+        for chunk, chunk_id in zip(eligible_chunks, loaded_ids)
+    ):
+        integrity = integrity.with_failure("manifest_chunk_metadata_mismatch")
+    if any(
+        hashlib.sha256(str(chunk.get("text") or "").encode("utf-8")).hexdigest()
+        != manifest_text_hashes.get(str(chunk.get("chunk_id") or ""))
+        for chunk in eligible_chunks
+    ):
+        integrity = integrity.with_failure("chunk_text_identity_mismatch")
+    expected_collection_name = str(
+        manifest_store.get("collection_name") or ""
+    )
+    if (
+        expected_collection_name
+        and expected_collection_name != str(actual_collection_name or "")
+    ):
+        integrity = integrity.with_failure("collection_name_mismatch")
+    expected_hnsw_space = str(manifest_store.get("hnsw_space") or "")
+    if (
+        expected_hnsw_space
+        and expected_hnsw_space != str(actual_hnsw_space or "")
+    ):
+        integrity = integrity.with_failure("hnsw_space_mismatch")
+    expected_embedding_model = str(
+        manifest_store.get("embedding_model") or ""
+    )
+    if (
+        expected_embedding_model
+        and expected_embedding_model != EMBEDDING_MODEL
+    ):
+        integrity = integrity.with_failure("embedding_model_mismatch")
+
+    if not require_store_identity:
+        return integrity
+
+    if not isinstance(collection_metadata, Mapping):
+        integrity = integrity.with_failure("collection_metadata_missing")
+    else:
+        expected_chunks_sha256 = str(
+            (corpus_manifest or {}).get("chunks_sha256") or ""
+        )
+        if (
+            not expected_chunks_sha256
+            or str(collection_metadata.get("chunks_sha256") or "")
+            != expected_chunks_sha256
+        ):
+            integrity = integrity.with_failure("collection_chunks_identity_mismatch")
+        if (
+            expected_embedding_model
+            and str(collection_metadata.get("embedding_model") or "")
+            != expected_embedding_model
+        ):
+            integrity = integrity.with_failure("collection_embedding_model_mismatch")
+        if (
+            expected_hnsw_space
+            and str(collection_metadata.get("hnsw:space") or "")
+            != expected_hnsw_space
+        ):
+            integrity = integrity.with_failure("collection_hnsw_space_mismatch")
+
+    if not isinstance(collection_records, Mapping):
+        return integrity.with_failure("collection_records_missing")
+    raw_store_ids = collection_records.get("ids")
+    raw_store_metadatas = collection_records.get("metadatas")
+    if not isinstance(raw_store_ids, list) or not isinstance(
+        raw_store_metadatas, list
+    ):
+        return integrity.with_failure("collection_records_malformed")
+    store_ids = [str(value) for value in raw_store_ids]
+    if (
+        len(store_ids) != len(set(store_ids))
+        or set(store_ids) != set(manifest_ids)
+    ):
+        integrity = integrity.with_failure("collection_chunk_ids_mismatch")
+    if len(raw_store_metadatas) != len(store_ids):
+        return integrity.with_failure("collection_metadata_count_mismatch")
+    store_metadata_by_id = {
+        chunk_id: metadata
+        for chunk_id, metadata in zip(store_ids, raw_store_metadatas)
+        if isinstance(metadata, Mapping)
+    }
+    if len(store_metadata_by_id) != len(store_ids):
+        return integrity.with_failure("collection_chunk_metadata_missing")
+
+    for chunk_id in manifest_ids:
+        expected = manifest_by_id.get(chunk_id, {})
+        actual = store_metadata_by_id.get(chunk_id)
+        if actual is None:
+            integrity = integrity.with_failure("collection_chunk_metadata_missing")
+            continue
+        stored_text = actual.get("text")
+        if (
+            str(actual.get("chunk_id") or "") != chunk_id
+            or str(actual.get("document") or "")
+            != str(expected.get("document") or "")
+            or actual.get("paragraph_start") != expected.get("paragraph_start")
+            or actual.get("paragraph_end") != expected.get("paragraph_end")
+            or not isinstance(stored_text, str)
+            or len(stored_text) != expected.get("char_count")
+            or hashlib.sha256(str(stored_text).encode("utf-8")).hexdigest()
+            != manifest_text_hashes.get(chunk_id)
+        ):
+            integrity = integrity.with_failure(
+                "collection_chunk_metadata_mismatch"
+            )
+            break
+    return integrity
+
+
+def preflight_answer_corpus(
+    *,
+    collection_handle: object,
+    chunks: Sequence[Mapping[str, object]],
+    corpus_manifest: Mapping[str, object] | None,
+    corpus_manifest_sha256: str | None,
+    require_store_identity: bool,
+) -> CorpusIntegrity:
+    """Verify local corpus and store identity without an OpenAI operation."""
+
+    eligible_chunks = [
+        chunk
+        for chunk in chunks
+        if not should_skip_document(str(chunk.get("document") or ""))
+    ]
+    collection_count = int(collection_handle.count())
+    actual_collection_name = str(
+        getattr(collection_handle, "name", "") or ""
+    )
+    collection_metadata = getattr(collection_handle, "metadata", None)
+    configuration = getattr(collection_handle, "configuration", {})
+    actual_hnsw_space: str | None = None
+    if isinstance(configuration, Mapping):
+        hnsw = configuration.get("hnsw")
+        if isinstance(hnsw, Mapping):
+            actual_hnsw_space = str(hnsw.get("space") or "")
+    if (
+        not actual_hnsw_space
+        and isinstance(collection_metadata, Mapping)
+    ):
+        actual_hnsw_space = str(
+            collection_metadata.get("hnsw:space") or ""
+        )
+
+    collection_records: Mapping[str, object] | None = None
+    if require_store_identity:
+        getter = getattr(collection_handle, "get", None)
+        if callable(getter):
+            try:
+                raw_records = getter(include=["metadatas"])
+            except Exception:
+                raw_records = None
+            if isinstance(raw_records, Mapping):
+                collection_records = raw_records
+
+    return assess_answer_corpus_integrity(
+        eligible_chunks,
+        collection_count,
+        corpus_manifest,
+        corpus_manifest_sha256,
+        actual_collection_name=actual_collection_name,
+        actual_hnsw_space=actual_hnsw_space,
+        collection_metadata=(
+            collection_metadata
+            if isinstance(collection_metadata, Mapping)
+            else None
+        ),
+        collection_records=collection_records,
+        require_store_identity=require_store_identity,
+    )
+
+
+def _parse_related_probe(
+    plan: QuestionPlan,
+) -> tuple[str, tuple[str, ...]] | None:
+    original_question = next(
+        (
+            facet.search_query
+            for facet in plan.facets
+            if facet.role is FacetRole.ORIGINAL
+        ),
+        "",
+    )
+    normalized_question = normalize_search_query(original_question)
+    for facet in plan.facets:
+        if facet.role is not FacetRole.BROADER_RELATED:
+            continue
+        match = _RELATED_PROBE_PATTERN.fullmatch(facet.search_query)
+        if match is None:
+            continue
+        broader = match.group("broader").strip()
+        related = tuple(
+            value.strip()
+            for value in match.group("related").split(",")
+            if value.strip()
+        )
+        trusted_surfaces = (broader, *related)
+        if (
+            broader
+            and related
+            and all(
+                f" {normalize_search_query(surface)} "
+                in f" {normalized_question} "
+                for surface in trusted_surfaces
+            )
+        ):
+            return broader, related
+    return None
+
+
+def _all_sources_gate(
+    planned: PlannedContext,
+    integrity: CorpusIntegrity,
+    *,
+    rule: str,
+) -> EvidenceGateResult:
+    assignments = tuple(
+        EvidenceLaneAssignment(
+            source_number=number,
+            chunk_id=str(chunk.get("chunk_id") or ""),
+            lane=EvidenceLane.GENERIC_SEMANTIC,
+        )
+        for number, chunk in enumerate(planned.final_chunks, start=1)
+    )
+    return EvidenceGateResult(
+        decision=EvidenceDecision.DIRECT_ANSWER,
+        certified_direct_absence=False,
+        premise_correction_required=False,
+        relationship_chunk_ids=(),
+        allowed_source_numbers=tuple(range(1, len(planned.final_chunks) + 1)),
+        suppressed_source_numbers=(),
+        lane_assignments=assignments,
+        rules_fired=(rule,),
+        integrity=integrity,
+    )
+
+
+def _promote_direct_anchor_chunks(
+    planned: PlannedContext,
+    scans: Sequence[EvidenceTargetScan],
+    eligible_chunks: Sequence[Mapping[str, object]],
+    *,
+    facet_scan: EvidenceTargetScan | None,
+    immediate_neighbors: Mapping[str, Sequence[str]],
+) -> None:
+    """Guarantee corpus-scan hits are actually present in the model context."""
+    lookup = {
+        str(chunk.get("chunk_id") or ""): dict(chunk)
+        for chunk in eligible_chunks
+    }
+    mandatory_ids: list[str] = []
+    if scans and facet_scan is not None:
+        mandatory_ids.extend(
+            relationship_evidence_chunk_ids(
+                scans[0],
+                facet_scan,
+                immediate_neighbors=immediate_neighbors,
+            )
+        )
+    for scan in scans:
+        mandatory_ids.extend(scan.direct_chunk_ids[:2])
+    mandatory_ids = list(dict.fromkeys(mandatory_ids))[:MAX_FINAL_SOURCES]
+    if not mandatory_ids:
+        return
+
+    old_chunks = list(planned.final_chunks)
+    old_ids = [str(chunk.get("chunk_id") or "") for chunk in old_chunks]
+    selection = planned.trace.setdefault("selection", {})
+    selection["pre_anchor_context"] = list(selection.get("context", []))
+    old_facet_chunk_ids = {
+        facet_id: [
+            old_ids[source_number - 1]
+            for source_number in source_numbers
+            if 1 <= source_number <= len(old_ids)
+        ]
+        for facet_id, source_numbers in planned.facet_source_numbers.items()
+    }
+    new_ids = [
+        *mandatory_ids,
+        *(chunk_id for chunk_id in old_ids if chunk_id not in mandatory_ids),
+    ][:MAX_FINAL_SOURCES]
+    if new_ids == old_ids:
+        return
+
+    new_chunks = [lookup[chunk_id] for chunk_id in new_ids if chunk_id in lookup]
+    source_number_by_id = {
+        str(chunk.get("chunk_id") or ""): source_number
+        for source_number, chunk in enumerate(new_chunks, start=1)
+    }
+    f0_id = next(
+        (
+            facet_id
+            for facet_id in planned.facet_source_numbers
+            if facet_id == "F0"
+        ),
+        None,
+    )
+    new_facet_sources: dict[str, tuple[int, ...]] = {}
+    for facet_id, chunk_ids in old_facet_chunk_ids.items():
+        mapped_ids = list(chunk_ids)
+        if facet_id == f0_id:
+            mapped_ids = list(dict.fromkeys((*mandatory_ids, *mapped_ids)))
+        new_facet_sources[facet_id] = tuple(
+            source_number_by_id[chunk_id]
+            for chunk_id in mapped_ids
+            if chunk_id in source_number_by_id
+        )
+
+    new_lane_by_id = {
+        chunk_id: planned.lane_by_chunk_id.get(chunk_id, ())
+        for chunk_id in new_ids
+    }
+    if f0_id is not None:
+        for chunk_id in mandatory_ids:
+            new_lane_by_id[chunk_id] = tuple(
+                dict.fromkeys((*new_lane_by_id.get(chunk_id, ()), f0_id))
+            )
+
+    planned.final_chunks[:] = new_chunks
+    planned.facet_source_numbers.clear()
+    planned.facet_source_numbers.update(new_facet_sources)
+    planned.lane_by_chunk_id.clear()
+    planned.lane_by_chunk_id.update(new_lane_by_id)
+
+    promoted = [chunk_id for chunk_id in mandatory_ids if chunk_id not in old_ids]
+    planned.trace.setdefault("plan", {})["anchor_promoted_count"] = len(promoted)
+    selection["anchor_source_number_remap"] = [
+        {
+            "pre_anchor_source_number": (
+                old_ids.index(chunk_id) + 1
+                if chunk_id in old_ids
+                else None
+            ),
+            "post_anchor_source_number": source_number,
+        }
+        for source_number, chunk_id in enumerate(new_ids, start=1)
+    ]
+    distribution: dict[str, int] = defaultdict(int)
+    for chunk in new_chunks:
+        distribution[str(chunk.get("document") or "")] += 1
+    documents = selection.setdefault("document_distribution", {})
+    if isinstance(documents, dict):
+        documents["context"] = dict(sorted(distribution.items()))
+    selection["context"] = [
+        {
+            "chunk_id": str(chunk.get("chunk_id") or ""),
+            "document": str(chunk.get("document") or ""),
+            "paragraph_start": chunk.get("paragraph_start"),
+            "paragraph_end": chunk.get("paragraph_end"),
+            "source_number": source_number,
+            "origin": (
+                "corpus_anchor"
+                if str(chunk.get("chunk_id") or "") in promoted
+                else "retrieval"
+            ),
+            "facet_ids": list(
+                new_lane_by_id.get(str(chunk.get("chunk_id") or ""), ())
+            ),
+        }
+        for source_number, chunk in enumerate(new_chunks, start=1)
+    ]
+
+
+def apply_evidence_gate(
+    plan: QuestionPlan,
+    planned: PlannedContext,
+    eligible_chunks: Sequence[Mapping[str, object]],
+    *,
+    collection_count: int,
+    corpus_manifest: Mapping[str, object] | None,
+    corpus_manifest_sha256: str | None,
+    corpus_integrity: CorpusIntegrity | None = None,
+    policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
+) -> tuple[EvidenceGateResult, dict[str, Any], str | None]:
+    """Run the local corpus gate and return trace-safe diagnostics plus target label."""
+    integrity = corpus_integrity or assess_answer_corpus_integrity(
+        eligible_chunks,
+        collection_count,
+        corpus_manifest,
+        corpus_manifest_sha256,
+    )
+    if not policy.absence_gate or not plan.targets:
+        gate = _all_sources_gate(planned, integrity, rule="absence_gate_not_applicable")
+        return (
+            gate,
+            {
+                "schema": "archivist.evidence_policy_diagnostics/1",
+                "policy_version": "evidence-gate-v1",
+                "corpus": integrity.as_diagnostics(),
+                "targets": [],
+                "decision": {
+                    "value": gate.decision.value,
+                    "allowed_source_numbers": list(gate.allowed_source_numbers),
+                    "suppressed_source_numbers": [],
+                    "rules_fired": list(gate.rules_fired),
+                },
+            },
+            None,
+        )
+
+    scans = [
+        scan_evidence_target(
+            target.target_id,
+            target.query_surface_span,
+            eligible_chunks,
+            absence_checkable=target.absence_checkable,
+            corpus_integrity=integrity,
+            role=PolicyTargetRole(target.role.value),
+        )
+        for target in plan.targets
+    ]
+    subject_scans = [
+        scan
+        for scan in scans
+        if scan.role is PolicyTargetRole.SUBJECT
+    ]
+    if not subject_scans:
+        gate = _all_sources_gate(planned, integrity, rule="no_subject_target")
+        return gate, {
+            "schema": "archivist.evidence_policy_diagnostics/1",
+            "policy_version": "evidence-gate-v1",
+            "corpus": integrity.as_diagnostics(),
+            "targets": [scan.as_diagnostics() for scan in scans],
+            "decision": {
+                "value": gate.decision.value,
+                "allowed_source_numbers": list(gate.allowed_source_numbers),
+                "suppressed_source_numbers": [],
+                "rules_fired": list(gate.rules_fired),
+            },
+        }, None
+
+    subject_scan = subject_scans[0]
+    facet_scans = [
+        scan for scan in scans if scan.role is PolicyTargetRole.FACET
+    ]
+    facet_scan = facet_scans[0] if facet_scans else None
+    neighbors = build_immediate_neighbor_map(eligible_chunks)
+    _promote_direct_anchor_chunks(
+        planned,
+        scans,
+        eligible_chunks,
+        facet_scan=facet_scan,
+        immediate_neighbors=neighbors,
+    )
+    if len(subject_scans) > 1 or len(facet_scans) > 1:
+        assignments = classify_evidence_lanes(
+            planned.final_chunks,
+            subject_scan=subject_scan,
+            facet_scan=facet_scan,
+            immediate_neighbors=neighbors,
+        )
+        gate = EvidenceGateResult(
+            decision=EvidenceDecision.INDETERMINATE,
+            certified_direct_absence=False,
+            premise_correction_required=False,
+            relationship_chunk_ids=(),
+            allowed_source_numbers=(),
+            suppressed_source_numbers=tuple(
+                range(1, len(planned.final_chunks) + 1)
+            ),
+            lane_assignments=assignments,
+            rules_fired=("multiple_targets_require_disambiguation",),
+            integrity=integrity,
+        )
+        diagnostics = evidence_diagnostics(
+            gate,
+            subject_scan=subject_scan,
+            facet_scan=facet_scan,
+        )
+        diagnostics["targets"] = [
+            scan.as_diagnostics() for scan in scans
+        ]
+        return gate, diagnostics, None
+    related_spec = _parse_related_probe(plan)
+    broader_scan = (
+        scan_broader_related(
+            related_spec[0],
+            related_spec[1],
+            eligible_chunks,
+            immediate_neighbors=neighbors,
+        )
+        if related_spec is not None
+        else None
+    )
+    lane_assignments = classify_evidence_lanes(
+        planned.final_chunks,
+        subject_scan=subject_scan,
+        facet_scan=facet_scan,
+        broader_related_scan=broader_scan,
+        immediate_neighbors=neighbors,
+    )
+    gate = decide_evidence(
+        subject_scan,
+        facet_scan=facet_scan,
+        lane_assignments=lane_assignments,
+        broader_related_scan=broader_scan,
+        immediate_neighbors=neighbors,
+    )
+
+    # Premise status is adjudicated against the sources in the one structured answer
+    # call. Do not let a surface-form absence suppress those support/counter lanes first.
+    if plan.premises and policy.premise_checking:
+        gate = _all_sources_gate(
+            planned,
+            gate.integrity,
+            rule="premise_evaluation_pending",
+        )
+    diagnostics = evidence_diagnostics(
+        gate,
+        subject_scan=subject_scan,
+        facet_scan=facet_scan,
+        broader_related_scan=broader_scan,
+    )
+    target_label = next(
+        (
+            target.query_surface_span
+            for target in plan.targets
+            if target.target_id == subject_scan.target_id
+        ),
+        None,
+    )
+    return gate, diagnostics, target_label
+
+
+def _filter_context(
+    planned: PlannedContext,
+    allowed_source_numbers: Sequence[int],
+) -> tuple[
+    list[dict[str, Any]],
+    dict[int, int],
+    dict[str, tuple[int, ...]],
+]:
+    allowed = set(allowed_source_numbers)
+    selected_pairs = [
+        (old_number, chunk)
+        for old_number, chunk in enumerate(planned.final_chunks, start=1)
+        if old_number in allowed
+    ]
+    old_to_new = {
+        old_number: new_number
+        for new_number, (old_number, _chunk) in enumerate(selected_pairs, start=1)
+    }
+    remapped_facets = {
+        facet_id: tuple(
+            old_to_new[number]
+            for number in source_numbers
+            if number in old_to_new
+        )
+        for facet_id, source_numbers in planned.facet_source_numbers.items()
+    }
+    return [chunk for _number, chunk in selected_pairs], old_to_new, remapped_facets
+
+
+def _record_generation_context(
+    planned: PlannedContext,
+    final_chunks: Sequence[Mapping[str, object]],
+    old_to_new: Mapping[int, int],
+) -> None:
+    """Make post-gate citation numbering mechanically auditable."""
+    selection = planned.trace.setdefault("selection", {})
+    retrieval_context = list(selection.get("context", []))
+    selection["retrieval_context"] = retrieval_context
+    new_to_old = {
+        new_number: old_number
+        for old_number, new_number in old_to_new.items()
+    }
+    generation_context = [
+        {
+            "source_number": new_number,
+            "retrieval_source_number": new_to_old.get(new_number),
+            "chunk_id": str(chunk.get("chunk_id") or ""),
+            "document": str(chunk.get("document") or ""),
+            "paragraph_start": chunk.get("paragraph_start"),
+            "paragraph_end": chunk.get("paragraph_end"),
+        }
+        for new_number, chunk in enumerate(final_chunks, start=1)
+    ]
+    selection["source_number_remap"] = [
+        {
+            "retrieval_source_number": old_number,
+            "generation_source_number": new_number,
+        }
+        for old_number, new_number in sorted(old_to_new.items())
+    ]
+    selection["generation_context"] = generation_context
+    selection["context"] = generation_context
+
+
+def _requirement_source_map(
+    plan: QuestionPlan,
+    facet_source_numbers: Mapping[str, Sequence[int]],
+) -> dict[str, tuple[int, ...]]:
+    result: dict[str, list[int]] = defaultdict(list)
+    for facet in plan.facets:
+        for requirement_id in facet.requirement_ids:
+            for source_number in facet_source_numbers.get(facet.facet_id, ()):
+                if source_number not in result[requirement_id]:
+                    result[requirement_id].append(source_number)
+    return {
+        requirement.requirement_id: tuple(result[requirement.requirement_id])
+        for requirement in plan.requirements
+    }
+
+
+def build_coverage_input(
+    resolved_turn: ResolvedTurn,
+    plan: QuestionPlan,
+    final_chunks: list[dict[str, Any]],
+    facet_source_numbers: Mapping[str, Sequence[int]],
+    gate: EvidenceGateResult,
+    *,
+    historiographical_lens: HistoriographicalLens | str,
+    voice: AnswerVoice | str,
+    worldview: Worldview | str,
+) -> str:
+    requirement_sources = _requirement_source_map(plan, facet_source_numbers)
+    premise_sources = []
+    for premise in plan.premises:
+        support = facet_source_numbers.get(premise.support_facet_id, ())
+        counter = facet_source_numbers.get(premise.counter_facet_id, ())
+        framing = (
+            facet_source_numbers.get(premise.framing_facet_id, ())
+            if premise.framing_facet_id is not None
+            else ()
+        )
+        premise_sources.append(
+            {
+                "premise_id": premise.premise_id,
+                "proposition": premise.proposition,
+                "support_candidate_sources": list(support),
+                "counter_candidate_sources": list(counter),
+                "framing_candidate_sources": list(framing),
+            }
+        )
+    control = {
+        "schema": "archivist.answer_request/1",
+        "question": resolved_turn.standalone_question,
+        "conversation_context": {
+            "entities": list(resolved_turn.entities),
+            "scope": resolved_turn.scope,
+            "corrections": list(resolved_turn.corrections),
+            "relationship": resolved_turn.relationship,
+            "note": (
+                "These fields resolve user intent only. Prior assistant answers are not evidence."
+            ),
+        },
+        "requirements": [
+            {
+                "requirement_id": requirement.requirement_id,
+                "label": requirement.label,
+                "order": requirement.order,
+                "required": requirement.required,
+                "candidate_source_numbers": list(
+                    requirement_sources[requirement.requirement_id]
+                ),
+            }
+            for requirement in plan.requirements
+        ],
+        "premises": premise_sources,
+        "evidence_boundary": {
+            "decision": gate.decision.value,
+            "certified_direct_absence": gate.certified_direct_absence,
+            "rules_fired": list(gate.rules_fired),
+        },
+    }
+    style = build_interpretive_prompt_block(
+        historiographical_lens,
+        voice,
+        worldview,
+    )
+    sections = [
+        "Request contract:\n" + json.dumps(control, ensure_ascii=False, indent=2),
+        "Numbered manuscript sources:\n" + build_context(final_chunks),
+    ]
+    if style:
+        sections.append(
+            "Interpretive style (wording only; never alter coverage or sources):\n"
+            + style
+            + "\nDo not add an uncited invitation or follow-up question outside the schema."
+        )
+    return "\n\n".join(sections)
+
+
+def _response_refused(response: object) -> bool:
+    for output in getattr(response, "output", ()) or ():
+        for content in getattr(output, "content", ()) or ():
+            if getattr(content, "type", None) == "refusal":
+                return True
+    return False
+
+
+def _clean_abstention(target_label: str | None) -> str:
+    subject = f" “{target_label}”" if target_label else ""
+    return (
+        f"I could not find a direct mention of{subject} in the searchable manuscript, "
+        "so I cannot describe the book as treating it. I will not substitute material "
+        "about a similar subject."
+    )
+
+
+def _generation_trace(
+    coverage: EvidenceCoverageResult | None,
+    *,
+    status: str,
+    style_prompt_sha256: str | None = None,
+) -> dict[str, Any]:
+    contract = {
+        "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
+        "instructions_sha256": hashlib.sha256(
+            EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")
+        ).hexdigest(),
+        "schema_sha256": hashlib.sha256(
+            json.dumps(
+                EvidenceCoverageAnswer.model_json_schema(),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+        "generator_model": GENERATOR_SETTINGS.model,
+        "generator_reasoning_effort": GENERATOR_SETTINGS.reasoning_effort,
+        "generator_verbosity": GENERATOR_SETTINGS.verbosity,
+        "style_prompt_sha256": style_prompt_sha256,
+    }
+    if coverage is None:
+        return {
+            **contract,
+            "status": status,
+            "structured_generation_called": False,
+        }
+    diagnostics = coverage.diagnostics.model_dump(mode="json", by_alias=True)
+    return {
+        **contract,
+        "status": coverage.status.value,
+        "structured_generation_called": True,
+        **diagnostics,
+    }
+
+
+def run_evidence_planned_answer(
+    *,
+    resolved_turn: ResolvedTurn,
+    collection_handle: object,
+    chunks: list[dict[str, Any]],
+    client: object,
+    n_results: int = 5,
+    corpus_trace: Mapping[str, Any] | None = None,
+    corpus_manifest: Mapping[str, object] | None = None,
+    corpus_manifest_sha256: str | None = None,
+    corpus_integrity: CorpusIntegrity | None = None,
+    require_store_identity: bool = False,
+    historiographical_lens: HistoriographicalLens | str = (
+        HistoriographicalLens.EVIDENCE_FIRST
+    ),
+    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
+    worldview: Worldview | str = Worldview.NONE,
+    policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
+) -> AnswerModeResult:
+    """Execute one bounded evidence-planned Answer Mode turn."""
+    eligible_chunks = [
+        chunk
+        for chunk in chunks
+        if not should_skip_document(str(chunk.get("document") or ""))
+    ]
+    collection_count = int(collection_handle.count())
+    integrity = corpus_integrity or preflight_answer_corpus(
+        collection_handle=collection_handle,
+        chunks=eligible_chunks,
+        corpus_manifest=corpus_manifest,
+        corpus_manifest_sha256=corpus_manifest_sha256,
+        require_store_identity=require_store_identity,
+    )
+    if not integrity.passed:
+        plan = build_question_plan(
+            resolved_turn,
+            fallback_reason="corpus_integrity_failed",
+        )
+        diagnostics = {
+            "evidence": {
+                "schema": "archivist.evidence_policy_diagnostics/1",
+                "corpus": integrity.as_diagnostics(),
+                "decision": {
+                    "value": EvidenceDecision.INDETERMINATE.value,
+                    "rules_fired": ["corpus_integrity_failed"],
+                },
+            },
+            "generation": {
+                "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
+                "status": "corpus_integrity_failed",
+                "structured_generation_called": False,
+            },
+        }
+        return AnswerModeResult(
+            answer=CORPUS_INTEGRITY_FAILED_MESSAGE,
+            final_chunks=[],
+            status="corpus_integrity_failed",
+            plan=plan,
+            evidence_decision=EvidenceDecision.INDETERMINATE.value,
+            diagnostics=diagnostics,
+        )
+
+    catalog = build_document_catalog(eligible_chunks)
+    request_client = without_automatic_retries(client)
+    plan = plan_question(
+        request_client,
+        resolved_turn,
+        catalog,
+        policy=policy,
+    )
+    planned = retrieve_plan_from_collection(
+        plan,
+        collection_handle,
+        eligible_chunks,
+        n_results=n_results,
+        embedding_client=request_client,
+        corpus=corpus_trace,
+        max_final_sources=MAX_FINAL_SOURCES,
+    )
+    planned.trace["plan"].update(
+        {
+            "policy_version": policy.version,
+            "planner_prompt_version": QUERY_PLANNER_PROMPT_VERSION,
+            "planner_prompt_sha256": hashlib.sha256(
+                (
+                    QUERY_PLANNER_INSTRUCTIONS
+                    + "\n"
+                    + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS
+                ).encode("utf-8")
+            ).hexdigest(),
+            "planner_schema_sha256": hashlib.sha256(
+                json.dumps(
+                    QuestionPlan.model_json_schema(),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+            "planner_model": QUERY_PLANNER_SETTINGS.model,
+            "planner_reasoning_effort": QUERY_PLANNER_SETTINGS.reasoning_effort,
+            "planner_verbosity": QUERY_PLANNER_SETTINGS.verbosity,
+        }
+    )
+    gate, gate_diagnostics, target_label = apply_evidence_gate(
+        plan,
+        planned,
+        eligible_chunks,
+        collection_count=collection_count,
+        corpus_manifest=corpus_manifest,
+        corpus_manifest_sha256=corpus_manifest_sha256,
+        corpus_integrity=integrity,
+        policy=policy,
+    )
+    planned.trace["evidence"] = gate_diagnostics
+
+    if gate.skip_answer_generation:
+        answer = _clean_abstention(target_label)
+        planned.trace["generation_contract"] = _generation_trace(
+            None,
+            status="clean_abstention",
+        )
+        emit_retrieval_trace(planned.trace)
+        return AnswerModeResult(
+            answer=answer,
+            final_chunks=[],
+            status="clean_abstention",
+            plan=plan,
+            evidence_decision=gate.decision.value,
+            diagnostics={
+                "evidence": gate_diagnostics,
+                "generation": planned.trace["generation_contract"],
+            },
+        )
+
+    final_chunks, old_to_new, remapped_facets = _filter_context(
+        planned,
+        gate.allowed_source_numbers,
+    )
+    _record_generation_context(planned, final_chunks, old_to_new)
+    requirement_ids = tuple(
+        requirement.requirement_id for requirement in plan.requirements
+    )
+    premise_ids = tuple(premise.premise_id for premise in plan.premises)
+    requirement_labels = {
+        requirement.requirement_id: requirement.label
+        for requirement in plan.requirements
+    }
+
+    if not final_chunks:
+        coverage = process_evidence_coverage(
+            None,
+            requirement_ids=requirement_ids,
+            premise_ids=premise_ids,
+            source_count=0,
+            requirement_labels=requirement_labels,
+        )
+        planned.trace["generation_contract"] = _generation_trace(
+            coverage,
+            status="insufficient_evidence",
+        )
+        emit_retrieval_trace(planned.trace)
+        return AnswerModeResult(
+            answer=coverage.answer,
+            final_chunks=[],
+            status=coverage.status.value,
+            plan=plan,
+            evidence_decision=gate.decision.value,
+            diagnostics={
+                "evidence": gate_diagnostics,
+                "generation": planned.trace["generation_contract"],
+            },
+        )
+
+    coverage_input = build_coverage_input(
+        resolved_turn,
+        plan,
+        final_chunks,
+        remapped_facets,
+        gate,
+        historiographical_lens=historiographical_lens,
+        voice=voice,
+        worldview=worldview,
+    )
+    style_block = build_interpretive_prompt_block(
+        historiographical_lens,
+        voice,
+        worldview,
+    )
+    style_prompt_sha256 = (
+        hashlib.sha256(style_block.encode("utf-8")).hexdigest()
+        if style_block
+        else None
+    )
+    try:
+        response = tracked_responses_parse(
+            request_client,
+            operation="answer_generation",
+            instructions=EVIDENCE_COVERAGE_INSTRUCTIONS,
+            input=coverage_input,
+            text_format=EvidenceCoverageAnswer,
+            max_output_tokens=MAX_COVERAGE_OUTPUT_TOKENS,
+            **GENERATOR_SETTINGS.responses_create_kwargs(),
+        )
+        parsed = getattr(response, "output_parsed", None)
+        refused = _response_refused(response)
+    except CostLimitExceeded:
+        raise
+    except Exception:
+        parsed = None
+        refused = True
+
+    coverage = process_evidence_coverage(
+        parsed,
+        requirement_ids=requirement_ids,
+        premise_ids=premise_ids,
+        source_count=len(final_chunks),
+        requirement_labels=requirement_labels,
+        refused=refused,
+    )
+    planned.trace["generation_contract"] = _generation_trace(
+        coverage,
+        status=coverage.status.value,
+        style_prompt_sha256=style_prompt_sha256,
+    )
+    emit_retrieval_trace(planned.trace)
+    return AnswerModeResult(
+        answer=coverage.answer,
+        final_chunks=final_chunks,
+        status=coverage.status.value,
+        plan=plan,
+        evidence_decision=gate.decision.value,
+        diagnostics={
+            "evidence": gate_diagnostics,
+            "generation": planned.trace["generation_contract"],
+        },
+    )
+
+
+__all__ = [
+    "AnswerModeResult",
+    "EVIDENCE_PLANNED_POLICY",
+    "EVIDENCE_COVERAGE_INSTRUCTIONS",
+    "RAG_POLICY_VERSION",
+    "RagPolicy",
+    "apply_evidence_gate",
+    "assess_answer_corpus_integrity",
+    "build_coverage_input",
+    "build_document_catalog",
+    "build_planner_input",
+    "plan_question",
+    "preflight_answer_corpus",
+    "run_evidence_planned_answer",
+    "without_automatic_retries",
+]

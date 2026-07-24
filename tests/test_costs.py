@@ -12,6 +12,7 @@ from pydantic import ValidationError
 import web_api
 import costs
 from costs import (
+    CostLimitExceeded,
     MODEL_PRICING,
     PRICING_VERSION,
     TokenUsage,
@@ -22,10 +23,9 @@ from costs import (
     record_openai_response,
     tracked_embeddings_create,
     tracked_responses_create,
+    tracked_responses_parse,
     usage_scope,
 )
-
-
 @pytest.fixture
 def ledger_path(request):
     directory = Path("runtime") / "test-ledgers"
@@ -233,6 +233,53 @@ def test_post_response_tracking_failure_does_not_hide_success(monkeypatch):
     assert response.output_text == "paid answer"
 
 
+def test_structured_response_wrapper_uses_parse_and_tracks_usage(monkeypatch):
+    paid_response = SimpleNamespace(
+        id="structured-response",
+        model="gpt-5.6-sol",
+        output_parsed={"result": "ok"},
+        usage=SimpleNamespace(input_tokens=2, output_tokens=1, total_tokens=3),
+    )
+    requests = []
+    tracked = []
+    client = SimpleNamespace(
+        responses=SimpleNamespace(
+            parse=lambda **request: requests.append(request) or paid_response
+        )
+    )
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+
+    response = tracked_responses_parse(
+        client,
+        operation="query_planning",
+        model="gpt-5.6-sol",
+        input="structured prompt",
+        text_format=dict,
+    )
+
+    assert response is paid_response
+    assert requests == [
+        {
+            "model": "gpt-5.6-sol",
+            "input": "structured prompt",
+            "text_format": dict,
+        }
+    ]
+    assert tracked == [
+        (
+            paid_response,
+            {
+                "operation": "query_planning",
+                "requested_model": "gpt-5.6-sol",
+            },
+        )
+    ]
+
+
 def test_summary_filters_scopes_and_utc_calendar_month(ledger_path):
     ledger = UsageLedger(ledger_path)
     usage = TokenUsage(input_tokens=1_000, total_tokens=1_000)
@@ -365,8 +412,19 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(ledger_path))
     captured = []
 
-    def fake_resolve(question, history):
-        captured.append(("resolve", question, history, current_usage_context()))
+    def fake_answer(
+        project_id,
+        question,
+        n_results,
+        *,
+        historiographical_lens,
+        voice,
+        worldview,
+        history,
+    ):
+        captured.append(
+            ("answer", project_id, question, history, current_usage_context())
+        )
         record_openai_response(
             SimpleNamespace(
                 id="resolver",
@@ -376,18 +434,6 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
             operation="followup_resolution",
             requested_model="gpt-5",
         )
-        return "Standalone question?"
-
-    def fake_answer(
-        project_id,
-        question,
-        n_results,
-        *,
-        historiographical_lens,
-        voice,
-        worldview,
-    ):
-        captured.append(("answer", project_id, question, current_usage_context()))
         record_openai_response(
             SimpleNamespace(
                 id="answer",
@@ -397,10 +443,15 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
             operation="answer_generation",
             requested_model="gpt-5",
         )
-        return "Grounded answer.", []
+        return SimpleNamespace(
+            answer="Grounded answer.",
+            final_chunks=[],
+            status="answered",
+            evidence_decision="direct_answer",
+            resolved_question="Standalone question?",
+        )
 
-    monkeypatch.setattr(web_api, "resolve_conversation_query", fake_resolve)
-    monkeypatch.setattr(web_api, "answer_project_question", fake_answer)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
     request = web_api.QuestionRequest(
         question="What happened next?",
         history=[{"question": "Who?", "answer": "A prior answer."}],
@@ -410,12 +461,14 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
 
     response = web_api.question("current", request)
 
-    for context in (captured[0][3], captured[1][3]):
-        assert (
-            context.project_id,
-            context.conversation_id,
-            context.turn_id,
-        ) == ("current", "conversation-1", "turn-1")
+    context = captured[0][4]
+    assert (
+        context.project_id,
+        context.conversation_id,
+        context.turn_id,
+        context.enforce_budget,
+        context.allow_over_budget,
+    ) == ("current", "conversation-1", "turn-1", True, False)
     assert response["conversation_id"] == "conversation-1"
     assert response["turn_id"] == "turn-1"
     assert response["resolved_query"] == "Standalone question?"
@@ -450,11 +503,16 @@ def test_question_api_hard_stop_and_explicit_override(monkeypatch, ledger_path):
     assert exc_info.value.detail["code"] == "cost_limit_exceeded"
     assert exc_info.value.detail["budget"]["exceeded"] is True
 
-    monkeypatch.setattr(web_api, "resolve_conversation_query", lambda question, _history: question)
     monkeypatch.setattr(
         web_api,
-        "answer_project_question",
-        lambda *_args, **_kwargs: ("Allowed answer.", []),
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer="Allowed answer.",
+            final_chunks=[],
+            status="answered",
+            evidence_decision="direct_answer",
+            resolved_question="Question?",
+        ),
     )
     allowed = web_api.QuestionRequest(question="Question?", allow_over_budget=True)
     assert web_api.question("current", allowed)["answer"] == "Allowed answer."
@@ -477,17 +535,138 @@ def test_post_answer_summary_failure_does_not_discard_paid_answer(monkeypatch):
             raise RuntimeError("ledger became unavailable")
 
     monkeypatch.setattr(web_api, "UsageLedger", BrokenSummaryLedger)
-    monkeypatch.setattr(web_api, "resolve_conversation_query", lambda question, _history: question)
     monkeypatch.setattr(
         web_api,
-        "answer_project_question",
-        lambda *_args, **_kwargs: ("Paid answer.", []),
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer="Paid answer.",
+            final_chunks=[],
+            status="answered",
+            evidence_decision="direct_answer",
+            resolved_question="Question?",
+        ),
     )
 
     response = web_api.question("current", web_api.QuestionRequest(question="Question?"))
 
     assert response["answer"] == "Paid answer."
     assert response["costs"] is None
+
+
+def test_tracked_calls_recheck_hard_limit_between_operations(monkeypatch):
+    class SequencedLedger:
+        def __init__(self):
+            self.checks = 0
+
+        def budget_state(self):
+            self.checks += 1
+            exceeded = self.checks > 1
+            return {
+                "hard_limit_enabled": True,
+                "exceeded": exceeded,
+            }
+
+    class FakeResponses:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **_request):
+            self.calls += 1
+            return SimpleNamespace(id=f"response-{self.calls}")
+
+    ledger = SequencedLedger()
+    responses = FakeResponses()
+    monkeypatch.setattr(costs, "UsageLedger", lambda: ledger)
+    client = SimpleNamespace(responses=responses)
+
+    with usage_scope(enforce_budget=True):
+        tracked_responses_create(
+            client,
+            operation="first",
+            model="gpt-5",
+            input="Synthetic input.",
+        )
+        with pytest.raises(CostLimitExceeded):
+            tracked_responses_create(
+                client,
+                operation="second",
+                model="gpt-5",
+                input="Synthetic input.",
+            )
+
+    assert ledger.checks == 2
+    assert responses.calls == 1
+
+
+def test_explicit_budget_override_applies_to_every_tracked_operation(monkeypatch):
+    monkeypatch.setattr(
+        costs,
+        "UsageLedger",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("override must skip budget reads")
+        ),
+    )
+
+    class FakeEmbeddings:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **_request):
+            self.calls += 1
+            return SimpleNamespace(id=f"embedding-{self.calls}")
+
+    embeddings = FakeEmbeddings()
+    with usage_scope(enforce_budget=True, allow_over_budget=True):
+        tracked_embeddings_create(
+            SimpleNamespace(embeddings=embeddings),
+            operation="query_embedding",
+            model="text-embedding-3-small",
+            input=["Synthetic query."],
+        )
+        tracked_embeddings_create(
+            SimpleNamespace(embeddings=embeddings),
+            operation="query_embedding",
+            model="text-embedding-3-small",
+            input=["Another synthetic query."],
+        )
+
+    assert embeddings.calls == 2
+
+
+def test_question_api_reports_a_mid_turn_cost_stop_as_payment_required(
+    monkeypatch,
+):
+    available = {
+        "hard_limit_enabled": True,
+        "exceeded": False,
+    }
+    exceeded = {
+        "hard_limit_enabled": True,
+        "exceeded": True,
+    }
+
+    class InitiallyAvailableLedger:
+        def budget_state(self):
+            return available
+
+    monkeypatch.setattr(web_api, "UsageLedger", InitiallyAvailableLedger)
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            CostLimitExceeded(exceeded)
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        web_api.question(
+            "current",
+            web_api.QuestionRequest(question="Synthetic question?"),
+        )
+
+    assert exc_info.value.status_code == 402
+    assert exc_info.value.detail["code"] == "cost_limit_exceeded"
+    assert exc_info.value.detail["budget"] == exceeded
 
 
 def test_request_and_settings_validation():

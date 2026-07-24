@@ -6,7 +6,7 @@ import os
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -50,7 +50,8 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/1"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v1"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/2"
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
 _TRACE_CORPUS_FIELDS = frozenset(
@@ -69,7 +70,11 @@ _TRACE_TOP_LEVEL_FIELDS = frozenset(
         "corpus",
         "created_at",
         "parameters",
+        "plan",
         "query",
+        "evidence",
+        "generation_contract",
+        "lanes",
         "retrieval_version",
         "schema",
         "scope",
@@ -198,6 +203,16 @@ class RetrievalOutcome:
     trace: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class PlannedContext:
+    """Ordered multi-facet context and the source map consumed by generation."""
+
+    final_chunks: list[dict[str, Any]]
+    facet_source_numbers: dict[str, tuple[int, ...]]
+    trace: dict[str, Any]
+    lane_by_chunk_id: dict[str, tuple[str, ...]]
+
+
 class FileTraceSink:
     """Persist one private, text-free retrieval trace per JSON file."""
 
@@ -280,6 +295,26 @@ def embed_query(query: str, embedding_client: OpenAI | None = None) -> list[floa
         input=query,
     )
     return response.data[0].embedding
+
+
+def embed_queries(
+    queries: Sequence[str],
+    embedding_client: OpenAI | None = None,
+) -> list[list[float]]:
+    """Embed a bounded facet set in one tracked API operation."""
+    query_list = [str(query) for query in queries]
+    if not query_list:
+        return []
+    response = tracked_embeddings_create(
+        embedding_client or default_openai_client(),
+        operation="query_embedding",
+        model="text-embedding-3-small",
+        input=query_list,
+    )
+    embeddings = [list(item.embedding) for item in response.data]
+    if len(embeddings) != len(query_list):
+        raise RuntimeError("embedding response count does not match query facet count")
+    return embeddings
 
 
 def retrieve_semantic_from_collection(
@@ -652,6 +687,7 @@ def build_hybrid_results(
     *,
     n_results: int = 5,
     corpus: Mapping[str, Any] | None = None,
+    allow_semantic_fallback: bool = True,
 ) -> dict[str, Any]:
     """Attach deterministic BM25/RRF primary anchors to raw semantic results."""
     if n_results <= 0:
@@ -686,11 +722,18 @@ def build_hybrid_results(
         for candidate in semantic_reachable
         if float(candidate["distance"]) <= MAX_PRIMARY_DISTANCE
     ]
-    raw_primary_fallback = _raw_primary_fallback_used(
+    raw_primary_fallback_detected = _raw_primary_fallback_used(
         semantic,
         n_results=n_results,
     )
-    semantic_fallback = bool(semantic_reachable and not semantic_within_threshold)
+    raw_primary_fallback = bool(
+        allow_semantic_fallback and raw_primary_fallback_detected
+    )
+    semantic_fallback = bool(
+        allow_semantic_fallback
+        and semantic_reachable
+        and not semantic_within_threshold
+    )
     if semantic_fallback:
         semantic_for_fusion = semantic_reachable
     else:
@@ -885,6 +928,7 @@ def build_hybrid_results(
             ),
             "diversity_min_score_ratio": DIVERSITY_MIN_SCORE_RATIO,
             "neighbor_expansion": "primaries_first_then_immediate_neighbors",
+            "semantic_fallback_allowed": allow_semantic_fallback,
             "tie_break": "rrf_desc_semantic_rank_lexical_rank_chunk_id",
         },
         "candidates": {
@@ -906,6 +950,7 @@ def build_hybrid_results(
             ),
             "discarded": discarded,
             "raw_primary_fallback_used": raw_primary_fallback,
+            "raw_primary_fallback_detected": raw_primary_fallback_detected,
             "fusion_pool_fallback_used": semantic_fallback,
             "document_distribution": {
                 "semantic": _document_distribution(semantic_trace),
@@ -929,6 +974,8 @@ def build_hybrid_results(
         "primary_candidates": [
             {
                 "chunk_id": candidate["chunk_id"],
+                "document": candidate["document"],
+                "rrf_score": round(float(candidate["rrf_score"]), 12),
                 "semantic_distance": candidate["semantic_distance"],
                 "semantic_rank": candidate["semantic_rank"],
                 "semantic_contributed": candidate["semantic_contributed"],
@@ -984,6 +1031,397 @@ def retrieve_from_collection(
         chunks,
         n_results=n_results,
         corpus=corpus_trace,
+    )
+
+
+def _plan_value(item: object, field: str, default: object = None) -> object:
+    if isinstance(item, Mapping):
+        return item.get(field, default)
+    return getattr(item, field, default)
+
+
+def _facet_priority(facet: object) -> tuple[int, str]:
+    role = str(_plan_value(facet, "role", ""))
+    facet_id = str(_plan_value(facet, "facet_id", ""))
+    priorities = {
+        "original": 0,
+        "premise_support": 1,
+        "premise_counter": 1,
+        "framing": 1,
+    }
+    return priorities.get(role, 2), facet_id
+
+
+def _empty_semantic_results() -> dict[str, list[list[object]]]:
+    return {"ids": [[]], "metadatas": [[]], "distances": [[]]}
+
+
+def _semantic_lane_query(
+    collection_handle: Any,
+    embedding: list[float],
+    *,
+    candidate_count: int,
+    document_hints: tuple[str, ...],
+) -> dict[str, Any]:
+    if candidate_count <= 0:
+        return _empty_semantic_results()
+    request: dict[str, Any] = {
+        "query_embeddings": [embedding],
+        "n_results": candidate_count,
+        "include": ["metadatas", "distances"],
+    }
+    if document_hints:
+        request["where"] = (
+            {"document": document_hints[0]}
+            if len(document_hints) == 1
+            else {"document": {"$in": list(document_hints)}}
+        )
+    return collection_handle.query(**request)
+
+
+def _pick_first_lane_candidate(
+    candidates: list[dict[str, Any]],
+    *,
+    selected_ids: set[str],
+    selected_documents: set[str],
+    prefer_new_document: bool,
+) -> dict[str, Any] | None:
+    available = [
+        candidate
+        for candidate in candidates
+        if str(candidate.get("chunk_id") or "") not in selected_ids
+    ]
+    if not available:
+        return None
+    if not prefer_new_document:
+        return available[0]
+
+    strongest = float(available[0].get("rrf_score") or 0.0)
+    for candidate in available:
+        document = str(candidate.get("document") or "")
+        score = float(candidate.get("rrf_score") or 0.0)
+        if (
+            document not in selected_documents
+            and (strongest <= 0.0 or score >= strongest * DIVERSITY_MIN_SCORE_RATIO)
+        ):
+            return candidate
+    return available[0]
+
+
+def retrieve_plan_from_collection(
+    plan: object,
+    collection_handle: Any,
+    chunks: list[dict[str, Any]],
+    *,
+    n_results: int = 5,
+    embedding_client: OpenAI | None = None,
+    corpus: Mapping[str, Any] | None = None,
+    max_final_sources: int = MAX_FINAL_SOURCES,
+) -> PlannedContext:
+    """Retrieve a validated query plan through bounded lanes sharing one embedding call."""
+    if n_results <= 0:
+        raise ValueError("n_results must be greater than zero")
+    if max_final_sources <= 0:
+        raise ValueError("max_final_sources must be greater than zero")
+
+    raw_facets = _plan_value(plan, "facets", ())
+    facets = list(raw_facets) if isinstance(raw_facets, (list, tuple)) else []
+    if not facets:
+        raise ValueError("query plan must contain at least the original facet")
+    original_facets = [
+        facet for facet in facets if str(_plan_value(facet, "role", "")) == "original"
+    ]
+    if len(original_facets) != 1:
+        raise ValueError("query plan must contain exactly one original facet")
+
+    queries = [str(_plan_value(facet, "search_query", "")).strip() for facet in facets]
+    if any(not query for query in queries):
+        raise ValueError("query plan contains an empty search facet")
+    embeddings = embed_queries(queries, embedding_client=embedding_client)
+    collection_count = int(collection_handle.count())
+    lane_primary_limit = min(max(n_results, 3), max_final_sources)
+    candidate_count = min(collection_count, max(SEMANTIC_CANDIDATE_LIMIT, n_results))
+    corpus_trace = dict(corpus or {})
+    corpus_trace.setdefault("collection_count", collection_count)
+    hnsw_space = _collection_hnsw_space(collection_handle)
+    if hnsw_space:
+        corpus_trace.setdefault("hnsw_space", hnsw_space)
+
+    lanes: list[dict[str, Any]] = []
+    for facet, query, embedding in zip(facets, queries, embeddings, strict=True):
+        facet_id = str(_plan_value(facet, "facet_id", ""))
+        role = str(_plan_value(facet, "role", ""))
+        raw_hints = _plan_value(facet, "document_hints", ())
+        document_hints = tuple(str(value) for value in (raw_hints or ()))
+        lane_chunks = [
+            chunk
+            for chunk in chunks
+            if not document_hints
+            or str(chunk.get("document") or "") in document_hints
+        ]
+        semantic_results = (
+            _semantic_lane_query(
+                collection_handle,
+                embedding,
+                candidate_count=candidate_count,
+                document_hints=document_hints,
+            )
+            if lane_chunks
+            else _empty_semantic_results()
+        )
+        allow_fallback = role == "original"
+        results = build_hybrid_results(
+            query,
+            semantic_results,
+            lane_chunks,
+            n_results=lane_primary_limit,
+            corpus=corpus_trace,
+            allow_semantic_fallback=allow_fallback,
+        )
+        hybrid = results.get("hybrid")
+        primary_candidates = (
+            list(hybrid.get("primary_candidates", []))
+            if isinstance(hybrid, Mapping)
+            else []
+        )
+        lane_trace = hybrid.get("trace", {}) if isinstance(hybrid, Mapping) else {}
+        lanes.append(
+            {
+                "facet": facet,
+                "facet_id": facet_id,
+                "role": role,
+                "query": query,
+                "document_hints": document_hints,
+                "candidates": primary_candidates,
+                "trace": lane_trace,
+            }
+        )
+
+    raw_traits = _plan_value(plan, "traits", ())
+    traits = tuple(
+        str(getattr(value, "value", value))
+        for value in (raw_traits or ())
+    )
+    broad = "broad_synthesis" in traits
+    ordered_lanes = sorted(lanes, key=lambda lane: _facet_priority(lane["facet"]))
+    selected_ids: set[str] = set()
+    selected_documents: set[str] = set()
+    selected_chunks: list[dict[str, Any]] = []
+    selected_by_facet: dict[str, list[str]] = {
+        str(lane["facet_id"]): [] for lane in lanes
+    }
+    lookup = build_chunk_lookup(chunks)
+
+    def accept(candidate: Mapping[str, Any], facet_id: str) -> bool:
+        chunk_id = str(candidate.get("chunk_id") or "")
+        if not chunk_id:
+            return False
+        if chunk_id in selected_ids:
+            if chunk_id not in selected_by_facet[facet_id]:
+                selected_by_facet[facet_id].append(chunk_id)
+            return False
+        chunk = lookup.get(chunk_id)
+        if chunk is None or should_skip_document(str(chunk.get("document") or "")):
+            return False
+        selected_ids.add(chunk_id)
+        selected_documents.add(str(chunk.get("document") or ""))
+        selected_chunks.append(chunk)
+        selected_by_facet[facet_id].append(chunk_id)
+        return True
+
+    # Coverage pass: give each live lane an anchor before any lane receives a second.
+    for lane in ordered_lanes:
+        facet_id = str(lane["facet_id"])
+        shared_candidate = (
+            lane["candidates"][0]
+            if lane["candidates"]
+            and str(lane["candidates"][0].get("chunk_id") or "")
+            in selected_ids
+            else None
+        )
+        if shared_candidate is not None:
+            accept(shared_candidate, facet_id)
+            continue
+        if len(selected_chunks) >= max_final_sources:
+            continue
+        candidate = _pick_first_lane_candidate(
+            lane["candidates"],
+            selected_ids=selected_ids,
+            selected_documents=selected_documents,
+            prefer_new_document=broad and lane["role"] not in {
+                "premise_support",
+                "premise_counter",
+                "framing",
+            },
+        )
+        if candidate is not None:
+            accept(candidate, facet_id)
+    coverage_anchor_count = len(selected_chunks)
+
+    # Fill remaining positions round-robin so one prolific lane cannot monopolize context.
+    candidate_offsets = {str(lane["facet_id"]): 0 for lane in ordered_lanes}
+    while len(selected_chunks) < max_final_sources:
+        made_progress = False
+        for lane in ordered_lanes:
+            facet_id = str(lane["facet_id"])
+            candidates = lane["candidates"]
+            offset = candidate_offsets[facet_id]
+            while offset < len(candidates):
+                candidate = candidates[offset]
+                offset += 1
+                if accept(candidate, facet_id):
+                    made_progress = True
+                    break
+            candidate_offsets[facet_id] = offset
+            if len(selected_chunks) >= max_final_sources:
+                break
+        if not made_progress:
+            break
+
+    expanded = expand_with_neighbors(
+        selected_chunks,
+        lookup=lookup,
+        primary_first=True,
+    )
+    final_chunks = expanded[:max_final_sources]
+    optional_neighbors = expanded[len(selected_chunks) :]
+    if (
+        len(selected_chunks) >= max_final_sources
+        and len(selected_chunks) > coverage_anchor_count
+        and optional_neighbors
+    ):
+        final_chunks = [
+            *selected_chunks[: max_final_sources - 1],
+            optional_neighbors[0],
+        ]
+    if broad:
+        corpus_ordinal = {
+            str(chunk.get("chunk_id") or ""): ordinal
+            for ordinal, chunk in enumerate(chunks)
+        }
+        final_chunks.sort(
+            key=lambda chunk: (
+                corpus_ordinal.get(str(chunk.get("chunk_id") or ""), 10**9),
+                str(chunk.get("chunk_id") or ""),
+            )
+        )
+
+    source_number_by_id = {
+        str(chunk.get("chunk_id") or ""): source_number
+        for source_number, chunk in enumerate(final_chunks, start=1)
+    }
+    facet_source_numbers = {
+        facet_id: tuple(
+            source_number_by_id[chunk_id]
+            for chunk_id in chunk_ids
+            if chunk_id in source_number_by_id
+        )
+        for facet_id, chunk_ids in selected_by_facet.items()
+    }
+    lane_by_chunk: dict[str, list[str]] = {}
+    for facet_id, chunk_ids in selected_by_facet.items():
+        for chunk_id in chunk_ids:
+            lane_by_chunk.setdefault(chunk_id, []).append(facet_id)
+
+    original_query = str(_plan_value(original_facets[0], "search_query", ""))
+    safe_lane_trace = []
+    for lane in lanes:
+        selection = lane["trace"].get("selection", {})
+        safe_lane_trace.append(
+            {
+                "facet_id": lane["facet_id"],
+                "role": lane["role"],
+                "query_sha256": hashlib.sha256(
+                    lane["query"].encode("utf-8")
+                ).hexdigest(),
+                "query_char_count": len(lane["query"]),
+                "document_hints": list(lane["document_hints"]),
+                "candidate_chunk_ids": [
+                    str(candidate.get("chunk_id") or "")
+                    for candidate in lane["candidates"]
+                ],
+                "selected_chunk_ids": selected_by_facet[str(lane["facet_id"])],
+                "raw_primary_fallback_detected": bool(
+                    selection.get("raw_primary_fallback_detected")
+                ),
+                "semantic_fallback_used": bool(
+                    selection.get("fusion_pool_fallback_used")
+                ),
+            }
+        )
+
+    plan_schema = str(_plan_value(plan, "schema", ""))
+    requirements = _plan_value(plan, "requirements", ())
+    trace = {
+        "schema": RETRIEVAL_TRACE_SCHEMA,
+        "trace_id": uuid4().hex,
+        "created_at": datetime.now(UTC).isoformat(),
+        "retrieval_version": FACETED_RETRIEVAL_VERSION,
+        "query": {
+            "sha256": hashlib.sha256(original_query.encode("utf-8")).hexdigest(),
+            "char_count": len(original_query),
+            "mode": "planned" if len(facets) > 1 else "standard",
+        },
+        "corpus": _safe_corpus_trace(corpus_trace),
+        "parameters": {
+            "semantic_candidate_limit": SEMANTIC_CANDIDATE_LIMIT,
+            "lexical_candidate_limit": LEXICAL_CANDIDATE_LIMIT,
+            "semantic_distance_threshold": MAX_PRIMARY_DISTANCE,
+            "final_context_source_limit": max_final_sources,
+            "lane_primary_limit": lane_primary_limit,
+            "facet_embedding": "single_batched_request",
+            "lane_selection": "one_each_then_round_robin",
+            "premise_lane_reservation": True,
+            "broad_context_order": "corpus_ordinal" if broad else "selection",
+            "neighbor_expansion": "primaries_first_then_immediate_neighbors",
+        },
+        "plan": {
+            "schema": plan_schema,
+            "traits": list(traits),
+            "planner_used": bool(_plan_value(plan, "planner_used", False)),
+            "fallback_reason": _plan_value(plan, "fallback_reason"),
+            "facet_count": len(facets),
+            "requirement_count": len(tuple(requirements or ())),
+        },
+        "lanes": safe_lane_trace,
+        "candidates": {},
+        "selection": {
+            "primary_chunk_ids": [
+                str(chunk.get("chunk_id") or "") for chunk in selected_chunks
+            ],
+            "discarded": [],
+            "document_distribution": {
+                "selected_primary": _document_distribution(selected_chunks),
+                "context": _document_distribution(final_chunks),
+            },
+            "context": [
+                {
+                    **_safe_chunk_fields(chunk),
+                    "source_number": source_number,
+                    "origin": (
+                        "primary"
+                        if str(chunk.get("chunk_id") or "") in selected_ids
+                        else "neighbor"
+                    ),
+                    "facet_ids": lane_by_chunk.get(
+                        str(chunk.get("chunk_id") or ""),
+                        [],
+                    ),
+                }
+                for source_number, chunk in enumerate(final_chunks, start=1)
+            ],
+        },
+        "evidence": {},
+        "generation_contract": {},
+    }
+    return PlannedContext(
+        final_chunks=final_chunks,
+        facet_source_numbers=facet_source_numbers,
+        trace=trace,
+        lane_by_chunk_id={
+            chunk_id: tuple(facet_ids)
+            for chunk_id, facet_ids in lane_by_chunk.items()
+        },
     )
 
 
@@ -1316,6 +1754,14 @@ def _emit_trace(
             "Retrieval diagnostics could not be persisted",
             exc_info=True,
         )
+
+
+def emit_retrieval_trace(
+    trace: Mapping[str, Any],
+    trace_sink: Callable[[Mapping[str, Any]], object] | None = None,
+) -> None:
+    """Expose the same nonfatal text-free trace boundary to planned Answer Mode."""
+    _emit_trace(trace, trace_sink)
 
 
 def finalize_context_chunks(

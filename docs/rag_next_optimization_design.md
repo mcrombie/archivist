@@ -1,8 +1,42 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: proposed implementation design  
-Scope: Answer Mode only  
-Behavior changed by this document: none
+Status: implemented locally on 2026-07-24; paid evaluation pending
+Scope: Answer Mode only
+Behavior changed by this document: evidence-planned policy available behind the orchestration
+boundary; the legacy answer path remains callable
+
+## Implementation status
+
+Version 1 is now implemented as `evidence-planned-v1` in the shared CLI/web answer pipeline.
+The implementation follows the bounded-call design in this document:
+
+- a follow-up resolver runs only when conversation history exists;
+- a structured question planner runs only for routed broad, multi-part, premise-sensitive, or
+  absence-sensitive questions;
+- all retrieval facets share one batched embedding request;
+- a clean, locally certified absence skips answer generation;
+- every other admitted answer uses one structured evidence-coverage generation with no automatic
+  critic or retry.
+
+Conversation context is intentionally asymmetric. Prior user turns can clarify a referent, scope,
+or requested relationship. Prior assistant answer text is not sent to the resolver, cannot become
+manuscript evidence, and cannot supply the trusted wording used to certify an absence.
+
+Before any paid operation, the pipeline validates the persisted corpus and vector index against the
+private manifest. It reads the actual Chroma collection name, metadata, IDs, and stored per-chunk
+metadata rather than trusting caller-supplied labels or count alone. A stale, reordered, incomplete,
+or differently configured index fails operationally without spending on follow-up resolution,
+planning, embedding, or generation. Non-current custom projects continue to use the legacy path
+until they persist the same independent chunk-identity contract.
+
+The question endpoint also rechecks the configured hard cost limit immediately before every tracked
+OpenAI operation. If an earlier operation in the same turn crosses the limit, the next operation is
+not sent unless the reader explicitly enabled the per-request override.
+
+The implementation was verified with synthetic, corpus-agnostic tests and local inspection of the
+current private index. No paid evaluation run was performed as part of implementation. Enabling
+this policy for the unchanged ten-question set therefore starts a new cohort rather than extending
+the earlier semantic/hybrid comparison.
 
 ## Decision
 

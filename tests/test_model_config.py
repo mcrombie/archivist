@@ -9,6 +9,7 @@ from model_config import (
     FOLLOWUP_RESOLVER_SETTINGS,
     GENERATOR_SETTINGS,
     GPT_5_6_SOL_MODEL,
+    QUERY_PLANNER_SETTINGS,
     is_dated_model_snapshot,
     require_dated_model_snapshot,
 )
@@ -23,6 +24,11 @@ def test_active_generation_roles_use_explicit_sol_defaults():
             "reasoning": {"effort": "medium"},
             "text": {"verbosity": "medium"},
         }
+    assert QUERY_PLANNER_SETTINGS.responses_create_kwargs() == {
+        "model": "gpt-5.6-sol",
+        "reasoning": {"effort": "low"},
+        "text": {"verbosity": "low"},
+    }
 
 
 def test_response_request_fragments_are_not_shared_mutable_state():
@@ -74,13 +80,42 @@ def test_cli_answer_generation_uses_central_generator_settings(monkeypatch):
         lambda: SimpleNamespace(responses=FakeResponses()),
     )
 
-    answer, returned_chunks = ask.answer_question("What happened?")
+    answer, returned_chunks = ask.answer_question_legacy("What happened?")
 
     assert answer == "Synthetic answer [Source 1]."
     assert returned_chunks == chunks
     assert {
         key: captured[key] for key in ("model", "reasoning", "text")
     } == GENERATOR_SETTINGS.responses_create_kwargs()
+
+
+def test_cli_answer_mode_uses_shared_evidence_planned_core(monkeypatch):
+    captured = {}
+    chunks = [{"chunk_id": "synthetic_001", "text": "Synthetic evidence."}]
+    client = object()
+
+    monkeypatch.setattr(ask, "get_all_chunks", lambda: chunks)
+    monkeypatch.setattr(ask, "default_openai_client", lambda: client)
+    monkeypatch.setattr(
+        ask,
+        "run_evidence_planned_answer",
+        lambda **request: (
+            captured.update(request)
+            or SimpleNamespace(
+                answer="Synthetic answer [Source 1].",
+                final_chunks=chunks,
+            )
+        ),
+    )
+
+    answer, returned_chunks = ask.answer_question("What happened?", n_results=7)
+
+    assert answer == "Synthetic answer [Source 1]."
+    assert returned_chunks == chunks
+    assert captured["resolved_turn"].standalone_question == "What happened?"
+    assert captured["chunks"] == chunks
+    assert captured["client"] is client
+    assert captured["n_results"] == 7
 
 
 def test_index_generation_uses_central_generator_settings(monkeypatch):
