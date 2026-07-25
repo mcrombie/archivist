@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import retrieval
 from retrieval import retrieve_plan_from_collection
+from retrieval_trace_contract import validate_text_free_retrieval_trace
 
 
 def chunk(chunk_id: str, document: str, text: str, paragraph: int) -> dict:
@@ -112,6 +113,7 @@ def test_facets_share_one_embedding_batch_and_receive_anchors_before_refill(monk
     assert outcome.facet_source_numbers["F0"]
     assert outcome.facet_source_numbers["F1"]
     assert_text_free(outcome.trace)
+    validate_text_free_retrieval_trace(outcome.trace)
 
 
 def test_scoped_verification_lane_does_not_force_all_distant_semantic_results(

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -5,9 +6,11 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException
-from pydantic import ValidationError
+from openai import OpenAI
+from pydantic import BaseModel, ValidationError
 
 import web_api
 import costs
@@ -47,7 +50,7 @@ def answer_run_diagnostics_payload(**overrides):
     payload = {
         "schema": "archivist.answer_run_diagnostics/2",
         "cohort": {
-            "rag_policy_version": "evidence-planned-v3",
+            "rag_policy_version": "evidence-planned-v4",
             "query_planner_prompt_version": "query-planner-v2",
             "coverage_prompt_version": "evidence-coverage-v2",
             "normalizer_version": "evidence-coverage-normalizer/1",
@@ -100,7 +103,7 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
 
     assert stored is not None
     assert stored["validation_error_code"] == "citation_source_mismatch"
-    assert stored["cohort"]["rag_policy_version"] == "evidence-planned-v3"
+    assert stored["cohort"]["rag_policy_version"] == "evidence-planned-v4"
     assert stored["planner"]["status"] == "not_called"
     assert stored["stage_timings_ms"]["answer_generation"] == 240.125
     assert "question" not in str(stored).casefold()
@@ -566,6 +569,158 @@ def test_structured_response_wrapper_uses_parse_and_tracks_usage(monkeypatch):
     ]
 
 
+def test_structured_raw_response_path_preserves_output_parsed(monkeypatch):
+    parsed_response = SimpleNamespace(output_parsed={"result": "ok"})
+    raw_payload = {
+        "id": "raw-structured-response",
+        "model": "gpt-5.6-sol",
+        "usage": {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+    }
+    requests = []
+    tracked = []
+
+    class FakeRawResponse:
+        def json(self):
+            return raw_payload
+
+        def parse(self):
+            return parsed_response
+
+    client = SimpleNamespace(
+        responses=SimpleNamespace(
+            with_raw_response=SimpleNamespace(
+                parse=lambda **request: requests.append(request) or FakeRawResponse()
+            )
+        )
+    )
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+
+    response = tracked_responses_parse(
+        client,
+        operation="query_planning",
+        model="gpt-5.6-sol",
+        input="structured prompt",
+        text_format=dict,
+    )
+
+    assert response.output_parsed == {"result": "ok"}
+    assert len(requests) == 1
+    assert tracked == [
+        (
+            raw_payload,
+            {
+                "operation": "query_planning",
+                "requested_model": "gpt-5.6-sol",
+            },
+        )
+    ]
+
+
+def test_structured_validation_error_still_tracks_completed_response_usage(
+    monkeypatch, ledger_path
+):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    database = ledger_path
+    monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(database))
+    calls = []
+    response_body = {
+        "id": "structured-validation-error",
+        "object": "response",
+        "created_at": 1.0,
+        "model": "gpt-5.6-sol",
+        "output": [
+            {
+                "id": "message-1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "annotations": [],
+                        "text": json.dumps({"wrong": "shape"}),
+                    }
+                ],
+            }
+        ],
+        "parallel_tool_calls": True,
+        "tool_choice": "auto",
+        "tools": [],
+        "status": "completed",
+        "usage": {
+            "input_tokens": 12,
+            "input_tokens_details": {
+                "cached_tokens": 2,
+                "cache_write_tokens": 0,
+            },
+            "output_tokens": 3,
+            "output_tokens_details": {"reasoning_tokens": 1},
+            "total_tokens": 15,
+        },
+    }
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json=response_body,
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = OpenAI(
+        api_key="local-test-key",
+        base_url="https://example.test/v1",
+        http_client=http_client,
+    )
+    try:
+        with usage_scope(project_id="p1", conversation_id="c1", turn_id="t1"):
+            with pytest.raises(ValidationError):
+                tracked_responses_parse(
+                    client,
+                    operation="query_planning",
+                    model="gpt-5.6-sol",
+                    input="structured prompt",
+                    text_format=StructuredPayload,
+                )
+    finally:
+        client.close()
+
+    assert len(calls) == 1
+    with closing(sqlite3.connect(database)) as connection:
+        rows = connection.execute(
+            """
+            SELECT response_id, operation, project_id, conversation_id, turn_id,
+                   requested_model, actual_model, input_tokens, cached_tokens,
+                   output_tokens, reasoning_tokens, total_tokens
+            FROM usage_events
+            """
+        ).fetchall()
+    assert rows == [
+        (
+            "structured-validation-error",
+            "query_planning",
+            "p1",
+            "c1",
+            "t1",
+            "gpt-5.6-sol",
+            "gpt-5.6-sol",
+            12,
+            2,
+            3,
+            1,
+            15,
+        )
+    ]
+
+
 def test_summary_filters_scopes_and_utc_calendar_month(ledger_path):
     ledger = UsageLedger(ledger_path)
     usage = TokenUsage(input_tokens=1_000, total_tokens=1_000)
@@ -760,7 +915,7 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["resolved_query"] == "Standalone question?"
     run_diagnostics = dict(response["run_diagnostics"])
     cohort = run_diagnostics.pop("cohort")
-    assert cohort["rag_policy_version"] == "evidence-planned-v3"
+    assert cohort["rag_policy_version"] == "evidence-planned-v4"
     assert cohort["query_planner_prompt_version"] == "query-planner-v2"
     assert len(cohort["coverage_instructions_sha256"]) == 64
     assert run_diagnostics == {

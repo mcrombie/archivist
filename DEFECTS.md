@@ -45,6 +45,40 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-24] Paid v3 smoke exposed an uncovered resolved-relationship form
+Phase/Brief: Phase 1 post-optimization paid confirmation smoke
+Symptom: both neutral smoke turns produced valid, source-supported answers, but the follow-up still
+spent 12.93 seconds in query planning before falling back. Its resolved wording was `How did the
+relationship between tobacco and labor shape everyday exchange in Jamestown?`; diagnostics record
+`planner_call_failed` with safe exception class `ValidationError`, while the local usage ledger has
+no planner event. The two-turn local estimate was `$0.18810122`, so any provider charge for that
+failed request is not represented locally. The v3 artifacts also omitted a standalone retrieval
+trace and the smoke summary omitted the corpus-manifest hash, weakening reproducibility even
+though runtime preflight passed.
+Cause: other and cohort-gate failure — the bounded local relationship grammar covered the earlier
+`the relationship between X and Y as shaping ...` form but not the resolver's actual
+`the relationship between X and Y shape ...` output. The generic broad-pattern check therefore
+classified `between ... and` as requiring model planning. The tracked structured-response helper
+records token usage only after successful parsing, and the smoke artifact contract does not yet
+require a persisted retrieval trace or manifest hash.
+Resolution and verification: resolved in the new `evidence-planned-v4` cohort. The exact
+corpus-agnostic directional relationship form now decomposes locally, while ambiguous tails retain
+planner routing. Structured-response accounting records completed raw-response usage before SDK
+post-parse validation without retrying or double-recording. Reusable smoke artifacts now bind
+corpus, vector-store, Git worktree, lockfile, runner, and per-turn trace identity. Trace schema
+`archivist.retrieval_trace/3` hashes document labels and planner exception classes and accepts only
+closed, field-specific diagnostic values, blocking unknown nested prose and encoded text channels.
+The full offline suite passes with 372 tests and one skipped.
+
+A separately bounded resolver-only API confirmation then resolved the observed follow-up to `How
+did the manuscript describe the relationship between tobacco and labor as shaping everyday
+exchange in Jamestown?`, retained all four required concepts, routed relationship-only, recorded
+planner status `not_called`, and made exactly one `followup_resolution` request. It used 449 input
+and 154 output tokens, took 6.954 seconds, and cost an estimated `$0.006865` under a `$0.02` hard
+stop. No embedding, retrieval, planner, or answer-generation call occurred. The artifact records a
+dirty exploratory worktree and is not a run of record. The unchanged ten-question evaluation
+remains separately budgeted and was not started.
+
 ## [2026-07-24] Valid smoke answer lost primary evidence and hid a planner failure
 Phase/Brief: Phase 1 post-optimization paid smoke
 Symptom: both turns of the neutral tobacco-and-labor smoke passed the structured coverage contract,

@@ -476,6 +476,48 @@ def test_trace_is_text_free_and_optional_persistence_is_nonfatal(caplog):
                 "query": "raw private question",
             }
         )
+    nested_private_trace = json.loads(
+        json.dumps(results["hybrid"]["trace"])
+    )
+    nested_private_trace["selection"]["context"] = [
+        {
+            "chunk_id": "01_One_001",
+            "body": evidence,
+        }
+    ]
+    with pytest.raises(ValueError, match="unsupported field.*body"):
+        FileTraceSink(trace_root)(nested_private_trace)
+    forged_hash_trace = json.loads(json.dumps(results["hybrid"]["trace"]))
+    forged_hash_trace["plan"] = {
+        "planner_prompt_sha256": "raw private planner prompt"
+    }
+    with pytest.raises(ValueError, match="must be a SHA-256"):
+        FileTraceSink(trace_root)(forged_hash_trace)
+    forged_distribution_trace = json.loads(
+        json.dumps(results["hybrid"]["trace"])
+    )
+    forged_distribution_trace["selection"]["document_distribution"][
+        "context"
+    ] = {"Raw private manuscript prose": 1}
+    with pytest.raises(ValueError, match="invalid document hash"):
+        FileTraceSink(trace_root)(forged_distribution_trace)
+    encoded_token_trace = json.loads(json.dumps(results["hybrid"]["trace"]))
+    encoded_token_trace["plan"] = {
+        "fallback_reason": "PRIVATE-provider-prose-must-never-persist"
+    }
+    with pytest.raises(ValueError, match="unsupported diagnostic value"):
+        FileTraceSink(trace_root)(encoded_token_trace)
+    self_attested_document_trace = json.loads(
+        json.dumps(results["hybrid"]["trace"])
+    )
+    self_attested_document_trace["selection"]["context"] = [
+        {
+            "chunk_id": "01_One_001",
+            "document": "Raw private manuscript prose.md",
+        }
+    ]
+    with pytest.raises(ValueError, match="unsupported field.*document"):
+        FileTraceSink(trace_root)(self_attested_document_trace)
     malicious_path_trace = dict(results["hybrid"]["trace"])
     malicious_path_trace["trace_id"] = "../escape"
     with pytest.raises(ValueError, match="trace ID"):

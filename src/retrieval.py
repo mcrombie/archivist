@@ -27,6 +27,11 @@ from corpus import (
 )
 from costs import current_usage_context, tracked_embeddings_create
 from filters import should_skip_document
+from retrieval_trace_contract import (
+    RETRIEVAL_TRACE_SCHEMA,
+    document_identifier_sha256,
+    validate_text_free_retrieval_trace,
+)
 
 load_dotenv()
 
@@ -51,8 +56,8 @@ MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
 FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v2"
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/2"
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
+RETRIEVAL_DIAGNOSTICS_DIR_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS_DIR"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
 _TRACE_CORPUS_FIELDS = frozenset(
     {
@@ -216,19 +221,20 @@ class PlannedContext:
 class FileTraceSink:
     """Persist one private, text-free retrieval trace per JSON file."""
 
-    def __init__(self, root: Path = RETRIEVAL_DIAGNOSTICS_DIR) -> None:
+    def __init__(self, root: Path | None = None) -> None:
+        if root is None:
+            configured_root = os.getenv(RETRIEVAL_DIAGNOSTICS_DIR_ENV, "").strip()
+            root = (
+                Path(configured_root)
+                if configured_root
+                else RETRIEVAL_DIAGNOSTICS_DIR
+            )
         self.root = root
 
     def __call__(self, trace: Mapping[str, Any]) -> Path:
         if trace.get("schema") != RETRIEVAL_TRACE_SCHEMA:
             raise ValueError("retrieval trace schema is missing or unsupported")
-        _assert_trace_is_text_free(trace)
-        unknown_fields = set(trace) - _TRACE_TOP_LEVEL_FIELDS
-        if unknown_fields:
-            raise ValueError(
-                "retrieval trace contains unsupported top-level fields: "
-                + ", ".join(sorted(str(field) for field in unknown_fields))
-            )
+        validate_text_free_retrieval_trace(trace)
         day = datetime.now(UTC).date().isoformat()
         directory = self.root / day
         directory.mkdir(parents=True, exist_ok=True)
@@ -243,43 +249,6 @@ class FileTraceSink:
         )
         temporary.replace(target)
         return target
-
-
-def _assert_trace_is_text_free(value: object) -> None:
-    sensitive_keys = {
-        "chunk",
-        "content",
-        "excerpt",
-        "manuscript_text",
-        "metadata",
-        "metadatas",
-        "passage",
-        "prompt",
-        "question",
-        "raw_query",
-        "response",
-        "answer",
-        "text",
-    }
-
-    def walk(item: object, path: str) -> None:
-        if isinstance(item, Mapping):
-            for raw_key, nested in item.items():
-                key = str(raw_key).casefold()
-                if key in sensitive_keys:
-                    raise ValueError(
-                        f"retrieval trace contains forbidden field {path}.{raw_key}"
-                    )
-                if key == "query" and not isinstance(nested, Mapping):
-                    raise ValueError(
-                        "retrieval trace query must contain only hashed diagnostics"
-                    )
-                walk(nested, f"{path}.{raw_key}")
-        elif isinstance(item, list):
-            for index, nested in enumerate(item):
-                walk(nested, f"{path}[{index}]")
-
-    walk(value, "trace")
 
 
 @lru_cache(maxsize=1)
@@ -395,16 +364,23 @@ def classify_retrieval_mode(query: str) -> str:
 def _safe_chunk_fields(chunk: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "chunk_id": str(chunk.get("chunk_id") or ""),
-        "document": str(chunk.get("document") or ""),
-        "chapter_title": str(chunk.get("chapter_title") or ""),
+        "document_sha256": document_identifier_sha256(
+            chunk.get("document")
+        ),
         "paragraph_start": chunk.get("paragraph_start"),
         "paragraph_end": chunk.get("paragraph_end"),
     }
 
 
 def _document_distribution(items: list[Mapping[str, Any]]) -> dict[str, int]:
-    counts = Counter(str(item.get("document") or "") for item in items)
-    counts.pop("", None)
+    counts: Counter[str] = Counter()
+    for item in items:
+        document_sha256 = str(item.get("document_sha256") or "")
+        document = str(item.get("document") or "")
+        if not document_sha256 and document:
+            document_sha256 = document_identifier_sha256(document)
+        if document_sha256:
+            counts[document_sha256] += 1
     return dict(sorted(counts.items()))
 
 
@@ -1323,7 +1299,10 @@ def retrieve_plan_from_collection(
                     lane["query"].encode("utf-8")
                 ).hexdigest(),
                 "query_char_count": len(lane["query"]),
-                "document_hints": list(lane["document_hints"]),
+                "document_hint_sha256s": [
+                    document_identifier_sha256(hint)
+                    for hint in lane["document_hints"]
+                ],
                 "candidate_chunk_ids": [
                     str(candidate.get("chunk_id") or "")
                     for candidate in lane["candidates"]

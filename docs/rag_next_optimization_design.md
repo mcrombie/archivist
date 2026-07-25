@@ -1,6 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: implemented locally on 2026-07-24; paid evaluation pending
+Status: evidence-planned-v4 implemented and resolver gate passed on 2026-07-25; ten-question
+evaluation awaits a clean commit and separate authorization
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -14,7 +15,7 @@ durable text-free post-validation diagnostics. A paid two-turn smoke then expose
 defects: neighbor expansion displaced a selected primary passage, compound answer units weakened
 citation locality, and a locally resolvable follow-up attempted a failing planner call.
 
-The current `evidence-planned-v3` cohort addresses those defects:
+The `evidence-planned-v3` cohort addressed those defects:
 
 - every selected primary passage is retained before optional neighbors fill unused context slots;
 - the evidence-coverage prompt and schema require one independently checkable factual claim and
@@ -25,8 +26,30 @@ The current `evidence-planned-v3` cohort addresses those defects:
 - every planner outcome is represented by a versioned, text-free diagnostic. Failures preserve
   only safe class/code tokens, never provider messages or manuscript/question text.
 
-These repairs are verified locally but have not yet been confirmed by another paid smoke. Version
-2's smoke results therefore cannot be credited to version 3.
+The paid v3 smoke confirmed primary-passage retention, atomic citation locality, and substantively
+supported answers. It did not confirm planner avoidance. The follow-up resolver emitted the
+corpus-agnostic form `How did the relationship between X and Y shape Z?`, which fell outside the
+local grammar and still attempted a planner call. That call failed with `ValidationError` after
+12.93 seconds and returned no locally recordable usage. The unchanged ten-question evaluation
+was therefore held behind a narrower orchestration gate.
+
+The current `evidence-planned-v4` cohort clears that gate:
+
+- the resolver's observed directional relationship form decomposes locally without weakening the
+  ambiguous-tail planner boundary;
+- completed structured responses record provider usage before SDK post-parse validation, with no
+  retry or second request;
+- reusable smoke artifacts bind corpus, vector-store, Git worktree, dependency lock, runner, and
+  per-turn retrieval-trace identity;
+- retrieval trace schema `archivist.retrieval_trace/3` hashes document labels and planner
+  exception classes and accepts only closed, field-specific diagnostic values.
+
+A separately authorized resolver-only confirmation made exactly one API request and no planner,
+embedding, retrieval, or answer-generation call. It retained tobacco, labor, Jamestown, and
+exchange in the standalone question; routed relationship-only; recorded planner status
+`not_called`; took 6.954 seconds; and cost an estimated `$0.006865` under a `$0.02` hard stop. The
+artifact was intentionally produced from a dirty exploratory worktree, so it is not a run of
+record. It proves the orchestration repair, not answer quality.
 
 The implementation follows the bounded-call design in this document:
 
@@ -54,9 +77,11 @@ OpenAI operation. If an earlier operation in the same turn crosses the limit, th
 not sent unless the reader explicitly enabled the per-request override.
 
 The implementation was verified with synthetic, corpus-agnostic tests and local inspection of the
-current private index. No paid evaluation run was performed as part of implementation. Enabling
-this policy for the unchanged ten-question set therefore starts a new cohort rather than extending
-the earlier semantic/hybrid comparison.
+current private index. The full offline suite passes with 372 tests and one skipped. A paid
+two-turn v3 smoke verified answer quality and citation structure, and the later v4 resolver-only
+confirmation cleared the remaining planner-routing gate. Running the unchanged ten-question set
+will measure the v4 cohort rather than extend the earlier semantic/hybrid comparison; it still
+requires a clean committed boundary and fresh explicit spend authorization.
 
 ## Decision
 

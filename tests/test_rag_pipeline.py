@@ -21,7 +21,8 @@ from query_planning import (
     ResolvedTurn,
     SearchFacet,
 )
-from retrieval import PlannedContext
+from retrieval import PlannedContext, RETRIEVAL_TRACE_SCHEMA
+from retrieval_trace_contract import validate_text_free_retrieval_trace
 from model_config import GENERATOR_SETTINGS, QUERY_PLANNER_SETTINGS
 
 
@@ -120,7 +121,7 @@ def planned_context(
             facet.facet_id: source_numbers for facet in plan.facets
         },
         trace={
-            "schema": "archivist.retrieval_trace/2",
+            "schema": RETRIEVAL_TRACE_SCHEMA,
             "plan": {},
             "evidence": {},
             "generation_contract": {},
@@ -333,6 +334,49 @@ def test_resolved_between_relationship_context_does_not_call_the_planner(
     )
 
 
+def test_directional_resolved_relationship_does_not_call_the_planner(
+    monkeypatch,
+):
+    relationship_chunk = {
+        **CHUNK,
+        "text": (
+            "Project Lumen and Harbor Network shaped civic exchange "
+            "in Port Delta."
+        ),
+    }
+    install_planned_retrieval(monkeypatch, [relationship_chunk])
+    calls: list[str] = []
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        return SimpleNamespace(
+            output_parsed=supported_answer(("R1", "R2", "R3")),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+    question = (
+        "How did the relationship between Project Lumen and Harbor Network "
+        "shape civic exchange in Port Delta?"
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(standalone_question=question),
+        collection_handle=Collection(),
+        chunks=[relationship_chunk],
+        client=object(),
+        corpus_manifest=corpus_manifest(relationship_chunk),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert "query_planning" not in calls
+    assert result.diagnostics["planner"]["status"] == "not_called"
+    assert result.plan.facets[-1].search_query == (
+        "Project Lumen Harbor Network relationship "
+        "shape civic exchange in Port Delta"
+    )
+
+
 def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     install_planned_retrieval(monkeypatch, [CHUNK])
     raw_plan = QuestionPlan(
@@ -450,7 +494,16 @@ def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch)
     assert calls == ["query_planning", "answer_generation"]
     assert result.plan.fallback_reason == "planner_call_failed"
     assert result.diagnostics["planner"] == expected
-    assert emitted_trace["plan"]["planner_call"] == expected
+    assert emitted_trace["plan"]["planner_call"] == {
+        "schema": "archivist.planner_call_diagnostics/1",
+        "status": "failed",
+        "failure_code": "planner_call_failed",
+        "exception_class_sha256": hashlib.sha256(
+            b"SyntheticPlannerFailure"
+        ).hexdigest(),
+        "exception_code": "rate-limit/429",
+    }
+    validate_text_free_retrieval_trace(emitted_trace)
     run_diagnostics = rag_pipeline.answer_run_diagnostics(result)
     assert run_diagnostics["schema"] == "archivist.answer_run_diagnostics/2"
     assert run_diagnostics["planner"] == expected

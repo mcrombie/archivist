@@ -73,9 +73,10 @@ from retrieval import (
     emit_retrieval_trace,
     retrieve_plan_from_collection,
 )
+from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v3"
+RAG_POLICY_VERSION = "evidence-planned-v4"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
@@ -356,6 +357,23 @@ def _planner_call_diagnostic(
         "failure_code": _safe_failure_code(failure_code),
         "exception_class": exception_class,
         "exception_code": exception_code,
+    }
+
+
+def _planner_trace_diagnostic(
+    diagnostic: Mapping[str, object],
+) -> dict[str, object]:
+    exception_class = diagnostic.get("exception_class")
+    return {
+        "schema": diagnostic.get("schema"),
+        "status": diagnostic.get("status"),
+        "failure_code": diagnostic.get("failure_code"),
+        "exception_class_sha256": (
+            hashlib.sha256(exception_class.encode("utf-8")).hexdigest()
+            if isinstance(exception_class, str) and exception_class
+            else None
+        ),
+        "exception_code": diagnostic.get("exception_code"),
     }
 
 
@@ -906,14 +924,18 @@ def _promote_direct_anchor_chunks(
     ]
     distribution: dict[str, int] = defaultdict(int)
     for chunk in new_chunks:
-        distribution[str(chunk.get("document") or "")] += 1
+        distribution[
+            document_identifier_sha256(chunk.get("document"))
+        ] += 1
     documents = selection.setdefault("document_distribution", {})
     if isinstance(documents, dict):
         documents["context"] = dict(sorted(distribution.items()))
     selection["context"] = [
         {
             "chunk_id": str(chunk.get("chunk_id") or ""),
-            "document": str(chunk.get("document") or ""),
+            "document_sha256": document_identifier_sha256(
+                chunk.get("document")
+            ),
             "paragraph_start": chunk.get("paragraph_start"),
             "paragraph_end": chunk.get("paragraph_end"),
             "source_number": source_number,
@@ -1138,7 +1160,9 @@ def _record_generation_context(
             "source_number": new_number,
             "retrieval_source_number": new_to_old.get(new_number),
             "chunk_id": str(chunk.get("chunk_id") or ""),
-            "document": str(chunk.get("document") or ""),
+            "document_sha256": document_identifier_sha256(
+                chunk.get("document")
+            ),
             "paragraph_start": chunk.get("paragraph_start"),
             "paragraph_end": chunk.get("paragraph_end"),
         }
@@ -1439,7 +1463,9 @@ def run_evidence_planned_answer(
             "planner_model": QUERY_PLANNER_SETTINGS.model,
             "planner_reasoning_effort": QUERY_PLANNER_SETTINGS.reasoning_effort,
             "planner_verbosity": QUERY_PLANNER_SETTINGS.verbosity,
-            "planner_call": dict(planner_call_diagnostics),
+            "planner_call": _planner_trace_diagnostic(
+                planner_call_diagnostics
+            ),
         }
     )
     gate_started_ns = perf_counter_ns()

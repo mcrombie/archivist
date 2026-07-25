@@ -1188,14 +1188,69 @@ def tracked_responses_create(client: object, *, operation: str, **request: Any) 
 
 
 def tracked_responses_parse(client: object, *, operation: str, **request: Any) -> object:
-    """Call the Responses structured-output helper without bypassing usage tracking."""
+    """Call the structured-output helper while retaining completed-response usage.
+
+    The OpenAI SDK applies ``text_format`` validation as a post-parser.  A
+    validation error therefore prevents ``responses.parse`` from returning the
+    otherwise completed response (including its usage).  Reading the SDK's raw
+    response first lets us record that usage before invoking the same parser,
+    without issuing another request.
+    """
     enforce_usage_budget()
-    response = client.responses.parse(**request)
-    _track_without_breaking_response(
-        response,
-        operation=operation,
-        requested_model=str(request.get("model", "")),
+    requested_model = str(request.get("model", ""))
+    raw_responses = getattr(client.responses, "with_raw_response", None)
+    raw_parse = getattr(raw_responses, "parse", None)
+
+    # Preserve compatibility with lightweight test doubles and older clients.
+    # The installed SDK (2.46.0) takes the raw-response path below.
+    if not callable(raw_parse):
+        response = client.responses.parse(**request)
+        _track_without_breaking_response(
+            response,
+            operation=operation,
+            requested_model=requested_model,
+        )
+        return response
+
+    raw_response = raw_parse(**request)
+    completed_response: object | None = None
+    json_reader = getattr(raw_response, "json", None)
+    if callable(json_reader):
+        try:
+            completed_response = json_reader()
+        except Exception:
+            logger.exception("Could not inspect completed OpenAI response usage")
+    else:
+        # openai 2.46.0 returns LegacyAPIResponse here.  It exposes the
+        # completed httpx response but not APIResponse.json().
+        http_response = getattr(raw_response, "http_response", None)
+        http_json_reader = getattr(http_response, "json", None)
+        if callable(http_json_reader):
+            try:
+                completed_response = http_json_reader()
+            except Exception:
+                logger.exception("Could not inspect completed OpenAI response usage")
+
+    completed_usage_available = (
+        completed_response is not None
+        and extract_token_usage(completed_response) is not None
     )
+    if completed_usage_available:
+        _track_without_breaking_response(
+            completed_response,
+            operation=operation,
+            requested_model=requested_model,
+        )
+
+    # This is the SDK's normal parse step and preserves output_parsed as well
+    # as its original Pydantic ValidationError behavior.
+    response = raw_response.parse()
+    if not completed_usage_available:
+        _track_without_breaking_response(
+            response,
+            operation=operation,
+            requested_model=requested_model,
+        )
     return response
 
 

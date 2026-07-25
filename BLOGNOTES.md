@@ -613,6 +613,65 @@ looked like one mediocre answer: evidence was retrieved and then discarded, cita
 structurally valid but too broad, and a needless orchestration call added latency while hiding its
 failure. Each required a different boundary-level repair.
 
+### 2026-07-24 - Paid v3 smoke: content repaired, planner gate still open
+
+- Repeated the same neutral two-turn smoke against clean commit `db7d914` and the 481-passage
+  private index. The questions, manuscript, evaluation contract, and expected-answer material were
+  unchanged, and no automatic retries occurred.
+- The first turn cost an estimated `$0.09000667` and took 32.37 seconds. That left too little room
+  under the original `$0.12` operational stop and `$0.05` second-turn reserve, so the runner stopped
+  before making another call. The already-authorized run was resumed for only the missing second
+  turn with a `$0.18` operational stop under the unchanged `$0.20` total authorization; turn 1 was
+  not repeated.
+- The completed local estimate was `$0.18810122`:
+  - turn 1: `$0.09000667`;
+  - turn 2: `$0.09809455`;
+  - total elapsed time: 81.99 seconds.
+  These are local token-based estimates, not an invoice.
+- Both turns passed the machine-readable boundary: answered, direct evidence, valid coverage
+  structure, no validation error, and every citation resolving to a returned passage.
+- Turn 1 applied the bounded `source_mapping_mismatch` normalization before its final valid result.
+  That repair changed only redundant bookkeeping; it did not rewrite prose or citations.
+- Human source review also passed both answers:
+  - the opening answer now retained the crucial Chapter 4 primary passage that the previous
+    neighbor-expansion policy had displaced. It directly covered tobacco payment, labor and
+    tobacco as units of account, chronic labor shortage, indentured passage, and headrights;
+  - the follow-up connected Jamestown tobacco cultivation to commodity payment, units of account,
+    indenture, headrights, and river exchange;
+  - the new atomic answer units kept factual sentences locally cited. No materially unsupported or
+    overstated claim was found.
+- The opening answer was strong but deliberately focused rather than exhaustive. It did not cover
+  every later labor development, including servant mortality, estate concentration, or the longer
+  transition toward enslaved labor. The smoke therefore confirms the repaired mechanism and
+  citation locality, not comprehensive treatment of the manuscript's entire tobacco-and-labor arc.
+- The operational planner defect did **not** clear. The resolver produced `How did the relationship
+  between tobacco and labor shape everyday exchange in Jamestown?`, while the local grammar only
+  recognized a narrower relationship form. The generic `between ... and` broad pattern sent this
+  already-resolved question to the model planner, which failed with a safely recorded
+  `ValidationError` after 12.93 seconds. Local fallback still retrieved good evidence.
+- The failed planner returned no usage object and therefore has no local ledger row. Actual
+  provider billing may be higher than `$0.18810122` and should be checked in the OpenAI dashboard.
+  No further paid calls were made.
+- Audit artifacts have two secondary reproducibility gaps: the v3 run did not persist a standalone
+  retrieval trace, and its summary did not include the corpus-manifest hash. Runtime preflight
+  still confirmed all 481 eligible chunks against the live index, and comparison with the prior
+  trace strongly confirms that all eight selected primaries—including the previously lost Chapter
+  4 passage—reached turn 1's final context. Future smoke artifacts should prove both facts directly.
+- Compared with the prior v2 smoke, the stricter atomic contract materially increased generated
+  output and reasoning. The local estimate rose from `$0.09010135` to `$0.18810122`, and total
+  elapsed time rose from 47.78 to 81.99 seconds. Better citation locality came with a real
+  cost-and-latency tradeoff that needs measurement rather than concealment.
+- Gate decision: do not start the unchanged ten-question comparison yet. First recognize the
+  resolver's actual corpus-agnostic relationship wording locally, retain any available failed-parse
+  usage, persist retrieval and corpus identity in the smoke artifact, lock those behaviors with
+  regressions, and request separate authorization for the smallest paid confirmation that can
+  prove the planner is no longer called.
+
+Useful blog lesson: a smoke test can pass on answer quality and still fail as an orchestration
+gate. Here, the repaired retrieval and evidence contract produced substantially better answers,
+but one uncovered phrasing doubled down on the expensive path. Quality, latency, and spend need
+separate verdicts.
+
 ### 2026-07-24 - Turning a paid validation failure into an actionable defect
 
 - Reader testing exposed a particularly bad failure: an opening-screen sample question retrieved
@@ -659,6 +718,54 @@ Useful blog lesson: strict grounding is not enough by itself. A safety check tha
 answer for harmless bookkeeping and cannot say why creates an expensive black box. The better
 boundary separates factual safety failures from locally repairable structure, then records exactly
 what happened without retaining the private source text.
+
+### 2026-07-25 - Clearing the planner gate with one measured API call
+
+- Opened `evidence-planned-v4` because deterministic routing behavior changed. The resolver's
+  observed `How did the relationship between X and Y shape Z?` form now decomposes locally into
+  both relationship operands and the requested context. Ambiguous causal tails still go to the
+  planner; this is a bounded grammar repair, not a corpus-specific shortcut.
+- Changed structured-response accounting so a completed provider response is recorded before the
+  SDK performs Pydantic post-parse validation. A schema failure can therefore retain returned token
+  usage without making a second request. Transport failures that never return authoritative usage
+  remain visible only in the provider dashboard.
+- Added reusable smoke artifacts that bind a run to the corpus-manifest and chunks hashes,
+  manifest and embedded counts, vector-store identity, commit, clean/dirty state, exact dirty
+  fingerprint, dependency-lock hash, runner hash, and per-turn retrieval-trace hashes. The
+  validator requires that complete reproducibility identity rather than accepting only the two
+  corpus hashes. A resolver-only check explicitly records retrieval traces as not applicable
+  instead of silently omitting them.
+- Hardened the retrieval-trace privacy boundary during review. Trace schema
+  `archivist.retrieval_trace/3` allows only closed, field-specific diagnostic values; document
+  labels and planner exception classes are hashed; unknown nested fields and non-hash prose in
+  SHA-labeled fields are rejected. The writer and artifact certifier use the same validator, so a
+  weaker reader cannot certify what the persistence boundary would reject.
+- The final offline suite passed with 372 tests and one skipped; Ruff and whitespace checks passed.
+  The three warnings were existing Chroma legacy-embedding configuration deprecations.
+- Ran one separately bounded resolver-only confirmation with no automatic retries:
+  - one `followup_resolution` request, 449 input tokens and 154 output tokens;
+  - resolved query: `How did the manuscript describe the relationship between tobacco and labor
+    as shaping everyday exchange in Jamestown?`;
+  - route: relationship only;
+  - planner required: false;
+  - planner calls: zero, with diagnostic status `not_called`;
+  - elapsed time: 6.954 seconds;
+  - local estimated cost: `$0.006865`, below the `$0.02` hard stop.
+- The ignored private artifact records runner SHA-256
+  `2be80e40ee9df745d93814b5527585a7bdfa9d87d1e7266abebe69d3a9dad284`, corpus-manifest SHA-256
+  `b7ff94315a3f1f28c831e2c3ca62c385567d2b1447c19ff45139d175c3ff3c17`, 910 manifest chunks,
+  481 embedded searchable passages, and the exact dirty routing-state fingerprint
+  `8c0e9ac044fbca106eb9a1671407d01ab8f731de05a034ea580955542e484008`.
+- This was deliberately a dirty exploratory gate, not a run of record. It proves only that the
+  resolver retains the needed context and the repaired local router avoids the paid planner. It
+  made no embedding, retrieval, or answer-generation call and says nothing new about answer
+  quality. The final trace-privacy and artifact-validator hardening followed this resolver-only
+  call and was verified offline; the paid artifact contained no retrieval trace and validates
+  under the completed artifact contract. The unchanged ten-question evaluation was not started.
+
+Useful blog lesson: after an expensive end-to-end smoke exposes one orchestration defect, the next
+paid experiment can be much smaller. One resolver call was enough to test the exact uncertainty
+without paying again for retrieval and generation or confusing answer quality with routing.
 
 ## Suggested demo sequence
 
@@ -713,7 +820,7 @@ what happened without retaining the private source text.
 
 ## Open threads for later entries
 
-- Run one paid repeat of the same two-turn smoke under `evidence-planned-v3`; if it passes, run the
+- Commit the verified `evidence-planned-v4` repair, then request a fresh explicit budget for the
   unchanged ten-question comparison under that cohort.
 - Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
   retrieval and citation metrics require it.

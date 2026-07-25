@@ -302,6 +302,10 @@ def test_relational_question_forms_are_routed_and_role_the_second_target_as_face
             "How did the manuscript describe the relationship between Alpha Network "
             "and Beta Council as shaping exchange because the treaty failed?"
         ),
+        (
+            "How did the relationship between Alpha Network and Beta Council "
+            "shape exchange because the treaty failed?"
+        ),
     ],
 )
 def test_ambiguous_relationship_syntax_uses_the_planner_instead_of_bad_local_operands(
@@ -404,6 +408,37 @@ def test_bounded_between_relationship_decomposes_locally_with_its_context():
         (
             "Project Lumen Harbor Network relationship "
             "as shaping civic exchange in Port Delta"
+        ),
+    ]
+
+
+def test_directional_between_relationship_decomposes_resolved_followup_locally():
+    question = (
+        "How did the relationship between tobacco and labor "
+        "shape everyday exchange in Jamestown?"
+    )
+
+    assert route_question(question) == (RouteTrait.RELATIONSHIP,)
+    assert requires_planning(question) is False
+
+    plan = build_question_plan(question)
+
+    assert plan.fallback_reason is None
+    assert [requirement.label for requirement in plan.requirements] == [
+        "Context for tobacco",
+        "Context for labor",
+        (
+            "Connection between tobacco and labor "
+            "shape everyday exchange in Jamestown"
+        ),
+    ]
+    assert [facet.search_query for facet in plan.facets] == [
+        question,
+        "tobacco context",
+        "labor context",
+        (
+            "tobacco labor relationship "
+            "shape everyday exchange in Jamestown"
         ),
     ]
 

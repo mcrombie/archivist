@@ -563,6 +563,18 @@ _BETWEEN_RELATIONSHIP_PATTERN = re.compile(
     r"\s*[?.!]?\s*$",
     re.IGNORECASE,
 )
+_DIRECTIONAL_BETWEEN_RELATIONSHIP_PATTERN = re.compile(
+    r"^\s*how\s+(?:does|do|did)\s+"
+    r"(?:(?:the|a)\s+)?"
+    r"(?P<predicate>relationship|connection|relation)\s+between\s+"
+    r"(?P<left>[^?.!,;]{1,120}?)\s+and\s+"
+    r"(?P<right>[^?.!,;]{1,120}?)"
+    r"(?P<context>\s+"
+    r"(?:shape|affect|influence|change|form)"
+    r"\b[^?.!,;]{1,150})"
+    r"\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
 _AMBIGUOUS_RELATIONSHIP_OPERAND_TAIL = re.compile(
     r"\b(?:as|because|although|though|while|when|where|which|who|whose|"
     r"during|after|before|over|amid|throughout|under|within|across|"
@@ -573,8 +585,9 @@ _AMBIGUOUS_RELATIONSHIP_OPERAND_TAIL = re.compile(
     re.IGNORECASE,
 )
 _BOUNDED_RELATIONSHIP_CONTEXT_PREFIX = re.compile(
-    r"^(?:as|in)\s+"
-    r"(?:shaping|affecting|influencing|changing|forming)\b",
+    r"^(?:(?:as|in)\s+"
+    r"(?:shaping|affecting|influencing|changing|forming)"
+    r"|(?:shape|affect|influence|change|form))\b",
     re.IGNORECASE,
 )
 _AMBIGUOUS_RELATIONSHIP_CONTEXT_TAIL = re.compile(
@@ -1085,7 +1098,9 @@ def _bounded_between_relationship_parts(
 ) -> tuple[str, str, str, str | None] | None:
     match = _BETWEEN_RELATIONSHIP_PATTERN.fullmatch(question)
     if match is None:
-        return None
+        match = _DIRECTIONAL_BETWEEN_RELATIONSHIP_PATTERN.fullmatch(question)
+        if match is None:
+            return None
 
     left = _bounded_text(match.group("left").strip(" ,;:?"))
     right = _bounded_text(match.group("right").strip(" ,;:?"))
@@ -1134,7 +1149,10 @@ def _relational_parts(
     bounded_between = _bounded_between_relationship_parts(question)
     if bounded_between is not None:
         return bounded_between
-    if _BETWEEN_RELATIONSHIP_PATTERN.fullmatch(question) is not None:
+    if (
+        _BETWEEN_RELATIONSHIP_PATTERN.fullmatch(question) is not None
+        or _DIRECTIONAL_BETWEEN_RELATIONSHIP_PATTERN.fullmatch(question) is not None
+    ):
         return None
     if len(re.findall(r"\bto\b", question, flags=re.IGNORECASE)) != 1:
         return None
