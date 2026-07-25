@@ -45,11 +45,11 @@ def ledger_path(request):
 
 def answer_run_diagnostics_payload(**overrides):
     payload = {
-        "schema": "archivist.answer_run_diagnostics/1",
+        "schema": "archivist.answer_run_diagnostics/2",
         "cohort": {
-            "rag_policy_version": "evidence-planned-v2",
+            "rag_policy_version": "evidence-planned-v3",
             "query_planner_prompt_version": "query-planner-v2",
-            "coverage_prompt_version": "evidence-coverage-v1",
+            "coverage_prompt_version": "evidence-coverage-v2",
             "normalizer_version": "evidence-coverage-normalizer/1",
             "coverage_instructions_sha256": "a" * 64,
             "coverage_schema_sha256": "b" * 64,
@@ -63,6 +63,13 @@ def answer_run_diagnostics_payload(**overrides):
         "validation_error_code": "citation_source_mismatch",
         "repair_applied": False,
         "repair_codes": [],
+        "planner": {
+            "schema": "archivist.planner_call_diagnostics/1",
+            "status": "not_called",
+            "failure_code": None,
+            "exception_class": None,
+            "exception_code": None,
+        },
         "stage_timings_ms": {
             "retrieval": 12.5,
             "answer_generation": 240.125,
@@ -93,7 +100,8 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
 
     assert stored is not None
     assert stored["validation_error_code"] == "citation_source_mismatch"
-    assert stored["cohort"]["rag_policy_version"] == "evidence-planned-v2"
+    assert stored["cohort"]["rag_policy_version"] == "evidence-planned-v3"
+    assert stored["planner"]["status"] == "not_called"
     assert stored["stage_timings_ms"]["answer_generation"] == 240.125
     assert "question" not in str(stored).casefold()
     first_run_id = stored["run_id"]
@@ -104,6 +112,13 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
         validation_error_code=None,
         repair_applied=True,
         repair_codes=["source_mapping_mismatch"],
+        planner={
+            "schema": "archivist.planner_call_diagnostics/1",
+            "status": "failed",
+            "failure_code": "planner_call_failed",
+            "exception_class": "SyntheticPlannerFailure",
+            "exception_code": "rate-limit/429",
+        },
     )
     assert ledger.record_answer_run_diagnostics(
         project_id="current",
@@ -120,6 +135,138 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
     assert updated["run_id"] != first_run_id
     assert updated["answer_status"] == "answered"
     assert updated["repair_codes"] == ["source_mapping_mismatch"]
+    assert updated["planner"]["exception_class"] == "SyntheticPlannerFailure"
+    assert updated["planner"]["exception_code"] == "rate-limit/429"
+
+
+def test_answer_run_diagnostics_migration_marks_historical_planner_state_unknown(
+    ledger_path,
+):
+    with closing(sqlite3.connect(ledger_path)) as connection, connection:
+        connection.executescript(
+            """
+            CREATE TABLE answer_run_diagnostics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL UNIQUE,
+                recorded_at TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                answer_status TEXT NOT NULL,
+                evidence_decision TEXT NOT NULL,
+                validation_result TEXT NOT NULL,
+                validation_error_code TEXT,
+                repair_applied INTEGER NOT NULL,
+                repair_codes_json TEXT NOT NULL,
+                cohort_json TEXT NOT NULL,
+                stage_timings_json TEXT NOT NULL,
+                UNIQUE(project_id, conversation_id, turn_id)
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO answer_run_diagnostics (
+                run_id, recorded_at, project_id, conversation_id, turn_id,
+                answer_status, evidence_decision, validation_result,
+                validation_error_code, repair_applied, repair_codes_json,
+                cohort_json, stage_timings_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "historical-run",
+                "2026-07-24T12:00:00+00:00",
+                "current",
+                "historical-conversation",
+                "historical-turn",
+                "answered",
+                "direct_answer",
+                "valid",
+                None,
+                0,
+                "[]",
+                "{}",
+                "{}",
+            ),
+        )
+
+    stored = UsageLedger(ledger_path).get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="historical-conversation",
+        turn_id="historical-turn",
+    )
+
+    assert stored is not None
+    assert stored["schema"] == "archivist.answer_run_diagnostics/2"
+    assert stored["cohort"] == costs.HISTORICAL_UNKNOWN_COHORT
+    assert stored["planner"] == {
+        "schema": "archivist.planner_call_diagnostics/1",
+        "status": "unknown",
+        "failure_code": None,
+        "exception_class": None,
+        "exception_code": None,
+    }
+
+
+def test_historical_unknown_diagnostics_are_valid_v2_write_contract(ledger_path):
+    payload = answer_run_diagnostics_payload(
+        cohort=costs.HISTORICAL_UNKNOWN_COHORT,
+        planner=costs.HISTORICAL_UNKNOWN_PLANNER,
+    )
+
+    assert UsageLedger(ledger_path).record_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="historical-conversation",
+        turn_id="historical-turn",
+        diagnostics=payload,
+    )
+
+
+def test_fresh_diagnostics_table_defaults_support_older_writer(ledger_path):
+    ledger = UsageLedger(ledger_path)
+    assert (
+        ledger.get_answer_run_diagnostics(
+            project_id="current",
+            conversation_id="missing-conversation",
+            turn_id="missing-turn",
+        )
+        is None
+    )
+    with closing(sqlite3.connect(ledger_path)) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO answer_run_diagnostics (
+                run_id, recorded_at, project_id, conversation_id, turn_id,
+                answer_status, evidence_decision, validation_result,
+                validation_error_code, repair_applied, repair_codes_json,
+                stage_timings_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "rollback-writer-run",
+                "2026-07-24T12:00:00+00:00",
+                "current",
+                "rollback-conversation",
+                "rollback-turn",
+                "answered",
+                "direct_answer",
+                "valid",
+                None,
+                0,
+                "[]",
+                "{}",
+            ),
+        )
+
+    stored = ledger.get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="rollback-conversation",
+        turn_id="rollback-turn",
+    )
+
+    assert stored is not None
+    assert stored["cohort"] == costs.HISTORICAL_UNKNOWN_COHORT
+    assert stored["planner"] == costs.HISTORICAL_UNKNOWN_PLANNER
 
 
 @pytest.mark.parametrize(
@@ -130,6 +277,42 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
         answer_run_diagnostics_payload(
             validation_result="valid",
             validation_error_code="citation_source_mismatch",
+        ),
+        answer_run_diagnostics_payload(
+            planner={
+                "schema": "archivist.planner_call_diagnostics/1",
+                "status": "succeeded",
+                "failure_code": "planner_call_failed",
+                "exception_class": None,
+                "exception_code": None,
+            }
+        ),
+        answer_run_diagnostics_payload(
+            planner={
+                "schema": "archivist.planner_call_diagnostics/1",
+                "status": "failed",
+                "failure_code": None,
+                "exception_class": "Private message must not persist",
+                "exception_code": None,
+            }
+        ),
+        *(
+            answer_run_diagnostics_payload(
+                planner={
+                    "schema": "archivist.planner_call_diagnostics/1",
+                    "status": "failed",
+                    "failure_code": "planner_call_failed",
+                    "exception_class": "SyntheticPlannerFailure",
+                    "exception_code": private_code,
+                }
+            )
+            for private_code in (
+                "PRIVATE-provider-prose-must-never-persist",
+                "PRIVATE/provider/prose",
+                "C:/Users/Michael/private",
+                "private-provider-prose-must-persist",
+                "c:users:michael:private",
+            )
         ),
     ],
 )
@@ -577,17 +760,24 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["resolved_query"] == "Standalone question?"
     run_diagnostics = dict(response["run_diagnostics"])
     cohort = run_diagnostics.pop("cohort")
-    assert cohort["rag_policy_version"] == "evidence-planned-v2"
+    assert cohort["rag_policy_version"] == "evidence-planned-v3"
     assert cohort["query_planner_prompt_version"] == "query-planner-v2"
     assert len(cohort["coverage_instructions_sha256"]) == 64
     assert run_diagnostics == {
-        "schema": "archivist.answer_run_diagnostics/1",
+        "schema": "archivist.answer_run_diagnostics/2",
         "answer_status": "answered",
         "evidence_decision": "direct_answer",
         "validation_result": "not_run",
         "validation_error_code": None,
         "repair_applied": False,
         "repair_codes": [],
+        "planner": {
+            "schema": "archivist.planner_call_diagnostics/1",
+            "status": "not_called",
+            "failure_code": None,
+            "exception_class": None,
+            "exception_code": None,
+        },
         "stage_timings_ms": {},
     }
     assert response["costs"]["turn_usd"] > 0
@@ -635,6 +825,7 @@ def test_question_api_persists_explicit_legacy_cohort(monkeypatch, ledger_path):
     assert cohort["normalizer_version"] == "not-applicable"
     assert cohort["coverage_instructions_sha256"] == "not-applicable"
     assert cohort["coverage_schema_sha256"] == "not-applicable"
+    assert response["run_diagnostics"]["planner"]["status"] == "not_called"
 
     persisted = UsageLedger().get_answer_run_diagnostics(
         project_id="custom-project",

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
+import pytest
+
 import rag_pipeline
 from answer_coverage import (
     AnswerUnit,
@@ -182,6 +184,17 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
     monkeypatch.setattr(rag_pipeline, "emit_retrieval_trace", lambda _trace: None)
 
 
+def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
+    instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
+
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v2"
+    assert "exactly one independently checkable factual claim" in instructions
+    assert "exactly one terminal citation group" in instructions
+    assert "every listed source independently supports" in instructions
+    assert "split them into separate answer" in instructions
+    assert "spell them out or rephrase" in instructions
+
+
 def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch):
     install_planned_retrieval(monkeypatch, [CHUNK])
     calls: list[dict] = []
@@ -220,6 +233,13 @@ def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch)
     run_diagnostics = rag_pipeline.answer_run_diagnostics(result)
     assert run_diagnostics["validation_result"] == "valid"
     assert run_diagnostics["validation_error_code"] is None
+    assert run_diagnostics["planner"] == {
+        "schema": "archivist.planner_call_diagnostics/1",
+        "status": "not_called",
+        "failure_code": None,
+        "exception_class": None,
+        "exception_code": None,
+    }
     assert {
         "corpus_integrity",
         "query_planning",
@@ -268,6 +288,49 @@ def test_homepage_relationship_question_decomposes_locally_and_reaches_answer(
         "tobacco labor connect",
     ]
     assert "Synthetic supported point 3" in result.answer
+
+
+def test_resolved_between_relationship_context_does_not_call_the_planner(
+    monkeypatch,
+):
+    relationship_chunk = {
+        **CHUNK,
+        "text": (
+            "Project Lumen and Harbor Network shaped civic exchange "
+            "in Port Delta."
+        ),
+    }
+    install_planned_retrieval(monkeypatch, [relationship_chunk])
+    calls: list[str] = []
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        return SimpleNamespace(
+            output_parsed=supported_answer(("R1", "R2", "R3")),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+    question = (
+        "How did the manuscript describe the relationship between Project Lumen "
+        "and Harbor Network as shaping civic exchange in Port Delta?"
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(standalone_question=question),
+        collection_handle=Collection(),
+        chunks=[relationship_chunk],
+        client=object(),
+        corpus_manifest=corpus_manifest(relationship_chunk),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert "query_planning" not in calls
+    assert result.diagnostics["planner"]["status"] == "not_called"
+    assert result.plan.facets[-1].search_query == (
+        "Project Lumen Harbor Network relationship "
+        "as shaping civic exchange in Port Delta"
+    )
 
 
 def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
@@ -337,6 +400,102 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     assert result.plan.planner_used is True
     assert result.plan.facets[0].facet_id == "F0"
     assert result.status == "answered"
+
+
+def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    emitted_trace: dict[str, object] = {}
+    monkeypatch.setattr(
+        rag_pipeline,
+        "emit_retrieval_trace",
+        lambda trace: emitted_trace.update(trace),
+    )
+    calls: list[str] = []
+    private_provider_message = "PRIVATE provider prose must never be recorded"
+
+    class SyntheticPlannerFailure(RuntimeError):
+        code = "rate-limit/429"
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        if operation == "query_planning":
+            raise SyntheticPlannerFailure(private_provider_message)
+        return SimpleNamespace(
+            output_parsed=supported_answer(("R1", "R2", "R3")),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question=(
+                "Trace Project Lumen from its origin to its endpoint."
+            ),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    expected = {
+        "schema": "archivist.planner_call_diagnostics/1",
+        "status": "failed",
+        "failure_code": "planner_call_failed",
+        "exception_class": "SyntheticPlannerFailure",
+        "exception_code": "rate-limit/429",
+    }
+    assert calls == ["query_planning", "answer_generation"]
+    assert result.plan.fallback_reason == "planner_call_failed"
+    assert result.diagnostics["planner"] == expected
+    assert emitted_trace["plan"]["planner_call"] == expected
+    run_diagnostics = rag_pipeline.answer_run_diagnostics(result)
+    assert run_diagnostics["schema"] == "archivist.answer_run_diagnostics/2"
+    assert run_diagnostics["planner"] == expected
+    assert private_provider_message not in str(result.diagnostics)
+    assert private_provider_message not in str(emitted_trace)
+    assert private_provider_message not in str(run_diagnostics)
+
+
+@pytest.mark.parametrize(
+    "private_code",
+    [
+        "PRIVATE-provider-prose-must-never-persist",
+        "PRIVATE/provider/prose",
+        "C:/Users/Michael/private",
+        "private-provider-prose-must-persist",
+        "c:users:michael:private",
+    ],
+)
+def test_planner_diagnostics_reject_encoded_prose_and_paths(private_code):
+    class SyntheticPlannerFailure(RuntimeError):
+        code = private_code
+
+    diagnostic = rag_pipeline._planner_call_diagnostic(
+        "failed",
+        failure_code="planner_call_failed",
+        error=SyntheticPlannerFailure("private provider message"),
+    )
+
+    assert diagnostic["exception_code"] is None
+    assert private_code not in str(diagnostic)
+
+
+def test_planner_diagnostic_uses_safe_status_when_provider_code_is_unsafe():
+    class SyntheticPlannerFailure(RuntimeError):
+        code = "private-provider-prose-must-persist"
+        status_code = 429
+
+    diagnostic = rag_pipeline._planner_call_diagnostic(
+        "failed",
+        failure_code="planner_call_failed",
+        error=SyntheticPlannerFailure("private provider message"),
+    )
+
+    assert diagnostic["exception_code"] == "429"
+    assert SyntheticPlannerFailure.code not in str(diagnostic)
 
 
 def test_certified_absence_skips_answer_generation(monkeypatch):
@@ -474,6 +633,16 @@ def test_integrity_failure_stops_before_planning_embedding_or_generation(
     assert (
         "chunk_text_identity_mismatch"
         in result.diagnostics["evidence"]["corpus"]["failure_codes"]
+    )
+    assert result.diagnostics["planner"] == {
+        "schema": "archivist.planner_call_diagnostics/1",
+        "status": "not_called",
+        "failure_code": None,
+        "exception_class": None,
+        "exception_code": None,
+    }
+    assert rag_pipeline.answer_run_diagnostics(result)["planner"] == (
+        result.diagnostics["planner"]
     )
 
 

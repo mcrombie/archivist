@@ -58,7 +58,7 @@ __all__ = [
 
 
 EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/1"
-EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/2"
+EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/3"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
 EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/1"
 
@@ -74,6 +74,7 @@ CITATION_GRAMMAR = r"\[Source\s+\d+(?:\s*,\s*Source\s+\d+)*\]"
 CITATION_PATTERN = re.compile(CITATION_GRAMMAR)
 _BRACKETED_PATTERN = re.compile(r"\[[^\[\]]*\]")
 _CITATION_NUMBER_PATTERN = re.compile(r"Source\s+(\d+)")
+_TERMINAL_CITATION_PATTERN = re.compile(rf"{CITATION_GRAMMAR}[.!?]$")
 
 NO_SOURCES_MESSAGE = (
     "The retrieved passages do not provide enough evidence to answer this question."
@@ -182,6 +183,7 @@ class CoverageValidationErrorCode(StrEnum):
     MALFORMED_CITATION = "malformed_citation"
     UNRESOLVABLE_CITATION = "unresolvable_citation"
     CITATION_SOURCE_MISMATCH = "citation_source_mismatch"
+    CITATION_LOCALITY_INVALID = "citation_locality_invalid"
     TEXT_LIMIT_EXCEEDED = "text_limit_exceeded"
 
 
@@ -217,10 +219,21 @@ class AnswerUnit(_ContractModel):
         max_length=MAX_REQUIREMENTS,
     )
     role: AnswerUnitRole
-    text: UnitText
+    text: UnitText = Field(
+        description=(
+            "Exactly one complete sentence asserting one independently checkable "
+            "factual claim, followed by exactly one terminal citation group and "
+            "its only ending punctuation. The claim must spell out or rephrase "
+            "period-containing abbreviations, titles, and initials."
+        )
+    )
     source_numbers: tuple[SourceNumber, ...] = Field(
         min_length=1,
         max_length=MAX_SOURCES,
+        description=(
+            "The exact sources in the terminal citation group; every listed source "
+            "must independently support the same single claim."
+        ),
     )
     paragraph: Annotated[int, Field(strict=True, ge=1, le=MAX_ANSWER_UNITS)]
 
@@ -293,7 +306,7 @@ class PremiseStatusCounts(_ContractModel):
 
 
 class CoverageDiagnosticSummary(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage_diagnostics/2"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage_diagnostics/3"] = Field(alias="schema")
     renderer_version: Literal["evidence-coverage-renderer/1"]
     validation_result: DiagnosticValidationResult
     error_code: CoverageValidationErrorCode | None
@@ -441,6 +454,7 @@ def validate_evidence_coverage(
         cited_numbers = parse_citation_numbers(unit.text)
         if not cited_numbers:
             raise CoverageContractError(CoverageValidationErrorCode.MISSING_CITATION)
+        _validate_citation_locality(unit.text, cited_numbers)
         if any(number > context.source_count for number in cited_numbers):
             raise CoverageContractError(CoverageValidationErrorCode.UNRESOLVABLE_CITATION)
         if _ordered_unique(cited_numbers) != unit.source_numbers:
@@ -919,6 +933,38 @@ def _validate_source_numbers(
         raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_SOURCE_NUMBER)
     if any(number < 1 or number > source_count for number in source_numbers):
         raise CoverageContractError(CoverageValidationErrorCode.SOURCE_NUMBER_OUT_OF_RANGE)
+
+
+def _validate_citation_locality(
+    text: str,
+    _cited_numbers: Sequence[int],
+) -> None:
+    """Require one terminally cited sentence-shaped unit.
+
+    Local code cannot decide whether a passage entails prose or whether one
+    grammatical sentence contains more than one factual claim. It can reliably
+    reserve all sentence-ending punctuation for the terminal citation, which
+    prevents a trailing citation bundle from covering several punctuated
+    sentences. Generated claims must spell out or rephrase period-containing
+    abbreviations, titles, initials, and decimals.
+    """
+
+    citations = tuple(CITATION_PATTERN.finditer(text))
+    if len(citations) != 1:
+        raise CoverageContractError(CoverageValidationErrorCode.CITATION_LOCALITY_INVALID)
+    citation = citations[0]
+    if _TERMINAL_CITATION_PATTERN.fullmatch(text[citation.start() :]) is None:
+        raise CoverageContractError(CoverageValidationErrorCode.CITATION_LOCALITY_INVALID)
+
+    claim = text[: citation.start()].rstrip()
+    if (
+        not claim
+        or "\n" in claim
+        or "\r" in claim
+        or ";" in claim
+        or any(mark in claim for mark in ".!?")
+    ):
+        raise CoverageContractError(CoverageValidationErrorCode.CITATION_LOCALITY_INVALID)
 
 
 def _validate_status_shape(record: RequirementCoverage) -> None:

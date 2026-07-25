@@ -25,7 +25,12 @@ from answer_coverage import (
     CoverageValidationErrorCode,
     process_evidence_coverage,
 )
-from costs import CostLimitExceeded, tracked_responses_parse
+from costs import (
+    CostLimitExceeded,
+    safe_planner_exception_class,
+    safe_planner_exception_code,
+    tracked_responses_parse,
+)
 from evidence_policy import (
     CorpusIntegrity,
     EvidenceDecision,
@@ -70,12 +75,13 @@ from retrieval import (
 )
 
 
-RAG_POLICY_VERSION = "evidence-planned-v2"
+RAG_POLICY_VERSION = "evidence-planned-v3"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
-ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/1"
+ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
+PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v2"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v1"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v2"
 MAX_PLANNER_OUTPUT_TOKENS = 3_000
 MAX_COVERAGE_OUTPUT_TOKENS = 8_000
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -125,8 +131,14 @@ For every ordered requirement:
 - ignore tangential sources and never use outside knowledge;
 - mark unsupported material unsupported rather than inventing connective tissue.
 
-Each factual answer unit must include immediate citations using exactly [Source N] or
-[Source N, Source N]. Its declared source_numbers must exactly match those citations.
+Each answer_unit.text must contain exactly one complete sentence asserting exactly one
+independently checkable factual claim, followed by exactly one terminal citation group
+and its only ending punctuation. Do not use periods inside abbreviations, titles, initials,
+or decimals; spell them out or rephrase the sentence. If prose contains two facts—even
+when joined by punctuation or a conjunction—or the facts require different source sets,
+split them into separate answer units; they may share a paragraph number. Use
+[Source N, Source M] only when every listed source independently supports that same single
+claim. Its declared source_numbers must exactly match the one citation group.
 
 Treat every listed premise as a hypothesis. If sources contradict one, the first answer
 unit must use role premise_correction, correct it with citations before addressing the
@@ -183,6 +195,8 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     generation = generation if isinstance(generation, Mapping) else {}
     raw_timings = diagnostics.get("stage_timings_ms")
     raw_timings = raw_timings if isinstance(raw_timings, Mapping) else {}
+    raw_planner = diagnostics.get("planner")
+    raw_planner = raw_planner if isinstance(raw_planner, Mapping) else {}
     valid_error_codes = {code.value for code in CoverageValidationErrorCode}
     valid_results = {value.value for value in DiagnosticValidationResult}
 
@@ -210,6 +224,29 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
             and math.isfinite(float(value))
             and float(value) >= 0
         )
+    }
+    planner_status = raw_planner.get("status")
+    if planner_status not in {"not_called", "succeeded", "failed"}:
+        planner_status = "not_called"
+    planner_failure_code = _safe_failure_code(
+        raw_planner.get("failure_code")
+    )
+    planner_exception_class = safe_planner_exception_class(
+        raw_planner.get("exception_class")
+    )
+    planner_exception_code = safe_planner_exception_code(
+        raw_planner.get("exception_code")
+    )
+    if planner_status != "failed":
+        planner_failure_code = None
+        planner_exception_class = None
+        planner_exception_code = None
+    planner = {
+        "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
+        "status": planner_status,
+        "failure_code": planner_failure_code,
+        "exception_class": planner_exception_class,
+        "exception_code": planner_exception_code,
     }
     if result.status == "legacy_answer":
         cohort = {
@@ -273,6 +310,7 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
         "validation_error_code": validation_error_code,
         "repair_applied": bool(generation.get("repair_applied")) and bool(repair_codes),
         "repair_codes": list(repair_codes),
+        "planner": planner,
         "stage_timings_ms": stage_timings_ms,
     }
 
@@ -282,6 +320,53 @@ EVIDENCE_PLANNED_POLICY = RagPolicy()
 
 def _elapsed_ms(start_ns: int) -> float:
     return round(max(0, perf_counter_ns() - start_ns) / 1_000_000, 3)
+
+
+_SAFE_FAILURE_CODE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
+
+
+def _safe_failure_code(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if _SAFE_FAILURE_CODE.fullmatch(value) is not None else None
+
+
+def _planner_call_diagnostic(
+    status: str,
+    *,
+    failure_code: str | None = None,
+    error: Exception | None = None,
+) -> dict[str, str | None]:
+    exception_class = None
+    exception_code = None
+    if error is not None:
+        exception_class = safe_planner_exception_class(type(error).__name__)
+        for attribute in ("code", "status_code"):
+            try:
+                exception_code = safe_planner_exception_code(
+                    getattr(error, attribute, None)
+                )
+            except Exception:
+                exception_code = None
+            if exception_code is not None:
+                break
+    return {
+        "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
+        "status": status,
+        "failure_code": _safe_failure_code(failure_code),
+        "exception_class": exception_class,
+        "exception_code": exception_code,
+    }
+
+
+def _replace_diagnostic(
+    target: dict[str, Any] | None,
+    diagnostic: Mapping[str, object],
+) -> None:
+    if target is None:
+        return
+    target.clear()
+    target.update(diagnostic)
 
 
 def without_automatic_retries(client: object) -> object:
@@ -333,8 +418,13 @@ def plan_question(
     document_catalog: Sequence[DocumentCatalogEntry],
     *,
     policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
+    planner_diagnostics: dict[str, Any] | None = None,
 ) -> QuestionPlan:
     """Run at most one structured planner call, then validate or fall back locally."""
+    _replace_diagnostic(
+        planner_diagnostics,
+        _planner_call_diagnostic("not_called"),
+    )
     if not policy.decomposition or not requires_planning(resolved_turn):
         return build_question_plan(resolved_turn)
     try:
@@ -351,16 +441,32 @@ def plan_question(
             max_output_tokens=MAX_PLANNER_OUTPUT_TOKENS,
             **QUERY_PLANNER_SETTINGS.responses_create_kwargs(),
         )
-    except CostLimitExceeded:
+    except CostLimitExceeded as error:
+        _replace_diagnostic(
+            planner_diagnostics,
+            _planner_call_diagnostic(
+                "failed",
+                failure_code="cost_limit_exceeded",
+                error=error,
+            ),
+        )
         raise
-    except Exception:
+    except Exception as error:
+        _replace_diagnostic(
+            planner_diagnostics,
+            _planner_call_diagnostic(
+                "failed",
+                failure_code="planner_call_failed",
+                error=error,
+            ),
+        )
         return build_question_plan(
             resolved_turn,
             fallback_reason="planner_call_failed",
         )
 
     parsed = getattr(response, "output_parsed", None)
-    return build_question_plan(
+    plan = build_question_plan(
         resolved_turn,
         parsed,
         document_catalog,
@@ -368,6 +474,20 @@ def plan_question(
             None if parsed is not None else "planner_refused_or_unparsed"
         ),
     )
+    if plan.planner_used:
+        _replace_diagnostic(
+            planner_diagnostics,
+            _planner_call_diagnostic("succeeded"),
+        )
+    else:
+        _replace_diagnostic(
+            planner_diagnostics,
+            _planner_call_diagnostic(
+                "failed",
+                failure_code=plan.fallback_reason or "invalid_planner_output",
+            ),
+        )
+    return plan
 
 
 def assess_answer_corpus_integrity(
@@ -1208,6 +1328,9 @@ def run_evidence_planned_answer(
     """Execute one bounded evidence-planned Answer Mode turn."""
     pipeline_started_ns = perf_counter_ns()
     stage_timings_ms: dict[str, float] = {}
+    planner_call_diagnostics: dict[str, Any] = _planner_call_diagnostic(
+        "not_called"
+    )
 
     def result_diagnostics(
         evidence: Mapping[str, Any],
@@ -1218,6 +1341,7 @@ def run_evidence_planned_answer(
             "rag_policy_version": policy.version,
             "evidence": dict(evidence),
             "generation": dict(generation),
+            "planner": dict(planner_call_diagnostics),
             "stage_timings_ms": dict(stage_timings_ms),
         }
 
@@ -1255,6 +1379,7 @@ def run_evidence_planned_answer(
                 None,
                 status="corpus_integrity_failed",
             ),
+            "planner": dict(planner_call_diagnostics),
         }
         return AnswerModeResult(
             answer=CORPUS_INTEGRITY_FAILED_MESSAGE,
@@ -1279,6 +1404,7 @@ def run_evidence_planned_answer(
         resolved_turn,
         catalog,
         policy=policy,
+        planner_diagnostics=planner_call_diagnostics,
     )
     stage_timings_ms["query_planning"] = _elapsed_ms(planning_started_ns)
     retrieval_started_ns = perf_counter_ns()
@@ -1313,6 +1439,7 @@ def run_evidence_planned_answer(
             "planner_model": QUERY_PLANNER_SETTINGS.model,
             "planner_reasoning_effort": QUERY_PLANNER_SETTINGS.reasoning_effort,
             "planner_verbosity": QUERY_PLANNER_SETTINGS.verbosity,
+            "planner_call": dict(planner_call_diagnostics),
         }
     )
     gate_started_ns = perf_counter_ns()

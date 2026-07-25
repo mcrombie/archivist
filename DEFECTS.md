@@ -45,6 +45,33 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-24] Valid smoke answer lost primary evidence and hid a planner failure
+Phase/Brief: Phase 1 post-optimization paid smoke
+Symptom: both turns of the neutral tobacco-and-labor smoke passed the structured coverage contract,
+but strict source review rated the opening answer only partial. It omitted the clearest
+labor-shortage, indenture, and headright mechanism even though retrieval had selected that passage
+as a primary result. The follow-up answered well but took 33 seconds; 16 seconds were attributed to
+query planning, while the usage ledger contained no planner event.
+Cause: other and spec gap — neighbor expansion was allowed to displace a selected primary passage
+under the eight-source generation cap; the coverage contract validates citation membership and
+requirement bookkeeping but not pairwise claim-to-source entailment; and the planner fallback
+catches every exception without retaining an exact failure code or any available failed-request
+usage.
+Resolution and verification: opened `evidence-planned-v3`. Context assembly now preserves every
+selected primary passage before optional neighbors fill unused slots. The evidence-coverage prompt
+and schema require one independently checkable factual claim and one terminal citation group per
+answer unit; deterministic validation rejects mechanically detectable extra sentences, citation
+groups, post-citation prose, newlines, and semicolon-separated claims. Bounded resolved
+relationship follow-ups decompose locally into both operands and their context, so the smoke's
+follow-up shape no longer invokes the planner. Every planner outcome is also persisted as a
+versioned text-free diagnostic; a failure retains only a safe exception class, an allowlisted
+provider code, or a numeric HTTP status, never exception messages. The full offline suite passes
+with 353 tests and one skipped, Ruff passes, and the
+frontend production build passes. No OpenAI call was made. Semantic claim-to-source entailment
+still requires evaluation rather than punctuation heuristics. Failed provider calls that return no
+usage object also remain dashboard-only for billing. A separately authorized paid smoke must
+confirm the live behavior before the unchanged ten-question comparison.
+
 ## [2026-07-24] A source-grounded draft was discarded without an actionable diagnosis
 Phase/Brief: Phase 1 post-optimization reader testing
 Symptom: a question recommended on the opening screen retrieved eight passages and incurred a full

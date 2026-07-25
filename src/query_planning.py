@@ -419,7 +419,8 @@ _ATTRIBUTED_PREMISE = re.compile(
     re.IGNORECASE,
 )
 _FACTIVE_INTRODUCTION = re.compile(
-    r"\b(?:given that|assuming that|because|in light of the fact that)\b",
+    r"\b(?:given that|assuming that|because|in light of the fact that|"
+    r"according to|on the assumption that)\b",
     re.IGNORECASE,
 )
 _WHY_PRESUPPOSITION = re.compile(
@@ -454,8 +455,17 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
     turn = _coerce_resolved_turn(question)
     text = turn.standalone_question
     traits: set[RouteTrait] = set()
+    between_relationship_syntax = bool(
+        _BETWEEN_RELATIONSHIP_REQUEST.search(text)
+    )
+    bounded_between_relationship = (
+        _bounded_between_relationship_parts(text) is not None
+    )
 
-    if any(pattern.search(text) for pattern in _BROAD_PATTERNS):
+    if (
+        any(pattern.search(text) for pattern in _BROAD_PATTERNS)
+        and not bounded_between_relationship
+    ):
         traits.add(RouteTrait.BROAD_SYNTHESIS)
 
     dimension_matches = _MULTIPLE_DIMENSIONS.findall(text.casefold())
@@ -468,7 +478,7 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
     ):
         traits.add(RouteTrait.MULTI_PART)
 
-    if _RELATIONAL_QUERY.search(text):
+    if _RELATIONAL_QUERY.search(text) or between_relationship_syntax:
         traits.add(RouteTrait.RELATIONSHIP)
 
     neutral_manuscript_request = bool(
@@ -477,20 +487,21 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
     if neutral_manuscript_request:
         traits.add(RouteTrait.ABSENCE_SENSITIVE)
 
-    if (
-        _ATTRIBUTED_PREMISE.search(text)
-        or _FACTIVE_INTRODUCTION.search(text)
-        or _WHY_PRESUPPOSITION.search(text)
-        or _HOW_FACTIVE_PREDICATE.search(text)
-    ) and not (
-        neutral_manuscript_request
-        and re.match(
-            r"^\s*(?:what|whether|how|does|do|did)\b",
-            text,
-            flags=re.IGNORECASE,
-        )
-    ):
-        traits.add(RouteTrait.PREMISE_SENSITIVE)
+    if not bounded_between_relationship:
+        if (
+            _ATTRIBUTED_PREMISE.search(text)
+            or _FACTIVE_INTRODUCTION.search(text)
+            or _WHY_PRESUPPOSITION.search(text)
+            or _HOW_FACTIVE_PREDICATE.search(text)
+        ) and not (
+            neutral_manuscript_request
+            and re.match(
+                r"^\s*(?:what|whether|how|does|do|did)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+        ):
+            traits.add(RouteTrait.PREMISE_SENSITIVE)
 
     return tuple(trait for trait in RouteTrait if trait in traits)
 
@@ -529,6 +540,48 @@ _RELATIONAL_VERB = (
 )
 _RELATIONAL_QUERY = re.compile(
     rf"\b{_RELATIONAL_VERB}\b[^?.!]{{0,160}}\bto\b",
+    re.IGNORECASE,
+)
+_BETWEEN_RELATIONSHIP_REQUEST = re.compile(
+    r"\b(?:relationship|connection|relation)\s+between\b",
+    re.IGNORECASE,
+)
+_BETWEEN_RELATIONSHIP_PATTERN = re.compile(
+    r"^\s*(?:"
+    r"(?:how|what)\s+(?:does|do|did)\s+"
+    r"(?:(?:the|this|that)\s+)?(?:manuscript|book|text|author|account)\s+"
+    r"(?:describe|frame|present|treat)\s+(?:(?:the|a)\s+)?"
+    r"|"
+    r"what\s+(?:is|was)\s+(?:(?:the|a)\s+)?"
+    r")"
+    r"(?P<predicate>relationship|connection|relation)\s+between\s+"
+    r"(?P<left>[^?.!,;]{1,120}?)\s+and\s+"
+    r"(?P<right>[^?.!,;]{1,120}?)"
+    r"(?P<context>\s+(?:as|in)\s+"
+    r"(?:shaping|affecting|influencing|changing|forming)"
+    r"\b[^?.!,;]{0,150})?"
+    r"\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+_AMBIGUOUS_RELATIONSHIP_OPERAND_TAIL = re.compile(
+    r"\b(?:as|because|although|though|while|when|where|which|who|whose|"
+    r"during|after|before|over|amid|throughout|under|within|across|"
+    r"despite|unless|until|given|assuming|according|in|at|by|from|"
+    r"through|with|without|among)\b|"
+    r"with\s+respect\s+to|in\s+light\s+of\s+the\s+fact\s+that|"
+    r"on\s+the\s+assumption\s+that",
+    re.IGNORECASE,
+)
+_BOUNDED_RELATIONSHIP_CONTEXT_PREFIX = re.compile(
+    r"^(?:as|in)\s+"
+    r"(?:shaping|affecting|influencing|changing|forming)\b",
+    re.IGNORECASE,
+)
+_AMBIGUOUS_RELATIONSHIP_CONTEXT_TAIL = re.compile(
+    r"\b(?:as|because|although|though|while|when|where|which|who|whose|"
+    r"despite|unless|until|given|assuming|according)\b|"
+    r"in\s+light\s+of\s+the\s+fact\s+that|"
+    r"on\s+the\s+assumption\s+that",
     re.IGNORECASE,
 )
 _RELATIONSHIP_REQUEST = re.compile(
@@ -1027,9 +1080,62 @@ def _coordinated_parts(question: str) -> tuple[str, ...]:
     return ()
 
 
-def _relational_parts(question: str) -> tuple[str, str, str] | None:
-    """Extract two explicit operands and their surface relationship predicate."""
+def _bounded_between_relationship_parts(
+    question: str,
+) -> tuple[str, str, str, str | None] | None:
+    match = _BETWEEN_RELATIONSHIP_PATTERN.fullmatch(question)
+    if match is None:
+        return None
 
+    left = _bounded_text(match.group("left").strip(" ,;:?"))
+    right = _bounded_text(match.group("right").strip(" ,;:?"))
+    predicate = _bounded_text(match.group("predicate"))
+    context = _bounded_text((match.group("context") or "").strip()) or None
+    if (
+        not left
+        or not right
+        or re.search(r"\band\b", left, flags=re.IGNORECASE)
+        or re.search(r"\band\b", right, flags=re.IGNORECASE)
+        or _AMBIGUOUS_RELATIONSHIP_OPERAND_TAIL.search(left)
+        or _AMBIGUOUS_RELATIONSHIP_OPERAND_TAIL.search(right)
+        or normalize_search_query(left) == normalize_search_query(right)
+    ):
+        return None
+    relationship_label = " ".join(
+        part
+        for part in (
+            f"Connection between {left} and {right}",
+            context,
+        )
+        if part
+    )
+    relationship_query = " ".join(
+        part for part in (left, right, predicate, context) if part
+    )
+    context_tail = (
+        _BOUNDED_RELATIONSHIP_CONTEXT_PREFIX.sub("", context, count=1)
+        if context is not None
+        else ""
+    )
+    if (
+        _AMBIGUOUS_RELATIONSHIP_CONTEXT_TAIL.search(context_tail)
+        or len(relationship_label) > MAX_SEARCH_QUERY_CHARS
+        or len(relationship_query) > MAX_SEARCH_QUERY_CHARS
+    ):
+        return None
+    return left, right, predicate, context
+
+
+def _relational_parts(
+    question: str,
+) -> tuple[str, str, str, str | None] | None:
+    """Extract two explicit operands, their predicate, and bounded context."""
+
+    bounded_between = _bounded_between_relationship_parts(question)
+    if bounded_between is not None:
+        return bounded_between
+    if _BETWEEN_RELATIONSHIP_PATTERN.fullmatch(question) is not None:
+        return None
     if len(re.findall(r"\bto\b", question, flags=re.IGNORECASE)) != 1:
         return None
     match = _TRANSITIVE_RELATIONSHIP_PATTERN.search(question)
@@ -1044,10 +1150,12 @@ def _relational_parts(question: str) -> tuple[str, str, str] | None:
     if (
         not left
         or not right
+        or re.search(r"\band\b", left, flags=re.IGNORECASE)
+        or re.search(r"\band\b", right, flags=re.IGNORECASE)
         or normalize_search_query(left) == normalize_search_query(right)
     ):
         return None
-    return left, right, predicate
+    return left, right, predicate, None
 
 
 def deterministic_fallback_plan(
@@ -1098,9 +1206,16 @@ def deterministic_fallback_plan(
             ),
         )
     elif relational is not None:
-        left, right, predicate = relational
+        left, right, predicate, relationship_context = relational
         relationship_label = _bounded_text(
-            f"Connection between {left} and {right}"
+            " ".join(
+                part
+                for part in (
+                    f"Connection between {left} and {right}",
+                    relationship_context,
+                )
+                if part
+            )
         )
         requirements = (
             _fallback_requirement(1, f"Context for {left}"),
@@ -1124,7 +1239,11 @@ def deterministic_fallback_plan(
                 3,
                 requirements[2],
                 FacetRole.MECHANISM,
-                f"{left} {right} {predicate}",
+                " ".join(
+                    part
+                    for part in (left, right, predicate, relationship_context)
+                    if part
+                ),
             ),
         )
     elif coordinated := _coordinated_parts(question):

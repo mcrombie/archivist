@@ -8,9 +8,25 @@ boundary; the legacy answer path remains callable
 ## Implementation status
 
 Version 1 was implemented as `evidence-planned-v1` in the shared CLI/web answer pipeline.
-The current `evidence-planned-v2` keeps that bounded-call design and adds conservative local
-normalization for redundant evidence mappings, relational-query decomposition that does not need
-an extra planner call, and durable text-free post-validation diagnostics.
+Version 2 kept that bounded-call design and added conservative local normalization for redundant
+evidence mappings, relational-query decomposition that did not need an extra planner call, and
+durable text-free post-validation diagnostics. A paid two-turn smoke then exposed three narrower
+defects: neighbor expansion displaced a selected primary passage, compound answer units weakened
+citation locality, and a locally resolvable follow-up attempted a failing planner call.
+
+The current `evidence-planned-v3` cohort addresses those defects:
+
+- every selected primary passage is retained before optional neighbors fill unused context slots;
+- the evidence-coverage prompt and schema require one independently checkable factual claim and
+  one terminal citation group per answer unit. Generated prose reserves its only sentence-ending
+  punctuation for that citation, making extra punctuated sentences mechanically rejectable;
+- bounded resolved relationship follow-ups decompose locally into both operands and their context
+  instead of calling the planner;
+- every planner outcome is represented by a versioned, text-free diagnostic. Failures preserve
+  only safe class/code tokens, never provider messages or manuscript/question text.
+
+These repairs are verified locally but have not yet been confirmed by another paid smoke. Version
+2's smoke results therefore cannot be credited to version 3.
 
 The implementation follows the bounded-call design in this document:
 

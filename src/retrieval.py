@@ -50,7 +50,7 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v1"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v2"
 RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/2"
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
@@ -1256,8 +1256,6 @@ def retrieve_plan_from_collection(
         )
         if candidate is not None:
             accept(candidate, facet_id)
-    coverage_anchor_count = len(selected_chunks)
-
     # Fill remaining positions round-robin so one prolific lane cannot monopolize context.
     candidate_offsets = {str(lane["facet_id"]): 0 for lane in ordered_lanes}
     while len(selected_chunks) < max_final_sources:
@@ -1284,16 +1282,6 @@ def retrieve_plan_from_collection(
         primary_first=True,
     )
     final_chunks = expanded[:max_final_sources]
-    optional_neighbors = expanded[len(selected_chunks) :]
-    if (
-        len(selected_chunks) >= max_final_sources
-        and len(selected_chunks) > coverage_anchor_count
-        and optional_neighbors
-    ):
-        final_chunks = [
-            *selected_chunks[: max_final_sources - 1],
-            optional_neighbors[0],
-        ]
     if broad:
         corpus_ordinal = {
             str(chunk.get("chunk_id") or ""): ordinal

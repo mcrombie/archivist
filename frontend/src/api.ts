@@ -45,7 +45,7 @@ export type ConversationHistoryTurn = {
 };
 
 export type AnswerRunDiagnostics = {
-  schema: "archivist.answer_run_diagnostics/1";
+  schema: "archivist.answer_run_diagnostics/2";
   cohort: {
     rag_policy_version: string;
     query_planner_prompt_version: string;
@@ -63,6 +63,13 @@ export type AnswerRunDiagnostics = {
   validation_error_code: string | null;
   repair_applied: boolean;
   repair_codes: string[];
+  planner: {
+    schema: "archivist.planner_call_diagnostics/1";
+    status: "unknown" | "not_called" | "succeeded" | "failed";
+    failure_code: string | null;
+    exception_class: string | null;
+    exception_code: string | null;
+  };
   stage_timings_ms: Record<string, number>;
 };
 

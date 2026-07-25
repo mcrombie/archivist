@@ -270,6 +270,38 @@ def test_relational_question_forms_are_routed_and_role_the_second_target_as_face
     [
         "How does Project Lumen connect to Harbor Network to explain the change?",
         "How do I connect to the archive to search it?",
+        (
+            "How did the manuscript describe the relationship between Alpha Network "
+            "and Beta Council as proving the hidden conspiracy?"
+        ),
+        (
+            "How did the manuscript describe the relationship between Alpha Network "
+            "and Beta Council because the treaty failed?"
+        ),
+        (
+            "How did the manuscript describe the relationship between Alpha Network "
+            "and Beta Council over time?"
+        ),
+        (
+            "What is the relationship between Alpha Network "
+            "and Beta Council in Port Delta?"
+        ),
+        (
+            "What is the relationship between Alpha Network "
+            "and Beta Council in 1700?"
+        ),
+        (
+            "What is the relationship between Alpha Network and Beta Council "
+            "given that the treaty failed?"
+        ),
+        (
+            "What is the relationship between Alpha Network and Beta Council "
+            "according to the disputed premise?"
+        ),
+        (
+            "How did the manuscript describe the relationship between Alpha Network "
+            "and Beta Council as shaping exchange because the treaty failed?"
+        ),
     ],
 )
 def test_ambiguous_relationship_syntax_uses_the_planner_instead_of_bad_local_operands(
@@ -281,7 +313,130 @@ def test_ambiguous_relationship_syntax_uses_the_planner_instead_of_bad_local_ope
     plan = build_question_plan(question)
 
     assert plan.fallback_reason == "planner_unavailable"
-    assert [facet.role for facet in plan.facets] == [FacetRole.ORIGINAL]
+    assert plan.facets[0].role is FacetRole.ORIGINAL
+    assert not {
+        FacetRole.BROADER_RELATED,
+        FacetRole.MECHANISM,
+    }.intersection(facet.role for facet in plan.facets)
+
+
+def test_between_relationship_keeps_for_inside_a_named_operand():
+    question = (
+        "What was the relationship between Alpha Network "
+        "and Society for Public Memory?"
+    )
+
+    assert route_question(question) == (RouteTrait.RELATIONSHIP,)
+    assert requires_planning(question) is False
+
+    plan = build_question_plan(question)
+
+    assert [requirement.label for requirement in plan.requirements] == [
+        "Context for Alpha Network",
+        "Context for Society for Public Memory",
+        "Connection between Alpha Network and Society for Public Memory",
+    ]
+    assert plan.facets[-1].search_query == (
+        "Alpha Network Society for Public Memory relationship"
+    )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        (
+            "How did the manuscript describe the relationship between Alpha Network "
+            "and Beta Council as proving the hidden conspiracy?"
+        ),
+        (
+            "What is the relationship between Alpha Network and Beta Council "
+            "given that the treaty failed?"
+        ),
+        (
+            "What is the relationship between Alpha Network and Beta Council "
+            "according to the disputed premise?"
+        ),
+        (
+            "How did the manuscript describe the relationship between Alpha Network "
+            "and Beta Council as shaping exchange because the treaty failed?"
+        ),
+    ],
+)
+def test_factive_between_relationship_preserves_premise_checking(question):
+
+    assert RouteTrait.PREMISE_SENSITIVE in route_question(question)
+    assert requires_planning(question) is True
+
+    fallback = build_question_plan(question)
+
+    assert fallback.premises
+    assert {
+        FacetRole.PREMISE_SUPPORT,
+        FacetRole.PREMISE_COUNTER,
+        FacetRole.FRAMING,
+    }.issubset(facet.role for facet in fallback.facets)
+
+
+def test_bounded_between_relationship_decomposes_locally_with_its_context():
+    question = (
+        "How did the manuscript describe the relationship between Project Lumen "
+        "and Harbor Network as shaping civic exchange in Port Delta?"
+    )
+
+    assert route_question(question) == (RouteTrait.RELATIONSHIP,)
+    assert requires_planning(question) is False
+
+    plan = build_question_plan(question)
+
+    assert plan.fallback_reason is None
+    assert [requirement.label for requirement in plan.requirements] == [
+        "Context for Project Lumen",
+        "Context for Harbor Network",
+        (
+            "Connection between Project Lumen and Harbor Network "
+            "as shaping civic exchange in Port Delta"
+        ),
+    ]
+    assert [facet.search_query for facet in plan.facets] == [
+        question,
+        "Project Lumen context",
+        "Harbor Network context",
+        (
+            "Project Lumen Harbor Network relationship "
+            "as shaping civic exchange in Port Delta"
+        ),
+    ]
+
+
+def test_between_relationship_uses_planner_instead_of_truncating_long_context():
+    left = "Alpha " * 17
+    right = "Beta " * 20
+    question = (
+        "How did the manuscript describe the relationship between "
+        f"{left.strip()} and {right.strip()} as shaping civic exchange?"
+    )
+
+    assert RouteTrait.RELATIONSHIP in route_question(question)
+    assert requires_planning(question) is True
+
+    plan = build_question_plan(question)
+
+    assert plan.fallback_reason == "planner_unavailable"
+    assert plan.facets[0].role is FacetRole.ORIGINAL
+    assert not {
+        FacetRole.BROADER_RELATED,
+        FacetRole.MECHANISM,
+    }.intersection(facet.role for facet in plan.facets)
+
+
+def test_between_relationship_with_oversized_operand_still_routes_to_planner():
+    question = (
+        "What was the relationship between Alpha Network and "
+        f"{'Beta ' * 30}?"
+    )
+
+    assert RouteTrait.RELATIONSHIP in route_question(question)
+    assert requires_planning(question) is True
 
 
 def test_long_original_question_is_preserved_while_added_facets_stay_bounded():

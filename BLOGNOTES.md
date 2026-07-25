@@ -515,6 +515,104 @@ Archivist can remember what the reader meant without treating its own earlier an
 proof. The same separation also makes absence claims safer and keeps every factual reply bounded by
 the current manuscript sources.
 
+### 2026-07-24 - Paid two-turn smoke: structurally fixed, qualitatively unfinished
+
+- Ran a clean, neutral two-turn smoke at commit `dbafcd3` with a private isolated ledger, no
+  automatic retries, a `$0.12` operational stop, and owner authorization up to `$0.20`.
+  - opening question: “How does the manuscript connect tobacco to labor?”
+  - follow-up: “How did that relationship shape everyday exchange in Jamestown?”
+- The local ledger recorded `$0.09010135`:
+  - turn 1: `$0.02621092` and 14.77 seconds;
+  - turn 2: `$0.06389043` and 33.01 seconds.
+  These remain estimates rather than an invoice.
+- Both turns cleared the machine-readable boundary: `answered`, `direct_answer`, valid coverage
+  contract, no validation error, eight returned passages, and citations resolving to those
+  passages. Neither turn needed the new mechanical normalizer.
+- The follow-up resolver worked. It expanded “that relationship” into a self-contained question
+  retaining tobacco, labor, Jamestown, and everyday exchange, then retrieved fresh evidence rather
+  than using the first answer as evidence.
+- Human source review produced a more useful split verdict:
+  - turn 1 was only partial under a strict standard. Its claims were mostly supported in aggregate,
+    but it omitted the book's clearest mechanism: labor-intensive tobacco created chronic labor
+    shortages, encouraging indentures and headrights. The retrieval trace shows that exact linking
+    chunk was selected as a primary result and then displaced from the eight-passage generation
+    context by an added neighbor.
+  - turn 1 also bundled citations across compound claims, and slightly overstated the causal link
+    between tobacco work and later cigar-company activism.
+  - turn 2 was substantively strong. It recovered the missing mechanism and connected commodity
+    payment, units of account, indentured passage, headrights, and river commerce to the follow-up.
+    Its remaining citation issue was minor but real: one joint citation should have been split by
+    clause for pairwise entailment.
+- Turn 2 exposed a separate operational defect. It spent 15.98 seconds attempting model-based query
+  planning, fell back locally with `planner_call_failed`, and still answered well. The failed
+  planner produced no local usage row, so the `$0.09010135` ledger total may omit a billable request
+  and should be checked against the provider dashboard. The exact planner exception was swallowed
+  by the fallback and is not recoverable from current diagnostics.
+- This smoke confirms that the original generic failure has been repaired, but it does **not**
+  establish that the opening answer is complete or strictly cited. The next engineering targets
+  are now narrower: protect primary evidence from neighbor displacement, enforce citation
+  locality, and make planner failures observable or avoid that planner call when local
+  decomposition is sufficient.
+
+Useful blog lesson: a valid response is not necessarily a good response. Schema validation proved
+that the model followed the evidence bookkeeping contract; human review still found a missing
+causal mechanism and over-broad citations. The most revealing trace was not a low semantic score
+but a strong primary passage being selected and then lost during context assembly.
+
+### 2026-07-24 - Repairing the three paid-smoke defects
+
+- Opened the `evidence-planned-v3` cohort to address the three specific defects found in the paid
+  two-turn smoke. The evaluation contract and frozen expected-answer material were not changed.
+- Corrected context assembly so every selected primary passage survives the eight-source cap.
+  Immediate neighbors are now optional enrichment and can fill only unused slots; they can no
+  longer displace a later high-value primary.
+- Versioned faceted retrieval as `faceted-hybrid-rrf-v2` and added regressions for both sides of
+  the rule: a late primary remains present when the context is full, and a neighbor still fills a
+  genuinely spare slot.
+- Tightened the evidence-coverage generation contract:
+  - each answer unit must state one independently checkable factual claim;
+  - it must end with exactly one citation group and nothing after it;
+  - grouped citations are allowed only when every listed source independently supports that same
+    claim;
+  - compound facts or facts needing different sources must become separate units.
+- Deterministic validation reserves all sentence-ending punctuation for the terminal citation.
+  Answer prose must therefore spell out or rephrase period-containing abbreviations, titles,
+  initials, and decimals. This makes punctuated extra sentences, multiple citation groups,
+  post-citation text, newlines, and semicolon-separated claims mechanically rejectable. It still
+  does not pretend that syntax can prove semantic atomicity or source entailment; those require
+  source-aware evaluation.
+- Bounded resolved follow-ups of the form “the relationship between X and Y as ...” now decompose
+  locally into X, Y, and the requested context. This removes the unnecessary planner call exposed
+  by the smoke while leaving genuinely ambiguous relationship questions eligible for planning.
+  The local grammar preserves names containing words such as “for,” refuses factive or unclear
+  tails, and routes any composed search that would exceed its length bound to the planner instead
+  of silently truncating it.
+- Added versioned planner diagnostics to retrieval traces, answer-run diagnostics, and the local
+  ledger. Each turn records `not_called`, `succeeded`, or `failed`; failures retain only safe
+  exception classes, allowlisted provider codes, or numeric HTTP statuses. Arbitrary code strings,
+  provider exception messages, questions, answers, paths, and manuscript text are not persisted.
+- If a failed provider request raises before returning token usage, the local ledger still cannot
+  infer its billable cost. The diagnostic now proves that the attempt failed, while the provider
+  dashboard remains authoritative for any charge. The exact bounded follow-up from the smoke
+  avoids that uncertainty because it no longer makes the planner call.
+- Bumped the evidence-coverage prompt to `evidence-coverage-v2`, answer-run diagnostics to version
+  2, and the RAG policy to `evidence-planned-v3`. Historical diagnostic rows migrate with an
+  explicit `unknown` planner status rather than inventing an outcome.
+- Verification was entirely local and incurred no OpenAI spend:
+  - 214 focused backend tests passed across retrieval, coverage, planning, conversation, and
+    diagnostics persistence;
+  - the full backend suite passed with 353 tests and one skipped;
+  - Ruff passed across `src` and `tests`;
+  - the frontend TypeScript/Vite production build passed.
+- This proves the three code defects have local regressions, not that the live answers have
+  improved. The correct next gate is one separately authorized paid repeat of the same two-turn
+  smoke. Only if that passes should the unchanged ten-question comparison proceed.
+
+Useful blog lesson: the paid smoke did its job by separating three different failure classes that
+looked like one mediocre answer: evidence was retrieved and then discarded, citations were
+structurally valid but too broad, and a needless orchestration call added latency while hiding its
+failure. Each required a different boundary-level repair.
+
 ### 2026-07-24 - Turning a paid validation failure into an actionable defect
 
 - Reader testing exposed a particularly bad failure: an opening-screen sample question retrieved
@@ -615,8 +713,8 @@ what happened without retaining the private source text.
 
 ## Open threads for later entries
 
-- A paid post-fix confirmation of the opening-screen relationship question, followed by the
-  unchanged ten-question comparison under the new `evidence-planned-v2` cohort.
+- Run one paid repeat of the same two-turn smoke under `evidence-planned-v3`; if it passes, run the
+  unchanged ten-question comparison under that cohort.
 - Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
   retrieval and citation metrics require it.
 - Retrieval-only pilot results before any answer generation is graded.

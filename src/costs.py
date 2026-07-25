@@ -23,7 +23,8 @@ PRICING_VERSION = "2026-07-22"
 CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
 TOKENS_PER_MILLION = Decimal("1000000")
-ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/1"
+ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
+PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
 ANSWER_RUN_TIMING_KEYS = frozenset(
     {
         "preflight",
@@ -52,8 +53,60 @@ ANSWER_RUN_COHORT_KEYS = frozenset(
         "generator_verbosity",
     }
 )
+ANSWER_RUN_PLANNER_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "failure_code",
+        "exception_class",
+        "exception_code",
+    }
+)
+HISTORICAL_UNKNOWN_COHORT = {
+    key: "unknown" for key in ANSWER_RUN_COHORT_KEYS
+}
+HISTORICAL_UNKNOWN_PLANNER = {
+    "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
+    "status": "unknown",
+    "failure_code": None,
+    "exception_class": None,
+    "exception_code": None,
+}
+_HISTORICAL_UNKNOWN_COHORT_JSON = json.dumps(
+    HISTORICAL_UNKNOWN_COHORT,
+    sort_keys=True,
+    separators=(",", ":"),
+)
+_HISTORICAL_UNKNOWN_PLANNER_JSON = json.dumps(
+    HISTORICAL_UNKNOWN_PLANNER,
+    sort_keys=True,
+    separators=(",", ":"),
+)
 _DIAGNOSTIC_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _COHORT_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_EXCEPTION_CLASS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+_HTTP_STATUS_CODE_PATTERN = re.compile(r"^[1-5][0-9]{2}$")
+SAFE_PLANNER_EXCEPTION_CODES = frozenset(
+    {
+        "authentication_error",
+        "bad_request",
+        "connection_error",
+        "content_filter",
+        "context_length_exceeded",
+        "insufficient_quota",
+        "internal_server_error",
+        "invalid_api_key",
+        "invalid_request_error",
+        "model_not_found",
+        "not_found",
+        "permission_denied",
+        "rate-limit/429",
+        "rate_limit_exceeded",
+        "request_timeout",
+        "server_error",
+        "service_unavailable",
+    }
+)
 _SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 
 logger = logging.getLogger(__name__)
@@ -325,6 +378,27 @@ def _diagnostic_code(value: object, *, nullable: bool = False) -> str | None:
     return value
 
 
+def safe_planner_exception_class(value: object) -> str | None:
+    if (
+        not isinstance(value, str)
+        or _EXCEPTION_CLASS_PATTERN.fullmatch(value) is None
+    ):
+        return None
+    return value
+
+
+def safe_planner_exception_code(value: object) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    token = str(value)
+    if (
+        token in SAFE_PLANNER_EXCEPTION_CODES
+        or _HTTP_STATUS_CODE_PATTERN.fullmatch(token) is not None
+    ):
+        return token
+    return None
+
+
 def _normalized_answer_run_diagnostics(
     diagnostics: Mapping[str, object],
 ) -> dict[str, object]:
@@ -337,6 +411,7 @@ def _normalized_answer_run_diagnostics(
         "validation_error_code",
         "repair_applied",
         "repair_codes",
+        "planner",
         "stage_timings_ms",
     }
     if set(diagnostics) != allowed_keys:
@@ -357,7 +432,7 @@ def _normalized_answer_run_diagnostics(
         }
         if is_sha256_field:
             valid_value = (
-                value == "not-applicable"
+                value in {"not-applicable", "unknown"}
                 or _SHA256_PATTERN.fullmatch(value) is not None
             )
         else:
@@ -365,6 +440,45 @@ def _normalized_answer_run_diagnostics(
         if not valid_value:
             raise ValueError("answer-run diagnostics contain an invalid cohort value")
         cohort[key] = value
+
+    raw_planner = diagnostics.get("planner")
+    if (
+        not isinstance(raw_planner, Mapping)
+        or set(raw_planner) != ANSWER_RUN_PLANNER_KEYS
+        or raw_planner.get("schema") != PLANNER_CALL_DIAGNOSTICS_SCHEMA
+    ):
+        raise ValueError("answer-run diagnostics contain invalid planner fields")
+    planner_status = _diagnostic_code(raw_planner.get("status"))
+    if planner_status not in {"unknown", "not_called", "succeeded", "failed"}:
+        raise ValueError("answer-run diagnostics contain an invalid planner status")
+    planner_failure_code = _diagnostic_code(
+        raw_planner.get("failure_code"),
+        nullable=True,
+    )
+    planner_tokens: dict[str, str | None] = {}
+    for key, sanitizer in (
+        ("exception_class", safe_planner_exception_class),
+        ("exception_code", safe_planner_exception_code),
+    ):
+        value = raw_planner.get(key)
+        if value is not None and sanitizer(value) != value:
+            raise ValueError("answer-run diagnostics contain an invalid planner token")
+        planner_tokens[key] = value
+    if planner_status == "failed":
+        if planner_failure_code is None:
+            raise ValueError("failed planner diagnostics require a failure code")
+    elif (
+        planner_failure_code is not None
+        or planner_tokens["exception_class"] is not None
+        or planner_tokens["exception_code"] is not None
+    ):
+        raise ValueError("non-failed planner diagnostics cannot contain failure metadata")
+    planner = {
+        "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
+        "status": planner_status,
+        "failure_code": planner_failure_code,
+        **planner_tokens,
+    }
 
     repair_codes_value = diagnostics.get("repair_codes")
     if not isinstance(repair_codes_value, (list, tuple)):
@@ -415,6 +529,7 @@ def _normalized_answer_run_diagnostics(
         "validation_error_code": validation_error_code,
         "repair_applied": repair_applied,
         "repair_codes": repair_codes,
+        "planner": planner,
         "stage_timings_ms": timings,
     }
 
@@ -436,7 +551,7 @@ class UsageLedger:
     @staticmethod
     def _ensure_schema(connection: sqlite3.Connection) -> None:
         connection.executescript(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS usage_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 response_id TEXT NOT NULL UNIQUE,
@@ -474,7 +589,10 @@ class UsageLedger:
                 validation_error_code TEXT,
                 repair_applied INTEGER NOT NULL CHECK (repair_applied IN (0, 1)),
                 repair_codes_json TEXT NOT NULL,
-                cohort_json TEXT NOT NULL,
+                cohort_json TEXT NOT NULL DEFAULT
+                    '{_HISTORICAL_UNKNOWN_COHORT_JSON}',
+                planner_json TEXT NOT NULL DEFAULT
+                    '{_HISTORICAL_UNKNOWN_PLANNER_JSON}',
                 stage_timings_json TEXT NOT NULL,
                 UNIQUE(project_id, conversation_id, turn_id)
             );
@@ -503,11 +621,36 @@ class UsageLedger:
         }
         if "cohort_json" not in diagnostic_columns:
             connection.execute(
-                """
+                f"""
                 ALTER TABLE answer_run_diagnostics
-                ADD COLUMN cohort_json TEXT NOT NULL DEFAULT '{}'
+                ADD COLUMN cohort_json TEXT NOT NULL DEFAULT
+                '{_HISTORICAL_UNKNOWN_COHORT_JSON}'
                 """
             )
+        if "planner_json" not in diagnostic_columns:
+            connection.execute(
+                f"""
+                ALTER TABLE answer_run_diagnostics
+                ADD COLUMN planner_json TEXT NOT NULL DEFAULT
+                '{_HISTORICAL_UNKNOWN_PLANNER_JSON}'
+                """
+            )
+        connection.execute(
+            """
+            UPDATE answer_run_diagnostics
+            SET cohort_json = ?
+            WHERE cohort_json = '{}'
+            """,
+            (_HISTORICAL_UNKNOWN_COHORT_JSON,),
+        )
+        connection.execute(
+            """
+            UPDATE answer_run_diagnostics
+            SET planner_json = ?
+            WHERE planner_json = '{}'
+            """,
+            (_HISTORICAL_UNKNOWN_PLANNER_JSON,),
+        )
         connection.commit()
 
     def record(
@@ -581,8 +724,8 @@ class UsageLedger:
                     run_id, recorded_at, project_id, conversation_id, turn_id,
                     answer_status, evidence_decision, validation_result,
                     validation_error_code, repair_applied, repair_codes_json,
-                    cohort_json, stage_timings_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cohort_json, planner_json, stage_timings_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project_id, conversation_id, turn_id) DO UPDATE SET
                     run_id = excluded.run_id,
                     recorded_at = excluded.recorded_at,
@@ -593,6 +736,7 @@ class UsageLedger:
                     repair_applied = excluded.repair_applied,
                     repair_codes_json = excluded.repair_codes_json,
                     cohort_json = excluded.cohort_json,
+                    planner_json = excluded.planner_json,
                     stage_timings_json = excluded.stage_timings_json
                 """,
                 (
@@ -609,6 +753,11 @@ class UsageLedger:
                     json.dumps(normalized["repair_codes"], separators=(",", ":")),
                     json.dumps(
                         normalized["cohort"],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    json.dumps(
+                        normalized["planner"],
                         sort_keys=True,
                         separators=(",", ":"),
                     ),
@@ -633,7 +782,8 @@ class UsageLedger:
                 """
                 SELECT run_id, recorded_at, answer_status, evidence_decision,
                        validation_result, validation_error_code, repair_applied,
-                       repair_codes_json, cohort_json, stage_timings_json
+                       repair_codes_json, cohort_json, planner_json,
+                       stage_timings_json
                 FROM answer_run_diagnostics
                 WHERE project_id = ? AND conversation_id = ? AND turn_id = ?
                 """,
@@ -656,6 +806,7 @@ class UsageLedger:
             "repair_applied": bool(row["repair_applied"]),
             "repair_codes": json.loads(str(row["repair_codes_json"])),
             "cohort": json.loads(str(row["cohort_json"])),
+            "planner": json.loads(str(row["planner_json"])),
             "stage_timings_ms": json.loads(str(row["stage_timings_json"])),
         }
 

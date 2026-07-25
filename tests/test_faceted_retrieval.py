@@ -232,12 +232,19 @@ def test_shared_candidate_is_mapped_to_each_facet_without_duplicate_source(
     assert outcome.facet_source_numbers == {"F0": (1,), "F1": (1,)}
 
 
-def test_refill_primary_yields_one_slot_to_an_immediate_neighbor(monkeypatch):
+def test_late_high_value_primary_is_not_displaced_by_an_earlier_neighbor(
+    monkeypatch,
+):
     first = chunk("a_001", "a.md", "primary anchor evidence", 1)
     neighbor = chunk("a_002", "a.md", "continuity in the next passage", 2)
     second = chunk("b_001", "b.md", "primary second evidence", 1)
-    third = chunk("c_001", "c.md", "primary third evidence", 1)
-    chunks = [first, neighbor, second, third]
+    late_high_value = chunk(
+        "c_001",
+        "c.md",
+        "late high-value primary evidence",
+        1,
+    )
+    chunks = [first, neighbor, second, late_high_value]
     monkeypatch.setattr(
         retrieval,
         "embed_queries",
@@ -249,10 +256,10 @@ def test_refill_primary_yields_one_slot_to_an_immediate_neighbor(monkeypatch):
             return len(chunks)
 
         def query(self, **_request):
-            return semantic_results([first, second, third])
+            return semantic_results([first, second, late_high_value])
 
     outcome = retrieve_plan_from_collection(
-        plan(facet("F0", "original", "primary evidence")),
+        plan(facet("F0", "original", "quasar")),
         Collection(),
         chunks,
         n_results=3,
@@ -262,5 +269,49 @@ def test_refill_primary_yields_one_slot_to_an_immediate_neighbor(monkeypatch):
     assert [item["chunk_id"] for item in outcome.final_chunks] == [
         "a_001",
         "b_001",
+        "c_001",
+    ]
+    assert outcome.facet_source_numbers == {"F0": (1, 2, 3)}
+    assert [
+        item["origin"]
+        for item in outcome.trace["selection"]["context"]
+    ] == ["primary", "primary", "primary"]
+
+
+def test_immediate_neighbor_still_fills_a_slot_left_after_all_primaries(
+    monkeypatch,
+):
+    first = chunk("a_001", "a.md", "first primary", 1)
+    neighbor = chunk("a_002", "a.md", "continuity passage", 2)
+    second = chunk("b_001", "b.md", "second primary", 1)
+    chunks = [first, neighbor, second]
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda *_args, **_kwargs: [[0.0]],
+    )
+
+    class Collection:
+        def count(self):
+            return len(chunks)
+
+        def query(self, **_request):
+            return semantic_results([first, second])
+
+    outcome = retrieve_plan_from_collection(
+        plan(facet("F0", "original", "quasar")),
+        Collection(),
+        chunks,
+        n_results=2,
+        max_final_sources=3,
+    )
+
+    assert [item["chunk_id"] for item in outcome.final_chunks] == [
+        "a_001",
+        "b_001",
         "a_002",
     ]
+    assert [
+        item["origin"]
+        for item in outcome.trace["selection"]["context"]
+    ] == ["primary", "primary", "neighbor"]

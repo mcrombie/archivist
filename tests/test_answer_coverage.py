@@ -459,6 +459,157 @@ def test_citation_parser_accepts_only_locked_single_and_group_forms():
     assert parse_citation_numbers("One [Source 1] and another [Source 2, Source 3].") == (1, 2, 3)
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "One factual sentence. A second factual sentence [Source 1].",
+        "One factual clause; a second factual clause [Source 1].",
+        "One factual line\nA second factual line [Source 1].",
+        "One claim [Source 1]. Another claim [Source 1].",
+        "One cited claim [Source 1] followed by uncited prose.",
+        "One claim without ending punctuation [Source 1]",
+        "One claim about Example Co. A second claim followed [Source 1].",
+        "One claim in the U.S. The next claim followed [Source 1].",
+        "The company was based in the U.S. Markets then fell [Source 1].",
+        "The first category was A. Markets then fell [Source 1].",
+        "U.S. policy changed [Source 1].",
+    ],
+)
+def test_answer_units_reject_mechanically_nonlocal_citations(text):
+    answer = _valid_answer()
+    unit = answer.answer_units[0].model_copy(
+        update={
+            "text": text,
+            "source_numbers": tuple(dict.fromkeys(parse_citation_numbers(text))),
+        }
+    )
+    changed = answer.model_copy(update={"answer_units": (unit, answer.answer_units[1])})
+
+    _assert_error(
+        changed,
+        CoverageValidationErrorCode.CITATION_LOCALITY_INVALID,
+    )
+
+
+def test_atomic_answer_unit_accepts_one_terminal_single_or_grouped_citation():
+    answer = _valid_answer()
+    terminal_single_citation = answer.answer_units[0].model_copy(
+        update={"text": "One synthetic atomic claim [Source 1]."}
+    )
+    validated = _validate(
+        answer.model_copy(
+            update={
+                "answer_units": (
+                    terminal_single_citation,
+                    answer.answer_units[1],
+                )
+            }
+        )
+    )
+
+    assert validated.answer.answer_units[0].text == terminal_single_citation.text
+
+    conflicting = _unit(
+        "U1",
+        ("R1",),
+        "The synthetic sources disagree [Source 1, Source 2].",
+        (1, 2),
+    )
+    conflicting_answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.CONFLICTING,
+                ("U1",),
+                (1, 2),
+                GapReason.SOURCE_CONFLICT,
+            ),
+        ),
+        answer_units=(conflicting,),
+    )
+    assert (
+        validate_evidence_coverage(
+            conflicting_answer,
+            requirement_ids=("R1",),
+            source_count=2,
+        )
+        .answer.answer_units[0]
+        .text
+        == conflicting.text
+    )
+
+
+def test_locality_failure_keeps_its_precise_diagnostic_and_never_renders_prose():
+    bundled_text = "One factual sentence. A second factual sentence [Source 1]."
+    answer = _valid_answer()
+    unit = answer.answer_units[0].model_copy(update={"text": bundled_text})
+
+    result = process_evidence_coverage(
+        answer.model_copy(update={"answer_units": (unit, answer.answer_units[1])}),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        source_count=3,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.diagnostics.error_code is CoverageValidationErrorCode.CITATION_LOCALITY_INVALID
+    assert bundled_text not in result.answer
+
+
+@pytest.mark.parametrize(
+    "text,source_numbers",
+    [
+        ("United States policy changed [Source 1].", (1,)),
+        ("The United States Army acted [Source 1].", (1,)),
+        ("Doctor Example acted [Source 1].", (1,)),
+        ("Example Company operated locally [Source 1].", (1,)),
+        ("In 1700, policy changed [Source 1, Source 2].", (1, 2)),
+        ("The compact joined Alpha and Beta [Source 1, Source 2].", (1, 2)),
+        ("The ratio was 2:1 [Source 1].", (1,)),
+    ],
+)
+def test_locality_validation_does_not_guess_semantics_from_safe_punctuation(
+    text,
+    source_numbers,
+):
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                source_numbers,
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(
+            _unit("U1", ("R1",), text, source_numbers),
+        ),
+    )
+
+    validated = validate_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=3,
+    )
+
+    assert validated.answer.answer_units[0].text == text
+
+
+def test_answer_unit_schema_explicitly_requires_one_independently_checkable_claim():
+    description = EvidenceCoverageAnswer.model_json_schema()["$defs"]["AnswerUnit"][
+        "properties"
+    ]["text"]["description"]
+
+    assert "one independently checkable factual claim" in description
+    assert "one terminal citation group" in description
+    assert "period-containing abbreviations" in description
+
+
 def test_missing_unresolvable_and_mismatched_citations_are_distinct_errors():
     answer = _valid_answer()
 
