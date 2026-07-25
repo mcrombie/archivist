@@ -29,6 +29,8 @@ from costs import (
     tracked_responses_parse,
     usage_scope,
 )
+
+
 @pytest.fixture
 def ledger_path(request):
     directory = Path("runtime") / "test-ledgers"
@@ -225,6 +227,38 @@ def test_historical_unknown_diagnostics_are_valid_v2_write_contract(ledger_path)
     )
 
 
+def test_active_planner_validation_code_round_trips_without_private_payload(
+    ledger_path,
+):
+    payload = answer_run_diagnostics_payload(
+        planner={
+            "schema": "archivist.planner_call_diagnostics/2",
+            "status": "failed",
+            "failure_code": "invalid_planner_output",
+            "planner_validation_code": "missing_requirement_mapping",
+            "exception_class": None,
+            "exception_code": None,
+        },
+    )
+    ledger = UsageLedger(ledger_path)
+
+    assert ledger.record_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+        diagnostics=payload,
+    )
+    stored = ledger.get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+    )
+
+    assert stored is not None
+    assert stored["planner"] == payload["planner"]
+    assert "requirement text" not in str(stored).casefold()
+
+
 def test_fresh_diagnostics_table_defaults_support_older_writer(ledger_path):
     ledger = UsageLedger(ledger_path)
     assert (
@@ -292,6 +326,26 @@ def test_fresh_diagnostics_table_defaults_support_older_writer(ledger_path):
         ),
         answer_run_diagnostics_payload(
             planner={
+                "schema": "archivist.planner_call_diagnostics/2",
+                "status": "failed",
+                "failure_code": "invalid_planner_output",
+                "planner_validation_code": None,
+                "exception_class": None,
+                "exception_code": None,
+            }
+        ),
+        answer_run_diagnostics_payload(
+            planner={
+                "schema": "archivist.planner_call_diagnostics/2",
+                "status": "failed",
+                "failure_code": "invalid_planner_output",
+                "planner_validation_code": "PRIVATE-planner-prose",
+                "exception_class": None,
+                "exception_code": None,
+            }
+        ),
+        answer_run_diagnostics_payload(
+            planner={
                 "schema": "archivist.planner_call_diagnostics/1",
                 "status": "failed",
                 "failure_code": None,
@@ -346,14 +400,20 @@ def test_versioned_pricing_handles_cached_writes_and_reasoning_without_double_ch
     assert calculate_cost_nano_usd("gpt-5", usage) == 1_525_000
     assert calculate_cost_nano_usd("gpt-5-2025-08-07", usage) == 1_525_000
     assert calculate_cost_nano_usd("gpt-5.6-sol", usage) == 5_725_000
-    assert calculate_cost_nano_usd(
-        "text-embedding-3-small",
-        TokenUsage(input_tokens=1_000_000, total_tokens=1_000_000),
-    ) == 20_000_000
-    assert calculate_cost_nano_usd(
-        "text-embedding-3-large",
-        TokenUsage(input_tokens=1_000_000, total_tokens=1_000_000),
-    ) == 130_000_000
+    assert (
+        calculate_cost_nano_usd(
+            "text-embedding-3-small",
+            TokenUsage(input_tokens=1_000_000, total_tokens=1_000_000),
+        )
+        == 20_000_000
+    )
+    assert (
+        calculate_cost_nano_usd(
+            "text-embedding-3-large",
+            TokenUsage(input_tokens=1_000_000, total_tokens=1_000_000),
+        )
+        == 130_000_000
+    )
     assert calculate_cost_nano_usd("unknown-model", usage) is None
     assert PRICING_VERSION
 
@@ -503,9 +563,7 @@ def test_post_response_tracking_failure_does_not_hide_success(monkeypatch):
         output_text="paid answer",
         usage=SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2),
     )
-    client = SimpleNamespace(
-        responses=SimpleNamespace(create=lambda **_request: paid_response)
-    )
+    client = SimpleNamespace(responses=SimpleNamespace(create=lambda **_request: paid_response))
     monkeypatch.setattr(
         costs,
         "record_openai_response",
@@ -532,9 +590,7 @@ def test_structured_response_wrapper_uses_parse_and_tracks_usage(monkeypatch):
     requests = []
     tracked = []
     client = SimpleNamespace(
-        responses=SimpleNamespace(
-            parse=lambda **request: requests.append(request) or paid_response
-        )
+        responses=SimpleNamespace(parse=lambda **request: requests.append(request) or paid_response)
     )
     monkeypatch.setattr(
         costs,
@@ -783,11 +839,14 @@ def test_settings_and_hard_stop_use_global_utc_month(ledger_path):
         "warning_threshold_percent": 80,
         "hard_limit_enabled": False,
     }
-    assert ledger.update_settings(
-        monthly_budget_usd="0.01",
-        warning_threshold_percent=50,
-        hard_limit_enabled=True,
-    )["monthly_budget_usd"] == 0.01
+    assert (
+        ledger.update_settings(
+            monthly_budget_usd="0.01",
+            warning_threshold_percent=50,
+            hard_limit_enabled=True,
+        )["monthly_budget_usd"]
+        == 0.01
+    )
 
     usage = TokenUsage(input_tokens=10_000, total_tokens=10_000)
     ledger.record(
@@ -813,9 +872,7 @@ def test_settings_and_hard_stop_use_global_utc_month(ledger_path):
     assert state["exceeded"] is True
 
 
-def test_cost_settings_and_summary_api_functions_return_flat_shapes(
-    monkeypatch, ledger_path
-):
+def test_cost_settings_and_summary_api_functions_return_flat_shapes(monkeypatch, ledger_path):
     monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(ledger_path))
 
     assert web_api.cost_settings() == {
@@ -863,9 +920,7 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
         worldview,
         history,
     ):
-        captured.append(
-            ("answer", project_id, question, history, current_usage_context())
-        )
+        captured.append(("answer", project_id, question, history, current_usage_context()))
         record_openai_response(
             SimpleNamespace(
                 id="resolver",
@@ -915,8 +970,9 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["resolved_query"] == "Standalone question?"
     run_diagnostics = dict(response["run_diagnostics"])
     cohort = run_diagnostics.pop("cohort")
-    assert cohort["rag_policy_version"] == "evidence-planned-v4"
-    assert cohort["query_planner_prompt_version"] == "query-planner-v2"
+    assert cohort["rag_policy_version"] == "evidence-planned-v6"
+    assert cohort["query_planner_prompt_version"] == "query-planner-v3"
+    assert cohort["normalizer_version"] == "evidence-coverage-normalizer/3"
     assert len(cohort["coverage_instructions_sha256"]) == 64
     assert run_diagnostics == {
         "schema": "archivist.answer_run_diagnostics/2",
@@ -927,9 +983,10 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
         "repair_applied": False,
         "repair_codes": [],
         "planner": {
-            "schema": "archivist.planner_call_diagnostics/1",
+            "schema": "archivist.planner_call_diagnostics/2",
             "status": "not_called",
             "failure_code": None,
+            "planner_validation_code": None,
             "exception_class": None,
             "exception_code": None,
         },
@@ -1113,9 +1170,7 @@ def test_explicit_budget_override_applies_to_every_tracked_operation(monkeypatch
     monkeypatch.setattr(
         costs,
         "UsageLedger",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("override must skip budget reads")
-        ),
+        lambda: (_ for _ in ()).throw(AssertionError("override must skip budget reads")),
     )
 
     class FakeEmbeddings:
@@ -1164,9 +1219,7 @@ def test_question_api_reports_a_mid_turn_cost_stop_as_payment_required(
     monkeypatch.setattr(
         web_api,
         "answer_project_question_result",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            CostLimitExceeded(exceeded)
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(CostLimitExceeded(exceeded)),
     )
 
     with pytest.raises(HTTPException) as exc_info:

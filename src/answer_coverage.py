@@ -60,7 +60,7 @@ __all__ = [
 EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/1"
 EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/3"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
-EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/1"
+EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/3"
 
 MAX_REQUIREMENTS = 8
 MAX_PREMISES = 2
@@ -121,6 +121,14 @@ class GapReason(StrEnum):
     NO_DIRECT_SUPPORT = "no_direct_support"
     PARTIAL_SUPPORT = "partial_support"
     SOURCE_CONFLICT = "source_conflict"
+
+
+_STATUS_GAP_REASON = {
+    RequirementStatus.SUPPORTED: GapReason.NONE,
+    RequirementStatus.PARTIAL: GapReason.PARTIAL_SUPPORT,
+    RequirementStatus.UNSUPPORTED: GapReason.NO_DIRECT_SUPPORT,
+    RequirementStatus.CONFLICTING: GapReason.SOURCE_CONFLICT,
+}
 
 
 class AnswerUnitRole(StrEnum):
@@ -829,6 +837,11 @@ def _normalize_mechanical_contract(
         repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_REQUIREMENT_ID)
     normalized_coverage: list[RequirementCoverage] = []
     for record in coverage:
+        expected_gap = _STATUS_GAP_REASON[record.status]
+        if record.gap_reason is not expected_gap:
+            repair_codes.append(CoverageValidationErrorCode.STATUS_GAP_MISMATCH)
+            record = record.model_copy(update={"gap_reason": expected_gap})
+
         # An unsupported record with any claim/source association is never
         # repairable: the strict validator must reject it.
         if record.status is RequirementStatus.UNSUPPORTED:
@@ -879,9 +892,37 @@ def _normalize_mechanical_contract(
     )
     if premise_decisions != answer.premise_decisions:
         repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_PREMISE_ID)
+    normalized_premise_decisions: list[PremiseDecision] = []
+    units_by_id = {unit.unit_id: unit for unit in answer_units}
+    for decision in premise_decisions:
+        source_numbers = decision.source_numbers
+        correction = (
+            units_by_id.get(decision.correction_unit_id)
+            if decision.correction_unit_id is not None
+            else None
+        )
+        mappings_are_safe_to_derive = (
+            decision.status is PremiseStatus.CONTRADICTED
+            and correction is not None
+            and correction.role is AnswerUnitRole.PREMISE_CORRECTION
+            and bool(source_numbers)
+            and not _has_duplicates(source_numbers)
+            and all(1 <= source_number <= context.source_count for source_number in source_numbers)
+            and not _has_duplicates(correction.source_numbers)
+            and all(
+                1 <= source_number <= context.source_count
+                for source_number in correction.source_numbers
+            )
+        )
+        if mappings_are_safe_to_derive and set(correction.source_numbers) < set(source_numbers):
+            repair_codes.append(CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH)
+            source_numbers = correction.source_numbers
+        normalized_premise_decisions.append(
+            decision.model_copy(update={"source_numbers": source_numbers})
+        )
     normalized_answer = answer.model_copy(
         update={
-            "premise_decisions": premise_decisions,
+            "premise_decisions": tuple(normalized_premise_decisions),
             "coverage": tuple(normalized_coverage),
             "answer_units": answer_units,
         }
@@ -968,12 +1009,7 @@ def _validate_citation_locality(
 
 
 def _validate_status_shape(record: RequirementCoverage) -> None:
-    expected_gap = {
-        RequirementStatus.SUPPORTED: GapReason.NONE,
-        RequirementStatus.PARTIAL: GapReason.PARTIAL_SUPPORT,
-        RequirementStatus.UNSUPPORTED: GapReason.NO_DIRECT_SUPPORT,
-        RequirementStatus.CONFLICTING: GapReason.SOURCE_CONFLICT,
-    }[record.status]
+    expected_gap = _STATUS_GAP_REASON[record.status]
     if record.gap_reason is not expected_gap:
         raise CoverageContractError(CoverageValidationErrorCode.STATUS_GAP_MISMATCH)
 

@@ -11,15 +11,18 @@ from answer_coverage import (
     AnswerUnitRole,
     EvidenceCoverageAnswer,
     GapReason,
+    PremiseDecision,
+    PremiseStatus,
     RequirementCoverage,
     RequirementStatus,
 )
 from query_planning import (
-    AnswerRequirement,
     FacetRole,
+    PlannerAnswerRequirement,
+    PlannerQuestionPlan,
+    PlannerSearchFacet,
     QuestionPlan,
     ResolvedTurn,
-    SearchFacet,
 )
 from retrieval import PlannedContext, RETRIEVAL_TRACE_SCHEMA
 from retrieval_trace_contract import validate_text_free_retrieval_trace
@@ -55,9 +58,7 @@ def corpus_manifest(*chunks: dict) -> dict:
                 "document": chunk["document"],
                 "paragraph_start": chunk["paragraph_start"],
                 "paragraph_end": chunk["paragraph_end"],
-                "text_sha256": hashlib.sha256(
-                    str(chunk["text"]).encode("utf-8")
-                ).hexdigest(),
+                "text_sha256": hashlib.sha256(str(chunk["text"]).encode("utf-8")).hexdigest(),
                 "char_count": len(str(chunk["text"])),
             }
             for chunk in chunks
@@ -117,9 +118,7 @@ def planned_context(
     source_numbers = tuple(range(1, len(chunks) + 1))
     return PlannedContext(
         final_chunks=chunks,
-        facet_source_numbers={
-            facet.facet_id: source_numbers for facet in plan.facets
-        },
+        facet_source_numbers={facet.facet_id: source_numbers for facet in plan.facets},
         trace={
             "schema": RETRIEVAL_TRACE_SCHEMA,
             "plan": {},
@@ -235,9 +234,10 @@ def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch)
     assert run_diagnostics["validation_result"] == "valid"
     assert run_diagnostics["validation_error_code"] is None
     assert run_diagnostics["planner"] == {
-        "schema": "archivist.planner_call_diagnostics/1",
+        "schema": "archivist.planner_call_diagnostics/2",
         "status": "not_called",
         "failure_code": None,
+        "planner_validation_code": None,
         "exception_class": None,
         "exception_code": None,
     }
@@ -296,10 +296,7 @@ def test_resolved_between_relationship_context_does_not_call_the_planner(
 ):
     relationship_chunk = {
         **CHUNK,
-        "text": (
-            "Project Lumen and Harbor Network shaped civic exchange "
-            "in Port Delta."
-        ),
+        "text": ("Project Lumen and Harbor Network shaped civic exchange in Port Delta."),
     }
     install_planned_retrieval(monkeypatch, [relationship_chunk])
     calls: list[str] = []
@@ -329,8 +326,7 @@ def test_resolved_between_relationship_context_does_not_call_the_planner(
     assert "query_planning" not in calls
     assert result.diagnostics["planner"]["status"] == "not_called"
     assert result.plan.facets[-1].search_query == (
-        "Project Lumen Harbor Network relationship "
-        "as shaping civic exchange in Port Delta"
+        "Project Lumen Harbor Network relationship as shaping civic exchange in Port Delta"
     )
 
 
@@ -339,10 +335,7 @@ def test_directional_resolved_relationship_does_not_call_the_planner(
 ):
     relationship_chunk = {
         **CHUNK,
-        "text": (
-            "Project Lumen and Harbor Network shaped civic exchange "
-            "in Port Delta."
-        ),
+        "text": ("Project Lumen and Harbor Network shaped civic exchange in Port Delta."),
     }
     install_planned_retrieval(monkeypatch, [relationship_chunk])
     calls: list[str] = []
@@ -372,34 +365,31 @@ def test_directional_resolved_relationship_does_not_call_the_planner(
     assert "query_planning" not in calls
     assert result.diagnostics["planner"]["status"] == "not_called"
     assert result.plan.facets[-1].search_query == (
-        "Project Lumen Harbor Network relationship "
-        "shape civic exchange in Port Delta"
+        "Project Lumen Harbor Network relationship shape civic exchange in Port Delta"
     )
 
 
 def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     install_planned_retrieval(monkeypatch, [CHUNK])
-    raw_plan = QuestionPlan(
+    raw_plan = PlannerQuestionPlan(
         requirements=(
-            AnswerRequirement(
+            PlannerAnswerRequirement(
                 requirement_id="R1",
                 label="Project Lumen origin",
-                order=0,
             ),
-            AnswerRequirement(
+            PlannerAnswerRequirement(
                 requirement_id="R2",
                 label="Project Lumen endpoint",
-                order=1,
             ),
         ),
         facets=(
-            SearchFacet(
+            PlannerSearchFacet(
                 facet_id="F1",
                 requirement_ids=("R1",),
                 role=FacetRole.ORIGIN,
                 search_query="origin Project Lumen",
             ),
-            SearchFacet(
+            PlannerSearchFacet(
                 facet_id="F2",
                 requirement_ids=("R2",),
                 role=FacetRole.ENDPOINT,
@@ -411,20 +401,14 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
 
     def fake_parse(_client, *, operation, **request):
         calls.append({"operation": operation, **request})
-        parsed = (
-            raw_plan
-            if operation == "query_planning"
-            else supported_answer(("R1", "R2"))
-        )
+        parsed = raw_plan if operation == "query_planning" else supported_answer(("R1", "R2"))
         return SimpleNamespace(output_parsed=parsed, output=())
 
     monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
 
     result = rag_pipeline.run_evidence_planned_answer(
         resolved_turn=ResolvedTurn(
-            standalone_question=(
-                "Trace Project Lumen from its origin to its endpoint."
-            ),
+            standalone_question=("Trace Project Lumen from its origin to its endpoint."),
             entities=("Project Lumen",),
         ),
         collection_handle=Collection(),
@@ -441,9 +425,84 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     assert {
         key: calls[0][key] for key in ("model", "reasoning", "text")
     } == QUERY_PLANNER_SETTINGS.responses_create_kwargs()
+    assert calls[0]["text_format"] is PlannerQuestionPlan
+    assert calls[0]["max_output_tokens"] == 4_000
     assert result.plan.planner_used is True
     assert result.plan.facets[0].facet_id == "F0"
     assert result.status == "answered"
+
+
+def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
+    monkeypatch,
+):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    emitted_trace: dict[str, object] = {}
+    monkeypatch.setattr(
+        rag_pipeline,
+        "emit_retrieval_trace",
+        lambda trace: emitted_trace.update(trace),
+    )
+    proposal = PlannerQuestionPlan(
+        requirements=(
+            PlannerAnswerRequirement(
+                requirement_id="R1",
+                label="Project Lumen origin",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R2",
+                label="Project Lumen endpoint",
+            ),
+        ),
+        facets=(
+            PlannerSearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGIN,
+                search_query="origin Project Lumen",
+            ),
+        ),
+    )
+    calls: list[str] = []
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        parsed = proposal if operation == "query_planning" else supported_answer(("R1", "R2", "R3"))
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question=("Trace Project Lumen from its origin to its endpoint."),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert calls == ["query_planning", "answer_generation"]
+    assert result.plan.planner_used is False
+    assert result.plan.fallback_reason == "invalid_planner_output"
+    assert result.diagnostics["planner"] == {
+        "schema": "archivist.planner_call_diagnostics/2",
+        "status": "failed",
+        "failure_code": "invalid_planner_output",
+        "planner_validation_code": "missing_requirement_mapping",
+        "exception_class": None,
+        "exception_code": None,
+    }
+    assert emitted_trace["plan"]["planner_call"] == {
+        "schema": "archivist.planner_call_diagnostics/2",
+        "status": "failed",
+        "failure_code": "invalid_planner_output",
+        "planner_validation_code": "missing_requirement_mapping",
+        "exception_class_sha256": None,
+        "exception_code": None,
+    }
+    validate_text_free_retrieval_trace(emitted_trace)
+    assert rag_pipeline.answer_run_diagnostics(result)["planner"] == (result.diagnostics["planner"])
 
 
 def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch):
@@ -473,9 +532,7 @@ def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch)
 
     result = rag_pipeline.run_evidence_planned_answer(
         resolved_turn=ResolvedTurn(
-            standalone_question=(
-                "Trace Project Lumen from its origin to its endpoint."
-            ),
+            standalone_question=("Trace Project Lumen from its origin to its endpoint."),
         ),
         collection_handle=Collection(),
         chunks=[CHUNK],
@@ -485,9 +542,10 @@ def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch)
     )
 
     expected = {
-        "schema": "archivist.planner_call_diagnostics/1",
+        "schema": "archivist.planner_call_diagnostics/2",
         "status": "failed",
         "failure_code": "planner_call_failed",
+        "planner_validation_code": None,
         "exception_class": "SyntheticPlannerFailure",
         "exception_code": "rate-limit/429",
     }
@@ -495,12 +553,11 @@ def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch)
     assert result.plan.fallback_reason == "planner_call_failed"
     assert result.diagnostics["planner"] == expected
     assert emitted_trace["plan"]["planner_call"] == {
-        "schema": "archivist.planner_call_diagnostics/1",
+        "schema": "archivist.planner_call_diagnostics/2",
         "status": "failed",
         "failure_code": "planner_call_failed",
-        "exception_class_sha256": hashlib.sha256(
-            b"SyntheticPlannerFailure"
-        ).hexdigest(),
+        "planner_validation_code": None,
+        "exception_class_sha256": hashlib.sha256(b"SyntheticPlannerFailure").hexdigest(),
         "exception_code": "rate-limit/429",
     }
     validate_text_free_retrieval_trace(emitted_trace)
@@ -582,6 +639,195 @@ def test_certified_absence_skips_answer_generation(monkeypatch):
     assert result.status == "clean_abstention"
     assert result.final_chunks == []
     assert "could not find a direct mention" in result.answer
+
+
+def test_compound_named_subjects_are_scanned_independently_and_admit_context():
+    first = {
+        **CHUNK,
+        "chunk_id": "synthetic_001",
+        "text": "Avery North appears in this synthetic record.",
+    }
+    second = {
+        **CHUNK,
+        "chunk_id": "synthetic_002",
+        "paragraph_start": 2,
+        "paragraph_end": 2,
+        "text": "Blake South appears in a separate synthetic record.",
+    }
+    contextual = {
+        **CHUNK,
+        "chunk_id": "synthetic_003",
+        "paragraph_start": 3,
+        "paragraph_end": 3,
+        "text": "A contextual passage develops the synthetic argument.",
+    }
+    chunks = [first, second, contextual]
+    question = "What role do Avery North and Blake South play in the argument?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    plan = rag_pipeline.build_question_plan(turn)
+    planned = planned_context(plan, chunks)
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        chunks,
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=len(chunks),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "direct_answer"
+    assert gate.allowed_source_numbers == (1, 2, 3)
+    assert gate.suppressed_source_numbers == ()
+    assert gate.rules_fired == (
+        "all_subject_targets_direct",
+        "compound_named_subject_split",
+    )
+    assert len(diagnostics["targets"]) == 2
+    assert target_label is None
+
+
+def test_multiple_subjects_plus_a_facet_remain_indeterminate():
+    joint = {
+        **CHUNK,
+        "text": (
+            "Avery North and Blake South appear alongside Casey East in this synthetic record."
+        ),
+    }
+    question = "How did Avery North and Blake South affect Casey East?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    plan = rag_pipeline.build_question_plan(turn)
+    planned = planned_context(plan, [joint])
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        [joint],
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=1,
+        corpus_manifest=corpus_manifest(joint),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "indeterminate"
+    assert gate.allowed_source_numbers == ()
+    assert gate.suppressed_source_numbers == (1,)
+    assert gate.rules_fired == ("multiple_targets_require_disambiguation",)
+    assert [target["role"] for target in diagnostics["targets"]] == [
+        "subject",
+        "subject",
+        "facet",
+    ]
+    assert target_label is None
+
+
+def test_trusted_related_tail_qualifies_bounded_near_match():
+    related = {
+        **CHUNK,
+        "text": ("Federal programs changed while contracting expanded in the synthetic record."),
+    }
+    question = "What does the book say about XR-37 and its effect on federal contracting?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    plan = rag_pipeline.build_question_plan(turn)
+    planned = planned_context(plan, [related])
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        [related],
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=1,
+        corpus_manifest=corpus_manifest(related),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "qualified_near_match"
+    assert gate.allowed_source_numbers == (1,)
+    assert gate.rules_fired == (
+        "certified_direct_absence",
+        "qualified_broader_material",
+        "trusted_related_tail_material",
+    )
+    assert diagnostics["broader_related"]["qualifying_pair_count"] == 1
+    assert target_label == "XR-37"
+
+
+def test_related_looking_noncooccurring_material_preserves_clean_absence():
+    broader = {
+        **CHUNK,
+        "document": "first.md",
+        "text": "Canadian policy appears in this synthetic record.",
+    }
+    probe = {
+        **CHUNK,
+        "chunk_id": "synthetic_002",
+        "document": "second.md",
+        "paragraph_start": 2,
+        "paragraph_end": 2,
+        "text": "A fur trade appears in an unrelated synthetic record.",
+    }
+    chunks = [broader, probe]
+    question = "How does the book treat the Briar Council and the Canadian fur trade?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    plan = rag_pipeline.build_question_plan(turn)
+    planned = planned_context(plan, chunks)
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        chunks,
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=len(chunks),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "clean_abstention"
+    assert gate.allowed_source_numbers == ()
+    assert gate.suppressed_source_numbers == (1, 2)
+    assert diagnostics["broader_related"]["qualifying_pair_count"] == 0
+    assert target_label == "Briar Council"
+
+
+def test_related_tail_derivation_never_uses_resolver_only_prose():
+    related = {
+        **CHUNK,
+        "text": ("Federal programs changed while contracting expanded in the synthetic record."),
+    }
+    resolved_question = "What does the book say about XR-37 and its effect on federal contracting?"
+    trusted_question = "What does the book say about XR-37?"
+    turn = ResolvedTurn(
+        standalone_question=resolved_question,
+        trusted_user_texts=(trusted_question,),
+    )
+    plan = rag_pipeline.build_question_plan(turn)
+    planned = planned_context(plan, [related])
+
+    gate, diagnostics, _target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        [related],
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=1,
+        corpus_manifest=corpus_manifest(related),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "clean_abstention"
+    assert diagnostics["broader_related"] is None
 
 
 def test_invalid_structured_answer_fails_closed_without_retry(monkeypatch):
@@ -669,9 +915,7 @@ def test_integrity_failure_stops_before_planning_embedding_or_generation(
     )
 
     result = rag_pipeline.run_evidence_planned_answer(
-        resolved_turn=ResolvedTurn(
-            standalone_question="Who was Project Lumen?"
-        ),
+        resolved_turn=ResolvedTurn(standalone_question="Who was Project Lumen?"),
         collection_handle=Collection(),
         chunks=[altered],
         client=object(),
@@ -684,19 +928,17 @@ def test_integrity_failure_stops_before_planning_embedding_or_generation(
     assert result.final_chunks == []
     assert "index could not be verified" in result.answer
     assert (
-        "chunk_text_identity_mismatch"
-        in result.diagnostics["evidence"]["corpus"]["failure_codes"]
+        "chunk_text_identity_mismatch" in result.diagnostics["evidence"]["corpus"]["failure_codes"]
     )
     assert result.diagnostics["planner"] == {
-        "schema": "archivist.planner_call_diagnostics/1",
+        "schema": "archivist.planner_call_diagnostics/2",
         "status": "not_called",
         "failure_code": None,
+        "planner_validation_code": None,
         "exception_class": None,
         "exception_code": None,
     }
-    assert rag_pipeline.answer_run_diagnostics(result)["planner"] == (
-        result.diagnostics["planner"]
-    )
+    assert rag_pipeline.answer_run_diagnostics(result)["planner"] == (result.diagnostics["planner"])
 
 
 def test_strict_preflight_checks_actual_collection_ids_and_metadata():
@@ -743,9 +985,7 @@ def test_same_count_stale_collection_stops_before_any_paid_stage(monkeypatch):
     )
 
     result = rag_pipeline.run_evidence_planned_answer(
-        resolved_turn=ResolvedTurn(
-            standalone_question="Who was Project Lumen?"
-        ),
+        resolved_turn=ResolvedTurn(standalone_question="Who was Project Lumen?"),
         collection_handle=StrictCollection(stored_id="stale_001"),
         chunks=[CHUNK],
         client=object(),
@@ -757,8 +997,7 @@ def test_same_count_stale_collection_stops_before_any_paid_stage(monkeypatch):
     assert calls == []
     assert result.status == "corpus_integrity_failed"
     assert (
-        "collection_chunk_ids_mismatch"
-        in result.diagnostics["evidence"]["corpus"]["failure_codes"]
+        "collection_chunk_ids_mismatch" in result.diagnostics["evidence"]["corpus"]["failure_codes"]
     )
 
 
@@ -795,9 +1034,7 @@ def test_global_anchor_hit_is_promoted_into_generation_context(monkeypatch):
     chunks = [direct, unrelated]
 
     result = rag_pipeline.run_evidence_planned_answer(
-        resolved_turn=ResolvedTurn(
-            standalone_question="Who was Project Lumen?"
-        ),
+        resolved_turn=ResolvedTurn(standalone_question="Who was Project Lumen?"),
         collection_handle=Collection(count=2),
         chunks=chunks,
         client=object(),
@@ -808,6 +1045,116 @@ def test_global_anchor_hit_is_promoted_into_generation_context(monkeypatch):
     assert result.final_chunks[0]["chunk_id"] == direct["chunk_id"]
     assert direct["text"] in str(captured["input"])
     assert result.evidence_decision == "direct_answer"
+
+
+def test_promoted_premise_anchor_keeps_correction_source_mapping_valid(monkeypatch):
+    unrelated = {
+        **CHUNK,
+        "chunk_id": "synthetic_002",
+        "paragraph_start": 2,
+        "paragraph_end": 2,
+        "text": "An unrelated synthetic passage.",
+    }
+    direct = dict(CHUNK)
+
+    def fake_retrieve(plan, *_args, **_kwargs):
+        return planned_context(plan, [unrelated])
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "retrieve_plan_from_collection",
+        fake_retrieve,
+    )
+    monkeypatch.setattr(
+        rag_pipeline,
+        "plan_question",
+        lambda _client, resolved_turn, _catalog, **_kwargs: rag_pipeline.build_question_plan(
+            resolved_turn,
+            fallback_reason="synthetic_test",
+        ),
+    )
+    traces: list[dict] = []
+    monkeypatch.setattr(
+        rag_pipeline,
+        "emit_retrieval_trace",
+        lambda trace: traces.append(trace),
+    )
+    captured: dict[str, object] = {}
+    correction = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+        text="The synthetic premise began earlier [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+    )
+
+    def fake_parse(_client, *, operation, **request):
+        assert operation == "answer_generation"
+        captured.update(request)
+        return SimpleNamespace(
+            output_parsed=EvidenceCoverageAnswer(
+                schema="archivist.evidence_coverage/1",
+                premise_decisions=(
+                    PremiseDecision(
+                        premise_id="P1",
+                        status=PremiseStatus.CONTRADICTED,
+                        source_numbers=(1, 2),
+                        correction_unit_id="U1",
+                    ),
+                ),
+                coverage=(
+                    RequirementCoverage(
+                        requirement_id="R1",
+                        status=RequirementStatus.SUPPORTED,
+                        unit_ids=("U1",),
+                        source_numbers=(2,),
+                        gap_reason=GapReason.NONE,
+                    ),
+                ),
+                answer_units=(correction,),
+            ),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Why did Project Lumen begin the signal change?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Why did Project Lumen begin the signal change?",),
+        ),
+        collection_handle=Collection(count=2),
+        chunks=[direct, unrelated],
+        client=object(),
+        corpus_manifest=corpus_manifest(direct, unrelated),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert result.status == "answered"
+    assert result.answer == correction.text
+    assert [chunk["chunk_id"] for chunk in result.final_chunks] == [
+        "synthetic_001",
+        "synthetic_002",
+    ]
+    assert str(captured["input"]).index("[Source 1]") < str(captured["input"]).index("[Source 2]")
+    assert "inspect all supplied sources" in str(captured["instructions"])
+    assert result.diagnostics["generation"]["repair_codes"] == [
+        "source_mapping_mismatch",
+        "premise_source_mismatch",
+    ]
+    assert traces[0]["selection"]["anchor_source_number_remap"] == [
+        {
+            "pre_anchor_source_number": None,
+            "post_anchor_source_number": 1,
+        },
+        {
+            "pre_anchor_source_number": 1,
+            "post_anchor_source_number": 2,
+        },
+    ]
+    assert traces[0]["selection"]["generation_context"][0]["chunk_id"] == ("synthetic_001")
 
 
 def test_trace_records_post_gate_source_number_remap(monkeypatch):
@@ -846,9 +1193,7 @@ def test_trace_records_post_gate_source_number_remap(monkeypatch):
     )
 
     result = rag_pipeline.run_evidence_planned_answer(
-        resolved_turn=ResolvedTurn(
-            standalone_question="Who was Project Lumen?"
-        ),
+        resolved_turn=ResolvedTurn(standalone_question="Who was Project Lumen?"),
         collection_handle=Collection(count=3),
         chunks=chunks,
         client=object(),
@@ -870,6 +1215,4 @@ def test_trace_records_post_gate_source_number_remap(monkeypatch):
             "generation_source_number": 2,
         },
     ]
-    assert traces[0]["selection"]["generation_context"][1]["chunk_id"] == (
-        "synthetic_003"
-    )
+    assert traces[0]["selection"]["generation_context"][1]["chunk_id"] == ("synthetic_003")

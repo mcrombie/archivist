@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v4 implemented and resolver gate passed on 2026-07-25; ten-question
-evaluation awaits a clean commit and separate authorization
+Status: evidence-planned-v6 focused contract repairs implemented, verified offline, and confirmed
+on G009 on 2026-07-25; the unchanged ten-question rerun is next
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -51,6 +51,81 @@ exchange in the standalone question; routed relationship-only; recorded planner 
 artifact was intentionally produced from a dirty exploratory worktree, so it is not a run of
 record. It proves the orchestration repair, not answer quality.
 
+The subsequent clean directional evaluation ran the owner's unchanged ten questions at commit
+`cab97262c34a7dd64c070e71179ca4a311a76f34`. All ten completed once without retries under a
+`$1.25` cap, costing an estimated `$1.02332782`. Strict grading against the unchanged 58-claim
+practical rubric found 11 claims present, 47 absent, and none contradicted; final returned sources
+covered 11 of 26 target document groups. Five of ten items met their high-level expected behavior.
+The four accepted generated answers contained 33 well-formed, resolvable source references and no
+malformed citations.
+
+The run rejected the current v4 implementation as an answer-quality improvement:
+
+- all eight planner-eligible questions paid for a planner result, but five failed structured-output
+  validation and three were rejected as invalid plans; none supplied the accepted retrieval plan;
+- those failed calls cost `$0.57508750`, 56.2% of the run;
+- G002, G004, G006, and G009 falsely abstained, over-abstained, or returned insufficient evidence;
+- G008 correctly certified absence without analogical substitution;
+- G010 retrieved premise and counterevidence but discarded the generated correction after
+  source-remapping and premise-validation failures;
+- the broad G006 returned no answer and G007 covered none of its seven strict composite claims.
+
+This is a directional single sample rather than a formal run of record. The generator/planner name
+is undated, the practical rubric is not the locked chunk-level gold set, and the noise floor has not
+been established. It nevertheless gives a mechanically explained repair order without changing
+the questions, claims, rubric, or contract.
+
+The `evidence-planned-v5` cohort implements those repairs without changing corpus or evaluation
+identity:
+
+- `query-planner-v3` parses a compact provider proposal containing only requirements, facets, and
+  premise hypotheses. Application-owned routing, trusted targets, ordering, `F0`, status, and
+  cross-field semantics are applied locally after shape parsing. The provider retains the version
+  1 ceiling of eight requirements and seven added facets, is prompted to prefer smaller sufficient
+  plans, and has a 4,000-token output ceiling. There is still no planner retry.
+- `evidence-gate-v2` can split only two exact title-cased personal-name components copied from one
+  trusted compound target. All-present subjects admit the retrieved context; mixed presence admits
+  only direct/neighbor lanes; all-absent subjects certify absence only when each scan qualifies.
+  Any multi-subject request that also contains a facet remains indeterminate pending a joint rule.
+- A qualified related path can be derived only from an exact trusted user-message tail. The exact
+  broader term and probe must occur in one eligible chunk or immediate neighbors; resolver-only
+  additions, planner aliases, semantic similarity, and distant co-occurrence cannot qualify.
+- `evidence-coverage-normalizer/2` may remove redundant extra premise-decision source numbers only
+  when they form a nonempty strict superset of the cited leading correction unit. It never repairs
+  empty, disjoint, duplicate, out-of-range, wrong-role, or already-valid subset mappings.
+
+An offline replay of the preserved v4 retrieval contexts changed G002, G004, and G006 from
+withholding to direct-answer admission, kept G008 as a clean abstention, and changed G009 to a
+qualified near match limited to the two bounded passages. A synthetic promoted-anchor fixture
+also validates the G010 source-number/correction shape. These checks made no OpenAI request and do
+not establish live planner success or answer quality.
+
+The separately authorized v5 smoke then ran the unchanged G008-G010 items once for an estimated
+`$0.22260367`. G008 passed protected absence and skipped generation. G010 produced a valid cited
+premise correction. G009 reached the intended `qualified_near_match` decision with exactly two
+bounded sources, but its otherwise usable answer was discarded by redundant status/gap
+bookkeeping. Its planner proposal also failed local semantic validation after provider parsing,
+while the version-1 diagnostic collapsed the actionable local code into
+`invalid_planner_output`.
+
+The focused `evidence-planned-v6` cohort changes only those two contract boundaries:
+
+- `evidence-coverage-normalizer/3` canonicalizes `gap_reason` from the unchanged requirement
+  status, records the repair, and reruns strict validation. It does not alter answer units,
+  sources, citations, or status; unsupported factual units and missing required units still fail.
+- planner diagnostics schema `archivist.planner_call_diagnostics/2` retains a finite text-free
+  semantic validation code, or `plan_structure_invalid` for a structural failure, beside the
+  existing generic fallback reason. It does not loosen plan validation, retry, or persist provider
+  prose. Historical version-1 diagnostics remain readable.
+
+The v6 implementation itself made no OpenAI request. Its separately authorized G009 confirmation
+then completed in 24.721 seconds for an estimated `$0.07107566`, with no retry. The planner
+succeeded; evidence remained `qualified_near_match`; exactly two bounded sources were returned;
+normalization recorded `status_gap_mismatch`; strict validation passed; and all four emitted source
+references resolved. The confirmation therefore cleared the final micro-gate. The implementation
+is now frozen for the owner's unchanged ten-question rerun, with no UI work, broad audit, or new
+optimization target in between.
+
 The implementation follows the bounded-call design in this document:
 
 - a follow-up resolver runs only when conversation history exists;
@@ -76,12 +151,13 @@ The question endpoint also rechecks the configured hard cost limit immediately b
 OpenAI operation. If an earlier operation in the same turn crosses the limit, the next operation is
 not sent unless the reader explicitly enabled the per-request override.
 
-The implementation was verified with synthetic, corpus-agnostic tests and local inspection of the
-current private index. The full offline suite passes with 372 tests and one skipped. A paid
-two-turn v3 smoke verified answer quality and citation structure, and the later v4 resolver-only
-confirmation cleared the remaining planner-routing gate. Running the unchanged ten-question set
-will measure the v4 cohort rather than extend the earlier semantic/hybrid comparison; it still
-requires a clean committed boundary and fresh explicit spend authorization.
+The implementation was verified with 403 passing offline tests and one skipped test, strict
+provider-schema conversion, local inspection of the current private index, and replay of the
+preserved v4 retrieval contexts. Earlier paid smokes verified narrower source-retention,
+citation-structure, and relationship-routing behaviors, while the clean ten-question evaluation
+exposed the three v4 failures repaired here. The v5 smoke passed G008 and G010 and isolated the
+remaining G009 contract boundary; the v6 confirmation then passed that branch. The unchanged
+ten-question run is next.
 
 ## Decision
 

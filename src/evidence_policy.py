@@ -18,7 +18,7 @@ from enum import StrEnum
 
 
 ANCHOR_NORMALIZER_VERSION = "unicode-nfkc-casefold-anchor-v1"
-EVIDENCE_POLICY_VERSION = "evidence-gate-v1"
+EVIDENCE_POLICY_VERSION = "evidence-gate-v2"
 EVIDENCE_DIAGNOSTICS_SCHEMA = "archivist.evidence_policy_diagnostics/1"
 WEAK_MATCH_WINDOW_TOKENS = 12
 
@@ -47,6 +47,30 @@ _UNDOTTED_INITIALISM_PATTERN = re.compile(
     flags=re.UNICODE,
 )
 _MACHINE_ID_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}")
+_COMPOUND_NAME_SEPARATOR_PATTERN = re.compile(
+    r"\s+(?:and|&)\s+",
+    flags=re.IGNORECASE,
+)
+_ORGANIZATION_NAME_TOKENS = frozenset(
+    {
+        "administration",
+        "agency",
+        "association",
+        "bank",
+        "board",
+        "bureau",
+        "committee",
+        "company",
+        "corporation",
+        "council",
+        "department",
+        "group",
+        "institute",
+        "office",
+        "society",
+        "university",
+    }
+)
 
 
 class AnchorMatchKind(StrEnum):
@@ -140,12 +164,8 @@ class CorpusIntegrity:
             "passed": self.passed,
             "expected_manifest_sha256": self.expected_manifest_sha256,
             "loaded_manifest_sha256": self.loaded_manifest_sha256,
-            "manifest_eligible_chunk_ids_sha256": (
-                self.manifest_eligible_chunk_ids_sha256
-            ),
-            "loaded_eligible_chunk_ids_sha256": (
-                self.loaded_eligible_chunk_ids_sha256
-            ),
+            "manifest_eligible_chunk_ids_sha256": (self.manifest_eligible_chunk_ids_sha256),
+            "loaded_eligible_chunk_ids_sha256": (self.loaded_eligible_chunk_ids_sha256),
             "expected_eligible_chunk_count": self.expected_eligible_chunk_count,
             "expected_collection_count": self.expected_collection_count,
             "loaded_eligible_chunk_count": self.loaded_eligible_chunk_count,
@@ -178,18 +198,12 @@ class EvidenceTargetScan:
     @property
     def strong_chunk_ids(self) -> tuple[str, ...]:
         return tuple(
-            match.chunk_id
-            for match in self.matches
-            if match.kind is AnchorMatchKind.STRONG
+            match.chunk_id for match in self.matches if match.kind is AnchorMatchKind.STRONG
         )
 
     @property
     def weak_chunk_ids(self) -> tuple[str, ...]:
-        return tuple(
-            match.chunk_id
-            for match in self.matches
-            if match.kind is AnchorMatchKind.WEAK
-        )
+        return tuple(match.chunk_id for match in self.matches if match.kind is AnchorMatchKind.WEAK)
 
     @property
     def partial_chunk_ids(self) -> tuple[str, ...]:
@@ -213,11 +227,7 @@ class EvidenceTargetScan:
 
     @property
     def certified_direct_absence(self) -> bool:
-        return (
-            self.absence_checkable
-            and self.integrity.passed
-            and not self.direct_present
-        )
+        return self.absence_checkable and self.integrity.passed and not self.direct_present
 
     def as_diagnostics(self) -> dict[str, object]:
         return {
@@ -232,8 +242,7 @@ class EvidenceTargetScan:
             "weak_hit_count": len(self.weak_chunk_ids),
             "partial_token_collision_count": len(self.partial_chunk_ids),
             "mechanical_initialism_hit_count": sum(
-                match.rule is AnchorMatchRule.MECHANICAL_INITIALISM
-                for match in self.matches
+                match.rule is AnchorMatchRule.MECHANICAL_INITIALISM for match in self.matches
             ),
             "certified_direct_absence": self.certified_direct_absence,
         }
@@ -253,16 +262,12 @@ class BroaderRelatedScan:
     def qualified_broader_chunk_ids(self) -> tuple[str, ...]:
         qualifying = {broader_id for broader_id, _ in self.qualifying_pairs}
         return tuple(
-            chunk_id
-            for chunk_id in self.broader_strong_chunk_ids
-            if chunk_id in qualifying
+            chunk_id for chunk_id in self.broader_strong_chunk_ids if chunk_id in qualifying
         )
 
     @property
     def supporting_probe_chunk_ids(self) -> tuple[str, ...]:
-        return _ordered_unique(
-            probe_id for _, probe_id in self.qualifying_pairs
-        )
+        return _ordered_unique(probe_id for _, probe_id in self.qualifying_pairs)
 
     @property
     def qualified_chunk_ids(self) -> tuple[str, ...]:
@@ -279,13 +284,9 @@ class BroaderRelatedScan:
             "related_probe_sha256": list(self.related_probe_sha256),
             "scanned_chunk_ids_sha256": self.scanned_chunk_ids_sha256,
             "broader_strong_hit_count": len(self.broader_strong_chunk_ids),
-            "qualified_broader_hit_count": len(
-                self.qualified_broader_chunk_ids
-            ),
+            "qualified_broader_hit_count": len(self.qualified_broader_chunk_ids),
             "qualifying_pair_count": len(self.qualifying_pairs),
-            "supporting_probe_chunk_count": len(
-                self.supporting_probe_chunk_ids
-            ),
+            "supporting_probe_chunk_count": len(self.supporting_probe_chunk_ids),
         }
 
 
@@ -333,13 +334,11 @@ def _ordered_unique(values: Iterable[str]) -> tuple[str, ...]:
 def _normalize_unicode(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value)
     normalized = "".join(
-        "'" if character in _APOSTROPHES else character
-        for character in normalized
+        "'" if character in _APOSTROPHES else character for character in normalized
     )
     normalized = "".join(
         " "
-        if unicodedata.category(character) == "Pd"
-        or character in {"\u2212", "\ufe63"}
+        if unicodedata.category(character) == "Pd" or character in {"\u2212", "\ufe63"}
         else character
         for character in normalized
     )
@@ -384,6 +383,46 @@ def normalize_anchor(value: str) -> str:
     """Return the stable space-joined form used for matching and target hashing."""
 
     return " ".join(tokenize_anchor(value))
+
+
+def _looks_like_titlecased_name_component(value: str) -> bool:
+    lexemes = tuple(
+        _strip_possessive(raw)
+        for raw in _LEXEME_PATTERN.findall(unicodedata.normalize("NFKC", value))
+    )
+    return (
+        2 <= len(lexemes) <= 6
+        and not {lexeme.casefold() for lexeme in lexemes}.intersection(_ORGANIZATION_NAME_TOKENS)
+        and all(
+            lexeme
+            and lexeme[0].isupper()
+            and any(character.isalpha() for character in lexeme)
+            and not any(character.isdecimal() for character in lexeme)
+            for lexeme in lexemes
+        )
+    )
+
+
+def split_compound_named_anchor(value: str) -> tuple[str, ...]:
+    """Split exactly two explicit title-cased names joined by ``and`` or ``&``.
+
+    This is deliberately narrower than general coordination parsing.  Each returned
+    component remains an exact surface copied from the trusted user question; lowercase
+    concepts, organization descriptions, and planner-created aliases are never split.
+    """
+
+    if not isinstance(value, str):
+        raise TypeError("anchor value must be a string")
+    parts = tuple(
+        part.strip(" \t\r\n,;:.?!") for part in _COMPOUND_NAME_SEPARATOR_PATTERN.split(value)
+    )
+    if (
+        len(parts) != 2
+        or any(not part for part in parts)
+        or not all(_looks_like_titlecased_name_component(part) for part in parts)
+    ):
+        return (value,)
+    return parts
 
 
 def _contains_sequence(
@@ -441,10 +480,7 @@ def _explicit_initialisms(value: str) -> frozenset[str]:
         if (
             len(compact) >= 2
             and any(character.isalpha() for character in compact)
-            and all(
-                character.isupper() or character.isdecimal()
-                for character in compact
-            )
+            and all(character.isupper() or character.isdecimal() for character in compact)
         ):
             explicit.add(compact)
     return frozenset(explicit)
@@ -482,10 +518,7 @@ def classify_anchor_match(
         )
 
     initialism = _mechanical_initialism(anchor_parts.tokens)
-    if (
-        initialism is not None
-        and initialism.upper() in _explicit_initialisms(chunk_text)
-    ):
+    if initialism is not None and initialism.upper() in _explicit_initialisms(chunk_text):
         return AnchorMatch(
             AnchorMatchKind.WEAK,
             AnchorMatchRule.MECHANICAL_INITIALISM,
@@ -556,9 +589,7 @@ def assess_corpus_integrity(
     )
     manifest_ids_raw = tuple(manifest_eligible_chunk_ids)
     manifest_ids = tuple(
-        value
-        for value in manifest_ids_raw
-        if isinstance(value, str) and value.strip()
+        value for value in manifest_ids_raw if isinstance(value, str) and value.strip()
     )
     scope_ids = _chunk_scope_ids(eligible_chunks)
     valid_loaded_ids = tuple(
@@ -649,12 +680,8 @@ def _integrity_for_scan(
 
 
 def _validate_target_id(target_id: str) -> None:
-    if not isinstance(target_id, str) or not _MACHINE_ID_PATTERN.fullmatch(
-        target_id
-    ):
-        raise ValueError(
-            "target_id must be a compact machine ID of at most 64 characters"
-        )
+    if not isinstance(target_id, str) or not _MACHINE_ID_PATTERN.fullmatch(target_id):
+        raise ValueError("target_id must be a compact machine ID of at most 64 characters")
 
 
 def scan_evidence_target(
@@ -707,9 +734,7 @@ def scan_evidence_target(
     return EvidenceTargetScan(
         target_id=target_id,
         role=role,
-        target_sha256=hashlib.sha256(
-            normalized_target.encode("utf-8")
-        ).hexdigest(),
+        target_sha256=hashlib.sha256(normalized_target.encode("utf-8")).hexdigest(),
         target_character_count=len(query_surface_span),
         anchor_token_count=len(anchor_tokens),
         absence_checkable=absence_checkable,
@@ -745,10 +770,7 @@ def build_immediate_neighbor_map(
             neighbors[chunk_id].add(previous)
             neighbors.setdefault(previous, set()).add(chunk_id)
         previous_by_document[document] = chunk_id
-    return {
-        chunk_id: tuple(sorted(related_ids))
-        for chunk_id, related_ids in neighbors.items()
-    }
+    return {chunk_id: tuple(sorted(related_ids)) for chunk_id, related_ids in neighbors.items()}
 
 
 def _symmetric_neighbor_sets(
@@ -789,10 +811,7 @@ def relationship_evidence_chunk_ids(
     related: list[str] = []
     for subject_id in subject_scan.direct_chunk_ids:
         for facet_id in facet_scan.direct_chunk_ids:
-            if (
-                subject_id == facet_id
-                or facet_id in neighbors.get(subject_id, set())
-            ):
+            if subject_id == facet_id or facet_id in neighbors.get(subject_id, set()):
                 related.extend((subject_id, facet_id))
     return _ordered_unique(related)
 
@@ -829,14 +848,10 @@ def scan_broader_related(
     for chunk in valid_chunks:
         chunk_id = str(chunk["chunk_id"])
         chunk_text = str(chunk["text"])
-        if (
-            classify_anchor_match(broader_term, chunk_text).kind
-            is AnchorMatchKind.STRONG
-        ):
+        if classify_anchor_match(broader_term, chunk_text).kind is AnchorMatchKind.STRONG:
             broader_ids.append(chunk_id)
         if any(
-            classify_anchor_match(probe, chunk_text).kind
-            is AnchorMatchKind.STRONG
+            classify_anchor_match(probe, chunk_text).kind is AnchorMatchKind.STRONG
             for probe in probe_by_normalized.values()
         ):
             probe_ids.append(chunk_id)
@@ -847,23 +862,16 @@ def scan_broader_related(
     qualifying_pairs: list[tuple[str, str]] = []
     for broader_id in broader_ids:
         for probe_id in probe_ids:
-            if (
-                broader_id == probe_id
-                or probe_id in neighbors.get(broader_id, set())
-            ):
+            if broader_id == probe_id or probe_id in neighbors.get(broader_id, set()):
                 qualifying_pairs.append((broader_id, probe_id))
 
     return BroaderRelatedScan(
-        broader_target_sha256=hashlib.sha256(
-            broader_normalized.encode("utf-8")
-        ).hexdigest(),
+        broader_target_sha256=hashlib.sha256(broader_normalized.encode("utf-8")).hexdigest(),
         related_probe_sha256=tuple(
             hashlib.sha256(normalized.encode("utf-8")).hexdigest()
             for normalized in probe_by_normalized
         ),
-        scanned_chunk_ids_sha256=_ids_sha256(
-            _chunk_scope_ids(eligible_chunks)
-        ),
+        scanned_chunk_ids_sha256=_ids_sha256(_chunk_scope_ids(eligible_chunks)),
         broader_strong_chunk_ids=tuple(broader_ids),
         qualifying_pairs=tuple(qualifying_pairs),
     )
@@ -893,6 +901,7 @@ def classify_evidence_lanes(
     selected_chunks: Sequence[str | Mapping[str, object]],
     *,
     subject_scan: EvidenceTargetScan,
+    additional_subject_scans: Sequence[EvidenceTargetScan] = (),
     facet_scan: EvidenceTargetScan | None = None,
     broader_related_scan: BroaderRelatedScan | None = None,
     analogue_chunk_ids: Iterable[str] = (),
@@ -901,13 +910,21 @@ def classify_evidence_lanes(
     """Assign one non-promoting evidence lane to each selected candidate."""
 
     chunk_ids = _selected_chunk_ids(selected_chunks)
-    direct_ids = set(subject_scan.direct_chunk_ids)
+    subject_scans = (subject_scan, *tuple(additional_subject_scans))
+    expected_scope = subject_scan.integrity.loaded_eligible_chunk_ids_sha256
+    if any(
+        scan.role is not EvidenceTargetRole.SUBJECT
+        or scan.integrity.loaded_eligible_chunk_ids_sha256 != expected_scope
+        for scan in subject_scans
+    ):
+        raise ValueError("all subject scans must share one corpus scope and subject role")
+    direct_ids = {chunk_id for scan in subject_scans for chunk_id in scan.direct_chunk_ids}
     if immediate_neighbors is not None:
-        for chunk_id in subject_scan.direct_chunk_ids:
-            direct_ids.update(
-                str(neighbor_id)
-                for neighbor_id in immediate_neighbors.get(chunk_id, ())
-            )
+        for scan in subject_scans:
+            for chunk_id in scan.direct_chunk_ids:
+                direct_ids.update(
+                    str(neighbor_id) for neighbor_id in immediate_neighbors.get(chunk_id, ())
+                )
     if facet_scan is not None:
         direct_ids.update(
             relationship_evidence_chunk_ids(
@@ -917,9 +934,7 @@ def classify_evidence_lanes(
             )
         )
     broader_ids = (
-        set(broader_related_scan.qualified_chunk_ids)
-        if broader_related_scan is not None
-        else set()
+        set(broader_related_scan.qualified_chunk_ids) if broader_related_scan is not None else set()
     )
     analogue_ids = {str(chunk_id) for chunk_id in analogue_chunk_ids}
 
@@ -943,6 +958,82 @@ def classify_evidence_lanes(
     return tuple(assignments)
 
 
+def decide_multi_subject_evidence(
+    subject_scans: Sequence[EvidenceTargetScan],
+    *,
+    lane_assignments: Sequence[EvidenceLaneAssignment] = (),
+) -> EvidenceGateResult:
+    """Decide a coordinated multi-subject request without inventing disambiguation.
+
+    When every exact user-surface subject is present, absence protection is no longer
+    needed and the retrieved context remains available to the coverage model.  A mixed
+    result admits only direct/neighbor material for the subjects that are present.
+    Corpus-wide absence is certified only when every subject independently qualifies.
+    """
+
+    scans = tuple(subject_scans)
+    if len(scans) < 2:
+        raise ValueError("multi-subject evidence requires at least two scans")
+    if any(scan.role is not EvidenceTargetRole.SUBJECT for scan in scans):
+        raise ValueError("multi-subject evidence accepts subject scans only")
+
+    assignments = tuple(lane_assignments)
+    integrity = scans[0].integrity
+    expected_scope = integrity.loaded_eligible_chunk_ids_sha256
+    if any(scan.integrity.loaded_eligible_chunk_ids_sha256 != expected_scope for scan in scans[1:]):
+        integrity = integrity.with_failure("target_scan_scope_mismatch")
+
+    present_count = sum(scan.direct_present for scan in scans)
+    certified_absence = (
+        integrity.passed and present_count == 0 and all(scan.absence_checkable for scan in scans)
+    )
+    if not integrity.passed:
+        decision = EvidenceDecision.INDETERMINATE
+        rules = ("corpus_integrity_failed",)
+        allowed_numbers: tuple[int, ...] = ()
+    elif present_count == len(scans):
+        decision = EvidenceDecision.DIRECT_ANSWER
+        rules = ("all_subject_targets_direct",)
+        allowed_numbers = tuple(assignment.source_number for assignment in assignments)
+    elif present_count:
+        decision = EvidenceDecision.PARTIAL_ANSWER
+        rules = ("some_subject_targets_direct",)
+        allowed_numbers = tuple(
+            assignment.source_number
+            for assignment in assignments
+            if assignment.lane is EvidenceLane.DIRECT
+        )
+    elif certified_absence:
+        decision = EvidenceDecision.CLEAN_ABSTENTION
+        rules = (
+            "certified_direct_absence",
+            "no_safe_related_material",
+        )
+        allowed_numbers = ()
+    else:
+        decision = EvidenceDecision.INDETERMINATE
+        rules = ("direct_absence_not_certifiable",)
+        allowed_numbers = ()
+
+    allowed = set(allowed_numbers)
+    suppressed_numbers = tuple(
+        assignment.source_number
+        for assignment in assignments
+        if assignment.source_number not in allowed
+    )
+    return EvidenceGateResult(
+        decision=decision,
+        certified_direct_absence=certified_absence,
+        premise_correction_required=False,
+        relationship_chunk_ids=(),
+        allowed_source_numbers=allowed_numbers,
+        suppressed_source_numbers=suppressed_numbers,
+        lane_assignments=assignments,
+        rules_fired=rules,
+        integrity=integrity,
+    )
+
+
 def _allowed_and_suppressed_sources(
     decision: EvidenceDecision,
     assignments: tuple[EvidenceLaneAssignment, ...],
@@ -955,22 +1046,19 @@ def _allowed_and_suppressed_sources(
                 assignment.source_number
                 for assignment in assignments
                 if assignment.chunk_id in premise_contradiction_chunk_ids
-                or assignment.lane
-                in {EvidenceLane.DIRECT, EvidenceLane.BROADER_RELATED}
+                or assignment.lane in {EvidenceLane.DIRECT, EvidenceLane.BROADER_RELATED}
             }
         else:
             allowed = {
                 assignment.source_number
                 for assignment in assignments
-                if assignment.lane
-                in {EvidenceLane.DIRECT, EvidenceLane.BROADER_RELATED}
+                if assignment.lane in {EvidenceLane.DIRECT, EvidenceLane.BROADER_RELATED}
             }
     elif decision is EvidenceDecision.PARTIAL_ANSWER:
         allowed = {
             assignment.source_number
             for assignment in assignments
-            if assignment.lane
-            in {EvidenceLane.DIRECT, EvidenceLane.BROADER_RELATED}
+            if assignment.lane in {EvidenceLane.DIRECT, EvidenceLane.BROADER_RELATED}
         }
     elif decision is EvidenceDecision.QUALIFIED_NEAR_MATCH:
         allowed = {
@@ -1009,8 +1097,7 @@ def decide_evidence(
     expected_scope = integrity.loaded_eligible_chunk_ids_sha256
     if (
         facet_scan is not None
-        and facet_scan.integrity.loaded_eligible_chunk_ids_sha256
-        != expected_scope
+        and facet_scan.integrity.loaded_eligible_chunk_ids_sha256 != expected_scope
     ):
         integrity = integrity.with_failure("target_scan_scope_mismatch")
     if (
@@ -1021,9 +1108,7 @@ def decide_evidence(
 
     selected_ids = {assignment.chunk_id for assignment in assignments}
     contradiction_ids = {
-        str(chunk_id)
-        for chunk_id in premise_contradiction_chunk_ids
-        if str(chunk_id)
+        str(chunk_id) for chunk_id in premise_contradiction_chunk_ids if str(chunk_id)
     }
     if assignments:
         contradiction_ids.intersection_update(selected_ids)
@@ -1038,16 +1123,10 @@ def decide_evidence(
         )
     )
     direct_present = subject_scan.direct_present
-    certified_absence = (
-        subject_scan.absence_checkable
-        and integrity.passed
-        and not direct_present
-    )
+    certified_absence = subject_scan.absence_checkable and integrity.passed and not direct_present
     qualified_broader_ids: set[str] = set()
     if broader_related_scan is not None:
-        qualified_broader_ids.update(
-            broader_related_scan.qualified_chunk_ids
-        )
+        qualified_broader_ids.update(broader_related_scan.qualified_chunk_ids)
         if assignments:
             selected_broader_ids = {
                 assignment.chunk_id
@@ -1138,27 +1217,16 @@ def evidence_diagnostics(
         "corpus": result.integrity.as_diagnostics(),
         "targets": [scan.as_diagnostics() for scan in scans],
         "broader_related": (
-            None
-            if broader_related_scan is None
-            else broader_related_scan.as_diagnostics()
+            None if broader_related_scan is None else broader_related_scan.as_diagnostics()
         ),
-        "lanes": [
-            assignment.as_diagnostics()
-            for assignment in result.lane_assignments
-        ],
+        "lanes": [assignment.as_diagnostics() for assignment in result.lane_assignments],
         "decision": {
             "value": result.decision.value,
             "certified_direct_absence": result.certified_direct_absence,
-            "premise_correction_required": (
-                result.premise_correction_required
-            ),
-            "relationship_chunk_ids": list(
-                result.relationship_chunk_ids
-            ),
+            "premise_correction_required": (result.premise_correction_required),
+            "relationship_chunk_ids": list(result.relationship_chunk_ids),
             "allowed_source_numbers": list(result.allowed_source_numbers),
-            "suppressed_source_numbers": list(
-                result.suppressed_source_numbers
-            ),
+            "suppressed_source_numbers": list(result.suppressed_source_numbers),
             "skip_answer_generation": result.skip_answer_generation,
             "rules_fired": list(result.rules_fired),
         },
@@ -1187,11 +1255,13 @@ __all__ = [
     "classify_anchor_match",
     "classify_evidence_lanes",
     "decide_evidence",
+    "decide_multi_subject_evidence",
     "evidence_diagnostics",
     "normalize_anchor",
     "relationship_evidence_chunk_ids",
     "scan_broader_related",
     "scan_evidence_target",
     "scan_trusted_target",
+    "split_compound_named_anchor",
     "tokenize_anchor",
 ]

@@ -209,6 +209,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "exception_class_sha256",
             "exception_code",
             "failure_code",
+            "planner_validation_code",
             "schema",
             "status",
         }
@@ -280,9 +281,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "supporting_probe_chunk_count",
         }
     ),
-    ("evidence", "lanes", "[]"): frozenset(
-        {"chunk_id", "lane", "source_number"}
-    ),
+    ("evidence", "lanes", "[]"): frozenset({"chunk_id", "lane", "source_number"}),
     ("evidence", "decision"): frozenset(
         {
             "allowed_source_numbers",
@@ -423,9 +422,7 @@ _NULLABLE_OBJECT_PATHS = frozenset({("evidence", "broader_related")})
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _TRACE_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
-_MODEL_PATTERN = re.compile(
-    r"gpt-[A-Za-z0-9.]+(?:-[A-Za-z0-9.]+)*(?:-[0-9]{4}-[0-9]{2}-[0-9]{2})?"
-)
+_MODEL_PATTERN = re.compile(r"gpt-[A-Za-z0-9.]+(?:-[A-Za-z0-9.]+)*(?:-[0-9]{4}-[0-9]{2}-[0-9]{2})?")
 _HTTP_STATUS_PATTERN = re.compile(r"[1-5][0-9]{2}")
 _CHUNK_ID_PATTERN = re.compile(r"[^\r\n\x00-\x1f]{1,500}_[0-9]{3,}")
 _IDENTIFIER_FIELDS = frozenset(
@@ -527,7 +524,9 @@ _CORPUS_FAILURE_CODES = frozenset(
 _RULE_CODES = frozenset(
     {
         "absence_gate_not_applicable",
+        "all_subject_targets_direct",
         "certified_direct_absence",
+        "compound_named_subject_split",
         "corpus_integrity_failed",
         "direct_absence_not_certifiable",
         "direct_subject_and_facet_evidence",
@@ -539,6 +538,8 @@ _RULE_CODES = frozenset(
         "qualified_broader_material",
         "requested_relationship_not_established",
         "source_backed_premise_contradiction",
+        "some_subject_targets_direct",
+        "trusted_related_tail_material",
     }
 )
 _EXCEPTION_CODES = frozenset(
@@ -563,13 +564,9 @@ _EXCEPTION_CODES = frozenset(
     }
 )
 _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
-    "anchor_normalizer_version": frozenset(
-        {"unicode-nfkc-casefold-anchor-v1"}
-    ),
+    "anchor_normalizer_version": frozenset({"unicode-nfkc-casefold-anchor-v1"}),
     "broad_context_order": frozenset({"corpus_ordinal", "selection"}),
-    "displacement_cause": frozenset(
-        {"distance_filtering", "document_filtering", "truncation"}
-    ),
+    "displacement_cause": frozenset({"distance_filtering", "document_filtering", "truncation"}),
     "error_code": _COVERAGE_ERROR_CODES,
     "exception_code": _EXCEPTION_CODES,
     "facet_embedding": frozenset({"single_batched_request"}),
@@ -594,31 +591,51 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "planner_unavailable",
         }
     ),
-    "gap_reason": frozenset(
-        {"no_direct_support", "none", "partial_support", "source_conflict"}
-    ),
-    "generator_reasoning_effort": frozenset(
-        {"high", "low", "max", "medium", "none", "xhigh"}
-    ),
+    "gap_reason": frozenset({"no_direct_support", "none", "partial_support", "source_conflict"}),
+    "generator_reasoning_effort": frozenset({"high", "low", "max", "medium", "none", "xhigh"}),
     "generator_verbosity": frozenset({"high", "low", "medium"}),
     "hnsw_space": frozenset({"", "cosine", "ip", "l2"}),
-    "lane": frozenset(
-        {"analogue", "broader_related", "direct", "generic_semantic"}
-    ),
+    "lane": frozenset({"analogue", "broader_related", "direct", "generic_semantic"}),
     "lane_selection": frozenset({"one_each_then_round_robin"}),
     "lexical_scoring_version": frozenset({"bm25-nfkd-word-v1"}),
     "mode": frozenset({"broad_synthesis", "planned", "standard"}),
-    "neighbor_expansion": frozenset(
-        {"primaries_first_then_immediate_neighbors"}
+    "neighbor_expansion": frozenset({"primaries_first_then_immediate_neighbors"}),
+    "normalizer_version": frozenset(
+        {
+            "evidence-coverage-normalizer/1",
+            "evidence-coverage-normalizer/2",
+            "evidence-coverage-normalizer/3",
+        }
     ),
-    "normalizer_version": frozenset({"evidence-coverage-normalizer/1"}),
     "origin": frozenset({"corpus_anchor", "neighbor", "primary", "retrieval"}),
-    "planner_prompt_version": frozenset({"query-planner-v2"}),
-    "planner_reasoning_effort": frozenset(
-        {"high", "low", "max", "medium", "none", "xhigh"}
+    "planner_prompt_version": frozenset({"query-planner-v2", "query-planner-v3"}),
+    "planner_validation_code": frozenset(
+        {
+            "duplicate_query",
+            "established_answer_claim",
+            "missing_requirement_mapping",
+            "original_query_changed",
+            "original_query_too_long",
+            "plan_structure_invalid",
+            "planner_owned_original",
+            "query_drift",
+            "too_many_facets",
+            "unknown_document_hint",
+            "untrusted_target",
+            "untrusted_target_classification",
+        }
     ),
+    "planner_reasoning_effort": frozenset({"high", "low", "max", "medium", "none", "xhigh"}),
     "planner_verbosity": frozenset({"high", "low", "medium"}),
-    "policy_version": frozenset({"evidence-gate-v1", "evidence-planned-v4"}),
+    "policy_version": frozenset(
+        {
+            "evidence-gate-v1",
+            "evidence-gate-v2",
+            "evidence-planned-v4",
+            "evidence-planned-v5",
+            "evidence-planned-v6",
+        }
+    ),
     "prompt_version": frozenset({"evidence-coverage-v2"}),
     "reason": frozenset(
         {
@@ -631,9 +648,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     ),
     "renderer_version": frozenset({"evidence-coverage-renderer/1"}),
     "repair_codes": _COVERAGE_ERROR_CODES,
-    "retrieval_version": frozenset(
-        {"faceted-hybrid-rrf-v2", "hybrid-bm25-rrf-v1"}
-    ),
+    "retrieval_version": frozenset({"faceted-hybrid-rrf-v2", "hybrid-bm25-rrf-v1"}),
     "role": frozenset(
         {
             "broader_related",
@@ -666,6 +681,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.evidence_coverage_diagnostics/3",
             "archivist.evidence_policy_diagnostics/1",
             "archivist.planner_call_diagnostics/1",
+            "archivist.planner_call_diagnostics/2",
             "archivist.question_plan/1",
         }
     ),
@@ -690,12 +706,8 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "unsupported",
         }
     ),
-    "tie_break": frozenset(
-        {"rrf_desc_semantic_rank_lexical_rank_chunk_id"}
-    ),
-    "tokenizer_version": frozenset(
-        {"nfkd-unicode-word-possessive-v1"}
-    ),
+    "tie_break": frozenset({"rrf_desc_semantic_rank_lexical_rank_chunk_id"}),
+    "tokenizer_version": frozenset({"nfkd-unicode-word-possessive-v1"}),
     "traits": frozenset(
         {
             "absence_sensitive",
@@ -755,20 +767,11 @@ def validate_text_free_retrieval_trace(trace: object) -> None:
         field = field_name(path)
         if field == "trace_id":
             if _TRACE_ID_PATTERN.fullmatch(item) is None:
-                raise ValueError(
-                    "retrieval trace ID must be 32 lowercase "
-                    "hexadecimal characters"
-                )
+                raise ValueError("retrieval trace ID must be 32 lowercase hexadecimal characters")
             return
-        if (
-            field == "sha256"
-            or field.endswith("_sha256")
-            or field.endswith("_sha256s")
-        ):
+        if field == "sha256" or field.endswith("_sha256") or field.endswith("_sha256s"):
             if _SHA256_PATTERN.fullmatch(item) is None:
-                raise ValueError(
-                    f"retrieval trace {display_path(path)} must be a SHA-256"
-                )
+                raise ValueError(f"retrieval trace {display_path(path)} must be a SHA-256")
             if field in {"document_sha256", "document_hint_sha256s"}:
                 referenced_document_hashes.add(item)
             return
@@ -780,29 +783,22 @@ def validate_text_free_retrieval_trace(trace: object) -> None:
                     "retrieval trace created_at must be an ISO-8601 timestamp"
                 ) from exc
             return
-        if field == "chunk_id" or (
-            len(path) >= 2 and path[-2] in _CHUNK_ID_ARRAY_FIELDS
-        ):
+        if field == "chunk_id" or (len(path) >= 2 and path[-2] in _CHUNK_ID_ARRAY_FIELDS):
             if _CHUNK_ID_PATTERN.fullmatch(item) is None:
                 raise ValueError(
-                    f"retrieval trace {display_path(path)} contains an invalid "
-                    "chunk identifier"
+                    f"retrieval trace {display_path(path)} contains an invalid chunk identifier"
                 )
             return
-        if field in _IDENTIFIER_FIELDS or (
-            len(path) >= 2 and path[-2] in _IDENTIFIER_ARRAY_FIELDS
-        ):
+        if field in _IDENTIFIER_FIELDS or (len(path) >= 2 and path[-2] in _IDENTIFIER_ARRAY_FIELDS):
             if _IDENTIFIER_PATTERN.fullmatch(item) is None:
                 raise ValueError(
-                    f"retrieval trace {display_path(path)} contains an invalid "
-                    "identifier"
+                    f"retrieval trace {display_path(path)} contains an invalid identifier"
                 )
             return
         if field in _MODEL_FIELDS:
             if _MODEL_PATTERN.fullmatch(item) is None:
                 raise ValueError(
-                    f"retrieval trace {display_path(path)} contains an invalid "
-                    "model identifier"
+                    f"retrieval trace {display_path(path)} contains an invalid model identifier"
                 )
             return
         if field == "exception_code" and _HTTP_STATUS_PATTERN.fullmatch(item):
@@ -810,8 +806,7 @@ def validate_text_free_retrieval_trace(trace: object) -> None:
         allowed_values = _EXACT_STRING_VALUES.get(field)
         if allowed_values is None or item not in allowed_values:
             raise ValueError(
-                f"retrieval trace {display_path(path)} contains an unsupported "
-                "diagnostic value"
+                f"retrieval trace {display_path(path)} contains an unsupported diagnostic value"
             )
 
     def walk(item: object, path: tuple[str, ...]) -> None:
@@ -820,94 +815,68 @@ def validate_text_free_retrieval_trace(trace: object) -> None:
         if path in _OBJECT_FIELDS:
             if not isinstance(item, Mapping):
                 if path == ("query",):
-                    raise ValueError(
-                        "retrieval trace query must contain only hashed diagnostics"
-                    )
-                raise ValueError(
-                    f"retrieval trace {display_path(path)} must be an object"
-                )
+                    raise ValueError("retrieval trace query must contain only hashed diagnostics")
+                raise ValueError(f"retrieval trace {display_path(path)} must be an object")
             allowed = _OBJECT_FIELDS[path]
             for raw_key, nested in item.items():
                 if not isinstance(raw_key, str):
-                    raise ValueError(
-                        f"retrieval trace {display_path(path)} has a non-string field"
-                    )
+                    raise ValueError(f"retrieval trace {display_path(path)} has a non-string field")
                 key = raw_key.casefold()
                 if key in _FORBIDDEN_FIELDS:
                     raise ValueError(
-                        "retrieval trace contains forbidden field "
-                        f"{display_path(path)}.{raw_key}"
+                        f"retrieval trace contains forbidden field {display_path(path)}.{raw_key}"
                     )
                 if raw_key not in allowed:
                     raise ValueError(
-                        "retrieval trace contains unsupported field "
-                        f"{display_path(path)}.{raw_key}"
+                        f"retrieval trace contains unsupported field {display_path(path)}.{raw_key}"
                     )
                 walk(nested, (*path, raw_key))
             return
 
         if path in _DOCUMENT_DISTRIBUTION_PATHS:
             if not isinstance(item, Mapping):
-                raise ValueError(
-                    f"retrieval trace {display_path(path)} must be an object"
-                )
+                raise ValueError(f"retrieval trace {display_path(path)} must be an object")
             for document_sha256, count in item.items():
                 if (
                     not isinstance(document_sha256, str)
                     or _SHA256_PATTERN.fullmatch(document_sha256) is None
                 ):
                     raise ValueError(
-                        "retrieval trace document distribution has an invalid "
-                        "document hash"
+                        "retrieval trace document distribution has an invalid document hash"
                     )
-                if (
-                    not isinstance(count, int)
-                    or isinstance(count, bool)
-                    or count < 0
-                ):
+                if not isinstance(count, int) or isinstance(count, bool) or count < 0:
                     raise ValueError(
-                        "retrieval trace document distribution counts must be "
-                        "non-negative integers"
+                        "retrieval trace document distribution counts must be non-negative integers"
                     )
                 distributed_document_hashes.add(document_sha256)
             return
 
         if path in _ARRAY_PATHS:
             if not isinstance(item, list):
-                raise ValueError(
-                    f"retrieval trace {display_path(path)} must be an array"
-                )
+                raise ValueError(f"retrieval trace {display_path(path)} must be an array")
             for nested in item:
                 walk(nested, (*path, "[]"))
             return
 
         if isinstance(item, Mapping):
             raise ValueError(
-                "retrieval trace contains an unsupported object at "
-                f"{display_path(path)}"
+                f"retrieval trace contains an unsupported object at {display_path(path)}"
             )
         if isinstance(item, list):
             raise ValueError(
-                "retrieval trace contains an unsupported array at "
-                f"{display_path(path)}"
+                f"retrieval trace contains an unsupported array at {display_path(path)}"
             )
         if not isinstance(item, (str, int, float, bool, type(None))):
-            raise ValueError(
-                "retrieval trace contains a non-JSON value at "
-                f"{display_path(path)}"
-            )
+            raise ValueError(f"retrieval trace contains a non-JSON value at {display_path(path)}")
         if isinstance(item, float) and not math.isfinite(item):
             raise ValueError(
-                "retrieval trace contains a non-finite number at "
-                f"{display_path(path)}"
+                f"retrieval trace contains a non-finite number at {display_path(path)}"
             )
         if isinstance(item, str):
             validate_string(item, path)
 
     walk(trace, ())
-    unbound_documents = (
-        distributed_document_hashes - referenced_document_hashes
-    )
+    unbound_documents = distributed_document_hashes - referenced_document_hashes
     if unbound_documents:
         raise ValueError(
             "retrieval trace document distribution contains hashes not "

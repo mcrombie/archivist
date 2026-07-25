@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -26,6 +26,7 @@ from pydantic import (
 
 
 QUESTION_PLAN_SCHEMA = "archivist.question_plan/1"
+PLANNER_QUESTION_PLAN_SCHEMA = "archivist.planner_question_plan/1"
 RESOLVED_TURN_SCHEMA = "archivist.resolved_turn/1"
 F0_FACET_ID = "F0"
 
@@ -38,8 +39,29 @@ MAX_DOCUMENT_HINTS_PER_FACET = 2
 MAX_SEARCH_QUERY_CHARS = 240
 MAX_ORIGINAL_QUERY_CHARS = 4_000
 MAX_ADDED_QUERY_CHARS = 1_200
+MAX_PLANNER_REQUIREMENTS = MAX_ANSWER_REQUIREMENTS
+MAX_PLANNER_FACETS = MAX_ADDED_SEARCH_FACETS
+PLAN_STRUCTURE_INVALID = "plan_structure_invalid"
+PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
+    {
+        "duplicate_query",
+        "established_answer_claim",
+        "missing_requirement_mapping",
+        "original_query_changed",
+        "original_query_too_long",
+        "planner_owned_original",
+        "query_drift",
+        "too_many_facets",
+        "unknown_document_hint",
+        "untrusted_target",
+        "untrusted_target_classification",
+    }
+)
+PLANNER_VALIDATION_CODES = PLANNER_SEMANTIC_VALIDATION_CODES | {PLAN_STRUCTURE_INVALID}
 
 _SAFE_ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+SafePlanId = Annotated[str, Field(pattern=_SAFE_ID_PATTERN)]
+DocumentHint = Annotated[str, Field(min_length=1, max_length=300)]
 
 
 class RouteTrait(StrEnum):
@@ -118,9 +140,7 @@ class ResolvedTurn(_ContractModel):
             else MAX_SEARCH_QUERY_CHARS
         )
         if any(len(value) > limit for value in cleaned):
-            raise ValueError(
-                f"resolved-turn list values cannot exceed {limit} characters"
-            )
+            raise ValueError(f"resolved-turn list values cannot exceed {limit} characters")
         normalized = [normalize_search_query(value) for value in cleaned]
         if len(normalized) != len(set(normalized)):
             raise ValueError("resolved-turn lists cannot contain duplicate values")
@@ -167,13 +187,9 @@ class SearchFacet(_ContractModel):
         application_owned_original = (
             self.facet_id == F0_FACET_ID and self.role is FacetRole.ORIGINAL
         )
-        if (
-            not application_owned_original
-            and len(self.search_query) > MAX_SEARCH_QUERY_CHARS
-        ):
+        if not application_owned_original and len(self.search_query) > MAX_SEARCH_QUERY_CHARS:
             raise ValueError(
-                f"planner-added search queries cannot exceed "
-                f"{MAX_SEARCH_QUERY_CHARS} characters"
+                f"planner-added search queries cannot exceed {MAX_SEARCH_QUERY_CHARS} characters"
             )
         return self
 
@@ -303,12 +319,81 @@ class QuestionPlan(_ContractModel):
             if facet.facet_id != F0_FACET_ID
         ):
             raise ValueError(
-                f"planner-added search queries cannot exceed "
-                f"{MAX_SEARCH_QUERY_CHARS} characters"
+                f"planner-added search queries cannot exceed {MAX_SEARCH_QUERY_CHARS} characters"
             )
         if added_query_chars > MAX_ADDED_QUERY_CHARS:
             raise ValueError(f"added search queries exceed {MAX_ADDED_QUERY_CHARS} characters")
         return self
+
+
+class PlannerAnswerRequirement(_ContractModel):
+    """Minimal model-owned requirement shape.
+
+    Ordering and the required/optional decision are application-owned so a
+    structured-output response cannot invalidate itself on bookkeeping that
+    carries no search meaning.
+    """
+
+    requirement_id: SafePlanId
+    label: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
+
+
+class PlannerSearchFacet(_ContractModel):
+    """Shape-only planner facet parsed before semantic validation."""
+
+    facet_id: SafePlanId
+    requirement_ids: tuple[SafePlanId, ...] = Field(
+        min_length=1,
+        max_length=MAX_ANSWER_REQUIREMENTS,
+    )
+    role: FacetRole
+    search_query: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
+    document_hints: tuple[DocumentHint, ...] = Field(
+        default=(),
+        max_length=MAX_DOCUMENT_HINTS_PER_FACET,
+    )
+
+
+class PlannerPremiseHypothesis(_ContractModel):
+    """Shape-only premise references parsed before semantic validation."""
+
+    premise_id: SafePlanId
+    proposition: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
+    support_facet_id: SafePlanId
+    counter_facet_id: SafePlanId
+    framing_facet_id: SafePlanId | None = None
+
+
+class PlannerQuestionPlan(_ContractModel):
+    """Compact provider-facing proposal.
+
+    This intentionally excludes local routing traits, trusted evidence targets,
+    F0, and execution status.  It also has no cross-field model validator:
+    Structured Outputs establishes shape, then ``validate_planner_question_plan``
+    performs semantic checks locally and can fall back without misclassifying a
+    semantic rejection as an SDK parse failure.
+    """
+
+    schema_: Literal["archivist.planner_question_plan/1"] = Field(
+        default=PLANNER_QUESTION_PLAN_SCHEMA,
+        alias="schema",
+    )
+    requirements: tuple[PlannerAnswerRequirement, ...] = Field(
+        min_length=1,
+        max_length=MAX_PLANNER_REQUIREMENTS,
+    )
+    facets: tuple[PlannerSearchFacet, ...] = Field(
+        min_length=1,
+        max_length=MAX_PLANNER_FACETS,
+    )
+    premises: tuple[PlannerPremiseHypothesis, ...] = Field(
+        default=(),
+        max_length=MAX_PREMISE_HYPOTHESES,
+    )
+
+    @property
+    def schema(self) -> Literal["archivist.planner_question_plan/1"]:
+        return self.schema_
 
 
 class PlanValidationError(ValueError):
@@ -318,6 +403,20 @@ class PlanValidationError(ValueError):
         self.code = code
         self.detail = detail
         super().__init__(f"{code}: {detail}")
+
+
+def safe_planner_validation_code(value: object) -> str | None:
+    """Return only a finite, text-free planner validation code."""
+
+    return value if isinstance(value, str) and value in PLANNER_VALIDATION_CODES else None
+
+
+def _record_planner_validation_code(
+    diagnostics: MutableMapping[str, str | None] | None,
+    value: object,
+) -> None:
+    if diagnostics is not None:
+        diagnostics["planner_validation_code"] = safe_planner_validation_code(value)
 
 
 def _require_unique(label: str, values: Sequence[str]) -> None:
@@ -455,12 +554,8 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
     turn = _coerce_resolved_turn(question)
     text = turn.standalone_question
     traits: set[RouteTrait] = set()
-    between_relationship_syntax = bool(
-        _BETWEEN_RELATIONSHIP_REQUEST.search(text)
-    )
-    bounded_between_relationship = (
-        _bounded_between_relationship_parts(text) is not None
-    )
+    between_relationship_syntax = bool(_BETWEEN_RELATIONSHIP_REQUEST.search(text))
+    bounded_between_relationship = _bounded_between_relationship_parts(text) is not None
 
     if (
         any(pattern.search(text) for pattern in _BROAD_PATTERNS)
@@ -535,9 +630,7 @@ _NAMED_NUMBER_TARGET = re.compile(
     r"(?:No\.?\s*)?\d+[A-Za-z]?\b"
 )
 _ORDINAL_NAME_TARGET = re.compile(r"\b\d+(?:st|nd|rd|th)\s+[A-Z][^\W_]*\b")
-_RELATIONAL_VERB = (
-    r"(?:connect(?:s|ed|ing)?|relat(?:e|es|ed|ing)|link(?:s|ed|ing)?)"
-)
+_RELATIONAL_VERB = r"(?:connect(?:s|ed|ing)?|relat(?:e|es|ed|ing)|link(?:s|ed|ing)?)"
 _RELATIONAL_QUERY = re.compile(
     rf"\b{_RELATIONAL_VERB}\b[^?.!]{{0,160}}\bto\b",
     re.IGNORECASE,
@@ -756,9 +849,7 @@ def extract_trusted_targets(
 
     directional_relationship = bool(
         len(selected) >= 2
-        and _DIRECTIONAL_RELATIONSHIP_PREDICATE.search(
-            text[selected[0][1] : selected[1][0]]
-        )
+        and _DIRECTIONAL_RELATIONSHIP_PREDICATE.search(text[selected[0][1] : selected[1][0]])
     )
     relationship_request = bool(
         turn.relationship
@@ -766,8 +857,7 @@ def extract_trusted_targets(
         or directional_relationship
     )
     trusted_user_texts = tuple(
-        f" {normalize_search_query(value)} "
-        for value in turn.trusted_user_texts
+        f" {normalize_search_query(value)} " for value in turn.trusted_user_texts
     )
     return tuple(
         EvidenceTarget(
@@ -1005,6 +1095,57 @@ def validate_question_plan(
     return finalized
 
 
+def validate_planner_question_plan(
+    proposal: PlannerQuestionPlan | Mapping[str, Any],
+    resolved_turn: str | ResolvedTurn,
+    document_catalog: CatalogInput = (),
+) -> QuestionPlan:
+    """Materialize and semantically validate one provider proposal.
+
+    The provider controls search labels, facets, and premise hypotheses.  The
+    application derives requirement order and owns routing traits, trusted
+    targets, F0, execution status, and fallback state.
+    """
+
+    parsed = (
+        PlannerQuestionPlan.model_validate(proposal.model_dump())
+        if isinstance(proposal, PlannerQuestionPlan)
+        else PlannerQuestionPlan.model_validate(proposal)
+    )
+    plan = QuestionPlan(
+        requirements=tuple(
+            AnswerRequirement(
+                requirement_id=requirement.requirement_id,
+                label=requirement.label,
+                order=order,
+                required=True,
+            )
+            for order, requirement in enumerate(parsed.requirements)
+        ),
+        facets=tuple(
+            SearchFacet(
+                facet_id=facet.facet_id,
+                requirement_ids=facet.requirement_ids,
+                role=facet.role,
+                search_query=facet.search_query,
+                document_hints=facet.document_hints,
+            )
+            for facet in parsed.facets
+        ),
+        premises=tuple(
+            PremiseHypothesis(
+                premise_id=premise.premise_id,
+                proposition=premise.proposition,
+                support_facet_id=premise.support_facet_id,
+                counter_facet_id=premise.counter_facet_id,
+                framing_facet_id=premise.framing_facet_id,
+            )
+            for premise in parsed.premises
+        ),
+    )
+    return validate_question_plan(plan, resolved_turn, document_catalog)
+
+
 _START_END_PATTERN = re.compile(
     r"\bfrom\s+(?P<start>.+?)\s+to\s+(?P<end>.+?)(?:[?.!]|$)",
     re.IGNORECASE,
@@ -1124,9 +1265,7 @@ def _bounded_between_relationship_parts(
         )
         if part
     )
-    relationship_query = " ".join(
-        part for part in (left, right, predicate, context) if part
-    )
+    relationship_query = " ".join(part for part in (left, right, predicate, context) if part)
     context_tail = (
         _BOUNDED_RELATIONSHIP_CONTEXT_PREFIX.sub("", context, count=1)
         if context is not None
@@ -1257,11 +1396,7 @@ def deterministic_fallback_plan(
                 3,
                 requirements[2],
                 FacetRole.MECHANISM,
-                " ".join(
-                    part
-                    for part in (left, right, predicate, relationship_context)
-                    if part
-                ),
+                " ".join(part for part in (left, right, predicate, relationship_context) if part),
             ),
         )
     elif coordinated := _coordinated_parts(question):
@@ -1333,10 +1468,11 @@ def deterministic_fallback_plan(
 
 def build_question_plan(
     resolved_turn: str | ResolvedTurn,
-    planner_output: QuestionPlan | Mapping[str, Any] | None = None,
+    planner_output: (PlannerQuestionPlan | QuestionPlan | Mapping[str, Any] | None) = None,
     document_catalog: CatalogInput = (),
     *,
     fallback_reason: str | None = None,
+    validation_diagnostics: MutableMapping[str, str | None] | None = None,
 ) -> QuestionPlan:
     """Finalize one planner result or fall back once without retrying.
 
@@ -1344,6 +1480,7 @@ def build_question_plan(
     headroom without this pure layer knowing how those conditions were detected.
     """
 
+    _record_planner_validation_code(validation_diagnostics, None)
     turn = _coerce_resolved_turn(resolved_turn)
     if planner_output is None:
         reason = fallback_reason
@@ -1352,8 +1489,33 @@ def build_question_plan(
         return deterministic_fallback_plan(turn, fallback_reason=reason)
 
     try:
+        if isinstance(planner_output, PlannerQuestionPlan) or (
+            isinstance(planner_output, Mapping)
+            and (
+                planner_output.get("schema") == PLANNER_QUESTION_PLAN_SCHEMA
+                or planner_output.get("schema_") == PLANNER_QUESTION_PLAN_SCHEMA
+            )
+        ):
+            return validate_planner_question_plan(
+                planner_output,
+                turn,
+                document_catalog,
+            )
         return validate_question_plan(planner_output, turn, document_catalog)
-    except (PlanValidationError, ValidationError, ValueError):
+    except PlanValidationError as error:
+        _record_planner_validation_code(
+            validation_diagnostics,
+            error.code,
+        )
+        return deterministic_fallback_plan(
+            turn,
+            fallback_reason=fallback_reason or "invalid_planner_output",
+        )
+    except (ValidationError, ValueError):
+        _record_planner_validation_code(
+            validation_diagnostics,
+            PLAN_STRUCTURE_INVALID,
+        )
         return deterministic_fallback_plan(
             turn,
             fallback_reason=fallback_reason or "invalid_planner_output",
@@ -1361,9 +1523,15 @@ def build_question_plan(
 
 
 QUERY_PLANNER_INSTRUCTIONS = """\
-Decompose the standalone question into search requirements and facets without answering it.
+Return a compact search proposal for the standalone question without answering it.
 Return no F0 facet: the application inserts the unchanged original question.
+Return no route traits, evidence targets, requirement order, execution status, or fallback state:
+the application owns those fields.
 Use only IDs declared in the response, and map every requirement to at least one added facet.
+Prefer the smallest sufficient proposal. A single-clause request normally needs one requirement
+and one to three facets. Broad or explicitly multi-part requests may use more within the schema
+limits; do not merge or omit independently requested parts merely to stay under four.
+Keep labels and search queries terse and copy document hints only as exact catalog IDs.
 For relational questions, search each named concept plus evidence that explicitly links them.
 Treat factual premises as hypotheses with support and counter facets.
 Document hints must exactly match the supplied eligible catalog.
@@ -1373,9 +1541,15 @@ Respect the version-1 limits encoded in the response schema.
 
 
 def question_plan_json_schema() -> dict[str, Any]:
-    """Return the native Pydantic schema for a structured planner response."""
+    """Return the finalized in-memory plan schema."""
 
     return QuestionPlan.model_json_schema()
+
+
+def planner_question_plan_json_schema() -> dict[str, Any]:
+    """Return the compact provider-facing planner proposal schema."""
+
+    return PlannerQuestionPlan.model_json_schema()
 
 
 __all__ = [
@@ -1388,6 +1562,8 @@ __all__ = [
     "MAX_ADDED_QUERY_CHARS",
     "MAX_ADDED_SEARCH_FACETS",
     "MAX_ORIGINAL_QUERY_CHARS",
+    "MAX_PLANNER_FACETS",
+    "MAX_PLANNER_REQUIREMENTS",
     "MAX_ANSWER_REQUIREMENTS",
     "MAX_DOCUMENT_HINTS_PER_FACET",
     "MAX_EVIDENCE_TARGETS",
@@ -1395,6 +1571,14 @@ __all__ = [
     "MAX_SEARCH_FACETS",
     "MAX_SEARCH_QUERY_CHARS",
     "PlanValidationError",
+    "PLAN_STRUCTURE_INVALID",
+    "PlannerAnswerRequirement",
+    "PlannerPremiseHypothesis",
+    "PlannerQuestionPlan",
+    "PlannerSearchFacet",
+    "PLANNER_QUESTION_PLAN_SCHEMA",
+    "PLANNER_SEMANTIC_VALIDATION_CODES",
+    "PLANNER_VALIDATION_CODES",
     "PremiseHypothesis",
     "QUERY_PLANNER_INSTRUCTIONS",
     "QUESTION_PLAN_SCHEMA",
@@ -1408,7 +1592,10 @@ __all__ = [
     "extract_trusted_targets",
     "insert_original_facet",
     "question_plan_json_schema",
+    "planner_question_plan_json_schema",
     "requires_planning",
     "route_question",
+    "safe_planner_validation_code",
     "validate_question_plan",
+    "validate_planner_question_plan",
 ]

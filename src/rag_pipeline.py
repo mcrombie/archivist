@@ -13,7 +13,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter_ns
 from typing import Any
 
@@ -32,6 +32,8 @@ from costs import (
     tracked_responses_parse,
 )
 from evidence_policy import (
+    EVIDENCE_DIAGNOSTICS_SCHEMA,
+    EVIDENCE_POLICY_VERSION,
     CorpusIntegrity,
     EvidenceDecision,
     EvidenceGateResult,
@@ -43,10 +45,13 @@ from evidence_policy import (
     build_immediate_neighbor_map,
     classify_evidence_lanes,
     decide_evidence,
+    decide_multi_subject_evidence,
     evidence_diagnostics,
     relationship_evidence_chunk_ids,
     scan_broader_related,
     scan_evidence_target,
+    split_compound_named_anchor,
+    tokenize_anchor,
 )
 from filters import should_skip_document
 from model_config import GENERATOR_SETTINGS, QUERY_PLANNER_SETTINGS
@@ -60,11 +65,13 @@ from query_planning import (
     QUERY_PLANNER_INSTRUCTIONS,
     DocumentCatalogEntry,
     FacetRole,
+    PlannerQuestionPlan,
     QuestionPlan,
     ResolvedTurn,
     build_question_plan,
     normalize_search_query,
     requires_planning,
+    safe_planner_validation_code,
 )
 from retrieval import (
     MAX_FINAL_SOURCES,
@@ -76,14 +83,14 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v4"
+RAG_POLICY_VERSION = "evidence-planned-v6"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
-PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
-QUERY_PLANNER_PROMPT_VERSION = "query-planner-v2"
+PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v3"
 EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v2"
-MAX_PLANNER_OUTPUT_TOKENS = 3_000
+MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 8_000
 EMBEDDING_MODEL = "text-embedding-3-small"
 ANSWER_STAGE_TIMING_KEYS = frozenset(
@@ -111,6 +118,20 @@ _RELATED_PROBE_PATTERN = re.compile(
     r"related\s*:\s*(?P<related>.+?)\s*$",
     flags=re.IGNORECASE,
 )
+_TRUSTED_RELATED_TAIL_PATTERN = re.compile(
+    r"^\s*,?\s*and\s+(?P<tail>.+?)\s*[?.!]*\s*$",
+    flags=re.IGNORECASE,
+)
+_TRUSTED_RELATED_PREFIX_PATTERNS = (
+    re.compile(
+        r"^(?:its|their)\s+"
+        r"(?:effect|effects|impact|impacts|influence|relationship|role)\s+"
+        r"(?:on|upon|in|to|with)\s+",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(r"^(?:the|a|an)\s+", flags=re.IGNORECASE),
+)
+_MAX_TRUSTED_RELATED_TOKENS = 6
 
 QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS = """\
 For a safe broader-class search on an absence-sensitive question, use role
@@ -177,11 +198,7 @@ class AnswerModeResult:
     @property
     def resolved_question(self) -> str:
         original = next(
-            (
-                facet.search_query
-                for facet in self.plan.facets
-                if facet.role is FacetRole.ORIGINAL
-            ),
+            (facet.search_query for facet in self.plan.facets if facet.role is FacetRole.ORIGINAL),
             "",
         )
         return original
@@ -210,9 +227,7 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
 
     repair_codes = tuple(
         dict.fromkeys(
-            code
-            for code in (generation.get("repair_codes") or ())
-            if code in valid_error_codes
+            code for code in (generation.get("repair_codes") or ()) if code in valid_error_codes
         )
     )
     stage_timings_ms = {
@@ -229,23 +244,24 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     planner_status = raw_planner.get("status")
     if planner_status not in {"not_called", "succeeded", "failed"}:
         planner_status = "not_called"
-    planner_failure_code = _safe_failure_code(
-        raw_planner.get("failure_code")
-    )
-    planner_exception_class = safe_planner_exception_class(
-        raw_planner.get("exception_class")
-    )
-    planner_exception_code = safe_planner_exception_code(
-        raw_planner.get("exception_code")
+    planner_failure_code = _safe_failure_code(raw_planner.get("failure_code"))
+    planner_exception_class = safe_planner_exception_class(raw_planner.get("exception_class"))
+    planner_exception_code = safe_planner_exception_code(raw_planner.get("exception_code"))
+    planner_validation_code = safe_planner_validation_code(
+        raw_planner.get("planner_validation_code")
     )
     if planner_status != "failed":
         planner_failure_code = None
         planner_exception_class = None
         planner_exception_code = None
+        planner_validation_code = None
+    elif planner_failure_code != "invalid_planner_output":
+        planner_validation_code = None
     planner = {
         "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
         "status": planner_status,
         "failure_code": planner_failure_code,
+        "planner_validation_code": planner_validation_code,
         "exception_class": planner_exception_class,
         "exception_code": planner_exception_code,
     }
@@ -263,22 +279,17 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
         }
     else:
         cohort = {
-            "rag_policy_version": str(
-                diagnostics.get("rag_policy_version") or RAG_POLICY_VERSION
-            ),
+            "rag_policy_version": str(diagnostics.get("rag_policy_version") or RAG_POLICY_VERSION),
             "query_planner_prompt_version": QUERY_PLANNER_PROMPT_VERSION,
             "coverage_prompt_version": str(
                 generation.get("prompt_version") or EVIDENCE_COVERAGE_PROMPT_VERSION
             ),
             "normalizer_version": str(
-                generation.get("normalizer_version")
-                or EVIDENCE_COVERAGE_NORMALIZER_VERSION
+                generation.get("normalizer_version") or EVIDENCE_COVERAGE_NORMALIZER_VERSION
             ),
             "coverage_instructions_sha256": str(
                 generation.get("instructions_sha256")
-                or hashlib.sha256(
-                    EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")
-                ).hexdigest()
+                or hashlib.sha256(EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")).hexdigest()
             ),
             "coverage_schema_sha256": str(
                 generation.get("schema_sha256")
@@ -290,16 +301,12 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
                     ).encode("utf-8")
                 ).hexdigest()
             ),
-            "generator_model": str(
-                generation.get("generator_model") or GENERATOR_SETTINGS.model
-            ),
+            "generator_model": str(generation.get("generator_model") or GENERATOR_SETTINGS.model),
             "generator_reasoning_effort": str(
-                generation.get("generator_reasoning_effort")
-                or GENERATOR_SETTINGS.reasoning_effort
+                generation.get("generator_reasoning_effort") or GENERATOR_SETTINGS.reasoning_effort
             ),
             "generator_verbosity": str(
-                generation.get("generator_verbosity")
-                or GENERATOR_SETTINGS.verbosity
+                generation.get("generator_verbosity") or GENERATOR_SETTINGS.verbosity
             ),
         }
     return {
@@ -336,17 +343,20 @@ def _planner_call_diagnostic(
     status: str,
     *,
     failure_code: str | None = None,
+    planner_validation_code: str | None = None,
     error: Exception | None = None,
 ) -> dict[str, str | None]:
+    safe_failure_code = _safe_failure_code(failure_code)
+    safe_validation_code = safe_planner_validation_code(planner_validation_code)
+    if status != "failed" or safe_failure_code != "invalid_planner_output":
+        safe_validation_code = None
     exception_class = None
     exception_code = None
     if error is not None:
         exception_class = safe_planner_exception_class(type(error).__name__)
         for attribute in ("code", "status_code"):
             try:
-                exception_code = safe_planner_exception_code(
-                    getattr(error, attribute, None)
-                )
+                exception_code = safe_planner_exception_code(getattr(error, attribute, None))
             except Exception:
                 exception_code = None
             if exception_code is not None:
@@ -354,7 +364,8 @@ def _planner_call_diagnostic(
     return {
         "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
         "status": status,
-        "failure_code": _safe_failure_code(failure_code),
+        "failure_code": safe_failure_code,
+        "planner_validation_code": safe_validation_code,
         "exception_class": exception_class,
         "exception_code": exception_code,
     }
@@ -368,6 +379,7 @@ def _planner_trace_diagnostic(
         "schema": diagnostic.get("schema"),
         "status": diagnostic.get("status"),
         "failure_code": diagnostic.get("failure_code"),
+        "planner_validation_code": diagnostic.get("planner_validation_code"),
         "exception_class_sha256": (
             hashlib.sha256(exception_class.encode("utf-8")).hexdigest()
             if isinstance(exception_class, str) and exception_class
@@ -423,9 +435,7 @@ def build_planner_input(
 ) -> str:
     payload = {
         "resolved_turn": resolved_turn.model_dump(mode="json", by_alias=True),
-        "eligible_document_catalog": [
-            entry.model_dump(mode="json") for entry in document_catalog
-        ],
+        "eligible_document_catalog": [entry.model_dump(mode="json") for entry in document_catalog],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -450,12 +460,10 @@ def plan_question(
             without_automatic_retries(client),
             operation="query_planning",
             instructions=(
-                QUERY_PLANNER_INSTRUCTIONS
-                + "\n"
-                + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS
+                QUERY_PLANNER_INSTRUCTIONS + "\n" + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS
             ),
             input=build_planner_input(resolved_turn, document_catalog),
-            text_format=QuestionPlan,
+            text_format=PlannerQuestionPlan,
             max_output_tokens=MAX_PLANNER_OUTPUT_TOKENS,
             **QUERY_PLANNER_SETTINGS.responses_create_kwargs(),
         )
@@ -484,13 +492,13 @@ def plan_question(
         )
 
     parsed = getattr(response, "output_parsed", None)
+    validation_diagnostics: dict[str, str | None] = {}
     plan = build_question_plan(
         resolved_turn,
         parsed,
         document_catalog,
-        fallback_reason=(
-            None if parsed is not None else "planner_refused_or_unparsed"
-        ),
+        fallback_reason=(None if parsed is not None else "planner_refused_or_unparsed"),
+        validation_diagnostics=validation_diagnostics,
     )
     if plan.planner_used:
         _replace_diagnostic(
@@ -503,6 +511,7 @@ def plan_question(
             _planner_call_diagnostic(
                 "failed",
                 failure_code=plan.fallback_reason or "invalid_planner_output",
+                planner_validation_code=validation_diagnostics.get("planner_validation_code"),
             ),
         )
     return plan
@@ -538,15 +547,9 @@ def assess_answer_corpus_integrity(
             raw_count = store.get("embedded_chunk_count")
             if isinstance(raw_count, int) and not isinstance(raw_count, bool):
                 expected_collection_count = raw_count
-    manifest_ids = [
-        str(chunk.get("chunk_id") or "")
-        for chunk in manifest_chunks
-    ]
+    manifest_ids = [str(chunk.get("chunk_id") or "") for chunk in manifest_chunks]
     if not manifest_ids:
-        manifest_ids = [
-            str(chunk.get("chunk_id") or "")
-            for chunk in eligible_chunks
-        ]
+        manifest_ids = [str(chunk.get("chunk_id") or "") for chunk in eligible_chunks]
     manifest_hash = corpus_manifest_sha256 or ""
     integrity = assess_corpus_integrity(
         eligible_chunks,
@@ -557,9 +560,7 @@ def assess_answer_corpus_integrity(
         collection_count=collection_count,
     )
     manifest_text_hashes = {
-        str(chunk.get("chunk_id") or ""): str(
-            chunk.get("text_sha256") or ""
-        ).casefold()
+        str(chunk.get("chunk_id") or ""): str(chunk.get("text_sha256") or "").casefold()
         for chunk in manifest_chunks
     }
     if not manifest_chunks or any(
@@ -567,22 +568,17 @@ def assess_answer_corpus_integrity(
         for chunk_id in manifest_ids
     ):
         return integrity.with_failure("manifest_text_identity_missing")
-    loaded_ids = [
-        str(chunk.get("chunk_id") or "") for chunk in eligible_chunks
-    ]
+    loaded_ids = [str(chunk.get("chunk_id") or "") for chunk in eligible_chunks]
     if loaded_ids != manifest_ids:
         integrity = integrity.with_failure("manifest_chunk_order_mismatch")
-    manifest_by_id = {
-        str(chunk.get("chunk_id") or ""): chunk for chunk in manifest_chunks
-    }
+    manifest_by_id = {str(chunk.get("chunk_id") or ""): chunk for chunk in manifest_chunks}
     if any(
         (
             str(chunk.get("document") or "")
             != str(manifest_by_id.get(chunk_id, {}).get("document") or "")
             or chunk.get("paragraph_start")
             != manifest_by_id.get(chunk_id, {}).get("paragraph_start")
-            or chunk.get("paragraph_end")
-            != manifest_by_id.get(chunk_id, {}).get("paragraph_end")
+            or chunk.get("paragraph_end") != manifest_by_id.get(chunk_id, {}).get("paragraph_end")
             or len(str(chunk.get("text") or ""))
             != manifest_by_id.get(chunk_id, {}).get("char_count")
         )
@@ -595,27 +591,14 @@ def assess_answer_corpus_integrity(
         for chunk in eligible_chunks
     ):
         integrity = integrity.with_failure("chunk_text_identity_mismatch")
-    expected_collection_name = str(
-        manifest_store.get("collection_name") or ""
-    )
-    if (
-        expected_collection_name
-        and expected_collection_name != str(actual_collection_name or "")
-    ):
+    expected_collection_name = str(manifest_store.get("collection_name") or "")
+    if expected_collection_name and expected_collection_name != str(actual_collection_name or ""):
         integrity = integrity.with_failure("collection_name_mismatch")
     expected_hnsw_space = str(manifest_store.get("hnsw_space") or "")
-    if (
-        expected_hnsw_space
-        and expected_hnsw_space != str(actual_hnsw_space or "")
-    ):
+    if expected_hnsw_space and expected_hnsw_space != str(actual_hnsw_space or ""):
         integrity = integrity.with_failure("hnsw_space_mismatch")
-    expected_embedding_model = str(
-        manifest_store.get("embedding_model") or ""
-    )
-    if (
-        expected_embedding_model
-        and expected_embedding_model != EMBEDDING_MODEL
-    ):
+    expected_embedding_model = str(manifest_store.get("embedding_model") or "")
+    if expected_embedding_model and expected_embedding_model != EMBEDDING_MODEL:
         integrity = integrity.with_failure("embedding_model_mismatch")
 
     if not require_store_identity:
@@ -624,25 +607,20 @@ def assess_answer_corpus_integrity(
     if not isinstance(collection_metadata, Mapping):
         integrity = integrity.with_failure("collection_metadata_missing")
     else:
-        expected_chunks_sha256 = str(
-            (corpus_manifest or {}).get("chunks_sha256") or ""
-        )
+        expected_chunks_sha256 = str((corpus_manifest or {}).get("chunks_sha256") or "")
         if (
             not expected_chunks_sha256
-            or str(collection_metadata.get("chunks_sha256") or "")
-            != expected_chunks_sha256
+            or str(collection_metadata.get("chunks_sha256") or "") != expected_chunks_sha256
         ):
             integrity = integrity.with_failure("collection_chunks_identity_mismatch")
         if (
             expected_embedding_model
-            and str(collection_metadata.get("embedding_model") or "")
-            != expected_embedding_model
+            and str(collection_metadata.get("embedding_model") or "") != expected_embedding_model
         ):
             integrity = integrity.with_failure("collection_embedding_model_mismatch")
         if (
             expected_hnsw_space
-            and str(collection_metadata.get("hnsw:space") or "")
-            != expected_hnsw_space
+            and str(collection_metadata.get("hnsw:space") or "") != expected_hnsw_space
         ):
             integrity = integrity.with_failure("collection_hnsw_space_mismatch")
 
@@ -650,15 +628,10 @@ def assess_answer_corpus_integrity(
         return integrity.with_failure("collection_records_missing")
     raw_store_ids = collection_records.get("ids")
     raw_store_metadatas = collection_records.get("metadatas")
-    if not isinstance(raw_store_ids, list) or not isinstance(
-        raw_store_metadatas, list
-    ):
+    if not isinstance(raw_store_ids, list) or not isinstance(raw_store_metadatas, list):
         return integrity.with_failure("collection_records_malformed")
     store_ids = [str(value) for value in raw_store_ids]
-    if (
-        len(store_ids) != len(set(store_ids))
-        or set(store_ids) != set(manifest_ids)
-    ):
+    if len(store_ids) != len(set(store_ids)) or set(store_ids) != set(manifest_ids):
         integrity = integrity.with_failure("collection_chunk_ids_mismatch")
     if len(raw_store_metadatas) != len(store_ids):
         return integrity.with_failure("collection_metadata_count_mismatch")
@@ -679,8 +652,7 @@ def assess_answer_corpus_integrity(
         stored_text = actual.get("text")
         if (
             str(actual.get("chunk_id") or "") != chunk_id
-            or str(actual.get("document") or "")
-            != str(expected.get("document") or "")
+            or str(actual.get("document") or "") != str(expected.get("document") or "")
             or actual.get("paragraph_start") != expected.get("paragraph_start")
             or actual.get("paragraph_end") != expected.get("paragraph_end")
             or not isinstance(stored_text, str)
@@ -688,9 +660,7 @@ def assess_answer_corpus_integrity(
             or hashlib.sha256(str(stored_text).encode("utf-8")).hexdigest()
             != manifest_text_hashes.get(chunk_id)
         ):
-            integrity = integrity.with_failure(
-                "collection_chunk_metadata_mismatch"
-            )
+            integrity = integrity.with_failure("collection_chunk_metadata_mismatch")
             break
     return integrity
 
@@ -706,14 +676,10 @@ def preflight_answer_corpus(
     """Verify local corpus and store identity without an OpenAI operation."""
 
     eligible_chunks = [
-        chunk
-        for chunk in chunks
-        if not should_skip_document(str(chunk.get("document") or ""))
+        chunk for chunk in chunks if not should_skip_document(str(chunk.get("document") or ""))
     ]
     collection_count = int(collection_handle.count())
-    actual_collection_name = str(
-        getattr(collection_handle, "name", "") or ""
-    )
+    actual_collection_name = str(getattr(collection_handle, "name", "") or "")
     collection_metadata = getattr(collection_handle, "metadata", None)
     configuration = getattr(collection_handle, "configuration", {})
     actual_hnsw_space: str | None = None
@@ -721,13 +687,8 @@ def preflight_answer_corpus(
         hnsw = configuration.get("hnsw")
         if isinstance(hnsw, Mapping):
             actual_hnsw_space = str(hnsw.get("space") or "")
-    if (
-        not actual_hnsw_space
-        and isinstance(collection_metadata, Mapping)
-    ):
-        actual_hnsw_space = str(
-            collection_metadata.get("hnsw:space") or ""
-        )
+    if not actual_hnsw_space and isinstance(collection_metadata, Mapping):
+        actual_hnsw_space = str(collection_metadata.get("hnsw:space") or "")
 
     collection_records: Mapping[str, object] | None = None
     if require_store_identity:
@@ -748,9 +709,7 @@ def preflight_answer_corpus(
         actual_collection_name=actual_collection_name,
         actual_hnsw_space=actual_hnsw_space,
         collection_metadata=(
-            collection_metadata
-            if isinstance(collection_metadata, Mapping)
-            else None
+            collection_metadata if isinstance(collection_metadata, Mapping) else None
         ),
         collection_records=collection_records,
         require_store_identity=require_store_identity,
@@ -759,16 +718,13 @@ def preflight_answer_corpus(
 
 def _parse_related_probe(
     plan: QuestionPlan,
+    trusted_user_texts: Sequence[str],
 ) -> tuple[str, tuple[str, ...]] | None:
-    original_question = next(
-        (
-            facet.search_query
-            for facet in plan.facets
-            if facet.role is FacetRole.ORIGINAL
-        ),
-        "",
+    normalized_trusted_texts = tuple(
+        f" {normalize_search_query(value)} " for value in trusted_user_texts if value.strip()
     )
-    normalized_question = normalize_search_query(original_question)
+    if not normalized_trusted_texts:
+        return None
     for facet in plan.facets:
         if facet.role is not FacetRole.BROADER_RELATED:
             continue
@@ -777,21 +733,65 @@ def _parse_related_probe(
             continue
         broader = match.group("broader").strip()
         related = tuple(
-            value.strip()
-            for value in match.group("related").split(",")
-            if value.strip()
+            value.strip() for value in match.group("related").split(",") if value.strip()
         )
         trusted_surfaces = (broader, *related)
         if (
             broader
             and related
             and all(
-                f" {normalize_search_query(surface)} "
-                in f" {normalized_question} "
+                any(
+                    f" {normalize_search_query(surface)} " in trusted_text
+                    for trusted_text in normalized_trusted_texts
+                )
                 for surface in trusted_surfaces
             )
         ):
             return broader, related
+    return None
+
+
+def _derive_trusted_related_probe(
+    plan: QuestionPlan,
+    trusted_user_texts: Sequence[str],
+) -> tuple[str, tuple[str, ...]] | None:
+    """Derive one bounded broader/probe pair from an exact user-message tail."""
+
+    subject_targets = [
+        target
+        for target in plan.targets
+        if target.role.value == PolicyTargetRole.SUBJECT.value and target.absence_checkable
+    ]
+    if len(subject_targets) != 1:
+        return None
+    surface = subject_targets[0].query_surface_span
+    if len(split_compound_named_anchor(surface)) != 1:
+        return None
+
+    for trusted_text in reversed(tuple(trusted_user_texts)):
+        target_match = re.search(
+            re.escape(surface),
+            trusted_text,
+            flags=re.IGNORECASE,
+        )
+        if target_match is None:
+            continue
+        suffix_match = _TRUSTED_RELATED_TAIL_PATTERN.fullmatch(trusted_text[target_match.end() :])
+        if suffix_match is None:
+            continue
+        tail = suffix_match.group("tail").strip()
+        for prefix in _TRUSTED_RELATED_PREFIX_PATTERNS:
+            stripped = prefix.sub("", tail, count=1)
+            if stripped != tail:
+                tail = stripped.strip()
+                break
+        else:
+            continue
+
+        tokens = tokenize_anchor(tail)
+        if not 2 <= len(tokens) <= _MAX_TRUSTED_RELATED_TOKENS:
+            continue
+        return tokens[0], (" ".join(tokens[1:]),)
     return None
 
 
@@ -831,10 +831,7 @@ def _promote_direct_anchor_chunks(
     immediate_neighbors: Mapping[str, Sequence[str]],
 ) -> None:
     """Guarantee corpus-scan hits are actually present in the model context."""
-    lookup = {
-        str(chunk.get("chunk_id") or ""): dict(chunk)
-        for chunk in eligible_chunks
-    }
+    lookup = {str(chunk.get("chunk_id") or ""): dict(chunk) for chunk in eligible_chunks}
     mandatory_ids: list[str] = []
     if scans and facet_scan is not None:
         mandatory_ids.extend(
@@ -875,11 +872,7 @@ def _promote_direct_anchor_chunks(
         for source_number, chunk in enumerate(new_chunks, start=1)
     }
     f0_id = next(
-        (
-            facet_id
-            for facet_id in planned.facet_source_numbers
-            if facet_id == "F0"
-        ),
+        (facet_id for facet_id in planned.facet_source_numbers if facet_id == "F0"),
         None,
     )
     new_facet_sources: dict[str, tuple[int, ...]] = {}
@@ -893,10 +886,7 @@ def _promote_direct_anchor_chunks(
             if chunk_id in source_number_by_id
         )
 
-    new_lane_by_id = {
-        chunk_id: planned.lane_by_chunk_id.get(chunk_id, ())
-        for chunk_id in new_ids
-    }
+    new_lane_by_id = {chunk_id: planned.lane_by_chunk_id.get(chunk_id, ()) for chunk_id in new_ids}
     if f0_id is not None:
         for chunk_id in mandatory_ids:
             new_lane_by_id[chunk_id] = tuple(
@@ -914,9 +904,7 @@ def _promote_direct_anchor_chunks(
     selection["anchor_source_number_remap"] = [
         {
             "pre_anchor_source_number": (
-                old_ids.index(chunk_id) + 1
-                if chunk_id in old_ids
-                else None
+                old_ids.index(chunk_id) + 1 if chunk_id in old_ids else None
             ),
             "post_anchor_source_number": source_number,
         }
@@ -924,29 +912,21 @@ def _promote_direct_anchor_chunks(
     ]
     distribution: dict[str, int] = defaultdict(int)
     for chunk in new_chunks:
-        distribution[
-            document_identifier_sha256(chunk.get("document"))
-        ] += 1
+        distribution[document_identifier_sha256(chunk.get("document"))] += 1
     documents = selection.setdefault("document_distribution", {})
     if isinstance(documents, dict):
         documents["context"] = dict(sorted(distribution.items()))
     selection["context"] = [
         {
             "chunk_id": str(chunk.get("chunk_id") or ""),
-            "document_sha256": document_identifier_sha256(
-                chunk.get("document")
-            ),
+            "document_sha256": document_identifier_sha256(chunk.get("document")),
             "paragraph_start": chunk.get("paragraph_start"),
             "paragraph_end": chunk.get("paragraph_end"),
             "source_number": source_number,
             "origin": (
-                "corpus_anchor"
-                if str(chunk.get("chunk_id") or "") in promoted
-                else "retrieval"
+                "corpus_anchor" if str(chunk.get("chunk_id") or "") in promoted else "retrieval"
             ),
-            "facet_ids": list(
-                new_lane_by_id.get(str(chunk.get("chunk_id") or ""), ())
-            ),
+            "facet_ids": list(new_lane_by_id.get(str(chunk.get("chunk_id") or ""), ())),
         }
         for source_number, chunk in enumerate(new_chunks, start=1)
     ]
@@ -957,6 +937,7 @@ def apply_evidence_gate(
     planned: PlannedContext,
     eligible_chunks: Sequence[Mapping[str, object]],
     *,
+    trusted_user_texts: Sequence[str] = (),
     collection_count: int,
     corpus_manifest: Mapping[str, object] | None,
     corpus_manifest_sha256: str | None,
@@ -975,8 +956,8 @@ def apply_evidence_gate(
         return (
             gate,
             {
-                "schema": "archivist.evidence_policy_diagnostics/1",
-                "policy_version": "evidence-gate-v1",
+                "schema": EVIDENCE_DIAGNOSTICS_SCHEMA,
+                "policy_version": EVIDENCE_POLICY_VERSION,
                 "corpus": integrity.as_diagnostics(),
                 "targets": [],
                 "decision": {
@@ -989,41 +970,52 @@ def apply_evidence_gate(
             None,
         )
 
-    scans = [
-        scan_evidence_target(
-            target.target_id,
-            target.query_surface_span,
-            eligible_chunks,
-            absence_checkable=target.absence_checkable,
-            corpus_integrity=integrity,
-            role=PolicyTargetRole(target.role.value),
+    scans: list[EvidenceTargetScan] = []
+    compound_subject_split = False
+    for target in plan.targets:
+        surfaces = (
+            split_compound_named_anchor(target.query_surface_span)
+            if target.role.value == PolicyTargetRole.SUBJECT.value
+            else (target.query_surface_span,)
         )
-        for target in plan.targets
-    ]
-    subject_scans = [
-        scan
-        for scan in scans
-        if scan.role is PolicyTargetRole.SUBJECT
-    ]
+        compound_subject_split = compound_subject_split or len(surfaces) > 1
+        for component_index, surface in enumerate(surfaces, start=1):
+            scans.append(
+                scan_evidence_target(
+                    (
+                        target.target_id
+                        if len(surfaces) == 1
+                        else f"{target.target_id}.{component_index}"
+                    ),
+                    surface,
+                    eligible_chunks,
+                    absence_checkable=target.absence_checkable,
+                    corpus_integrity=integrity,
+                    role=PolicyTargetRole(target.role.value),
+                )
+            )
+    subject_scans = [scan for scan in scans if scan.role is PolicyTargetRole.SUBJECT]
     if not subject_scans:
         gate = _all_sources_gate(planned, integrity, rule="no_subject_target")
-        return gate, {
-            "schema": "archivist.evidence_policy_diagnostics/1",
-            "policy_version": "evidence-gate-v1",
-            "corpus": integrity.as_diagnostics(),
-            "targets": [scan.as_diagnostics() for scan in scans],
-            "decision": {
-                "value": gate.decision.value,
-                "allowed_source_numbers": list(gate.allowed_source_numbers),
-                "suppressed_source_numbers": [],
-                "rules_fired": list(gate.rules_fired),
+        return (
+            gate,
+            {
+                "schema": EVIDENCE_DIAGNOSTICS_SCHEMA,
+                "policy_version": EVIDENCE_POLICY_VERSION,
+                "corpus": integrity.as_diagnostics(),
+                "targets": [scan.as_diagnostics() for scan in scans],
+                "decision": {
+                    "value": gate.decision.value,
+                    "allowed_source_numbers": list(gate.allowed_source_numbers),
+                    "suppressed_source_numbers": [],
+                    "rules_fired": list(gate.rules_fired),
+                },
             },
-        }, None
+            None,
+        )
 
     subject_scan = subject_scans[0]
-    facet_scans = [
-        scan for scan in scans if scan.role is PolicyTargetRole.FACET
-    ]
+    facet_scans = [scan for scan in scans if scan.role is PolicyTargetRole.FACET]
     facet_scan = facet_scans[0] if facet_scans else None
     neighbors = build_immediate_neighbor_map(eligible_chunks)
     _promote_direct_anchor_chunks(
@@ -1033,6 +1025,33 @@ def apply_evidence_gate(
         facet_scan=facet_scan,
         immediate_neighbors=neighbors,
     )
+    if len(subject_scans) > 1 and not facet_scans:
+        assignments = classify_evidence_lanes(
+            planned.final_chunks,
+            subject_scan=subject_scan,
+            additional_subject_scans=subject_scans[1:],
+            facet_scan=facet_scan,
+            immediate_neighbors=neighbors,
+        )
+        gate = decide_multi_subject_evidence(
+            subject_scans,
+            lane_assignments=assignments,
+        )
+        if compound_subject_split:
+            gate = replace(
+                gate,
+                rules_fired=(
+                    *gate.rules_fired,
+                    "compound_named_subject_split",
+                ),
+            )
+        diagnostics = evidence_diagnostics(
+            gate,
+            subject_scan=subject_scan,
+            facet_scan=facet_scan,
+        )
+        diagnostics["targets"] = [scan.as_diagnostics() for scan in scans]
+        return gate, diagnostics, None
     if len(subject_scans) > 1 or len(facet_scans) > 1:
         assignments = classify_evidence_lanes(
             planned.final_chunks,
@@ -1046,9 +1065,7 @@ def apply_evidence_gate(
             premise_correction_required=False,
             relationship_chunk_ids=(),
             allowed_source_numbers=(),
-            suppressed_source_numbers=tuple(
-                range(1, len(planned.final_chunks) + 1)
-            ),
+            suppressed_source_numbers=tuple(range(1, len(planned.final_chunks) + 1)),
             lane_assignments=assignments,
             rules_fired=("multiple_targets_require_disambiguation",),
             integrity=integrity,
@@ -1058,11 +1075,16 @@ def apply_evidence_gate(
             subject_scan=subject_scan,
             facet_scan=facet_scan,
         )
-        diagnostics["targets"] = [
-            scan.as_diagnostics() for scan in scans
-        ]
+        diagnostics["targets"] = [scan.as_diagnostics() for scan in scans]
         return gate, diagnostics, None
-    related_spec = _parse_related_probe(plan)
+    related_spec = _parse_related_probe(plan, trusted_user_texts)
+    trusted_tail_related = False
+    if related_spec is None:
+        related_spec = _derive_trusted_related_probe(
+            plan,
+            trusted_user_texts,
+        )
+        trusted_tail_related = related_spec is not None
     broader_scan = (
         scan_broader_related(
             related_spec[0],
@@ -1087,6 +1109,14 @@ def apply_evidence_gate(
         broader_related_scan=broader_scan,
         immediate_neighbors=neighbors,
     )
+    if trusted_tail_related and gate.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH:
+        gate = replace(
+            gate,
+            rules_fired=(
+                *gate.rules_fired,
+                "trusted_related_tail_material",
+            ),
+        )
 
     # Premise status is adjudicated against the sources in the one structured answer
     # call. Do not let a surface-form absence suppress those support/counter lanes first.
@@ -1132,11 +1162,7 @@ def _filter_context(
         for new_number, (old_number, _chunk) in enumerate(selected_pairs, start=1)
     }
     remapped_facets = {
-        facet_id: tuple(
-            old_to_new[number]
-            for number in source_numbers
-            if number in old_to_new
-        )
+        facet_id: tuple(old_to_new[number] for number in source_numbers if number in old_to_new)
         for facet_id, source_numbers in planned.facet_source_numbers.items()
     }
     return [chunk for _number, chunk in selected_pairs], old_to_new, remapped_facets
@@ -1151,18 +1177,13 @@ def _record_generation_context(
     selection = planned.trace.setdefault("selection", {})
     retrieval_context = list(selection.get("context", []))
     selection["retrieval_context"] = retrieval_context
-    new_to_old = {
-        new_number: old_number
-        for old_number, new_number in old_to_new.items()
-    }
+    new_to_old = {new_number: old_number for old_number, new_number in old_to_new.items()}
     generation_context = [
         {
             "source_number": new_number,
             "retrieval_source_number": new_to_old.get(new_number),
             "chunk_id": str(chunk.get("chunk_id") or ""),
-            "document_sha256": document_identifier_sha256(
-                chunk.get("document")
-            ),
+            "document_sha256": document_identifier_sha256(chunk.get("document")),
             "paragraph_start": chunk.get("paragraph_start"),
             "paragraph_end": chunk.get("paragraph_end"),
         }
@@ -1243,9 +1264,7 @@ def build_coverage_input(
                 "label": requirement.label,
                 "order": requirement.order,
                 "required": requirement.required,
-                "candidate_source_numbers": list(
-                    requirement_sources[requirement.requirement_id]
-                ),
+                "candidate_source_numbers": list(requirement_sources[requirement.requirement_id]),
             }
             for requirement in plan.requirements
         ],
@@ -1342,9 +1361,7 @@ def run_evidence_planned_answer(
     corpus_manifest_sha256: str | None = None,
     corpus_integrity: CorpusIntegrity | None = None,
     require_store_identity: bool = False,
-    historiographical_lens: HistoriographicalLens | str = (
-        HistoriographicalLens.EVIDENCE_FIRST
-    ),
+    historiographical_lens: HistoriographicalLens | str = (HistoriographicalLens.EVIDENCE_FIRST),
     voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
     worldview: Worldview | str = Worldview.NONE,
     policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
@@ -1352,9 +1369,7 @@ def run_evidence_planned_answer(
     """Execute one bounded evidence-planned Answer Mode turn."""
     pipeline_started_ns = perf_counter_ns()
     stage_timings_ms: dict[str, float] = {}
-    planner_call_diagnostics: dict[str, Any] = _planner_call_diagnostic(
-        "not_called"
-    )
+    planner_call_diagnostics: dict[str, Any] = _planner_call_diagnostic("not_called")
 
     def result_diagnostics(
         evidence: Mapping[str, Any],
@@ -1371,9 +1386,7 @@ def run_evidence_planned_answer(
 
     integrity_started_ns = perf_counter_ns()
     eligible_chunks = [
-        chunk
-        for chunk in chunks
-        if not should_skip_document(str(chunk.get("document") or ""))
+        chunk for chunk in chunks if not should_skip_document(str(chunk.get("document") or ""))
     ]
     collection_count = int(collection_handle.count())
     integrity = corpus_integrity or preflight_answer_corpus(
@@ -1447,15 +1460,13 @@ def run_evidence_planned_answer(
             "policy_version": policy.version,
             "planner_prompt_version": QUERY_PLANNER_PROMPT_VERSION,
             "planner_prompt_sha256": hashlib.sha256(
-                (
-                    QUERY_PLANNER_INSTRUCTIONS
-                    + "\n"
-                    + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS
-                ).encode("utf-8")
+                (QUERY_PLANNER_INSTRUCTIONS + "\n" + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS).encode(
+                    "utf-8"
+                )
             ).hexdigest(),
             "planner_schema_sha256": hashlib.sha256(
                 json.dumps(
-                    QuestionPlan.model_json_schema(),
+                    PlannerQuestionPlan.model_json_schema(),
                     sort_keys=True,
                     separators=(",", ":"),
                 ).encode("utf-8")
@@ -1463,9 +1474,7 @@ def run_evidence_planned_answer(
             "planner_model": QUERY_PLANNER_SETTINGS.model,
             "planner_reasoning_effort": QUERY_PLANNER_SETTINGS.reasoning_effort,
             "planner_verbosity": QUERY_PLANNER_SETTINGS.verbosity,
-            "planner_call": _planner_trace_diagnostic(
-                planner_call_diagnostics
-            ),
+            "planner_call": _planner_trace_diagnostic(planner_call_diagnostics),
         }
     )
     gate_started_ns = perf_counter_ns()
@@ -1473,6 +1482,7 @@ def run_evidence_planned_answer(
         plan,
         planned,
         eligible_chunks,
+        trusted_user_texts=resolved_turn.trusted_user_texts,
         collection_count=collection_count,
         corpus_manifest=corpus_manifest,
         corpus_manifest_sha256=corpus_manifest_sha256,
@@ -1507,13 +1517,10 @@ def run_evidence_planned_answer(
         gate.allowed_source_numbers,
     )
     _record_generation_context(planned, final_chunks, old_to_new)
-    requirement_ids = tuple(
-        requirement.requirement_id for requirement in plan.requirements
-    )
+    requirement_ids = tuple(requirement.requirement_id for requirement in plan.requirements)
     premise_ids = tuple(premise.premise_id for premise in plan.premises)
     requirement_labels = {
-        requirement.requirement_id: requirement.label
-        for requirement in plan.requirements
+        requirement.requirement_id: requirement.label for requirement in plan.requirements
     }
     stage_timings_ms["context_preparation"] = _elapsed_ms(context_started_ns)
 
@@ -1560,9 +1567,7 @@ def run_evidence_planned_answer(
         worldview,
     )
     style_prompt_sha256 = (
-        hashlib.sha256(style_block.encode("utf-8")).hexdigest()
-        if style_block
-        else None
+        hashlib.sha256(style_block.encode("utf-8")).hexdigest() if style_block else None
     )
     generation_started_ns = perf_counter_ns()
     try:

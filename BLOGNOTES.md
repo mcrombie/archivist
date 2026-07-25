@@ -767,6 +767,186 @@ Useful blog lesson: after an expensive end-to-end smoke exposes one orchestratio
 paid experiment can be much smaller. One resolver call was enough to test the exact uncertainty
 without paying again for retrieval and generation or confusing answer quality with routing.
 
+### 2026-07-25 - The unchanged ten questions found a real regression
+
+- Committed the verified v4 boundary as
+  `cab97262c34a7dd64c070e71179ca4a311a76f34`, then ran the owner's unchanged ten
+  questions once from that clean tree. The private run froze the same question-source,
+  58-claim-rubric, corpus-manifest, and searchable-chunks hashes used by the prior practical
+  comparison.
+- This remained a directional development evaluation, not a formal run of record. It uses the
+  undated `gpt-5.6-sol` model name, the practical rubric is not the locked chunk-level gold set,
+  and one nondeterministic sample cannot establish a noise floor.
+- The run completed all ten questions without a retry or API error under a `$1.25` hard cap:
+  - 10 query embeddings, 8 planner calls, and 5 answer-generation calls;
+  - 23 priced events and zero unpriced events;
+  - `$1.02332782` total estimated cost;
+  - 347.621 seconds summed question latency, 36.220-second median, and a
+    1.786–70.307-second range;
+  - ten independently hashed schema-v3 retrieval traces certified against the clean commit,
+    runner, dependency lock, corpus, and vector store.
+- The strict unchanged-rubric result was 11/58 essential claims present, 47 absent, and none
+  contradicted. Final returned sources covered 11/26 target document groups. The four accepted
+  generated answers used 33 well-formed, resolvable citations with no malformed or out-of-range
+  source numbers.
+- The safety/utility tradeoff moved too far toward withholding:
+  - G008 correctly declined the absent Hudson's Bay Company request without substituting an
+    analogous company;
+  - G002 falsely certified the combined Dulles subject absent even though retrieval had found both
+    expected document groups;
+  - G004 and G006 returned insufficient evidence;
+  - G009 correctly found no literal COVID-19 mention but suppressed the bounded Epilogue
+    near-match;
+  - G010 retrieved earlier-origin and 1898 passages but discarded its paid premise correction
+    after source-remapping and validation failures.
+- The dominant defect was more basic than retrieval tuning: every paid planner result failed its
+  contract. Five raised structured-output `ValidationError`; three were rejected as
+  `invalid_planner_output`; none supplied the plan used by retrieval. Those failed calls alone
+  cost `$0.57508750`, 56.2% of the entire run.
+- For directional context only, the previous clean hybrid sample observed 19/58 present claims and
+  15/26 target groups at `$0.35567608` and 78.538 seconds. The v4 sample observed eight fewer
+  claims and four fewer target groups while costing 2.88 times as much and taking 4.43 times as
+  long. Different cohorts and single samples prevent a formal delta claim, but the failure is
+  large and mechanically explained enough to reject v4 as a quality improvement.
+- No expected claim, question, rubric rule, or measurement definition was changed after seeing
+  the result. The useful next targets are now concrete: make live planner output satisfy its
+  schema, split compound entity anchors, preserve bounded-related absence answers, distinguish
+  planner failure from evidence ambiguity, and repair premise-correction source remapping.
+
+Useful blog lesson: a system can become safer, more elaborate, and more expensive while becoming
+less useful. The evaluation paid for itself by showing that the sophisticated layer was not merely
+under-tuned: its planner never became operational, and its safety gate was suppressing evidence
+the retriever had already found. Without the unchanged questions, clean identity, and per-stage
+traces, those failures would have looked like vague model weakness.
+
+### 2026-07-25 - Three traced failures became the v5 repair cohort
+
+- Opened `evidence-planned-v5` because planner, evidence-admission, and answer-normalization
+  behavior all changed. The frozen questions, expected claims, rubric, corpus, and index were not
+  changed.
+- The planner failure was mostly truncation rather than bad retrieval:
+  - G004, G006, G008, and G010 each stopped at exactly the old 3,000-output-token ceiling;
+  - G003 was the one non-truncation Pydantic/SDK validation failure;
+  - three other responses parsed before failing the application validator.
+- Replaced the provider-facing full `QuestionPlan` with a compact
+  `archivist.planner_question_plan/1` proposal containing only requirements, facets, and premise
+  hypotheses. The application still owns routing traits, trusted targets, ordering, `F0`,
+  execution status, and fallback state. Cross-field semantics now run locally after parsing, so a
+  shape-valid but unusable proposal is distinguishable from an SDK parse failure.
+- Kept the designed capacity of eight requirements and seven added facets, while asking the model
+  to prefer a smaller plan when it can preserve every requested part. The output ceiling rose from
+  3,000 to 4,000 tokens; the one-call/no-retry rule remains unchanged. This may increase worst-case
+  planner cost, so the next paid smoke must measure both success and latency before the full set is
+  rerun.
+- Replaced the all-or-nothing multi-target gate with bounded local rules:
+  - an exact compound personal-name surface can split into two exact user-written anchors;
+  - all directly present subjects retain the retrieved context;
+  - mixed presence retains only direct/neighbor material and becomes a partial answer;
+  - multiple subjects plus a facet remain indeterminate until a joint relationship rule exists;
+  - no multi-subject clean absence is certified unless every subject independently qualifies.
+- Added a qualified near-match path derived only from an exact trusted user-message tail. Its
+  broader term and related probe must occur in one passage or immediate neighbors. It cannot use
+  resolver-only prose, model aliases, or semantic similarity as an absence certificate.
+- Tightened premise-correction normalization. A contradicted premise may shed redundant extra
+  source numbers only when its mapping is a nonempty strict superset of the valid leading
+  correction unit's citations. Empty, disjoint, duplicate, out-of-range, wrong-role, and already
+  valid subset mappings are not rewritten.
+- An offline replay against the exact frozen v4 retrieved contexts, with no API calls, changed the
+  evidence decisions as intended:
+  - G002, G004, and G006 now admit all eight retrieved sources as direct-answer contexts;
+  - G008 remains a clean abstention;
+  - G009 becomes a qualified near match limited to the two bounded passages;
+  - G010's promoted-anchor/source-remap shape now renders a validated leading premise correction
+    in the synthetic end-to-end fixture.
+- Component versions are now `query-planner-v3`, `evidence-gate-v2`, and
+  `evidence-coverage-normalizer/2`. Historical versions remain accepted by the text-free trace
+  validator, while new turns report the v5 cohort explicitly.
+- The complete offline suite passes with 396 tests and one skipped. Strict conversion of the
+  compact planner model to the provider schema also succeeds at the full eight-requirement,
+  seven-added-facet limits.
+- This is an offline repair, not a claim that answer quality improved. No OpenAI request was made.
+  The next gate is a separately authorized paid smoke that exercises a real planner response,
+  bounded absence/near-match behavior, and premise correction before rerunning all ten questions.
+
+Useful blog lesson: the valuable distinction was not “the model failed.” Four planner calls ran
+out of output budget, several answers were stopped by local evidence policy, and one good
+correction was discarded by redundant bookkeeping. Stage-specific traces turned one disappointing
+score into three small, independently testable engineering repairs.
+
+### 2026-07-25 - The v5 focused smoke passed two branches and isolated one more contract defect
+
+- A private, dirty-worktree exploratory smoke ran the unchanged G008-G010 questions once with no
+  retries. It used three planner calls, three query embeddings, and two answer-generation calls,
+  took 77.292 seconds in total, and cost an estimated `$0.22260367` under the separately enforced
+  `$0.55` operational stop and `$0.75` authorization ceiling.
+- The compact live planner succeeded on G008 and G010. Its average recorded planner cost fell
+  materially from the v4 failure sample, but this three-question, single-run smoke is not a formal
+  latency or cost comparison.
+- G008 passed the protected-absence branch: the system found no direct treatment of the named
+  company, returned no analogous company as a substitute, skipped answer generation, and incurred
+  an estimated `$0.02728943`.
+- G010 passed the premise-correction branch: it rejected the question's 1898 founding premise,
+  placed the manuscript's earlier-origin framing first, distinguished 1898 as a major overseas
+  turn, and returned seven well-formed citations resolving against eight sources. The previous
+  `premise_correction_invalid` failure did not recur.
+- G009 proved that retrieval and the new evidence gate were working: the system certified the
+  named event absent, admitted exactly two bounded related passages, and selected
+  `qualified_near_match`. It still did not display an answer because:
+  - its parsed planner proposal was rejected by local semantic validation and collapsed into the
+    generic `invalid_planner_output` code;
+  - its structured answer then failed the redundant status/gap bookkeeping rule with
+    `status_gap_mismatch`.
+- The planner artifact proves the failure was not truncation, refusal, transport, or provider
+  schema parsing, but the exact local semantic rejection was not retained. The next repair must
+  preserve a finite text-free validation code rather than loosening an unknown rule.
+- The answer status has a one-to-one required gap reason, so its mismatched gap value can be
+  canonicalized from the unchanged status without adding or removing a claim, source, citation, or
+  answer unit. Strict validation still has to reject unsupported records with factual units,
+  missing units, malformed citations, and source-mapping errors.
+- This smoke is a gate, not a replacement for the practical evaluation. The planned sequence is:
+  repair these two G009 contract boundaries, confirm that single branch once, commit the frozen
+  implementation, and then run the unchanged ten-question evaluation with no intervening UI work
+  or new optimization target.
+
+Useful blog lesson: the most encouraging result was not that two answers looked good. It was that
+the failed third question retained the right two passages and a precise evidence decision. That
+reduced a vague RAG failure to one redundant answer field and one missing planner diagnostic.
+
+### 2026-07-25 - The final G009 contract repair was completed offline
+
+- Opened `evidence-planned-v6` for two deliberately narrow changes; no corpus, index, frozen
+  question, expected claim, rubric rule, retrieval decision, or model setting changed.
+- `evidence-coverage-normalizer/3` now derives the redundant gap reason from the model's unchanged
+  requirement status. The repair is recorded and the complete strict validator still runs.
+  Missing required units and unsupported factual units remain failures, and no answer unit,
+  source, citation, or status is created or changed.
+- Planner diagnostics schema `archivist.planner_call_diagnostics/2` now preserves a finite
+  text-free local validation code when a parsed proposal fails semantic validation. Structural
+  failures receive `plan_structure_invalid`; historical version-1 artifacts remain readable.
+  Validation was not weakened, the planner is not retried, and neither provider prose nor
+  manuscript/question text enters the trace or cost ledger.
+- The complete offline suite passes with 403 tests and one skip. Ruff checks and the modified-file
+  format check pass, and `git diff --check` reports no whitespace errors. No OpenAI request was
+  made during the repair or verification.
+- Development is now deliberately sequenced to prevent another evaluation detour: repeat only
+  G009 once, freeze and commit the confirmed repair, then run the owner's unchanged ten-question
+  evaluation immediately. That one-question confirmation is the final micro-gate, not a
+  replacement for the practical evaluation.
+- The separately authorized confirmation cleared that gate. G009 completed once with no retry in
+  24.721 seconds for an estimated `$0.07107566`. The live planner succeeded; the evidence decision
+  remained `qualified_near_match`; exactly two bounded sources reached generation; normalization
+  recorded `status_gap_mismatch`; strict validation passed; and four emitted source references
+  all resolved. The answer accurately marked the named event absent from the retrieved evidence
+  before discussing the two related episodes.
+- The confirmation was an exploratory dirty-worktree artifact, not a run of record. Its purpose
+  was to confirm the repaired branch before freezing the code; the unchanged ten-question
+  directional evaluation remains the practical measurement.
+
+Useful blog lesson: strict source validation is valuable only when its failures remain
+diagnosable. A safe local repair can correct a redundant enum field without laundering factual
+content, while a closed diagnostic vocabulary can reveal which planner rule failed without
+storing private text.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
@@ -820,8 +1000,8 @@ without paying again for retrieval and generation or confusing answer quality wi
 
 ## Open threads for later entries
 
-- Commit the verified `evidence-planned-v4` repair, then request a fresh explicit budget for the
-  unchanged ten-question comparison under that cohort.
+- Rerun the unchanged ten questions on the frozen v6 implementation as the next directional
+  cohort and compare it with the preserved v4 result.
 - Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
   retrieval and citation metrics require it.
 - Retrieval-only pilot results before any answer generation is graded.

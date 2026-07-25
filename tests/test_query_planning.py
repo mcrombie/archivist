@@ -11,6 +11,9 @@ from query_planning import (
     EvidenceTargetRole,
     FacetRole,
     PlanValidationError,
+    PlannerAnswerRequirement,
+    PlannerQuestionPlan,
+    PlannerSearchFacet,
     PremiseHypothesis,
     QuestionPlan,
     ResolvedTurn,
@@ -86,6 +89,37 @@ def valid_planner_plan() -> QuestionPlan:
                 "Harbor Network closure",
                 role=FacetRole.ENDPOINT,
                 hints=("part-b.md",),
+            ),
+        ),
+    )
+
+
+def valid_planner_proposal() -> PlannerQuestionPlan:
+    return PlannerQuestionPlan(
+        requirements=(
+            PlannerAnswerRequirement(
+                requirement_id="R1",
+                label="Harbor Network formation",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R2",
+                label="Harbor Network closure",
+            ),
+        ),
+        facets=(
+            PlannerSearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGIN,
+                search_query="Harbor Network formation",
+                document_hints=("part-a.md",),
+            ),
+            PlannerSearchFacet(
+                facet_id="F2",
+                requirement_ids=("R2",),
+                role=FacetRole.ENDPOINT,
+                search_query="Harbor Network closure",
+                document_hints=("part-b.md",),
             ),
         ),
     )
@@ -234,9 +268,7 @@ def test_directional_relationship_predicates_classify_second_target_as_facet(
 
 
 def test_unrelated_predicate_does_not_turn_second_named_target_into_a_facet():
-    targets = extract_trusted_targets(
-        "What did Project Lumen report about Harbor Network?"
-    )
+    targets = extract_trusted_targets("What did Project Lumen report about Harbor Network?")
 
     assert [target.role for target in targets] == [
         EvidenceTargetRole.SUBJECT,
@@ -282,14 +314,8 @@ def test_relational_question_forms_are_routed_and_role_the_second_target_as_face
             "How did the manuscript describe the relationship between Alpha Network "
             "and Beta Council over time?"
         ),
-        (
-            "What is the relationship between Alpha Network "
-            "and Beta Council in Port Delta?"
-        ),
-        (
-            "What is the relationship between Alpha Network "
-            "and Beta Council in 1700?"
-        ),
+        ("What is the relationship between Alpha Network and Beta Council in Port Delta?"),
+        ("What is the relationship between Alpha Network and Beta Council in 1700?"),
         (
             "What is the relationship between Alpha Network and Beta Council "
             "given that the treaty failed?"
@@ -325,10 +351,7 @@ def test_ambiguous_relationship_syntax_uses_the_planner_instead_of_bad_local_ope
 
 
 def test_between_relationship_keeps_for_inside_a_named_operand():
-    question = (
-        "What was the relationship between Alpha Network "
-        "and Society for Public Memory?"
-    )
+    question = "What was the relationship between Alpha Network and Society for Public Memory?"
 
     assert route_question(question) == (RouteTrait.RELATIONSHIP,)
     assert requires_planning(question) is False
@@ -340,9 +363,7 @@ def test_between_relationship_keeps_for_inside_a_named_operand():
         "Context for Society for Public Memory",
         "Connection between Alpha Network and Society for Public Memory",
     ]
-    assert plan.facets[-1].search_query == (
-        "Alpha Network Society for Public Memory relationship"
-    )
+    assert plan.facets[-1].search_query == ("Alpha Network Society for Public Memory relationship")
 
 
 @pytest.mark.parametrize(
@@ -405,17 +426,13 @@ def test_bounded_between_relationship_decomposes_locally_with_its_context():
         question,
         "Project Lumen context",
         "Harbor Network context",
-        (
-            "Project Lumen Harbor Network relationship "
-            "as shaping civic exchange in Port Delta"
-        ),
+        ("Project Lumen Harbor Network relationship as shaping civic exchange in Port Delta"),
     ]
 
 
 def test_directional_between_relationship_decomposes_resolved_followup_locally():
     question = (
-        "How did the relationship between tobacco and labor "
-        "shape everyday exchange in Jamestown?"
+        "How did the relationship between tobacco and labor shape everyday exchange in Jamestown?"
     )
 
     assert route_question(question) == (RouteTrait.RELATIONSHIP,)
@@ -427,19 +444,13 @@ def test_directional_between_relationship_decomposes_resolved_followup_locally()
     assert [requirement.label for requirement in plan.requirements] == [
         "Context for tobacco",
         "Context for labor",
-        (
-            "Connection between tobacco and labor "
-            "shape everyday exchange in Jamestown"
-        ),
+        ("Connection between tobacco and labor shape everyday exchange in Jamestown"),
     ]
     assert [facet.search_query for facet in plan.facets] == [
         question,
         "tobacco context",
         "labor context",
-        (
-            "tobacco labor relationship "
-            "shape everyday exchange in Jamestown"
-        ),
+        ("tobacco labor relationship shape everyday exchange in Jamestown"),
     ]
 
 
@@ -465,10 +476,7 @@ def test_between_relationship_uses_planner_instead_of_truncating_long_context():
 
 
 def test_between_relationship_with_oversized_operand_still_routes_to_planner():
-    question = (
-        "What was the relationship between Alpha Network and "
-        f"{'Beta ' * 30}?"
-    )
+    question = f"What was the relationship between Alpha Network and {'Beta ' * 30}?"
 
     assert RouteTrait.RELATIONSHIP in route_question(question)
     assert requires_planning(question) is True
@@ -482,9 +490,7 @@ def test_long_original_question_is_preserved_while_added_facets_stay_bounded():
     assert len(question) > 240
     assert result.facets[0].facet_id == "F0"
     assert result.facets[0].search_query == question
-    assert all(
-        len(facet.search_query) <= 240 for facet in result.facets[1:]
-    )
+    assert all(len(facet.search_query) <= 240 for facet in result.facets[1:])
 
 
 def test_valid_plan_gets_trusted_traits_targets_and_unchanged_f0():
@@ -510,6 +516,93 @@ def test_valid_plan_gets_trusted_traits_targets_and_unchanged_f0():
             absence_checkable=True,
         ),
     )
+
+
+def test_provider_proposal_materializes_application_owned_plan_fields():
+    question = "Trace the Harbor Network from formation to closure."
+
+    result = build_question_plan(
+        question,
+        valid_planner_proposal(),
+        CATALOG,
+    )
+
+    assert result.planner_used is True
+    assert result.fallback_reason is None
+    assert result.traits == (RouteTrait.BROAD_SYNTHESIS,)
+    assert [requirement.order for requirement in result.requirements] == [0, 1]
+    assert all(requirement.required for requirement in result.requirements)
+    assert result.facets[0].facet_id == "F0"
+    assert result.targets == (
+        EvidenceTarget(
+            target_id="T1",
+            query_surface_span="Harbor Network",
+            role=EvidenceTargetRole.SUBJECT,
+            absence_checkable=True,
+        ),
+    )
+
+
+@pytest.mark.parametrize("by_alias", [False, True])
+def test_provider_proposal_mapping_round_trip_is_recognized(by_alias):
+    result = build_question_plan(
+        "Trace the Harbor Network from formation to closure.",
+        valid_planner_proposal().model_dump(by_alias=by_alias),
+        CATALOG,
+    )
+
+    assert result.planner_used is True
+    assert result.fallback_reason is None
+
+
+def test_shape_valid_but_semantically_invalid_proposal_falls_back_locally():
+    proposal = valid_planner_proposal().model_copy(
+        update={
+            "facets": (
+                PlannerSearchFacet(
+                    facet_id="F1",
+                    requirement_ids=("R1",),
+                    role=FacetRole.ORIGIN,
+                    search_query="Harbor Network formation",
+                ),
+            ),
+        }
+    )
+
+    diagnostics = {}
+    result = build_question_plan(
+        "Trace the Harbor Network from formation to closure.",
+        proposal,
+        CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert result.fallback_reason == "invalid_planner_output"
+    assert result.facets[0].facet_id == "F0"
+    assert diagnostics == {"planner_validation_code": "missing_requirement_mapping"}
+
+
+def test_structurally_invalid_proposal_records_only_normalized_code():
+    proposal = valid_planner_proposal().model_copy(
+        update={
+            "facets": (
+                valid_planner_proposal().facets[0],
+                valid_planner_proposal().facets[0],
+            ),
+        }
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        "Trace the Harbor Network from formation to closure.",
+        proposal,
+        CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.fallback_reason == "invalid_planner_output"
+    assert diagnostics == {"planner_validation_code": "plan_structure_invalid"}
 
 
 def test_planner_cannot_promote_a_focused_question_to_a_sensitive_route():
@@ -867,14 +960,79 @@ def test_invalid_planner_output_falls_back_once_without_retry(monkeypatch):
     assert result.facets[0].facet_id == "F0"
 
 
-def test_question_plan_schema_is_native_pydantic_and_forbids_extra_fields():
+def test_planner_proposal_schema_exposes_only_model_owned_fields():
+    schema = query_planning.planner_question_plan_json_schema()
+
+    assert schema["properties"]["schema"]["const"] == ("archivist.planner_question_plan/1")
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == {
+        "schema",
+        "requirements",
+        "facets",
+        "premises",
+    }
+    assert schema["properties"]["requirements"]["maxItems"] == 8
+    assert schema["properties"]["facets"]["maxItems"] == 7
+    facet_schema = schema["$defs"]["PlannerSearchFacet"]
+    assert facet_schema["properties"]["search_query"]["maxLength"] == 240
+    assert facet_schema["properties"]["document_hints"]["items"]["maxLength"] == 300
+    assert facet_schema["properties"]["requirement_ids"]["items"]["pattern"] == (
+        "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+    )
+
+    with pytest.raises(ValidationError):
+        PlannerQuestionPlan(
+            requirements=valid_planner_proposal().requirements,
+            facets=valid_planner_proposal().facets,
+            manuscript_answer="not a planning field",
+        )
+    with pytest.raises(ValidationError):
+        PlannerQuestionPlan(
+            requirements=tuple(
+                PlannerAnswerRequirement(
+                    requirement_id=f"R{index}",
+                    label=f"Requirement {index}",
+                )
+                for index in range(1, 10)
+            ),
+            facets=valid_planner_proposal().facets,
+        )
+
+
+def test_planner_proposal_preserves_multi_part_contract_capacity():
+    requirements = tuple(
+        PlannerAnswerRequirement(
+            requirement_id=f"R{index}",
+            label=f"Requested part {index}",
+        )
+        for index in range(1, 6)
+    )
+    facets = tuple(
+        PlannerSearchFacet(
+            facet_id=f"F{index}",
+            requirement_ids=(f"R{index}",),
+            role=FacetRole.BROADER_RELATED,
+            search_query=f"Requested part {index}",
+        )
+        for index in range(1, 6)
+    )
+
+    proposal = PlannerQuestionPlan(
+        requirements=requirements,
+        facets=facets,
+    )
+
+    assert len(proposal.requirements) == 5
+    assert len(proposal.facets) == 5
+
+
+def test_finalized_question_plan_schema_remains_distinct_from_provider_proposal():
     schema = query_planning.question_plan_json_schema()
 
     assert schema["properties"]["schema"]["const"] == "archivist.question_plan/1"
-    assert schema["additionalProperties"] is False
-
-    with pytest.raises(ValidationError):
-        QuestionPlan(
-            requirements=(requirement(),),
-            manuscript_answer="not a planning field",
-        )
+    assert {
+        "traits",
+        "targets",
+        "planner_used",
+        "fallback_reason",
+    } <= set(schema["properties"])

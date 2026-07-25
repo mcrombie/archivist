@@ -586,9 +586,7 @@ def test_locality_validation_does_not_guess_semantics_from_safe_punctuation(
                 GapReason.NONE,
             ),
         ),
-        answer_units=(
-            _unit("U1", ("R1",), text, source_numbers),
-        ),
+        answer_units=(_unit("U1", ("R1",), text, source_numbers),),
     )
 
     validated = validate_evidence_coverage(
@@ -601,9 +599,9 @@ def test_locality_validation_does_not_guess_semantics_from_safe_punctuation(
 
 
 def test_answer_unit_schema_explicitly_requires_one_independently_checkable_claim():
-    description = EvidenceCoverageAnswer.model_json_schema()["$defs"]["AnswerUnit"][
-        "properties"
-    ]["text"]["description"]
+    description = EvidenceCoverageAnswer.model_json_schema()["$defs"]["AnswerUnit"]["properties"][
+        "text"
+    ]["description"]
 
     assert "one independently checkable factual claim" in description
     assert "one terminal citation group" in description
@@ -906,6 +904,277 @@ def test_process_normalizes_only_order_and_redundant_derived_mappings():
         "P1",
         "P2",
     )
+
+
+def test_process_normalizes_gap_reason_from_unchanged_partial_status():
+    unit = _unit(
+        "U1",
+        ("R1",),
+        "The bounded synthetic material supports part of the request [Source 1].",
+        (1,),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.PARTIAL,
+                ("U1",),
+                (1,),
+                GapReason.NO_DIRECT_SUPPORT,
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert unit.text in result.answer
+    assert result.diagnostics.repair_codes == (CoverageValidationErrorCode.STATUS_GAP_MISMATCH,)
+    assert result.diagnostics.coverage[0].status is RequirementStatus.PARTIAL
+    assert result.diagnostics.coverage[0].gap_reason is GapReason.PARTIAL_SUPPORT
+    assert result.diagnostics.coverage[0].unit_ids == ("U1",)
+    assert result.diagnostics.coverage[0].source_numbers == (1,)
+
+
+def test_gap_normalization_does_not_supply_missing_units_or_sources():
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.PARTIAL,
+                (),
+                (),
+                GapReason.NO_DIRECT_SUPPORT,
+            ),
+        ),
+        answer_units=(),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.diagnostics.error_code is CoverageValidationErrorCode.STATUS_UNIT_MISMATCH
+    assert result.diagnostics.repair_codes == (CoverageValidationErrorCode.STATUS_GAP_MISMATCH,)
+
+
+def test_gap_normalization_never_admits_an_unsupported_factual_unit():
+    unit = _unit(
+        "U1",
+        ("R1",),
+        "A factual unit remains forbidden for unsupported coverage [Source 1].",
+        (1,),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.UNSUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert (
+        result.diagnostics.error_code
+        is CoverageValidationErrorCode.UNSUPPORTED_REQUIREMENT_HAS_UNIT
+    )
+    assert result.diagnostics.repair_codes == (CoverageValidationErrorCode.STATUS_GAP_MISMATCH,)
+    assert unit.text not in result.answer
+
+
+def test_process_derives_contradicted_premise_sources_from_its_correction_unit():
+    correction = _unit(
+        "U1",
+        ("R1",),
+        "The synthetic premise began earlier [Source 1].",
+        (1,),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(
+            PremiseDecision(
+                premise_id="P1",
+                status=PremiseStatus.CONTRADICTED,
+                source_numbers=(1, 2),
+                correction_unit_id="U1",
+            ),
+        ),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (2,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(correction,),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        premise_ids=("P1",),
+        source_count=2,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.answer == correction.text
+    assert result.diagnostics.repair_codes == (
+        CoverageValidationErrorCode.SOURCE_MAPPING_MISMATCH,
+        CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH,
+    )
+    assert result.diagnostics.premise_decisions[0].source_numbers == (1,)
+    assert result.diagnostics.coverage[0].source_numbers == (1,)
+
+
+@pytest.mark.parametrize(
+    ("decision_update", "unit_update", "error_code"),
+    [
+        (
+            {"source_numbers": ()},
+            {},
+            CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH,
+        ),
+        (
+            {"source_numbers": (2,)},
+            {},
+            CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID,
+        ),
+        (
+            {"source_numbers": (1, 1)},
+            {},
+            CoverageValidationErrorCode.DUPLICATE_SOURCE_NUMBER,
+        ),
+        (
+            {"source_numbers": (3,)},
+            {},
+            CoverageValidationErrorCode.SOURCE_NUMBER_OUT_OF_RANGE,
+        ),
+        (
+            {},
+            {"role": AnswerUnitRole.EVENT},
+            CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID,
+        ),
+    ],
+)
+def test_premise_source_normalization_never_repairs_malformed_or_semantic_fields(
+    decision_update,
+    unit_update,
+    error_code,
+):
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(
+            PremiseDecision(
+                premise_id="P1",
+                status=PremiseStatus.CONTRADICTED,
+                source_numbers=(2,),
+                correction_unit_id="U1",
+            ).model_copy(update=decision_update),
+        ),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(
+            _unit(
+                "U1",
+                ("R1",),
+                "The synthetic premise began earlier [Source 1].",
+                (1,),
+                role=AnswerUnitRole.PREMISE_CORRECTION,
+            ).model_copy(update=unit_update),
+        ),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        premise_ids=("P1",),
+        source_count=2,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.diagnostics.error_code is error_code
+    assert (
+        CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH not in result.diagnostics.repair_codes
+    )
+
+
+def test_premise_source_normalization_preserves_an_already_valid_subset():
+    correction = _unit(
+        "U1",
+        ("R1",),
+        "The synthetic premise began earlier [Source 1, Source 2].",
+        (1, 2),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(
+            PremiseDecision(
+                premise_id="P1",
+                status=PremiseStatus.CONTRADICTED,
+                source_numbers=(1,),
+                correction_unit_id="U1",
+            ),
+        ),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1, 2),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(correction,),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        premise_ids=("P1",),
+        source_count=2,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert (
+        CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH not in result.diagnostics.repair_codes
+    )
+    assert result.diagnostics.premise_decisions[0].source_numbers == (1,)
 
 
 def test_process_never_repairs_an_unsupported_requirement_with_a_factual_unit():

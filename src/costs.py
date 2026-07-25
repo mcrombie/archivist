@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from query_planning import safe_planner_validation_code
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_USAGE_DB = BASE_DIR / "runtime" / "usage.sqlite3"
@@ -24,7 +26,8 @@ CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
 TOKENS_PER_MILLION = Decimal("1000000")
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
-PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
+PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
+HISTORICAL_PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
 ANSWER_RUN_TIMING_KEYS = frozenset(
     {
         "preflight",
@@ -53,7 +56,7 @@ ANSWER_RUN_COHORT_KEYS = frozenset(
         "generator_verbosity",
     }
 )
-ANSWER_RUN_PLANNER_KEYS = frozenset(
+ANSWER_RUN_PLANNER_V1_KEYS = frozenset(
     {
         "schema",
         "status",
@@ -62,11 +65,10 @@ ANSWER_RUN_PLANNER_KEYS = frozenset(
         "exception_code",
     }
 )
-HISTORICAL_UNKNOWN_COHORT = {
-    key: "unknown" for key in ANSWER_RUN_COHORT_KEYS
-}
+ANSWER_RUN_PLANNER_KEYS = ANSWER_RUN_PLANNER_V1_KEYS | {"planner_validation_code"}
+HISTORICAL_UNKNOWN_COHORT = {key: "unknown" for key in ANSWER_RUN_COHORT_KEYS}
 HISTORICAL_UNKNOWN_PLANNER = {
-    "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
+    "schema": HISTORICAL_PLANNER_CALL_DIAGNOSTICS_SCHEMA,
     "status": "unknown",
     "failure_code": None,
     "exception_class": None,
@@ -122,27 +124,13 @@ class ModelPricing:
 
 MODEL_PRICING: dict[str, ModelPricing] = {
     "gpt-5": ModelPricing(Decimal("1.25"), Decimal("0.125"), Decimal("10")),
-    "gpt-5-2025-08-07": ModelPricing(
-        Decimal("1.25"), Decimal("0.125"), Decimal("10")
-    ),
-    "gpt-5.6": ModelPricing(
-        Decimal("5"), Decimal("0.50"), Decimal("30"), Decimal("1.25")
-    ),
-    "gpt-5.6-sol": ModelPricing(
-        Decimal("5"), Decimal("0.50"), Decimal("30"), Decimal("1.25")
-    ),
-    "gpt-5.6-terra": ModelPricing(
-        Decimal("2.50"), Decimal("0.25"), Decimal("15"), Decimal("1.25")
-    ),
-    "gpt-5.6-luna": ModelPricing(
-        Decimal("1"), Decimal("0.10"), Decimal("6"), Decimal("1.25")
-    ),
-    "text-embedding-3-small": ModelPricing(
-        Decimal("0.02"), Decimal("0.02"), Decimal("0")
-    ),
-    "text-embedding-3-large": ModelPricing(
-        Decimal("0.13"), Decimal("0.13"), Decimal("0")
-    ),
+    "gpt-5-2025-08-07": ModelPricing(Decimal("1.25"), Decimal("0.125"), Decimal("10")),
+    "gpt-5.6": ModelPricing(Decimal("5"), Decimal("0.50"), Decimal("30"), Decimal("1.25")),
+    "gpt-5.6-sol": ModelPricing(Decimal("5"), Decimal("0.50"), Decimal("30"), Decimal("1.25")),
+    "gpt-5.6-terra": ModelPricing(Decimal("2.50"), Decimal("0.25"), Decimal("15"), Decimal("1.25")),
+    "gpt-5.6-luna": ModelPricing(Decimal("1"), Decimal("0.10"), Decimal("6"), Decimal("1.25")),
+    "text-embedding-3-small": ModelPricing(Decimal("0.02"), Decimal("0.02"), Decimal("0")),
+    "text-embedding-3-large": ModelPricing(Decimal("0.13"), Decimal("0.13"), Decimal("0")),
 }
 
 
@@ -170,9 +158,7 @@ class CostLimitExceeded(RuntimeError):
 
     def __init__(self, budget: Mapping[str, object]) -> None:
         self.budget = dict(budget)
-        super().__init__(
-            "The local monthly OpenAI cost limit has been reached."
-        )
+        super().__init__("The local monthly OpenAI cost limit has been reached.")
 
 
 _usage_context: ContextVar[UsageContext] = ContextVar(
@@ -201,15 +187,9 @@ def usage_scope(
             conversation_id if conversation_id is not None else previous.conversation_id
         ),
         turn_id=turn_id if turn_id is not None else previous.turn_id,
-        enforce_budget=(
-            previous.enforce_budget
-            if enforce_budget is None
-            else enforce_budget
-        ),
+        enforce_budget=(previous.enforce_budget if enforce_budget is None else enforce_budget),
         allow_over_budget=(
-            previous.allow_over_budget
-            if allow_over_budget is None
-            else allow_over_budget
+            previous.allow_over_budget if allow_over_budget is None else allow_over_budget
         ),
     )
     token = _usage_context.set(context)
@@ -379,10 +359,7 @@ def _diagnostic_code(value: object, *, nullable: bool = False) -> str | None:
 
 
 def safe_planner_exception_class(value: object) -> str | None:
-    if (
-        not isinstance(value, str)
-        or _EXCEPTION_CLASS_PATTERN.fullmatch(value) is None
-    ):
+    if not isinstance(value, str) or _EXCEPTION_CLASS_PATTERN.fullmatch(value) is None:
         return None
     return value
 
@@ -442,11 +419,19 @@ def _normalized_answer_run_diagnostics(
         cohort[key] = value
 
     raw_planner = diagnostics.get("planner")
-    if (
-        not isinstance(raw_planner, Mapping)
-        or set(raw_planner) != ANSWER_RUN_PLANNER_KEYS
-        or raw_planner.get("schema") != PLANNER_CALL_DIAGNOSTICS_SCHEMA
-    ):
+    if not isinstance(raw_planner, Mapping):
+        raise ValueError("answer-run diagnostics contain invalid planner fields")
+    planner_schema = raw_planner.get("schema")
+    planner_keys = set(raw_planner)
+    active_planner = (
+        planner_schema == PLANNER_CALL_DIAGNOSTICS_SCHEMA
+        and planner_keys == ANSWER_RUN_PLANNER_KEYS
+    )
+    historical_planner = (
+        planner_schema == HISTORICAL_PLANNER_CALL_DIAGNOSTICS_SCHEMA
+        and planner_keys == ANSWER_RUN_PLANNER_V1_KEYS
+    )
+    if not active_planner and not historical_planner:
         raise ValueError("answer-run diagnostics contain invalid planner fields")
     planner_status = _diagnostic_code(raw_planner.get("status"))
     if planner_status not in {"unknown", "not_called", "succeeded", "failed"}:
@@ -455,6 +440,17 @@ def _normalized_answer_run_diagnostics(
         raw_planner.get("failure_code"),
         nullable=True,
     )
+    planner_validation_code = (
+        safe_planner_validation_code(raw_planner.get("planner_validation_code"))
+        if active_planner
+        else None
+    )
+    if (
+        active_planner
+        and raw_planner.get("planner_validation_code") is not None
+        and planner_validation_code is None
+    ):
+        raise ValueError("answer-run diagnostics contain an invalid planner validation code")
     planner_tokens: dict[str, str | None] = {}
     for key, sanitizer in (
         ("exception_class", safe_planner_exception_class),
@@ -467,28 +463,33 @@ def _normalized_answer_run_diagnostics(
     if planner_status == "failed":
         if planner_failure_code is None:
             raise ValueError("failed planner diagnostics require a failure code")
+        if (
+            planner_failure_code == "invalid_planner_output"
+            and active_planner
+            and planner_validation_code is None
+        ):
+            raise ValueError("invalid planner output requires a planner validation code")
+        if planner_failure_code != "invalid_planner_output" and planner_validation_code is not None:
+            raise ValueError("planner validation codes require invalid planner output")
     elif (
         planner_failure_code is not None
+        or planner_validation_code is not None
         or planner_tokens["exception_class"] is not None
         or planner_tokens["exception_code"] is not None
     ):
         raise ValueError("non-failed planner diagnostics cannot contain failure metadata")
     planner = {
-        "schema": PLANNER_CALL_DIAGNOSTICS_SCHEMA,
+        "schema": planner_schema,
         "status": planner_status,
         "failure_code": planner_failure_code,
+        **({"planner_validation_code": planner_validation_code} if active_planner else {}),
         **planner_tokens,
     }
 
     repair_codes_value = diagnostics.get("repair_codes")
     if not isinstance(repair_codes_value, (list, tuple)):
         raise ValueError("answer-run repair codes must be a list")
-    repair_codes = tuple(
-        dict.fromkeys(
-            _diagnostic_code(code)
-            for code in repair_codes_value
-        )
-    )
+    repair_codes = tuple(dict.fromkeys(_diagnostic_code(code) for code in repair_codes_value))
     repair_applied = diagnostics.get("repair_applied")
     if not isinstance(repair_applied, bool) or repair_applied != bool(repair_codes):
         raise ValueError("answer-run repair metadata is inconsistent")
@@ -615,9 +616,7 @@ class UsageLedger:
         )
         diagnostic_columns = {
             str(row[1])
-            for row in connection.execute(
-                "PRAGMA table_info(answer_run_diagnostics)"
-            ).fetchall()
+            for row in connection.execute("PRAGMA table_info(answer_run_diagnostics)").fetchall()
         }
         if "cohort_json" not in diagnostic_columns:
             connection.execute(
@@ -929,9 +928,7 @@ class UsageLedger:
                 raise ValueError("monthly_budget_usd must be between 0.01 and 100000")
         if not 1 <= warning_threshold_percent <= 100:
             raise ValueError("warning_threshold_percent must be between 1 and 100")
-        budget_nano = (
-            None if monthly_budget_usd is None else _nano_from_usd(monthly_budget_usd)
-        )
+        budget_nano = None if monthly_budget_usd is None else _nano_from_usd(monthly_budget_usd)
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
@@ -985,14 +982,11 @@ class UsageLedger:
             )
         )
         warning_reached = bool(
-            percent_used is not None
-            and percent_used >= int(settings["warning_threshold_percent"])
+            percent_used is not None and percent_used >= int(settings["warning_threshold_percent"])
         )
         limit_reached = bool(percent_used is not None and percent_used >= 100)
         remaining = (
-            None
-            if budget_nano is None
-            else _usd_from_nano(max(0, int(budget_nano) - spent_nano))
+            None if budget_nano is None else _usd_from_nano(max(0, int(budget_nano) - spent_nano))
         )
         return {
             "monthly_budget_usd": budget,
@@ -1232,8 +1226,7 @@ def tracked_responses_parse(client: object, *, operation: str, **request: Any) -
                 logger.exception("Could not inspect completed OpenAI response usage")
 
     completed_usage_available = (
-        completed_response is not None
-        and extract_token_usage(completed_response) is not None
+        completed_response is not None and extract_token_usage(completed_response) is not None
     )
     if completed_usage_available:
         _track_without_breaking_response(

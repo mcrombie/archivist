@@ -45,6 +45,111 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-25] Qualified near-match answer failed on redundant status/gap bookkeeping
+Phase/Brief: Phase 1 evidence-planned-v5 focused paid smoke
+Symptom: G009 certified direct absence of the named event, admitted exactly two bounded related
+passages, and reached `qualified_near_match`, but the paid structured answer was discarded with
+`generation_contract_failed` and `status_gap_mismatch`. No answer units or citations were rendered
+even though retrieval and source bounding had succeeded.
+Cause: other and spec gap in the brief - requirement status and gap reason are specified as a
+closed one-to-one mapping, but the normalizer repairs other redundant mappings while leaving this
+derived field pair to fail closed. The failure artifact preserves the stable code but not the exact
+generated pair.
+Resolution and verification: repaired offline in `evidence-planned-v6` with
+`evidence-coverage-normalizer/3`. The normalizer derives only `gap_reason` from the unchanged
+requirement status, records `status_gap_mismatch` as a repair code, and then runs the full strict
+validator. Tests prove that it changes no unit, source, citation, or status, while missing units
+and unsupported factual units still fail closed. The complete offline suite passes with 403 tests
+and one skip. The separately authorized G009 confirmation then returned an `answered`,
+`qualified_near_match` result from exactly two bounded sources; normalization recorded
+`status_gap_mismatch`, strict validation passed, and all four emitted source references resolved.
+The confirmation cost an estimated `$0.07107566` with no retry.
+
+## [2026-07-25] Planner semantic fallback erased its actionable validation code
+Phase/Brief: Phase 1 evidence-planned-v5 focused paid smoke
+Symptom: G009's 339-output-token planner response parsed successfully and was then rejected by
+local semantic materialization. The artifact retained only `invalid_planner_output`; it cannot
+distinguish missing requirement mappings, query drift, unknown document hints, duplicate queries,
+or another local validation rule. G008 and G010 planner proposals succeeded.
+Cause: model error and spec gap in the brief - `build_question_plan` catches
+`PlanValidationError`, Pydantic `ValidationError`, and `ValueError` together and intentionally
+collapses them into one fallback reason, discarding the already text-free
+`PlanValidationError.code`.
+Resolution and verification: repaired offline in `evidence-planned-v6`. Planner diagnostics schema
+`archivist.planner_call_diagnostics/2` retains one finite allowlisted
+`planner_validation_code` beside the existing generic failure while preserving one-call/no-retry
+fallback. Semantic failures retain their local code; structural Pydantic/ValueError failures use
+`plan_structure_invalid`. Historical schema version 1 artifacts remain readable. Contract, ledger,
+trace, and privacy tests reject missing, unknown, and non-text-free values and never persist the
+proposal, exception prose, query, document hint, or manuscript text. The complete offline suite
+passes with 403 tests and one skip. The separately authorized G009 confirmation's planner
+succeeded, so the new failure code was not needed on that sample; its version-2 diagnostic was
+valid and text-free. The semantic-failure path remains covered synthetically rather than claimed
+from this successful live call.
+
+## [2026-07-25] Every paid query-planner result failed its contract
+Phase/Brief: Phase 1 evidence-planned-v4 directional ten-question evaluation
+Symptom: all eight planner-eligible questions made exactly one paid `query_planning` request, but
+none produced an accepted plan. Five failed SDK/Pydantic validation with safe exception class
+`ValidationError`; three parsed but were rejected as `invalid_planner_output`. All eight questions
+therefore used local fallback planning. The failed planner calls consumed 35,775 tokens,
+`$0.57508750`, and 56.2% of the run's total estimated cost. G004 and G006 then returned no answer,
+and G007 still collapsed its broad chronology into a narrow twentieth-century account.
+Cause: other and spec gap in the brief — the planner prompt, output schema, token ceiling, and
+post-parse plan validator were tested synthetically but not demonstrated to agree on a live model
+response before planner-backed retrieval was treated as an optimization.
+Resolution and verification: repaired offline in the new `evidence-planned-v5` cohort. Ledger
+inspection established that G004, G006, G008, and G010 each exhausted exactly 3,000 planner output
+tokens; G003 was the lone non-truncation SDK/Pydantic failure. The provider now returns a compact
+shape-only `archivist.planner_question_plan/1` proposal, while the application supplies route
+traits, trusted targets, requirement order, `F0`, status, and cross-field validation. The ceiling
+is 4,000 tokens, the full eight-requirement/seven-added-facet capacity remains available, and
+one-call/no-retry behavior is unchanged. Synthetic parse/materialization/fallback and strict
+OpenAI-schema tests pass. A separately budgeted live planner smoke is still required before the
+ten-question rerun; the frozen questions and rubric were not changed.
+
+## [2026-07-25] Absence certification suppressed answerable and bounded-related evidence
+Phase/Brief: Phase 1 evidence-planned-v4 directional ten-question evaluation
+Symptom: G008 correctly abstained without substituting analogous chartered-company material, but
+the same gate falsely abstained on G002, over-abstained on G009, and returned
+`insufficient_evidence` on G004 and G006. G002's retrieval context included both expected Dulles
+document groups before the gate certified the combined name absent and suppressed all eight
+passages. G009 correctly found no literal COVID-19 mention but returned none of the bounded
+Epilogue treatment required by the rubric. Across the ten questions, only five answer generations
+were attempted and high-level expected behavior failed on five items.
+Cause: other and spec gap in the brief — exact direct-subject anchoring does not safely decompose
+compound named subjects, certified literal absence is allowed to erase qualified broader
+discussion, and multi-target fallback ambiguity is treated as a reason to withhold all context.
+Resolution and verification: repaired offline as `evidence-gate-v2` inside
+`evidence-planned-v5`. Exact compound personal names split only into exact trusted user surfaces;
+all-present and mixed-present subjects have separate admission rules; and compound subjects plus
+a facet remain conservatively indeterminate. A bounded related probe can be derived only from an
+exact trusted user-message tail and must co-occur with its broader term in one chunk or immediate
+neighbors. Generic positive, partial, true-absence, noncooccurrence, organization-name, and
+resolver-provenance regressions pass. Replaying the frozen v4 contexts without API calls routes
+G002/G004/G006 to direct answer, preserves G008's clean abstention, and routes G009 to a bounded
+qualified near match. A paid smoke remains required.
+
+## [2026-07-25] Premise-correction generation was discarded after source remapping
+Phase/Brief: Phase 1 evidence-planned-v4 directional ten-question evaluation
+Symptom: G010 retrieved eight passages spanning the 1898 material and earlier-origin evidence, paid
+for both planning and answer generation, then returned only `I could not produce a validated
+source-grounded answer from the retrieved passages.` Diagnostics record
+`generation_contract_failed`, repair code `source_mapping_mismatch`, and validation error
+`premise_correction_invalid`. The final answer corrected neither the false premise nor the book's
+origin framing and contained no citation.
+Cause: other and spec gap in the brief — the interaction among anchor promotion, post-promotion
+source numbering, premise-correction bookkeeping, and the structured generation validator was not
+covered by an end-to-end contract fixture before the paid run.
+Resolution and verification: repaired offline as `evidence-coverage-normalizer/2` inside
+`evidence-planned-v5`. A contradicted premise's redundant source mapping is contracted to its
+designated leading correction unit only when the original mapping is a nonempty strict superset
+and both source sets are unique and in range. Empty, disjoint, duplicate, out-of-range,
+wrong-role, and already-valid subset cases remain unchanged or fail closed. A corpus-agnostic
+end-to-end fixture promotes an anchor to Source 1, remaps the prior passage to Source 2, passes all
+numbered sources to generation, and renders the leading cited correction. A focused paid
+premise-correction smoke is still required.
+
 ## [2026-07-24] Paid v3 smoke exposed an uncovered resolved-relationship form
 Phase/Brief: Phase 1 post-optimization paid confirmation smoke
 Symptom: both neutral smoke turns produced valid, source-supported answers, but the follow-up still
