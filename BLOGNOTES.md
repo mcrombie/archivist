@@ -947,6 +947,52 @@ diagnosable. A safe local repair can correct a redundant enum field without laun
 content, while a closed diagnostic vocabulary can reveal which planner rule failed without
 storing private text.
 
+### 2026-07-25 - The unchanged ten-question v6 evaluation measured recovery and the next ceiling
+
+- Committed the frozen evidence-planned repair as
+  `8a0d6c9eaffaaaab2fb365f0b0a0a049b3dbc67d` before evaluation. The run began from that clean
+  commit; its ignored runner and private artifacts did not enter Git.
+- Ran the owner's unchanged ten questions and unchanged 58-claim practical rubric once, with
+  empty conversation history, neutral interpretation settings, no retries, and an isolated local
+  usage ledger. All ten items and all ten text-free retrieval traces completed.
+- The run cost an estimated `$0.92185165` and took 280.803 seconds across the ten questions:
+  - eight planner calls: 23,526 tokens and `$0.19846525`;
+  - nine answer generations: 64,201 tokens and `$0.72337950`;
+  - ten query embeddings: 345 tokens and `$0.00000690`;
+  - zero unpriced events.
+- Directional strict grading, using the same threshold precedents as the preserved v4 assessment,
+  found:
+  - 17/58 expected claims present, 41 absent, and none contradicted;
+  - 17/26 expected document groups represented in final context;
+  - 8/10 high-level behavior checks passing;
+  - 58 emitted source references, all well formed and resolvable;
+  - six accepted live planner proposals out of eight eligible questions.
+- The v4 comparison moved from 11 to 17 claims, 11 to 17 target groups, and five to eight
+  high-level behavior passes. Estimated total cost fell 9.9%, latency fell 19.2%, and planner cost
+  fell 65.5%. This is one directional sample per cohort, not a statistically reliable performance
+  claim.
+- Two successful answers still demonstrate why answer acceptance is not the same as adequacy:
+  - the broad institutional-lineage answer covered only 2/8 expected historical document groups;
+  - the broad war-and-central-power answer covered 2/5 groups and no complete strict claims.
+- The premise-correction item now returned a valid cited answer and rejected the proposed 1898
+  origin, but did not supply the manuscript's Jamestown origin frame. Mechanical validity improved
+  without complete realization of the requested correction.
+- Most importantly, the unchanged G009 passed the focused smoke and failed in the full cohort.
+  In the full run, a successful planner introduced a premise hypothesis that overrode the
+  mechanically certified absence route; the required Epilogue material was present, but strict
+  generation failed on `premise_source_mismatch`. The paired outcomes are concrete evidence of
+  residual model variance and a brittle precedence boundary, not a reason to rewrite the test.
+- The measured next targets are now narrow:
+  1. define premise-versus-absence precedence and retain bounded related evidence;
+  2. preserve requirement and era coverage through final source allocation under the existing
+     eight-source cap;
+  3. validate that a premise correction realizes its source-bounded origin requirement.
+
+Useful blog lesson: the unchanged evaluation did exactly what a good test should do. It showed a
+real recovery in useful behavior, prevented a successful smoke from becoming an overconfident
+conclusion, and replaced a vague desire for “better RAG” with three traceable engineering
+boundaries.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
@@ -1000,8 +1046,10 @@ storing private text.
 
 ## Open threads for later entries
 
-- Rerun the unchanged ten questions on the frozen v6 implementation as the next directional
-  cohort and compare it with the preserved v4 result.
+- Preserve the v6 result as the directional comparison point; do not change its frozen questions
+  or rubric in response to the observed failures.
+- Design the next focused repairs around premise/absence precedence, broad requirement survival,
+  and source-bounded premise-correction coverage.
 - Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
   retrieval and citation metrics require it.
 - Retrieval-only pilot results before any answer generation is graded.

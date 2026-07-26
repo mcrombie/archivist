@@ -45,6 +45,52 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-25] Premise planning bypassed certified absence on the unchanged G009
+Phase/Brief: Phase 1 evidence-planned-v6 directional ten-question evaluation
+Symptom: the focused v6 G009 confirmation returned a valid bounded near-match answer from two
+sources, but the same unchanged question later returned `generation_contract_failed` in the full
+cohort. The full-run planner succeeded, the target scanner again certified the named subject
+absent, and the required Epilogue group was present, but a planner-created premise hypothesis made
+`premise_evaluation_pending` take precedence. All eight sources entered generation as
+`direct_answer`; status/gap normalization succeeded; strict validation then rejected
+`premise_source_mismatch`.
+Cause: other and spec gap in the brief - the evidence-decision precedence does not define whether
+a model-proposed premise may override mechanically certified subject absence, and a declarative
+question about an absent subject can be reclassified as premise-sensitive nondeterministically.
+Resolution and verification: pending. Preserve both paid artifacts as the variance pair. The next
+repair must make premise ownership and absence precedence corpus-agnostic, retain the bounded
+near-match evidence, and keep source-mapping failures visible rather than broadening the
+normalizer. Repeat only the affected fixed subset before another full cohort.
+
+## [2026-07-25] Accepted broad plans did not produce source-bounded historical coverage
+Phase/Brief: Phase 1 evidence-planned-v6 directional ten-question evaluation
+Symptom: G006 and G007 both accepted live planner proposals and returned valid cited answers, but
+covered only 2/8 and 2/5 expected document groups and realized 1/8 and 0/7 strict claims. G006
+clustered six of eight sources in Chapters 2-4 and jumped to one modern chapter; G007 again
+collapsed largely into the twentieth century.
+Cause: spec gap in the brief - plan validity guarantees that requirements map to facets, while
+lane selection and the eight-source cap do not guarantee that a live facet yields a source or that
+one surviving source represents each required era. A syntactically accepted plan can therefore
+lose most of its intended historical span during retrieval and final allocation.
+Resolution and verification: pending. Use the preserved text-free traces to measure per-facet
+yield, requirement survival, document-era breadth, and which anchors the source cap displaced.
+Optimize allocation within the existing eight-source contract before considering a larger
+context, and rerun the unchanged broad items without changing their claims or target groups.
+
+## [2026-07-25] A valid premise correction still omitted the manuscript's origin frame
+Phase/Brief: Phase 1 evidence-planned-v6 directional ten-question evaluation
+Symptom: G010 changed from a rejected generation in v4 to a valid nine-citation answer in v6. It
+explicitly rejected 1898 as the origin and covered both expected document groups, but used a later
+Federalist counterpoint instead of stating the manuscript's Jamestown origin. It realized only
+1/4 strict expected claims and retained the listed failure mode for correcting a premise without
+stating where the book places the origin.
+Cause: spec gap in the brief - premise validation checks that a leading cited correction exists,
+not that the correction realizes the independently requested source-bounded origin requirement.
+Mechanical premise validity and answer adequacy therefore diverge.
+Resolution and verification: pending. Keep premise correction and source-bounded requirement
+coverage as separate validated obligations. A future repair must require the generated correction
+to cover the retrieved origin frame without hard-coding a place, chapter, or expected answer.
+
 ## [2026-07-25] Qualified near-match answer failed on redundant status/gap bookkeeping
 Phase/Brief: Phase 1 evidence-planned-v5 focused paid smoke
 Symptom: G009 certified direct absence of the named event, admitted exactly two bounded related

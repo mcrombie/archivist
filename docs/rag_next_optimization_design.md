@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v6 focused contract repairs implemented, verified offline, and confirmed
-on G009 on 2026-07-25; the unchanged ten-question rerun is next
+Status: evidence-planned-v6 implemented and measured on the unchanged ten-question set on
+2026-07-25; operational recovery confirmed, with three measured quality gaps remaining
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -126,6 +126,38 @@ references resolved. The confirmation therefore cleared the final micro-gate. Th
 is now frozen for the owner's unchanged ten-question rerun, with no UI work, broad audit, or new
 optimization target in between.
 
+The clean v6 directional cohort then ran all ten unchanged questions at commit
+`8a0d6c9eaffaaaab2fb365f0b0a0a049b3dbc67d`. Every item completed once with no retry, ten validated
+retrieval traces, and zero unpriced usage events. It cost an estimated `$0.92185165` and took
+280.803 seconds across the questions. Against the same frozen practical rubric and the same
+grading thresholds used for v4, it observed:
+
+- 17/58 expected claims present, 41 absent, and none contradicted;
+- 17/26 expected document groups represented in final context;
+- 8/10 high-level behaviors passing;
+- 58 emitted source references, all well formed and resolvable;
+- six accepted planner proposals out of eight eligible questions, versus none in v4.
+
+Relative to the preserved v4 directional sample, this is six more claims, six more document
+groups, and three more high-level behavior passes while estimated cost fell 9.9%, total latency
+fell 19.2%, and planner cost fell 65.5%. It remains a single nondeterministic comparison rather
+than a formal delta. It also remains below the earlier clean-hybrid sample's 19/58 strict claims
+while costing and taking substantially more.
+
+The evaluation isolated the next three quality boundaries:
+
+- the unchanged G009 passed its focused confirmation but failed in the full cohort when a live
+  premise hypothesis overrode certified absence, admitted all eight sources, and ended in
+  `premise_source_mismatch`;
+- successful broad plans did not survive source allocation: G006 covered 2/8 expected document
+  groups and G007 covered 2/5;
+- G010 became a mechanically valid premise correction but used a later earlier-than-1898 frame
+  instead of realizing the manuscript's requested origin frame.
+
+These are measurement results, not licenses to alter the questions or rubric. The next changes
+must target premise/absence precedence, requirement survival through source allocation, and
+source-bounded correction coverage separately.
+
 The implementation follows the bounded-call design in this document:
 
 - a follow-up resolver runs only when conversation history exists;
@@ -156,8 +188,8 @@ provider-schema conversion, local inspection of the current private index, and r
 preserved v4 retrieval contexts. Earlier paid smokes verified narrower source-retention,
 citation-structure, and relationship-routing behaviors, while the clean ten-question evaluation
 exposed the three v4 failures repaired here. The v5 smoke passed G008 and G010 and isolated the
-remaining G009 contract boundary; the v6 confirmation then passed that branch. The unchanged
-ten-question run is next.
+remaining G009 contract boundary; the v6 confirmation passed that branch, and the subsequent
+unchanged ten-question cohort produced the directional results recorded above.
 
 ## Decision
 
