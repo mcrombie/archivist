@@ -118,7 +118,19 @@ The manuscript is a commercial product sold on Amazon. Three rules, all hard:
 - **Committed artifacts reference the corpus by identifier and hash, never by content.** Chunk IDs, paragraph ranges, document names, and SHA-256 digests are safe and are what run identity and the gold set are built from.
 - **Gold-set answers are stated as claim lists in the author's own words**, not as quoted passages. A gold set full of verbatim excerpts is a partial reproduction of the book with extra steps.
 
-For any public deployment: short cited excerpts only, never whole chunks; rate limiting; and a representative corpus subset rather than the full manuscript. The endpoints that return full chunk text or stream source files are not deployable as they stand. This is a deployment gate, specified in Brief 7 — not something to solve incidentally in an earlier brief.
+For any public deployment: the complete retrieval-eligible corpus may remain private on the server,
+but responses expose short cited excerpts only, never whole chunks; arbitrary source browsing and
+source-file streaming are disabled; and server-side rate, concurrency, abuse, and spend limits are
+required. The public/development exposure profile is selected at server startup and may never be a
+client-controlled option. The endpoints that return full chunk text or stream source files are not
+deployable as they stand. This is a deployment gate, specified in Brief 8 - not something to solve
+incidentally in an earlier brief.
+
+Reader-facing page citations are edition-specific presentation metadata. Every page or location
+must name its edition profile (for example, `Typeset PDF (July 6, 2026), pp. 33-35`), and a new
+paperback, hardcover, or ebook profile must bind to its own source hash. Locator changes must not
+alter retrieval, source ordering, the `[Source N]` contract, or evaluation results. See
+`docs/public_demo_design.md`.
 
 ## Defect log
 

@@ -8,6 +8,7 @@ import pytest
 import rag_pipeline
 from answer_coverage import (
     EVIDENCE_COVERAGE_SCHEMA,
+    INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
     AnswerUnit,
     AnswerUnitRole,
     EvidenceDimension,
@@ -16,12 +17,15 @@ from answer_coverage import (
     EvidenceObligationCoverage,
     EvidenceObligationScope,
     GapReason,
+    InterpretiveEvidenceCoverageAnswer,
+    InterpretiveUnit,
     ObligationLink,
     PremiseDecision,
     PremiseStatus,
     RequirementCoverage,
     RequirementStatus,
 )
+from perspectives import AnswerVoice, HistoriographicalLens, Worldview
 from query_planning import (
     AnswerRequirement,
     FacetRole,
@@ -178,6 +182,34 @@ def supported_answer(
                 zip(requirement_ids, unit_ids, strict=True),
                 start=1,
             )
+        ),
+    )
+
+
+def supported_interpretive_answer(
+    requirement_ids: tuple[str, ...],
+    *,
+    source_number: int = 1,
+) -> InterpretiveEvidenceCoverageAnswer:
+    factual = supported_answer(
+        requirement_ids,
+        source_number=source_number,
+    )
+    return InterpretiveEvidenceCoverageAnswer(
+        schema=INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=factual.premise_decisions,
+        coverage=factual.coverage,
+        obligation_coverage=factual.obligation_coverage,
+        answer_units=factual.answer_units,
+        interpretive_units=(
+            InterpretiveUnit(
+                unit_id="I1",
+                text=(
+                    "This evidence reveals the historical stakes of that pattern "
+                    f"[Source {source_number}]."
+                ),
+                source_numbers=(source_number,),
+            ),
         ),
     )
 
@@ -536,6 +568,87 @@ def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch)
         "pipeline_total",
     }.issubset(run_diagnostics["stage_timings_ms"])
     assert all(value >= 0 for value in run_diagnostics["stage_timings_ms"].values())
+
+
+@pytest.mark.parametrize(
+    ("lens", "worldview"),
+    [
+        (HistoriographicalLens.TRAGIC, Worldview.NONE),
+        (HistoriographicalLens.EVIDENCE_FIRST, Worldview.PIOUS),
+    ],
+)
+def test_lens_or_worldview_requires_a_separate_interpretive_paragraph(
+    monkeypatch,
+    lens,
+    worldview,
+):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    calls: list[dict] = []
+
+    def fake_parse(_client, *, operation, **request):
+        calls.append({"operation": operation, **request})
+        return SimpleNamespace(
+            output_parsed=supported_interpretive_answer(("R1",)),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        historiographical_lens=lens,
+        worldview=worldview,
+    )
+
+    assert result.status == "answered"
+    assert result.answer == (
+        "Synthetic supported point 1 [Source 1].\n\n"
+        "This evidence reveals the historical stakes of that pattern [Source 1]."
+    )
+    assert calls[0]["text_format"] is InterpretiveEvidenceCoverageAnswer
+    assert rag_pipeline.INTERPRETIVE_STRUCTURED_OUTPUT_RULES in calls[0]["input"]
+
+
+def test_voice_alone_keeps_the_ordinary_compact_answer_contract(monkeypatch):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    calls: list[dict] = []
+
+    def fake_parse(_client, *, operation, **request):
+        calls.append({"operation": operation, **request})
+        return SimpleNamespace(
+            output_parsed=supported_answer(("R1",)),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        voice=AnswerVoice.ROMANTIC,
+    )
+
+    assert result.status == "answered"
+    assert result.answer == "Synthetic supported point 1 [Source 1]."
+    assert calls[0]["text_format"] is EvidenceCoverageAnswer
+    assert rag_pipeline.INTERPRETIVE_STRUCTURED_OUTPUT_RULES not in calls[0]["input"]
 
 
 def test_homepage_relationship_question_decomposes_locally_and_reaches_answer(

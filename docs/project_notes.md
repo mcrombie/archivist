@@ -10,8 +10,16 @@ and evaluation boundary: `01_Front Matter.md`, `02_Table of Contents.md`,
 `03_Acknowledgments.md`, and `04_Note on Illustrations.md` are excluded, along with documents
 matched by the `32_Bibliography.md` sentinel under substring matching. This leaves 481
 retrieval-eligible chunks and seven skipped documents; the Epilogue, Afterword, and appendices
-remain in scope. A matching 594-page July 6 PDF was used only for secondary visual and pagination
-checks because its text is not identical to the newer DOCX.
+remain in scope.
+
+The supplied 594-page typeset PDF is now the first edition-locator authority. Its SHA-256 is
+`89d68cdc186432d4d4804fbaff6aac0deb599d351dd016fe250b25f2a4771b3f`. A read-only feasibility
+pilot found at least two exact 12-token PDF anchors for every one of the 481 eligible chunks:
+39 preliminary spans covered one physical page, 360 covered two, 76 covered three, and 6 covered
+four. The PDF uses Roman-numbered front matter (the Introduction begins on `xi`) and restarts
+Arabic numbering at the Prologue; public citations must therefore say
+`Typeset PDF (July 6, 2026), p./pp. ...`, never present a bare page number. This mapping is
+presentation metadata over the current DOCX corpus, not a claim that the two files are identical.
 
 At the initial July 6 activation, after explicit owner authorization, the 488 chunks then eligible
 under the earlier scope were embedded with
@@ -62,4 +70,26 @@ multi-turn transcript, contextual follow-up resolution, and selectable visual vi
 framing is exposed as three provisional, independent settings: Historiographical lens, Voice, and
 Worldview. Evidence-first + Scholarly + None remains the unchanged Neutral baseline. These answer
 settings affect generation only; visual vibes are presentation only. Neither may alter retrieval,
-source ordering, or citation rules.
+source ordering, or citation rules. A non-default voice changes prose style without guaranteeing
+more text. A non-Evidence-first lens or non-None worldview uses a separate structured-output
+contract that requires at least one additional cited interpretive paragraph after the ordinary
+source-grounded answer. Those interpretive units cannot satisfy factual coverage requirements or
+evidence obligations.
+
+## Public demo and edition locators
+
+The public demo will search the same complete 481-chunk substantive corpus as local development.
+The earlier representative-subset proposal is superseded. Manuscript protection moves to the
+response boundary: the full corpus and Chroma index remain private on the server, while public
+source cards expose edition-qualified locators and only brief, server-bounded quotations.
+
+Local development retains the current full-passage source display because it is useful for
+diagnosing retrieval and citation failures. The public/development distinction is a server startup
+profile and cannot be selected by the browser. Public mode also removes the local upload,
+embedding, source-browser, source-file, index, mutable-budget, and budget-override surfaces.
+
+Locator metadata is edition-specific and keyed by stable chunk ID. The first profile is
+`typeset_pdf_0706`; later paperback, hardcover, and ebook profiles can be added without rebuilding
+embeddings or changing retrieval. Ebook profiles may use locations or sections rather than pages.
+See `docs/public_demo_design.md` for the source DTO, preliminary excerpt budget, mapping acceptance
+criteria, and Cromblog integration gate.

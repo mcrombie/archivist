@@ -78,9 +78,19 @@ The existing `docs/evaluation.md` is not a baseline and is not amended. It repor
 
 **This is the brief the first blog post is written from.**
 
-**8. Public Demo Safety Gate** — the deployment brief, and the only one that may touch the web surface's data exposure. Short cited excerpts rather than whole chunks; rate limiting; a representative corpus subset rather than the full manuscript; removal or authentication of the endpoints that currently return full text.
+**8. Public Demo Safety Gate** — the deployment brief, and the only one that may touch the web
+surface's data exposure. The public service searches the same complete 481-chunk substantive
+corpus as development while keeping it private on the server. It returns edition-qualified
+locators and tightly bounded quotations rather than whole chunks; enforces rate, concurrency,
+abuse, and spend limits; and removes or authenticates local-only endpoints.
 
 ⚠ Two endpoints are not deployable as they stand: `GET /api/projects/{id}/sources` returns full chunk text with arbitrary offset and a limit of 50, and `GET /api/projects/{id}/source-file/{path}` streams the original uploaded file. Together they publish the book by pagination.
+
+The first locator profile is bound to the finalized 594-page July 6 typeset PDF and must label
+citations as `Typeset PDF (July 6, 2026)`. Roman front matter and the Arabic restart at the Prologue
+are part of the mapping contract. The mapping is presentation metadata keyed by chunk ID and must
+not alter retrieval, source order, `[Source N]` resolution, or evaluation results. See
+`docs/public_demo_design.md`.
 
 **Depends on Brief 7, not merely on Brief 5.** The faithfulness measurement does double duty here: an answer that paraphrases rather than reproduces is simultaneously a grounding property and a licensing one, and the excerpt policy should be set against a measured reproduction rate rather than a guess.
 
@@ -124,7 +134,7 @@ Excluded from Phase 1 to keep it finishable. Not rejected.
 | | Deferred | Why it's worth revisiting | Blocked on |
 |---|---|---|---|
 | 1 | **The generic multi-project stack** — upload, manifests, per-project collections, `importers.py` | The *importers* are corpus handling and worth keeping — the manuscript is docx with an existing index section. The *project management* is the generic tool and is what conflicts with the corpus-specific strategy. Splitting the two is the eventual cut. | The baseline. Deciding now costs a week and changes no measurement. |
-| 2 | **Page-number citation mapping** | The strongest possible citation for a reader of the published book | Final manuscript formatting; orthogonal to every Phase 1 metric |
+| 2 | **Additional edition locator profiles** | Paperback, hardcover, and ebook numbering can let readers use the edition they own | The typeset-PDF profile is active design work in Brief 8; other profiles wait for edition-specific pagination from the owner |
 | 3 | **Hybrid retrieval for Answer Mode** | Index Mode's exact-match path exists; Answer Mode has no lexical component at all | Brief 7 showing that semantic-only retrieval is what's failing |
 | 4 | **Learned re-ranking** | The heuristic pipeline is the known weak point | A baseline to beat, and enough labelled data — which the gold set at 40 items is not |
 | 5 | **Reader-facing persona on the public demo** | Book marketing; explicitly permitted by the settled decisions, on the demo only | Brief 8, and never on the evaluated path |

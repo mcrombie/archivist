@@ -26,9 +26,11 @@ from answer_coverage import (
     EvidenceCoverageResult,
     EvidenceObligationFocus,
     EvidenceObligationScope,
+    InterpretiveEvidenceCoverageAnswer,
     MAX_ANSWER_UNITS,
     PremiseSourceScope,
     process_evidence_coverage,
+    process_interpretive_evidence_coverage,
 )
 from costs import (
     CostLimitExceeded,
@@ -66,6 +68,7 @@ from perspectives import (
     HistoriographicalLens,
     Worldview,
     build_interpretive_prompt_block,
+    requires_interpretive_expansion,
 )
 from query_planning import (
     QUERY_PLANNER_INSTRUCTIONS,
@@ -121,6 +124,19 @@ CORPUS_INTEGRITY_FAILED_MESSAGE = (
     "The manuscript index could not be verified against its promoted corpus "
     "snapshot. Rebuild or restore the index before asking another question."
 )
+
+INTERPRETIVE_STRUCTURED_OUTPUT_RULES = """\
+Structured interpretive expansion:
+- Keep all requested factual coverage in answer_units under the ordinary evidence contract.
+- If any requested point is supported, return one to four interpretive_units. They render together
+  as one distinct final paragraph after the factual answer.
+- Each interpretive_unit must make exactly one source-grounded historical interpretation or
+  inference through the selected lens, worldview, or both, followed by exactly one terminal
+  citation group whose numbers exactly match source_numbers.
+- Interpretive units never satisfy requirements or evidence obligations, must not introduce
+  outside facts, and must synthesize rather than merely restate answer_units.
+- Leave interpretive_units empty only when every requested point is unsupported.
+"""
 
 _RELATED_PROBE_PATTERN = re.compile(
     r"^\s*broader\s*:\s*(?P<broader>[^;]{1,120})\s*;\s*"
@@ -1830,14 +1846,24 @@ def build_coverage_input(
         voice,
         worldview,
     )
+    interpretive_expansion = requires_interpretive_expansion(
+        historiographical_lens,
+        worldview,
+    )
     sections = [
         "Request contract:\n" + json.dumps(control, ensure_ascii=False, indent=2),
         "Numbered manuscript sources:\n" + build_context(final_chunks),
     ]
     if style:
         sections.append(
-            "Interpretive style (wording only; never alter coverage or sources):\n"
+            "Interpretive presentation (never alter factual coverage or sources):\n"
             + style
+            + (
+                "\n"
+                + INTERPRETIVE_STRUCTURED_OUTPUT_RULES
+                if interpretive_expansion
+                else ""
+            )
             + "\nDo not add an uncited invitation or follow-up question outside the schema."
         )
     return "\n\n".join(sections)
@@ -1865,6 +1891,7 @@ def _generation_trace(
     *,
     status: str,
     style_prompt_sha256: str | None = None,
+    response_format: type[EvidenceCoverageAnswer] = EvidenceCoverageAnswer,
 ) -> dict[str, Any]:
     contract = {
         "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
@@ -1873,7 +1900,7 @@ def _generation_trace(
         ).hexdigest(),
         "schema_sha256": hashlib.sha256(
             json.dumps(
-                EvidenceCoverageAnswer.model_json_schema(),
+                response_format.model_json_schema(),
                 sort_keys=True,
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -2126,6 +2153,20 @@ def run_evidence_planned_answer(
         voice,
         worldview,
     )
+    interpretive_expansion = requires_interpretive_expansion(
+        historiographical_lens,
+        worldview,
+    )
+    response_format = (
+        InterpretiveEvidenceCoverageAnswer
+        if interpretive_expansion
+        else EvidenceCoverageAnswer
+    )
+    coverage_processor = (
+        process_interpretive_evidence_coverage
+        if interpretive_expansion
+        else process_evidence_coverage
+    )
     style_prompt_sha256 = (
         hashlib.sha256(style_block.encode("utf-8")).hexdigest() if style_block else None
     )
@@ -2136,7 +2177,7 @@ def run_evidence_planned_answer(
             operation="answer_generation",
             instructions=EVIDENCE_COVERAGE_INSTRUCTIONS,
             input=coverage_input,
-            text_format=EvidenceCoverageAnswer,
+            text_format=response_format,
             max_output_tokens=MAX_COVERAGE_OUTPUT_TOKENS,
             **GENERATOR_SETTINGS.responses_create_kwargs(),
         )
@@ -2150,7 +2191,7 @@ def run_evidence_planned_answer(
     stage_timings_ms["answer_generation"] = _elapsed_ms(generation_started_ns)
 
     validation_started_ns = perf_counter_ns()
-    coverage = process_evidence_coverage(
+    coverage = coverage_processor(
         parsed,
         requirement_ids=requirement_ids,
         premise_ids=premise_ids,
@@ -2165,6 +2206,7 @@ def run_evidence_planned_answer(
         coverage,
         status=coverage.status.value,
         style_prompt_sha256=style_prompt_sha256,
+        response_format=response_format,
     )
     emit_retrieval_trace(planned.trace)
     return AnswerModeResult(

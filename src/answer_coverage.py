@@ -33,6 +33,7 @@ __all__ = [
     "EVIDENCE_COVERAGE_RENDERER_VERSION",
     "EVIDENCE_COVERAGE_SCHEMA",
     "GENERATION_CONTRACT_FAILED_MESSAGE",
+    "INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA",
     "MAX_ANSWER_UNITS",
     "NO_SOURCES_MESSAGE",
     "AnswerUnit",
@@ -53,6 +54,8 @@ __all__ = [
     "EvidenceCoverageAnswer",
     "EvidenceCoverageResult",
     "GapReason",
+    "InterpretiveEvidenceCoverageAnswer",
+    "InterpretiveUnit",
     "ObligationLink",
     "PremiseDecision",
     "PremiseSourceScope",
@@ -63,12 +66,16 @@ __all__ = [
     "coverage_diagnostic_summary",
     "parse_citation_numbers",
     "process_evidence_coverage",
+    "process_interpretive_evidence_coverage",
     "render_evidence_coverage",
     "validate_evidence_coverage",
 ]
 
 
 EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/3"
+INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = (
+    "archivist.interpretive_evidence_coverage/1"
+)
 EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/5"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
 EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/5"
@@ -79,8 +86,10 @@ MAX_SOURCES = 8
 MAX_ANSWER_UNITS = 32
 MAX_EVIDENCE_OBLIGATIONS = 32
 MAX_OBLIGATION_DIMENSIONS = 4
+MAX_INTERPRETIVE_UNITS = 4
 MAX_UNIT_TEXT_CHARACTERS = 2_000
 MAX_TOTAL_UNIT_TEXT_CHARACTERS = 12_000
+MAX_TOTAL_INTERPRETIVE_TEXT_CHARACTERS = 4_000
 MAX_REQUIREMENT_LABEL_CHARACTERS = 240
 
 CITATION_GRAMMAR = r"\[Source\s+\d+(?:\s*,\s*Source\s+\d+)*\]"
@@ -310,6 +319,7 @@ class CoverageValidationErrorCode(StrEnum):
     OBLIGATION_DIMENSION_CAPACITY_EXCEEDED = (
         "obligation_dimension_capacity_exceeded"
     )
+    MISSING_INTERPRETIVE_PARAGRAPH = "missing_interpretive_paragraph"
     TEXT_LIMIT_EXCEEDED = "text_limit_exceeded"
 
 
@@ -416,6 +426,53 @@ class EvidenceCoverageAnswer(_ContractModel):
     @property
     def schema(self) -> str:
         return self.schema_version
+
+
+class InterpretiveUnit(_ContractModel):
+    unit_id: Identifier
+    text: UnitText = Field(
+        description=(
+            "Exactly one complete sentence making one source-grounded historical "
+            "interpretation or inference, followed by exactly one terminal citation "
+            "group and its only ending punctuation. It must synthesize rather than "
+            "merely repeat an answer unit."
+        ),
+        json_schema_extra={"pattern": ATOMIC_CITATION_TEXT_PATTERN},
+    )
+    source_numbers: tuple[SourceNumber, ...] = Field(
+        min_length=1,
+        max_length=MAX_SOURCES,
+        description=(
+            "The exact sources in the terminal citation group; every listed source "
+            "must support the same interpretation or inference."
+        ),
+    )
+
+    @field_validator("text")
+    @classmethod
+    def reject_blank_or_padded_text(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError(
+                "interpretive unit text must be nonblank and have no outer whitespace"
+            )
+        return value
+
+
+class InterpretiveEvidenceCoverageAnswer(EvidenceCoverageAnswer):
+    """Evidence coverage plus one separately rendered interpretive paragraph.
+
+    ``interpretive_units`` is allowed to be empty at schema level so an entirely
+    unsupported answer can remain honest. Local validation requires at least one
+    unit whenever the factual coverage renders an answer.
+    """
+
+    schema_version: Literal["archivist.interpretive_evidence_coverage/1"] = (
+        Field(alias="schema")
+    )
+    interpretive_units: tuple[InterpretiveUnit, ...] = Field(
+        default=(),
+        max_length=MAX_INTERPRETIVE_UNITS,
+    )
 
 
 class PremiseSourceScope(_ContractModel):
@@ -1198,6 +1255,100 @@ def process_evidence_coverage(
     )
 
 
+def process_interpretive_evidence_coverage(
+    payload: InterpretiveEvidenceCoverageAnswer | Mapping[str, Any] | None,
+    *,
+    requirement_ids: Sequence[str],
+    premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
+    source_count: int,
+    requirement_labels: Mapping[str, str] | None = None,
+    refused: bool = False,
+) -> EvidenceCoverageResult:
+    """Validate factual coverage and append one mandatory interpretive paragraph.
+
+    The ordinary evidence-coverage validator remains the authority for requested
+    facts, premise handling, completeness, and citation mappings. Interpretive
+    units are validated separately and never satisfy a requirement or obligation.
+    """
+
+    try:
+        context = _validation_context(
+            requirement_ids,
+            premise_ids,
+            premise_source_scopes,
+            obligation_scopes,
+            source_count,
+        )
+    except CoverageContractError as error:
+        return _contract_failure_result(
+            context=None,
+            error_code=error.code,
+        )
+
+    if context.source_count == 0 or refused or payload is None:
+        return process_evidence_coverage(
+            None,
+            requirement_ids=context.requirement_ids,
+            premise_ids=context.premise_ids,
+            premise_source_scopes=context.premise_source_scopes,
+            obligation_scopes=context.obligation_scopes,
+            source_count=context.source_count,
+            requirement_labels=requirement_labels,
+            refused=refused,
+        )
+
+    try:
+        answer = _parse_interpretive_payload(payload)
+    except CoverageContractError as error:
+        return _contract_failure_result(
+            context=context,
+            error_code=error.code,
+        )
+
+    factual_answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=answer.premise_decisions,
+        coverage=answer.coverage,
+        obligation_coverage=answer.obligation_coverage,
+        answer_units=answer.answer_units,
+    )
+    factual_result = process_evidence_coverage(
+        factual_answer,
+        requirement_ids=context.requirement_ids,
+        premise_ids=context.premise_ids,
+        premise_source_scopes=context.premise_source_scopes,
+        obligation_scopes=context.obligation_scopes,
+        source_count=context.source_count,
+        requirement_labels=requirement_labels,
+    )
+    if factual_result.status is not CoverageOutcomeStatus.ANSWERED:
+        return factual_result
+
+    try:
+        _validate_interpretive_units(
+            answer.interpretive_units,
+            source_count=context.source_count,
+        )
+    except CoverageContractError as error:
+        return _contract_failure_result(
+            context=context,
+            error_code=error.code,
+            citation_locality_failure=error.citation_locality_failure,
+            repair_codes=factual_result.diagnostics.repair_codes,
+        )
+
+    interpretive_paragraph = " ".join(
+        unit.text for unit in answer.interpretive_units
+    )
+    return factual_result.model_copy(
+        update={
+            "answer": f"{factual_result.answer}\n\n{interpretive_paragraph}",
+        }
+    )
+
+
 def _validation_context(
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str],
@@ -1288,6 +1439,59 @@ def _parse_payload(
         return EvidenceCoverageAnswer.model_validate(payload)
     except ValidationError:
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
+
+
+def _parse_interpretive_payload(
+    payload: InterpretiveEvidenceCoverageAnswer | Mapping[str, Any],
+) -> InterpretiveEvidenceCoverageAnswer:
+    if isinstance(payload, InterpretiveEvidenceCoverageAnswer):
+        return payload
+    if not isinstance(payload, Mapping):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD)
+    try:
+        return InterpretiveEvidenceCoverageAnswer.model_validate(payload)
+    except ValidationError:
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
+
+
+def _validate_interpretive_units(
+    units: Sequence[InterpretiveUnit],
+    *,
+    source_count: int,
+) -> None:
+    if not units:
+        raise CoverageContractError(
+            CoverageValidationErrorCode.MISSING_INTERPRETIVE_PARAGRAPH
+        )
+    if _has_duplicates(tuple(unit.unit_id for unit in units)):
+        raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_UNIT_ID)
+    if sum(len(unit.text) for unit in units) > MAX_TOTAL_INTERPRETIVE_TEXT_CHARACTERS:
+        raise CoverageContractError(CoverageValidationErrorCode.TEXT_LIMIT_EXCEEDED)
+
+    for unit_ordinal, unit in enumerate(units, start=1):
+        _validate_source_numbers(unit.source_numbers, source_count)
+        cited_numbers = parse_citation_numbers(unit.text)
+        if not cited_numbers:
+            raise CoverageContractError(CoverageValidationErrorCode.MISSING_CITATION)
+        locality_failure = _citation_locality_failure(
+            unit.text,
+            cited_numbers,
+            unit_id=unit.unit_id,
+            unit_ordinal=unit_ordinal,
+        )
+        if locality_failure is not None:
+            raise CoverageContractError(
+                CoverageValidationErrorCode.CITATION_LOCALITY_INVALID,
+                citation_locality_failure=locality_failure,
+            )
+        if any(number > source_count for number in cited_numbers):
+            raise CoverageContractError(
+                CoverageValidationErrorCode.UNRESOLVABLE_CITATION
+            )
+        if _ordered_unique(cited_numbers) != unit.source_numbers:
+            raise CoverageContractError(
+                CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH
+            )
 
 
 def _normalize_mechanical_contract(

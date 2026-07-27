@@ -1875,7 +1875,8 @@ function ConversationComposer({
       <legend>Interpretive settings</legend>
       <div className="chat-answer-settings-heading">
         <p id={facetDescriptionId}>
-          These choices change interpretation and expression, not the manuscript evidence.
+          A non-default lens or worldview adds a cited interpretive paragraph; voice changes
+          expression. Manuscript evidence stays fixed.
         </p>
         <span>{answerFacetSummary(facets)}</span>
       </div>

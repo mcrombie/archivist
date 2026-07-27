@@ -53,9 +53,10 @@ The web API needs:
   in both the conversation header and the top-of-page introduction.
 - Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
 - Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
-  combination is the unchanged, concise Neutral baseline. Any non-default characteristic activates
-  a separate conversational interpretive response contract, and the chosen settings are recorded
-  on each answer.
+  combination is the unchanged, concise Neutral baseline. A non-default voice changes expression
+  without automatically lengthening the answer. A non-Evidence-first lens or any worldview
+  requires at least one additional, separately rendered paragraph of source-grounded
+  interpretation, and the chosen settings are recorded on each answer.
 - Shows a locally persisted API-cost estimate for each answer, conversation, UTC month, and all
   tracked use, with optional budget warnings and a local hard stop. OpenAI billing remains the
   financial source of truth; see [Cost tracking](cost_tracking.md).

@@ -10,6 +10,7 @@ import web_project
 from perspectives import (
     ANSWER_VOICES,
     HISTORIOGRAPHICAL_LENSES,
+    INTERPRETIVE_EXPANSION_RULES,
     INTERPRETIVE_GUARDRAILS,
     INTERPRETIVE_PROMPT_DIR,
     INTERPRETIVE_RESPONSE_RULES,
@@ -25,6 +26,7 @@ from perspectives import (
     load_historiographical_lens_prompt,
     load_perspective_prompt,
     load_worldview_prompt,
+    requires_interpretive_expansion,
 )
 from prompts import (
     ANSWER_PROMPT_TEMPLATE,
@@ -223,6 +225,47 @@ def test_single_active_facet_does_not_emit_default_facet_sections():
     assert "Selected Voice:" in block
     assert "Selected Historiographical lens:" not in block
     assert "Selected Worldview:" not in block
+
+
+def test_lens_or_worldview_requires_a_distinct_interpretive_paragraph():
+    assert requires_interpretive_expansion(
+        HistoriographicalLens.TRAGIC,
+        Worldview.NONE,
+    )
+    assert requires_interpretive_expansion(
+        HistoriographicalLens.EVIDENCE_FIRST,
+        Worldview.PIOUS,
+    )
+
+    for block in (
+        build_interpretive_prompt_block(
+            HistoriographicalLens.TRAGIC,
+            AnswerVoice.SCHOLARLY,
+            Worldview.NONE,
+        ),
+        build_interpretive_prompt_block(
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.PIOUS,
+        ),
+    ):
+        assert INTERPRETIVE_EXPANSION_RULES in block
+        assert "at least one distinct paragraph" in block
+
+
+def test_voice_alone_changes_expression_without_forcing_a_longer_answer():
+    block = build_interpretive_prompt_block(
+        HistoriographicalLens.EVIDENCE_FIRST,
+        AnswerVoice.ROMANTIC,
+        Worldview.NONE,
+    )
+
+    assert not requires_interpretive_expansion(
+        HistoriographicalLens.EVIDENCE_FIRST,
+        Worldview.NONE,
+    )
+    assert INTERPRETIVE_RESPONSE_RULES in block
+    assert INTERPRETIVE_EXPANSION_RULES not in block
 
 
 @pytest.mark.parametrize(

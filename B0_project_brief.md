@@ -83,10 +83,21 @@ The manuscript is a commercial product. This constrains the architecture, not ju
 
 - **Nothing derived from the manuscript that contains its text may be committed.** `manuscript/`, `output/`, and `projects/` stay gitignored. Committed artifacts reference the corpus by identifier and hash — chunk IDs, paragraph ranges, document names, SHA-256 digests — never by content.
 - **The gold set states answers as claim lists in the author's own words**, not as quoted passages, so that it can be committed.
-- **Public deployment serves short cited excerpts, never whole chunks**, is rate-limited, and runs against a representative subset rather than the full manuscript. Full corpus for private evaluation; subset for the public demo.
+- **Public deployment searches the complete 481-chunk substantive corpus privately**, but serves
+  edition-qualified page locators and short cited excerpts rather than whole chunks. The exposure
+  profile is fixed by the server, not selected by the browser, and the public surface is
+  rate-, concurrency-, abuse-, and spend-limited.
 - **The faithfulness evaluation does double duty here.** An answer that paraphrases rather than reproduces is both a grounding property and a licensing property, and one measurement establishes both.
 
-The endpoints that return full chunk text (`GET /api/projects/{id}/sources`, paginated, arbitrary offset) and stream source files (`GET /api/projects/{id}/source-file/{path}`) are not deployable as they stand. Handled in Brief 7, deliberately not incidentally in an earlier one.
+The endpoints that return full chunk text (`GET /api/projects/{id}/sources`, paginated, arbitrary
+offset) and stream source files (`GET /api/projects/{id}/source-file/{path}`) are not deployable as
+they stand. Upload, embedding, index, mutable-cost-setting, and client budget-override surfaces are
+also local-only. Handled in Brief 8, deliberately not incidentally in an earlier one.
+
+Page numbers are edition facts rather than universal book addresses. The first public locator
+profile is explicitly `Typeset PDF (July 6, 2026)` and is bound to the supplied PDF hash. Future
+paperback, hardcover, and ebook profiles may be added without changing retrieval or evaluation.
+See `docs/public_demo_design.md`.
 
 ## Settled decisions
 
@@ -100,6 +111,10 @@ Restated as project commitments. A brief may note a consequence; it may not reop
 6. **Public deployment must not expose the manuscript.**
 7. **The evaluated system gets no personality.** Grounded and boring is the achievement. A light persona is acceptable only on a reader-facing public demo, never on the evaluated path.
 8. **Perspective modes come after the evaluation**, and are constrained by it: every register passes the same faithfulness and citation checks.
+9. **Public retrieval uses the complete substantive corpus, with disclosure controlled at the
+   presentation boundary.**
+10. **Every page citation names its edition.** Typeset PDF, paperback, hardcover, and ebook
+    locators are separate profiles over stable chunk IDs.
 
 ## Non-goals (explicit; revisit only by amending this brief)
 
@@ -108,7 +123,9 @@ Restated as project commitments. A brief may note a consequence; it may not reop
 - **No work on the generic multi-project stack.** Not extended, not deleted, not refactored. Deferred entirely until the baseline exists.
 - **No Index Mode work in Phase 1**, beyond keeping it compiling against the shared core.
 - **No persona, tone, or perspective-mode work in Phase 1.**
-- **No page-number mapping.** Pending final manuscript formatting, and orthogonal to every Phase 1 measurement.
+- **No unqualified or guessed page-number mapping.** The finalized typeset PDF now licenses its own
+  verified locator profile; paperback, hardcover, and ebook profiles remain empty until their
+  numbering is supplied.
 - **No new frontend features.** Presentation changes are limited to what Brief 1 requires for the citation contract.
 
 ## Tech context
@@ -125,3 +142,5 @@ Two facts pinned in `AGENTS.md` and worth surfacing here because they invalidate
 - **`DEFECTS.md`** logs contract violations, gold-set edits made in response to results, corpus leakage, duplicated primitives, Phase 2 creep, and brief gaps.
 - **`B1_unify_answer_mode.md`** is the first implementation brief.
 - **`docs/evaluation.md`** is the current, qualitative evaluation document. It is a specimen of the problem, not a baseline, and is replaced wholesale in Brief 6.
+- **`docs/public_demo_design.md`** specifies the server-selected development/public source profiles,
+  edition-qualified locator model, bounded quotation policy, and Cromblog integration gate.

@@ -1338,13 +1338,96 @@ every answer visible and every citation resolvable, which matters. But a source-
 facts can still miss the argument a reader asked for. The next quality gain has to come from
 choosing and organizing evidence, not merely requiring more of it to appear.
 
+### 2026-07-27 - Public sources become edition locators, not an online manuscript reader
+
+- Inspected Archivist and Cromblog before beginning integration. Cromblog already has an Archivist
+  feature panel, a typed project registry, and support for links to separately hosted apps. The
+  portfolio wiring is small; securely publishing the Python RAG service is the substantial part.
+- Verified the active private corpus rather than assuming it was complete. The July 6 DOCX
+  produces 910 total chunks, of which 481 substantive chunks are retrieval-eligible. Chroma
+  contains exactly those 481 records, and the full hash- and metadata-aware corpus preflight
+  passes. The excluded material is front matter, contents, acknowledgments, illustration notes,
+  bibliography/credits, and the printed Index - not a public-demo sample of the narrative.
+- Clarified an easy terminology trap for the product story: the RAG "index" is the private Chroma
+  embedding map used to find passages. It is not the printed Index at the back of the book, and it
+  does not mean all 594 pages are sent to the model on every question.
+- The earlier representative-subset public plan is superseded. Public Archivist should search all
+  481 substantive chunks while keeping the corpus private. Disclosure is controlled at the API
+  response boundary, not by withholding chapters from retrieval.
+- Preserved the existing full-passage source panel as a development feature. Large source blocks
+  are valuable while diagnosing retrieval and citation behavior, but the public client will use a
+  separate server-selected profile. That profile cannot be activated or escaped by a browser
+  toggle.
+- Inspected the supplied final typeset PDF. It is 594 physical pages with SHA-256
+  `89d68cdc186432d4d4804fbaff6aac0deb599d351dd016fe250b25f2a4771b3f`. Its PDF-internal labels are
+  merely physical positions, while the book itself has Roman front matter and restarts Arabic
+  numbering at the Prologue. The Introduction begins on typeset page `xi`; physical PDF page 51,
+  for example, is typeset page 33.
+- Ran a read-only mapping-feasibility pilot with six exact 12-token anchors sampled across each
+  eligible chunk. All 481 chunks mapped with at least two exact PDF anchors: 39 preliminary spans
+  covered one page, 360 covered two, 76 covered three, and 6 covered four. No embedding or paid
+  model call was made.
+- Page citations are now explicitly edition-qualified. The first profile is
+  `Typeset PDF (July 6, 2026)`, so the UI will say `Typeset PDF ..., p./pp. ...` rather than imply
+  that paperback, hardcover, ebook, and PDF pagination are interchangeable.
+- The locator schema leaves room for paperback, hardcover, and ebook profiles keyed to the same
+  chunk IDs. Each future profile binds to its own source hash and may use pages, ebook locations,
+  or sections. Adding one does not require re-embedding the manuscript or opening a new RAG
+  evaluation cohort.
+- Public source cards will show an edition-qualified location for every cited source and only a
+  small number of brief, claim-local quotations. The initial design caps one excerpt at 280
+  characters/two sentences, three excerpts per answer, and 700 quoted characters total, with no
+  route for fetching surrounding passages. These are conservative implementation defaults to
+  test, not a legal conclusion.
+- The public safety gate must also remove uploads, embedding, source browsing, raw source files,
+  index tools, mutable cost settings, and the client-controlled budget override; enforce
+  server-side request/concurrency/abuse/spend limits; and sanitize public errors. Only after that
+  gate passes should Cromblog's feature panel and Projects page link to the separate Archivist
+  deployment.
+- No source UI, API, deployment, or Cromblog code changed during this design pass. The retrieval
+  path, source order, model-facing `[Source N]` contract, and evaluation results remain untouched.
+
+Useful blog lesson: "search the whole book" and "publish the whole book" are not the same
+architecture. A private full-corpus index can support better answers while an edition-aware
+presentation layer gives readers verifiable locations and only the minimum quotation needed to
+check a claim.
+
+### 2026-07-27 - Interpretive settings now make a visible, enforceable difference
+
+- Replaced the earlier vague request for an interpretive "bridge" with a concrete output rule.
+  Evidence-first + Scholarly + None still uses the byte-for-byte neutral prompt path and remains
+  concise.
+- A non-Evidence-first historiographical lens or any selected worldview now requires at least one
+  additional paragraph after the factual answer. A selected voice alone changes diction and
+  cadence without automatically making the answer longer.
+- Implemented the expansion as a separate structured response schema rather than weakening the
+  factual answer contract. Ordinary answer units still own requested facts, premises, coverage,
+  obligations, and citations. One to four additional interpretive units render together as a
+  distinct final paragraph and cannot satisfy factual coverage.
+- Each interpretive unit must contain one source-grounded inference with a terminal citation whose
+  source numbers match its declared sources. Missing interpretation on an otherwise answered turn,
+  malformed citations, and out-of-range sources fail closed. If every requested point is
+  unsupported, Archivist may still abstain without inventing an interpretive paragraph.
+- The selected lens and worldview can share the required paragraph when both are active. This pass
+  guarantees a visible structural difference; it does not yet claim that every lens or worldview
+  produces historically persuasive interpretation.
+- No retrieval, source ordering, neutral prompt, model setting, corpus, or embedding changed, and
+  no paid API call was made.
+- Verification: Ruff checks passed, the OpenAI structured-output adapter accepted the new schema,
+  and the focused perspectives, evidence-coverage, and RAG pipeline suites passed all 161 tests.
+
+Useful blog lesson: prompt adjectives are not a product contract. Making interpretation visibly
+different required separating it from factual coverage, validating it independently, and deciding
+exactly which controls should purchase more prose.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
    manuscript rather than asking the reader to upload a file.
 2. Ask a non-gold, focused question so the public demo does not contaminate an unfinished
    evaluation item.
-3. Show the transition into the full-width answer and open one cited source.
+3. Show the transition into the full-width answer and open one cited source to reveal an
+   edition-qualified page range and brief supporting quotation, not a full chunk.
 4. Ask a natural follow-up containing a pronoun or shorthand reference to demonstrate
    conversational continuity.
 5. Show that the second turn retrieves its own evidence rather than treating the earlier answer as
@@ -1361,7 +1444,8 @@ choosing and organizing evidence, not merely requiring more of it to appear.
 
 - The opening composition with the cover and product introduction.
 - The cover fading away while the first answer centers.
-- The archival-paper answer treatment with a visible citation.
+- The archival-paper answer treatment with a visible citation and a compact
+  `Typeset PDF, p./pp.` source card.
 - A compact follow-up turn with prior sources collapsed.
 - Historiographical lens, Voice, and Worldview shown as separate controls.
 - Two different visual vibes displaying the same conversation.
@@ -1380,13 +1464,19 @@ choosing and organizing evidence, not merely requiring more of it to appear.
 - Do not present local cost estimates as invoices.
 - Do not imply conversation history survives a page reload; it currently lasts only for the open
   page.
+- Do not imply that typeset-PDF page numbers apply to the paperback, hardcover, or ebook.
+- Do not call the feasibility pilot a finished locator artifact until the production mapping and
+  visual boundary review pass.
 
 ## Privacy and publishing guardrails
 
 - Never commit or publish manuscript text, full chunks, private review pages, or source files.
 - Public screenshots should show only short excerpts necessary to explain citations.
 - Do not expose endpoints that return arbitrary full chunks or stream source documents.
-- Use a representative subset, rate limiting, and short excerpts before any public deployment.
+- Search the complete substantive corpus privately, but expose only edition-qualified locators and
+  server-bounded excerpts; enforce rate, concurrency, abuse, and spend limits.
+- Keep the development/public exposure profile server-controlled and impossible for a public
+  client to override.
 - API keys stay server-side and out of frontend storage.
 
 ## Open threads for later entries
@@ -1404,7 +1494,9 @@ choosing and organizing evidence, not merely requiring more of it to appear.
 - Baseline retrieval, citation, faithfulness, and abstention measurements with run-to-run spread.
 - Measurement-driven retrieval changes such as hybrid search, reranking, or query routing.
 - Durable saved conversations.
-- Public-demo corpus subset and manuscript-protection controls.
+- Production `typeset_pdf_0706` locator generation and visual boundary verification.
+- Paperback, hardcover, and ebook locator profiles after their pagination is supplied.
+- Public-demo response minimization, local-route removal, and manuscript-protection controls.
 
 ## Update convention
 

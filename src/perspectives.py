@@ -162,13 +162,22 @@ INTERPRETIVE_RESPONSE_RULES = """Reader-facing interpretive response:
   not merely decorate an otherwise neutral answer with themed adjectives or a final aside.
 - Let the historiographical lens determine the organizing arc, the worldview determine the
   evaluative stakes, and the voice determine sentence texture and rhythm.
-- Open with a direct answer. Prefer connected prose to bullets, then add one brief interpretive
-  bridge explaining why the answer matters through the active settings.
+- Open with a direct answer and prefer connected prose to bullets.
 - Speak as an informed archivist in conversation, not as a lecturer. Use natural transitions and,
   at most once, direct address when it helps orient the reader. Do not greet, praise the question,
   narrate your process, or append a generic offer to help.
 - When it would genuinely advance the exchange, close with one specific question offering a
   source-grounded next direction. Keep that question free of new factual claims.
+"""
+
+INTERPRETIVE_EXPANSION_RULES = """Required interpretive expansion:
+- After the direct source-grounded answer, add at least one distinct paragraph of interpretation.
+- Use that additional paragraph to apply the selected historiographical lens, worldview, or both
+  to the evidence: explain significance, stakes, contingency, achievement, loss, or moral tension
+  as the selected settings warrant.
+- The added paragraph must synthesize rather than merely repeat the factual answer. Ground every
+  historical assertion or inference in the supplied sources and preserve their uncertainty.
+- A non-default voice alone changes expression but does not require a longer answer.
 """
 
 # Old import name retained for compatibility.
@@ -197,6 +206,19 @@ def normalize_worldview(worldview: Worldview | str) -> Worldview:
 
 def normalize_perspective(perspective: AnswerPerspective | str) -> AnswerPerspective:
     return _normalize(perspective, AnswerPerspective)  # type: ignore[return-value]
+
+
+def requires_interpretive_expansion(
+    historiographical_lens: HistoriographicalLens | str = HistoriographicalLens.EVIDENCE_FIRST,
+    worldview: Worldview | str = Worldview.NONE,
+) -> bool:
+    """Return whether the selected settings require a separate interpretive paragraph."""
+
+    return (
+        normalize_historiographical_lens(historiographical_lens)
+        is not HistoriographicalLens.EVIDENCE_FIRST
+        or normalize_worldview(worldview) is not Worldview.NONE
+    )
 
 
 def settings_for_legacy_perspective(
@@ -285,9 +307,15 @@ def build_interpretive_prompt_block(
     selected_sections = [f"Selected {name}:\n{prompt}" for name, prompt in sections if prompt]
     if not selected_sections:
         return ""
+    expansion = (
+        f"{INTERPRETIVE_EXPANSION_RULES}\n"
+        if requires_interpretive_expansion(historiographical_lens, worldview)
+        else ""
+    )
     return (
         f"{INTERPRETIVE_GUARDRAILS}\n"
         f"{INTERPRETIVE_RESPONSE_RULES}\n"
+        f"{expansion}"
         + "\n\n".join(selected_sections)
     )
 

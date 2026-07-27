@@ -11,6 +11,7 @@ from answer_coverage import (
     CITATION_GRAMMAR,
     EVIDENCE_COVERAGE_SCHEMA,
     GENERATION_CONTRACT_FAILED_MESSAGE,
+    INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
     NO_SOURCES_MESSAGE,
     AnswerUnit,
     AnswerUnitRole,
@@ -26,6 +27,8 @@ from answer_coverage import (
     EvidenceObligationFocus,
     EvidenceObligationScope,
     GapReason,
+    InterpretiveEvidenceCoverageAnswer,
+    InterpretiveUnit,
     ObligationLink,
     PremiseDecision,
     PremiseSourceScope,
@@ -35,6 +38,7 @@ from answer_coverage import (
     coverage_diagnostic_summary,
     parse_citation_numbers,
     process_evidence_coverage,
+    process_interpretive_evidence_coverage,
     render_evidence_coverage,
     validate_evidence_coverage,
 )
@@ -156,6 +160,33 @@ def _valid_answer() -> EvidenceCoverageAnswer:
     )
 
 
+def _interpretive_answer(
+    *,
+    interpretive_units: tuple[InterpretiveUnit, ...] | None = None,
+) -> InterpretiveEvidenceCoverageAnswer:
+    factual = _valid_answer()
+    units = interpretive_units
+    if units is None:
+        units = (
+            InterpretiveUnit(
+                unit_id="I1",
+                text=(
+                    "This pattern makes the institution's achievement inseparable "
+                    "from its human cost [Source 1]."
+                ),
+                source_numbers=(1,),
+            ),
+        )
+    return InterpretiveEvidenceCoverageAnswer(
+        schema=INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=factual.premise_decisions,
+        coverage=factual.coverage,
+        obligation_coverage=factual.obligation_coverage,
+        answer_units=factual.answer_units,
+        interpretive_units=units,
+    )
+
+
 def _validate(answer: EvidenceCoverageAnswer):
     return validate_evidence_coverage(
         answer,
@@ -215,6 +246,74 @@ def test_json_shaped_payload_is_accepted_and_validated_against_trusted_inputs():
     assert validated.answer == _valid_answer()
     assert validated.citation_count == 3
     assert CITATION_GRAMMAR == r"\[Source\s+\d+(?:\s*,\s*Source\s+\d+)*\]"
+
+
+def test_interpretive_coverage_appends_one_distinct_cited_paragraph():
+    result = process_interpretive_evidence_coverage(
+        _interpretive_answer(),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.answer.split("\n\n")[-1] == (
+        "This pattern makes the institution's achievement inseparable "
+        "from its human cost [Source 1]."
+    )
+    assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
+
+
+def test_answered_interpretive_coverage_fails_without_the_required_paragraph():
+    result = process_interpretive_evidence_coverage(
+        _interpretive_answer(interpretive_units=()),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert (
+        result.diagnostics.error_code
+        is CoverageValidationErrorCode.MISSING_INTERPRETIVE_PARAGRAPH
+    )
+
+
+def test_entirely_unsupported_coverage_does_not_invent_interpretation():
+    answer = _interpretive_answer(interpretive_units=()).model_copy(
+        update={
+            "coverage": (
+                _coverage(
+                    "R1",
+                    RequirementStatus.UNSUPPORTED,
+                    (),
+                    (),
+                    GapReason.NO_DIRECT_SUPPORT,
+                ),
+                _coverage(
+                    "R2",
+                    RequirementStatus.UNSUPPORTED,
+                    (),
+                    (),
+                    GapReason.NO_DIRECT_SUPPORT,
+                ),
+            ),
+            "answer_units": (),
+        }
+    )
+
+    result = process_interpretive_evidence_coverage(
+        answer,
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    assert result.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert result.answer == ALL_UNSUPPORTED_MESSAGE
 
 
 @pytest.mark.parametrize(
