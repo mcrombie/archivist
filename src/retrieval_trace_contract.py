@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/3"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/4"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -68,6 +68,7 @@ _CONTEXT_FIELDS = _CHUNK_FIELDS | frozenset(
     {
         "facet_ids",
         "fused_rank",
+        "document_ordinal",
         "origin",
         "parent_primary_chunk_ids",
         "retrieval_source_number",
@@ -153,6 +154,8 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
     ("candidates", "fused", "[]"): _CANDIDATE_FIELDS,
     ("selection",): frozenset(
         {
+            "anchor_deferred_count",
+            "anchor_requested_count",
             "anchor_source_number_remap",
             "context",
             "discarded",
@@ -163,10 +166,15 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "generation_context",
             "pre_anchor_context",
             "primary_chunk_ids",
+            "protected_source_count",
+            "protected_source_shortfall_count",
             "raw_primary_fallback_detected",
             "raw_primary_fallback_used",
             "retrieval_context",
             "source_number_remap",
+            "stage_coverage_required_count",
+            "stage_coverage_satisfied_count",
+            "stage_coverage_shortfall_count",
         }
     ),
     ("selection", "discarded", "[]"): _CHUNK_FIELDS
@@ -217,6 +225,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
     ("lanes", "[]"): frozenset(
         {
             "candidate_chunk_ids",
+            "chronology_band",
+            "chronology_max_document_ordinal",
+            "chronology_min_document_ordinal",
             "document_hint_sha256s",
             "facet_id",
             "query_char_count",
@@ -310,6 +321,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "premise_count",
             "premise_decisions",
             "premise_ids",
+            "premise_source_scopes",
             "premise_status_counts",
             "prompt_version",
             "renderer_version",
@@ -347,6 +359,14 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "premise_id",
             "source_numbers",
             "status",
+        }
+    ),
+    ("generation_contract", "premise_source_scopes", "[]"): frozenset(
+        {
+            "counter_source_numbers",
+            "framing_source_numbers",
+            "premise_id",
+            "support_source_numbers",
         }
     ),
     ("generation_contract", "answer_units", "[]"): frozenset(
@@ -391,6 +411,25 @@ _ARRAY_PATHS = frozenset(
         ("generation_contract", "premise_decisions"),
         ("generation_contract", "premise_decisions", "[]", "source_numbers"),
         ("generation_contract", "premise_ids"),
+        ("generation_contract", "premise_source_scopes"),
+        (
+            "generation_contract",
+            "premise_source_scopes",
+            "[]",
+            "counter_source_numbers",
+        ),
+        (
+            "generation_contract",
+            "premise_source_scopes",
+            "[]",
+            "framing_source_numbers",
+        ),
+        (
+            "generation_contract",
+            "premise_source_scopes",
+            "[]",
+            "support_source_numbers",
+        ),
         ("generation_contract", "repair_codes"),
         ("generation_contract", "requirement_ids"),
         ("lanes",),
@@ -465,12 +504,15 @@ _COVERAGE_ERROR_CODES = frozenset(
         "missing_citation",
         "missing_premise_id",
         "missing_requirement_id",
+        "missing_unit_requirement_id",
         "out_of_order_premise_id",
         "out_of_order_requirement_id",
         "out_of_order_unit_requirement_id",
         "premise_correction_invalid",
         "premise_correction_missing",
         "premise_correction_not_first",
+        "premise_correction_requirement_mismatch",
+        "premise_provenance_mismatch",
         "premise_source_mismatch",
         "premise_status_invalid",
         "source_mapping_mismatch",
@@ -535,6 +577,7 @@ _RULE_CODES = frozenset(
         "no_safe_related_material",
         "no_subject_target",
         "premise_evaluation_pending",
+        "planner_bounded_related_material",
         "qualified_broader_material",
         "requested_relationship_not_established",
         "source_backed_premise_contradiction",
@@ -566,6 +609,7 @@ _EXCEPTION_CODES = frozenset(
 _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "anchor_normalizer_version": frozenset({"unicode-nfkc-casefold-anchor-v1"}),
     "broad_context_order": frozenset({"corpus_ordinal", "selection"}),
+    "chronology_band": frozenset({"early", "late", "middle", "none"}),
     "displacement_cause": frozenset({"distance_filtering", "document_filtering", "truncation"}),
     "error_code": _COVERAGE_ERROR_CODES,
     "exception_code": _EXCEPTION_CODES,
@@ -596,7 +640,12 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "generator_verbosity": frozenset({"high", "low", "medium"}),
     "hnsw_space": frozenset({"", "cosine", "ip", "l2"}),
     "lane": frozenset({"analogue", "broader_related", "direct", "generic_semantic"}),
-    "lane_selection": frozenset({"one_each_then_round_robin"}),
+    "lane_selection": frozenset(
+        {
+            "one_each_then_round_robin",
+            "stage_coverage_then_document_diversity",
+        }
+    ),
     "lexical_scoring_version": frozenset({"bm25-nfkd-word-v1"}),
     "mode": frozenset({"broad_synthesis", "planned", "standard"}),
     "neighbor_expansion": frozenset({"primaries_first_then_immediate_neighbors"}),
@@ -605,19 +654,31 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-normalizer/1",
             "evidence-coverage-normalizer/2",
             "evidence-coverage-normalizer/3",
+            "evidence-coverage-normalizer/4",
         }
     ),
     "origin": frozenset({"corpus_anchor", "neighbor", "primary", "retrieval"}),
-    "planner_prompt_version": frozenset({"query-planner-v2", "query-planner-v3"}),
+    "planner_prompt_version": frozenset(
+        {
+            "query-planner-v2",
+            "query-planner-v3",
+            "query-planner-v4",
+            "query-planner-v5",
+            "query-planner-v6",
+        }
+    ),
     "planner_validation_code": frozenset(
         {
+            "broad_plan_under_decomposed",
             "duplicate_query",
             "established_answer_claim",
+            "missing_premise_framing",
             "missing_requirement_mapping",
             "original_query_changed",
             "original_query_too_long",
             "plan_structure_invalid",
             "planner_owned_original",
+            "premise_route_mismatch",
             "query_drift",
             "too_many_facets",
             "unknown_document_hint",
@@ -631,12 +692,17 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "evidence-gate-v1",
             "evidence-gate-v2",
+            "evidence-gate-v3",
             "evidence-planned-v4",
             "evidence-planned-v5",
             "evidence-planned-v6",
+            "evidence-planned-v7",
+            "evidence-planned-v8",
+            "evidence-planned-v9",
+            "evidence-planned-v10",
         }
     ),
-    "prompt_version": frozenset({"evidence-coverage-v2"}),
+    "prompt_version": frozenset({"evidence-coverage-v2", "evidence-coverage-v3"}),
     "reason": frozenset(
         {
             "distance_threshold",
@@ -648,7 +714,15 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     ),
     "renderer_version": frozenset({"evidence-coverage-renderer/1"}),
     "repair_codes": _COVERAGE_ERROR_CODES,
-    "retrieval_version": frozenset({"faceted-hybrid-rrf-v2", "hybrid-bm25-rrf-v1"}),
+    "retrieval_version": frozenset(
+        {
+            "faceted-hybrid-rrf-v2",
+            "faceted-hybrid-rrf-v3",
+            "faceted-hybrid-rrf-v4",
+            "faceted-hybrid-rrf-v5",
+            "hybrid-bm25-rrf-v1",
+        }
+    ),
     "role": frozenset(
         {
             "broader_related",
@@ -679,6 +753,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             RETRIEVAL_TRACE_SCHEMA,
             "archivist.evidence_coverage_diagnostics/3",
+            "archivist.evidence_coverage_diagnostics/4",
             "archivist.evidence_policy_diagnostics/1",
             "archivist.planner_call_diagnostics/1",
             "archivist.planner_call_diagnostics/2",

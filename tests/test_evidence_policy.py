@@ -451,6 +451,26 @@ def test_broader_term_and_additional_probe_in_a_neighbor_qualify_near_match():
     assert result.suppressed_source_numbers == (3,)
 
 
+def test_qualified_near_match_admission_is_capped_at_two_sources():
+    chunks = [
+        chunk("c1", "The first planner-qualified related passage."),
+        chunk("c2", "The second planner-qualified related passage."),
+        chunk("c3", "The third planner-qualified related passage."),
+    ]
+    subject_scan = scan("T0", "Orchid Relay", chunks)
+    lanes = classify_evidence_lanes(
+        chunks,
+        subject_scan=subject_scan,
+        qualified_related_chunk_ids={"c1", "c2", "c3"},
+    )
+
+    result = decide_evidence(subject_scan, lane_assignments=lanes)
+
+    assert result.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH
+    assert result.allowed_source_numbers == (1, 2)
+    assert result.suppressed_source_numbers == (3,)
+
+
 def test_broad_term_alone_cannot_qualify_a_near_match():
     chunks = [
         chunk("c1", "Regional councils coordinated synthetic requests."),

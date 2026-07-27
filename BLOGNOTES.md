@@ -993,6 +993,188 @@ real recovery in useful behavior, prevented a successful smoke from becoming an 
 conclusion, and replaced a vague desire for “better RAG” with three traceable engineering
 boundaries.
 
+### 2026-07-25 - Evidence-planned v7 turned the three measured failures into local contracts
+
+- Opened `evidence-planned-v7` directly from the unchanged v6 evaluation evidence. No manuscript,
+  index, frozen question, expected claim, grading rule, model setting, source cap, or API-call
+  budget changed, and this implementation pass made no OpenAI request.
+- Made premise ownership application-controlled. The planner now receives the local route traits,
+  and a proposal containing a premise is rejected unless deterministic routing already marked the
+  question `premise_sensitive`. The evidence gate repeats that check defensively, so a
+  model-invented premise can no longer widen an absence-only context through
+  `premise_evaluation_pending`.
+- Split two superficially similar question forms. A manuscript-treatment question with a
+  conservative named target remains absence-sensitive; an unbounded “how does the book treat…”
+  theme without such a target is now broad synthesis. Broad planner proposals require at least
+  two ordered requirements with a dedicated facet for each, while the deterministic fallback
+  reserves origin, development/mechanism, and later-consequence/endpoint lanes.
+- Protected broad coverage under the unchanged eight-source cap. Direct-anchor promotion admits
+  at most one certified hit per scan, then preserves one source for every answer requirement,
+  premise side, and live broad facet before filling spare positions. The trace records requested
+  anchors, deferred anchors, protected sources, and any protection shortfall. A synthetic
+  pressure test confirms that four promoted anchors can coexist with origin, mechanism,
+  transition, and endpoint evidence.
+- Separated premise correction from ordinary answer coverage in
+  `archivist.evidence_coverage/2`. A correction unit must have no requirement IDs; every ordinary
+  unit must have at least one. The application now passes exact post-gate support, counter, and
+  framing source scopes to both generation and validation. A contradicted premise must cite its
+  correction’s exact sources and, whenever a framing source survived, include at least one such
+  source. The requested answer still has to be supplied in separate non-correction units.
+- Versioned the affected prompt, normalizer, diagnostics, and trace allowlists. Premise source
+  scopes are retained only as safe IDs and source numbers; no question, answer, or manuscript
+  prose enters the diagnostic.
+- Verification is entirely offline: 416 tests pass with one intentional skip, including focused
+  regressions for G009-style precedence, G006/G007-style source pressure, and G010-style framing
+  provenance. Ruff passes. The first sandboxed full-suite attempt could not access pytest’s
+  Windows temporary directory; the same suite passed outside that sandbox. No paid quality
+  improvement is claimed until the unchanged affected questions are run again.
+
+Useful blog lesson: prompting alone could not fix these failures. The reliable improvement was to
+move model-sensitive judgments into small, auditable boundaries: the application owns whether a
+premise exists, source allocation owns which planned obligations survive, and validation owns
+whether a correction used the source lane that was retrieved for it.
+
+### 2026-07-25 - The focused v7 confirmation passed mechanically and failed substantively
+
+- Ran the unchanged G006, G007, G009, and G010 questions as a separately metered dirty-worktree
+  confirmation. All four completed without a retry. The planner, answer contract, eight-source
+  bound, and citation resolution passed on every item. Estimated OpenAI API spend was
+  `$0.45132009`.
+- The frozen practical rubric prevented those green structural checks from being mistaken for a
+  useful retrieval result. G006 remained at 1/8 strict claims and 2/8 target document groups.
+  G007 remained at 0/7 strict claims while improving from 2/5 to 3/5 target groups. G009 improved
+  to a valid qualified answer with 2/5 strict claims, but both bounded sources came from Chapter
+  20 rather than the required Epilogue, leaving target coverage at 0/1. G010 now gives a valid,
+  cited Jamestown replacement for the false 1898 premise and covers both target groups, but only
+  1/4 strict composite claims is complete.
+- The repairs therefore did fix control machinery: planner-created premises no longer override
+  absence routing; broad planning preserves named lanes; and premise corrections have separate,
+  source-bounded provenance. They did not yet make the broad lanes span the whole requested
+  chronology, make final allocation prefer document diversity, or make a bounded absence probe
+  choose the most relevant near-match.
+- Applied the predeclared hard stop. The full unchanged ten-question cohort was not run, and the
+  v7 implementation was not frozen as a successful release. Spending more after the focused
+  content gate failed would have measured known defects again rather than testing an uncertain
+  improvement.
+- The next work is correspondingly narrow: historical-stage coverage must be explicit in broad
+  planning and traces; spare source slots must prefer uncovered documents/stages; anchor
+  promotion must not evict a unique stage source; and bounded absence ranking must preserve the
+  requested facet, not merely the broad related term.
+
+Useful blog lesson: a valid citation map is necessary but not sufficient. The system can cite
+every sentence correctly and still assemble the wrong slice of a long book. A content rubric is
+what turns "the pipeline worked" into the harder question, "did it retrieve the book-wide
+argument the reader actually asked for?"
+
+### 2026-07-25 - V8 fixed the bounded absence example but exposed a false broad-coverage signal
+
+- Opened `evidence-planned-v8` without changing the manuscript, index, frozen questions, practical
+  rubric, GPT-5.6 Sol settings, eight-source cap, or one-planner/one-generator call budget.
+- Broad synthesis now requires an ordered origin, transition-or-mechanism, and endpoint chain.
+  Each stage searches an application-owned early, middle, or late document band rather than
+  trusting a model hint to define chronology. Spare source slots prefer previously uncovered
+  documents, protected stage sources reserve capacity before corpus anchors, and final broad
+  context returns to corpus order.
+- The trace was versioned to `archivist.retrieval_trace/4` and records each stage's chronology
+  band and safe document-ordinal bounds plus required, satisfied, and shortfall counts. This made
+  the broad failure inspectable without storing question or manuscript prose.
+- Qualified absence retrieval can now retain at most two planner-ranked related passages only
+  when a substantive facet has an exact validated document hint and its query preserves the
+  trusted subject and relation surfaces. This ranking occurs before the older exact-tail
+  co-occurrence fallback and cannot turn semantic similarity into direct evidence.
+- Offline verification passed 421 tests with one intentional skip; Ruff and whitespace checks
+  passed. The separately metered unchanged G006/G007/G009 confirmation then completed without
+  retry for `$0.29427521`, and every structural, source-bound, and citation check passed.
+- G009 is the clear success. It used exactly two Epilogue passages, stated the evidence boundary,
+  connected pandemic-exposed supply chains to reshoring and military spending, and did not invent
+  COVID-era procurement analysis. It improved from 2/5 to about 3/5 strict claims and from 0/1 to
+  1/1 target groups.
+- Broad synthesis remains below the content gate. G006 improved from 1/8 claims and 2/8 groups to
+  2/8 and 3/8. G007 remained at 0/7 claims and fell from 3/5 to 2/5 groups. Both traces said 3/3
+  stages survived, proving that three coarse chronology bands are an allocation invariant, not a
+  measure of whether a book-wide institutional or causal argument was retrieved.
+- The full ten-question cohort was not run on v8. The next measured repair is narrower than a
+  larger context window: broad plans need more substantive historical obligations within the
+  existing eight slots, and diagnostics must distinguish chronology-band survival from
+  argument-stage coverage.
+
+Useful blog lesson: observability can falsify its own reassuring metric. "Three of three stages
+covered" sounded like success until the unchanged answer rubric showed that those stages were too
+coarse to represent the argument. The trace did not prove quality, but it made the next defect
+precise.
+
+### 2026-07-26 - The eight-source ceiling was tested instead of defended by intuition
+
+- Ran a controlled retrieval-only comparison on the unchanged broad G006 and G007 questions.
+  Each question made one live planner call and one batched facet-embedding call; the resulting
+  plan and embeddings were reused locally at source ceilings of 8, 12, and 16. The normal evidence
+  gate ran at each limit, but answer generation and judges were disabled.
+- The experiment completed without retries for `$0.05277158`: exactly two planner calls and two
+  embedding calls. Every larger context retained all eight baseline chunks, so gains did not come
+  from exchanging one baseline source for another.
+- G006 showed a genuine capacity effect. Target-document groups rose from 3/8 at eight sources to
+  3/8 at twelve and 6/8 at sixteen. The sixteen-source variant newly reached Chapter 11, Chapter
+  20, and the Epilogue, although it still missed Chapter 5 and Chapter 17.
+- G007 showed no capacity effect. Coverage remained 3/5 at all three limits. Twelve and sixteen
+  added distinct documents, but neither reached the missing Chapters 4-5 or Epilogue groups. The
+  shared three-requirement/four-facet plan and its ranking, not the final source ceiling, remained
+  the binding constraint for this question.
+- This rules out both attractive shortcuts. Eight is not reliably sufficient for broad lineage
+  questions, but a universal increase to sixteen is not a broad-synthesis repair. Twelve was
+  strictly dominated in this sample: it doubled neither question's target coverage.
+- No production limit changed. The evidence supports a broad-only sixteen-source ceiling as a
+  candidate cohort, not as a universal setting. Before adopting it, generation should be tested
+  on G006's richer context, while G007 needs a separate planner change that expresses more
+  substantive argument stages than coarse origin/middle/endpoint lanes.
+
+Useful blog lesson: parameter debates are often two different defects hiding in one number. The
+same eight-source limit genuinely constrained one question and was irrelevant to the other. A
+controlled retrieval-only run separated those mechanisms for about five cents.
+
+### 2026-07-26 - More passages did not repair the broad answer, but better stages repaired coverage
+
+- Tested actual G006 generation at 8 versus 16 sources before changing production. One live plan
+  and one embedding batch were shared across both allocations. The eight-source answer validated
+  from 2/8 target groups. Sixteen reached 6/8 groups, but the generation contract still declared
+  eight as its maximum legal source count and rejected `source_count=16` as `invalid_context`.
+- The already-paid sixteen-source structured output was recovered from its stored response rather
+  than regenerated. It added the Crown's takeover and several intermediate institutions, but
+  still omitted the rubric's Hamiltonian capital/debt step, Federal Reserve/FTC step,
+  Pentagon/cost-plus step, Chapter 20 endpoint, and Epilogue endpoint. More context produced a
+  longer lineage, not the required lineage, so production stayed at eight sources.
+- The comparison cost `$0.23826382` with one planner, two embedding batches, and two generations.
+  The second embedding batch was a recovery check after the shell closed its output pipe: the
+  exact stored planner response was reused, and the reconstructed eight-source context had to
+  match the persisted first variant chunk-for-chunk before the missing variant could run. Neither
+  answer was regenerated.
+- Opened `evidence-planned-v9` / `query-planner-v6` for the independent G007 defect. Broad plans
+  now require five dedicated ordered narrative stages instead of three generic terciles. When a
+  numbered book structure is available, chronology begins at Chapter 1 and ends at the
+  conclusion or Epilogue, excluding Afterword and appendices from stage allocation.
+- The first focused G007 run accepted the five-stage live plan and returned a valid answer, but
+  remained at 3/5 target groups for `$0.18608978`. It repaired the Jamestown stage while rigid
+  stage boundaries displaced the Civil War group, and its endpoint lane never considered an
+  Epilogue passage.
+- `Evidence-planned-v10` kept the same accepted plan, eight-source cap, corpus, model settings, and
+  generator prompt. Retrieval alone changed: adjacent stages overlap by two narrative documents,
+  and the endpoint facet performs a structural check against the book's own conclusion or
+  Epilogue using the same query embedding.
+- The controlled v10 G007 confirmation made no planner call, cost `$0.10395228`, validated its
+  answer, and improved target-document coverage from 3/5 to 5/5. Its eight passages included
+  Chapter 4, Chapter 11, Chapter 14, Chapter 17, and the Epilogue.
+- Document coverage is not yet claim completeness. The v10 answer still omitted or only partially
+  expressed the imperial-interior recurrence, Revolutionary-war-debt mechanism, Pentagon and
+  Virginia employment, NSC-68/Keynesian permanent spending, NATO persistence, and the
+  Epilogue's security-dilemma component. The unchanged ten-question cohort remains gated while
+  passage-level mechanism targeting is refined.
+- Offline verification for the five-stage implementation passes 422 tests with one intentional
+  skip. Ruff and `git diff --check` pass.
+
+Useful blog lesson: a context window and a chronology plan solve different problems. Sixteen
+sources could not rescue a vague lineage, while eight sources could cover every required era once
+the planner and allocator agreed on five overlapping narrative obligations. Even then, reaching
+the right chapters was not the same as reaching the right claims.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
@@ -1048,8 +1230,9 @@ boundaries.
 
 - Preserve the v6 result as the directional comparison point; do not change its frozen questions
   or rubric in response to the observed failures.
-- Design the next focused repairs around premise/absence precedence, broad requirement survival,
-  and source-bounded premise-correction coverage.
+- Preserve the successful v8 bounded-absence rule and v10's five-stage G007 document coverage.
+  Do not widen G006 to sixteen; target the missing within-stage mechanisms before another full
+  ten-question run.
 - Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
   retrieval and citation metrics require it.
 - Retrieval-only pilot results before any answer generation is graded.

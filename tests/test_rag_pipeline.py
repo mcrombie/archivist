@@ -7,6 +7,7 @@ import pytest
 
 import rag_pipeline
 from answer_coverage import (
+    EVIDENCE_COVERAGE_SCHEMA,
     AnswerUnit,
     AnswerUnitRole,
     EvidenceCoverageAnswer,
@@ -17,12 +18,15 @@ from answer_coverage import (
     RequirementStatus,
 )
 from query_planning import (
+    AnswerRequirement,
     FacetRole,
     PlannerAnswerRequirement,
     PlannerQuestionPlan,
     PlannerSearchFacet,
     QuestionPlan,
     ResolvedTurn,
+    RouteTrait,
+    SearchFacet,
 )
 from retrieval import PlannedContext, RETRIEVAL_TRACE_SCHEMA
 from retrieval_trace_contract import validate_text_free_retrieval_trace
@@ -139,7 +143,7 @@ def supported_answer(
 ) -> EvidenceCoverageAnswer:
     unit_ids = tuple(f"U{index}" for index in range(1, len(requirement_ids) + 1))
     return EvidenceCoverageAnswer(
-        schema="archivist.evidence_coverage/1",
+        schema=EVIDENCE_COVERAGE_SCHEMA,
         premise_decisions=(),
         coverage=tuple(
             RequirementCoverage(
@@ -187,12 +191,16 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v2"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v3"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
     assert "split them into separate answer" in instructions
     assert "spell them out or rephrase" in instructions
+    assert "have no requirement IDs" in instructions
+    assert "correction unit never satisfies an answer requirement" in instructions
+    assert "framing candidate sources" in instructions
+    assert "positive replacement chronology" in instructions
 
 
 def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch):
@@ -379,6 +387,18 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
             ),
             PlannerAnswerRequirement(
                 requirement_id="R2",
+                label="Project Lumen transition",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R3",
+                label="Project Lumen middle mechanism",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R4",
+                label="Project Lumen later transition",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R5",
                 label="Project Lumen endpoint",
             ),
         ),
@@ -392,6 +412,24 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
             PlannerSearchFacet(
                 facet_id="F2",
                 requirement_ids=("R2",),
+                role=FacetRole.TRANSITION,
+                search_query="transition Project Lumen",
+            ),
+            PlannerSearchFacet(
+                facet_id="F3",
+                requirement_ids=("R3",),
+                role=FacetRole.MECHANISM,
+                search_query="middle mechanism Project Lumen",
+            ),
+            PlannerSearchFacet(
+                facet_id="F4",
+                requirement_ids=("R4",),
+                role=FacetRole.TRANSITION,
+                search_query="later transition Project Lumen",
+            ),
+            PlannerSearchFacet(
+                facet_id="F5",
+                requirement_ids=("R5",),
                 role=FacetRole.ENDPOINT,
                 search_query="endpoint Project Lumen",
             ),
@@ -401,7 +439,11 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
 
     def fake_parse(_client, *, operation, **request):
         calls.append({"operation": operation, **request})
-        parsed = raw_plan if operation == "query_planning" else supported_answer(("R1", "R2"))
+        parsed = (
+                raw_plan
+                if operation == "query_planning"
+                else supported_answer(("R1", "R2", "R3", "R4", "R5"))
+        )
         return SimpleNamespace(output_parsed=parsed, output=())
 
     monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
@@ -641,6 +683,38 @@ def test_certified_absence_skips_answer_generation(monkeypatch):
     assert "could not find a direct mention" in result.answer
 
 
+def test_absence_gate_is_not_overridden_by_an_untrusted_premise_plan():
+    absent_chunk = {
+        **CHUNK,
+        "text": "This synthetic passage discusses an unrelated subject.",
+    }
+    question = "Why did Project Lumen begin the signal change?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    premise_plan = rag_pipeline.build_question_plan(turn)
+    defensive_plan = premise_plan.model_copy(
+        update={"traits": (RouteTrait.ABSENCE_SENSITIVE,)}
+    )
+    planned = planned_context(defensive_plan, [absent_chunk])
+
+    gate, _diagnostics, _target_label = rag_pipeline.apply_evidence_gate(
+        defensive_plan,
+        planned,
+        [absent_chunk],
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=1,
+        corpus_manifest=corpus_manifest(absent_chunk),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert premise_plan.premises
+    assert RouteTrait.PREMISE_SENSITIVE not in defensive_plan.traits
+    assert gate.decision.value == "clean_abstention"
+    assert "premise_evaluation_pending" not in gate.rules_fired
+
+
 def test_compound_named_subjects_are_scanned_independently_and_admit_context():
     first = {
         **CHUNK,
@@ -757,6 +831,77 @@ def test_trusted_related_tail_qualifies_bounded_near_match():
         "certified_direct_absence",
         "qualified_broader_material",
         "trusted_related_tail_material",
+    )
+    assert diagnostics["broader_related"]["qualifying_pair_count"] == 1
+    assert target_label == "XR-37"
+
+
+def test_hinted_planner_relation_outranks_exact_tail_keyword_fallback():
+    keyword = {
+        **CHUNK,
+        "chunk_id": "keyword_001",
+        "document": "keyword.md",
+        "text": "Federal programs changed while contracting expanded in the record.",
+    }
+    hinted = {
+        **CHUNK,
+        "chunk_id": "hinted_001",
+        "document": "hinted.md",
+        "paragraph_start": 2,
+        "paragraph_end": 2,
+        "text": "A worldwide pandemic exposed supply-chain risk and prompted reshoring.",
+    }
+    question = "What does the book say about XR-37 and its effect on federal contracting?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    local = rag_pipeline.build_question_plan(turn)
+    plan = QuestionPlan(
+        traits=local.traits,
+        requirements=local.requirements,
+        facets=(
+            local.facets[0],
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=(local.requirements[0].requirement_id,),
+                role=FacetRole.MECHANISM,
+                search_query="XR-37 federal contracting",
+                document_hints=("hinted.md",),
+            ),
+        ),
+        targets=local.targets,
+        planner_used=True,
+    )
+    planned = PlannedContext(
+        final_chunks=[keyword, hinted],
+        facet_source_numbers={"F0": (1,), "F1": (2,)},
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={"keyword_001": ("F0",), "hinted_001": ("F1",)},
+    )
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        [keyword, hinted],
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=2,
+        corpus_manifest=corpus_manifest(keyword, hinted),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "qualified_near_match"
+    assert gate.allowed_source_numbers == (2,)
+    assert gate.suppressed_source_numbers == (1,)
+    assert gate.rules_fired == (
+        "certified_direct_absence",
+        "qualified_broader_material",
+        "planner_bounded_related_material",
     )
     assert diagnostics["broader_related"]["qualifying_pair_count"] == 1
     assert target_label == "XR-37"
@@ -1047,18 +1192,185 @@ def test_global_anchor_hit_is_promoted_into_generation_context(monkeypatch):
     assert result.evidence_decision == "direct_answer"
 
 
+def test_anchor_promotion_preserves_every_broad_requirement_lane():
+    requirements = tuple(
+        AnswerRequirement(
+            requirement_id=f"R{index}",
+            label=f"Broad requirement {index}",
+            order=index - 1,
+        )
+        for index in range(1, 5)
+    )
+    plan = QuestionPlan(
+        traits=(RouteTrait.BROAD_SYNTHESIS,),
+        requirements=requirements,
+        facets=(
+            SearchFacet(
+                facet_id="F0",
+                requirement_ids=tuple(
+                    requirement.requirement_id for requirement in requirements
+                ),
+                role=FacetRole.ORIGINAL,
+                search_query="Trace four synthetic periods.",
+            ),
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGIN,
+                search_query="synthetic origin",
+            ),
+            SearchFacet(
+                facet_id="F2",
+                requirement_ids=("R2",),
+                role=FacetRole.MECHANISM,
+                search_query="synthetic mechanism",
+            ),
+            SearchFacet(
+                facet_id="F3",
+                requirement_ids=("R3",),
+                role=FacetRole.TRANSITION,
+                search_query="synthetic transition",
+            ),
+            SearchFacet(
+                facet_id="F4",
+                requirement_ids=("R4",),
+                role=FacetRole.ENDPOINT,
+                search_query="synthetic endpoint",
+            ),
+        ),
+    )
+    old_chunks = [
+        {
+            **CHUNK,
+            "chunk_id": f"old_{index}",
+            "paragraph_start": index,
+            "paragraph_end": index,
+            "text": f"Retrieved lane passage {index}.",
+        }
+        for index in range(1, 9)
+    ]
+    anchor_names = ("Atlas One", "Boreal Two", "Cedar Three", "Delta Four")
+    anchor_chunks = [
+        {
+            **CHUNK,
+            "chunk_id": f"anchor_{index}",
+            "paragraph_start": 20 + index,
+            "paragraph_end": 20 + index,
+            "text": f"{anchor_name} appears in this synthetic passage.",
+        }
+        for index, anchor_name in enumerate(anchor_names, start=1)
+    ]
+    eligible_chunks = [*old_chunks, *anchor_chunks]
+    planned = PlannedContext(
+        final_chunks=old_chunks.copy(),
+        facet_source_numbers={
+            "F0": tuple(range(1, 9)),
+            "F1": (1, 2),
+            "F2": (3, 4),
+            "F3": (5, 6),
+            "F4": (7, 8),
+        },
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "selection": {"context": []},
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={
+            str(chunk["chunk_id"]): (
+                "F0",
+                f"F{((index - 1) // 2) + 1}",
+            )
+            for index, chunk in enumerate(old_chunks, start=1)
+        },
+    )
+    integrity = rag_pipeline.assess_corpus_integrity(
+        eligible_chunks,
+        manifest_eligible_chunk_ids=tuple(
+            str(chunk["chunk_id"]) for chunk in eligible_chunks
+        ),
+        expected_manifest_sha256=MANIFEST_SHA256,
+        loaded_manifest_sha256=MANIFEST_SHA256,
+        expected_collection_count=len(eligible_chunks),
+        collection_count=len(eligible_chunks),
+    )
+    scans = tuple(
+        rag_pipeline.scan_evidence_target(
+            f"T{index}",
+            anchor_name,
+            eligible_chunks,
+            absence_checkable=True,
+            corpus_integrity=integrity,
+        )
+        for index, anchor_name in enumerate(anchor_names, start=1)
+    )
+
+    rag_pipeline._promote_direct_anchor_chunks(
+        plan,
+        planned,
+        scans,
+        eligible_chunks,
+        facet_scan=None,
+        immediate_neighbors={},
+    )
+
+    assert [chunk["chunk_id"] for chunk in planned.final_chunks] == [
+        "old_1",
+        "old_3",
+        "old_5",
+        "old_7",
+        "anchor_1",
+        "anchor_2",
+        "anchor_3",
+        "anchor_4",
+    ]
+    assert planned.facet_source_numbers["F1"] == (1,)
+    assert planned.facet_source_numbers["F2"] == (2,)
+    assert planned.facet_source_numbers["F3"] == (3,)
+    assert planned.facet_source_numbers["F4"] == (4,)
+    assert planned.trace["selection"]["anchor_requested_count"] == 4
+    assert planned.trace["selection"]["protected_source_count"] == 4
+    assert planned.trace["selection"]["protected_source_shortfall_count"] == 0
+
+
 def test_promoted_premise_anchor_keeps_correction_source_mapping_valid(monkeypatch):
-    unrelated = {
+    substantive = {
         **CHUNK,
         "chunk_id": "synthetic_002",
         "paragraph_start": 2,
         "paragraph_end": 2,
-        "text": "An unrelated synthetic passage.",
+        "text": "The later synthetic signal change is described.",
+    }
+    framing = {
+        **CHUNK,
+        "chunk_id": "synthetic_003",
+        "paragraph_start": 3,
+        "paragraph_end": 3,
+        "text": "The manuscript frames the synthetic chronology as beginning earlier.",
     }
     direct = dict(CHUNK)
 
     def fake_retrieve(plan, *_args, **_kwargs):
-        return planned_context(plan, [unrelated])
+        return PlannedContext(
+            final_chunks=[substantive, framing],
+            facet_source_numbers={
+                "F0": (1, 2),
+                "F1": (1,),
+                "F2": (2,),
+                "F3": (2,),
+            },
+            trace={
+                "schema": RETRIEVAL_TRACE_SCHEMA,
+                "plan": {},
+                "evidence": {},
+                "generation_contract": {},
+            },
+            lane_by_chunk_id={
+                "synthetic_002": ("F0", "F1"),
+                "synthetic_003": ("F0", "F2", "F3"),
+            },
+        )
 
     monkeypatch.setattr(
         rag_pipeline,
@@ -1082,11 +1394,19 @@ def test_promoted_premise_anchor_keeps_correction_source_mapping_valid(monkeypat
     captured: dict[str, object] = {}
     correction = AnswerUnit(
         unit_id="U1",
-        requirement_ids=("R1",),
+        requirement_ids=(),
         role=AnswerUnitRole.PREMISE_CORRECTION,
-        text="The synthetic premise began earlier [Source 1].",
-        source_numbers=(1,),
+        text="The manuscript frames the synthetic chronology as beginning earlier [Source 3].",
+        source_numbers=(3,),
         paragraph=1,
+    )
+    substantive_unit = AnswerUnit(
+        unit_id="U2",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.EVENT,
+        text="The later synthetic signal change is described [Source 2].",
+        source_numbers=(2,),
+        paragraph=2,
     )
 
     def fake_parse(_client, *, operation, **request):
@@ -1094,12 +1414,12 @@ def test_promoted_premise_anchor_keeps_correction_source_mapping_valid(monkeypat
         captured.update(request)
         return SimpleNamespace(
             output_parsed=EvidenceCoverageAnswer(
-                schema="archivist.evidence_coverage/1",
+                schema=EVIDENCE_COVERAGE_SCHEMA,
                 premise_decisions=(
                     PremiseDecision(
                         premise_id="P1",
                         status=PremiseStatus.CONTRADICTED,
-                        source_numbers=(1, 2),
+                        source_numbers=(3,),
                         correction_unit_id="U1",
                     ),
                 ),
@@ -1107,12 +1427,12 @@ def test_promoted_premise_anchor_keeps_correction_source_mapping_valid(monkeypat
                     RequirementCoverage(
                         requirement_id="R1",
                         status=RequirementStatus.SUPPORTED,
-                        unit_ids=("U1",),
+                        unit_ids=("U2",),
                         source_numbers=(2,),
                         gap_reason=GapReason.NONE,
                     ),
                 ),
-                answer_units=(correction,),
+                answer_units=(correction, substantive_unit),
             ),
             output=(),
         )
@@ -1125,24 +1445,31 @@ def test_promoted_premise_anchor_keeps_correction_source_mapping_valid(monkeypat
             entities=("Project Lumen",),
             trusted_user_texts=("Why did Project Lumen begin the signal change?",),
         ),
-        collection_handle=Collection(count=2),
-        chunks=[direct, unrelated],
+        collection_handle=Collection(count=3),
+        chunks=[direct, substantive, framing],
         client=object(),
-        corpus_manifest=corpus_manifest(direct, unrelated),
+        corpus_manifest=corpus_manifest(direct, substantive, framing),
         corpus_manifest_sha256=MANIFEST_SHA256,
     )
 
     assert result.status == "answered"
-    assert result.answer == correction.text
+    assert result.answer == f"{correction.text}\n\n{substantive_unit.text}"
     assert [chunk["chunk_id"] for chunk in result.final_chunks] == [
         "synthetic_001",
         "synthetic_002",
+        "synthetic_003",
     ]
     assert str(captured["input"]).index("[Source 1]") < str(captured["input"]).index("[Source 2]")
+    assert str(captured["input"]).index("[Source 2]") < str(captured["input"]).index("[Source 3]")
     assert "inspect all supplied sources" in str(captured["instructions"])
-    assert result.diagnostics["generation"]["repair_codes"] == [
-        "source_mapping_mismatch",
-        "premise_source_mismatch",
+    assert result.diagnostics["generation"]["repair_codes"] == []
+    assert result.diagnostics["generation"]["premise_source_scopes"] == [
+        {
+            "premise_id": "P1",
+            "support_source_numbers": [2],
+            "counter_source_numbers": [3],
+            "framing_source_numbers": [3],
+        }
     ]
     assert traces[0]["selection"]["anchor_source_number_remap"] == [
         {
@@ -1152,6 +1479,10 @@ def test_promoted_premise_anchor_keeps_correction_source_mapping_valid(monkeypat
         {
             "pre_anchor_source_number": 1,
             "post_anchor_source_number": 2,
+        },
+        {
+            "pre_anchor_source_number": 2,
+            "post_anchor_source_number": 3,
         },
     ]
     assert traces[0]["selection"]["generation_context"][0]["chunk_id"] == ("synthetic_001")
@@ -1211,7 +1542,7 @@ def test_trace_records_post_gate_source_number_remap(monkeypatch):
             "generation_source_number": 1,
         },
         {
-            "retrieval_source_number": 2,
+            "retrieval_source_number": 3,
             "generation_source_number": 2,
         },
     ]

@@ -45,6 +45,29 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-25] Bounded absence retrieval chose adjacent contracting history instead of the requested near-match
+Phase/Brief: Phase 1 evidence-planned-v7 focused paid confirmation
+Symptom: unchanged G009 now routed and validated correctly as `qualified_near_match`, stated the
+COVID/federal-contracting evidence boundary first, used exactly two bounded sources, and resolved
+all citations. Both selected sources were from Chapter 20, however, and the answer discussed
+post-Soviet layoffs and post-Al-Qaeda contracting. It omitted the Epilogue's generic pandemic,
+supply-chain, reshoring, and military-spending treatment required by the unchanged rubric. Strict
+coverage was 2/5 claims and 0/1 target groups.
+Cause: other and spec gap in the brief - a trusted-tail bounded probe certifies co-occurrence of
+the broad related terms, but final ranking does not measure whether a candidate preserves the
+requested absent subject's facet. Related contracting examples can therefore outrank the closest
+bounded thematic substitute.
+Resolution and verification: resolved in `evidence-planned-v8` without changing
+premise/absence precedence. A planner-ranked related passage is eligible only for an
+absence-sensitive, substantive non-premise facet with an exact validated document hint whose
+query preserves the trusted subject and relation surfaces. Admission occurs before the older
+exact-tail fallback and is capped at two sources. Synthetic tests prove that the hinted related
+lane outranks an exact but off-facet contracting co-occurrence and that three qualified candidates
+are still capped at two. The complete offline suite passes with 421 tests and one skip. The
+unchanged paid G009 confirmation then returned a valid qualified answer from exactly two Epilogue
+passages, covered the required 1/1 target group and about 3/5 strict claims, and invented no
+pandemic procurement analysis.
+
 ## [2026-07-25] Premise planning bypassed certified absence on the unchanged G009
 Phase/Brief: Phase 1 evidence-planned-v6 directional ten-question evaluation
 Symptom: the focused v6 G009 confirmation returned a valid bounded near-match answer from two
@@ -57,10 +80,16 @@ absent, and the required Epilogue group was present, but a planner-created premi
 Cause: other and spec gap in the brief - the evidence-decision precedence does not define whether
 a model-proposed premise may override mechanically certified subject absence, and a declarative
 question about an absent subject can be reclassified as premise-sensitive nondeterministically.
-Resolution and verification: pending. Preserve both paid artifacts as the variance pair. The next
-repair must make premise ownership and absence precedence corpus-agnostic, retain the bounded
-near-match evidence, and keep source-mapping failures visible rather than broadening the
-normalizer. Repeat only the affected fixed subset before another full cohort.
+Resolution and verification: repaired offline in `evidence-planned-v7`. Planner input now includes
+application-owned route traits, and local validation rejects any proposed premise unless the
+deterministic route is already `premise_sensitive`. The evidence gate repeats that condition
+before applying `premise_evaluation_pending`, so an absence-only route cannot be widened by a
+provider proposal. A synthetic G009-shaped regression verifies `premise_route_mismatch` fallback,
+and a defensive gate regression verifies that a surviving untrusted premise cannot override clean
+absence. The complete offline suite passes with 416 tests and one skip. The unchanged paid v7
+confirmation then retained only `absence_sensitive`, certified absence, returned
+`qualified_near_match`, and passed strict validation from two bounded sources. This precedence
+defect is resolved; the separate semantic near-match defect is logged above.
 
 ## [2026-07-25] Accepted broad plans did not produce source-bounded historical coverage
 Phase/Brief: Phase 1 evidence-planned-v6 directional ten-question evaluation
@@ -72,10 +101,60 @@ Cause: spec gap in the brief - plan validity guarantees that requirements map to
 lane selection and the eight-source cap do not guarantee that a live facet yields a source or that
 one surviving source represents each required era. A syntactically accepted plan can therefore
 lose most of its intended historical span during retrieval and final allocation.
-Resolution and verification: pending. Use the preserved text-free traces to measure per-facet
-yield, requirement survival, document-era breadth, and which anchors the source cap displaced.
-Optimize allocation within the existing eight-source contract before considering a larger
-context, and rerun the unchanged broad items without changing their claims or target groups.
+Resolution and verification: mitigation was implemented in `evidence-planned-v7` at the two
+measured boundaries. An unbounded manuscript-treatment question now routes as broad synthesis
+unless it has a conservative named absence target. Broad proposals require ordered requirements
+and dedicated facets; final allocation protects requirements and live broad facets under the
+unchanged eight-source cap. The complete offline suite passes with 416 tests and one skip.
+Unchanged paid confirmation showed that the defect is not resolved: G006 remained at 1/8 claims
+and 2/8 groups, while G007 remained at 0/7 claims and improved only to 3/5 groups. Protection
+reported no shortfall, but coarse origin/transition/endpoint facets still failed to span the full
+chronology, duplicate documents consumed slots, and anchor promotion displaced a unique useful
+stage source. The full cohort was stopped pending a narrower allocation and stage-coverage repair.
+
+`Evidence-planned-v8` added application-owned early/middle/late document bands, mandatory ordered
+origin/transition-or-mechanism/endpoint plans, unseen-document refill, capacity-first stage
+protection, and traceable stage counts. Offline verification passes with 421 tests and one skip.
+The unchanged paid confirmation proves the defect remains unresolved: G006 improved modestly to
+2/8 claims and 3/8 groups, while G007 remained at 0/7 claims and regressed to 2/5 groups. Both
+traces reported 3/3 stage coverage with zero shortfall. The new signal therefore verifies only
+coarse chronology-band survival, not recovery of the substantive stages in a book-wide argument.
+The next repair must increase or refine planned argument-stage obligations within the unchanged
+eight-source cap rather than treating three terciles as adequate coverage.
+
+A controlled retrieval-only 8/12/16 comparison refined that diagnosis. With one shared planner
+result and embedding batch per question, G006 target-group coverage was 3/8, 3/8, and 6/8,
+respectively; G007 remained 3/5 at every limit. Every larger context retained all eight baseline
+chunks. The eight-source ceiling is therefore a measured constraint for G006, while planning and
+ranking remain the measured constraint for G007. The earlier assumption that both repairs should
+fit under an unchanged eight-source cap is no longer justified. No production parameter changed;
+a broad-only sixteen-source ceiling and richer argument-stage planning must be evaluated as
+separate cohort changes before integration. The diagnostic made two planner calls, two embedding
+calls, no answer call, no retry, and cost an estimated `$0.05277158`.
+
+The separate G006 generation gate rejected the broad-only ceiling. Sixteen sources increased
+target-document coverage from 2/8 to 6/8 in that live-plan sample, but the answer contract exposed
+a hidden integration boundary: `source_count=16` is illegal while `MAX_SOURCES=8`. Recovering the
+already-paid structured output showed that the larger context also failed the substantive gate:
+it added the Crown takeover but still omitted the Hamiltonian, Federal Reserve/FTC,
+Pentagon/cost-plus, Chapter 20, and Epilogue steps. Production therefore remains at eight rather
+than widening both retrieval and generation contracts without an answer gain.
+
+`Evidence-planned-v9` replaced three coarse broad stages with five dedicated ordered narrative
+stages and scoped numbered books from Chapter 1 through conclusion/Epilogue. Its focused G007 run
+validated mechanically but remained at 3/5 target groups: it repaired Jamestown, displaced the
+Civil War group at a rigid stage boundary, and missed the Epilogue. `Evidence-planned-v10` added
+two-document overlap between adjacent narrative stages and one structural endpoint lookup against
+the book's own conclusion/Epilogue, sharing the existing embedding and retaining the eight-source
+cap. A controlled rerun reused the exact accepted v9 plan and improved G007 source coverage from
+3/5 to 5/5 for `$0.10395228`; the complete offline suite passes 422 tests with one skip.
+
+The broad-source-allocation symptom is resolved at the target-document level for G007 but not at
+the expected-claim level. The answer still lacks several specific mechanisms inside those
+chapters, including war debt as Hamiltonian power, Pentagon/employment, NSC-68 and Keynesian
+permanent spending, NATO persistence, and the security dilemma. The next defect is therefore
+passage-level mechanism targeting/ranking inside the now-correct narrative stages, not another
+source-limit increase or chronology-band change. The full ten-question cohort remains gated.
 
 ## [2026-07-25] A valid premise correction still omitted the manuscript's origin frame
 Phase/Brief: Phase 1 evidence-planned-v6 directional ten-question evaluation
@@ -87,9 +166,20 @@ stating where the book places the origin.
 Cause: spec gap in the brief - premise validation checks that a leading cited correction exists,
 not that the correction realizes the independently requested source-bounded origin requirement.
 Mechanical premise validity and answer adequacy therefore diverge.
-Resolution and verification: pending. Keep premise correction and source-bounded requirement
-coverage as separate validated obligations. A future repair must require the generated correction
-to cover the retrieved origin frame without hard-coding a place, chapter, or expected answer.
+Resolution and verification: repaired offline in `evidence-planned-v7` without hard-coding a
+place, chapter, or expected answer. `archivist.evidence_coverage/2` requires premise-correction
+units to carry no requirement IDs and requires ordinary units to carry at least one, preventing a
+correction from satisfying the requested answer by bookkeeping. The application supplies exact
+post-gate support, counter, and framing source scopes; a contradicted correction must cite its
+exact declared sources and include a retained framing source whenever one exists. The prompt
+requires a positive replacement chronology, origin, identity, or causal frame before separate
+substantive units. Provenance, separation, and text-free diagnostic regressions pass within the
+416-test offline suite. Unchanged paid G010 confirmation then produced a leading, cited Jamestown
+replacement frame, kept the correction outside ordinary requirement coverage, covered both
+target-document groups, and passed strict validation. The narrow missing-origin defect is
+resolved. Strict rubric completeness remains only 1/4 because the answer did not realize the full
+Introduction/Cradle framing, identify Chapter 11, or complete the Spanish-imperial-transition
+claim; those are answer-completeness targets rather than a recurrence of the provenance defect.
 
 ## [2026-07-25] Qualified near-match answer failed on redundant status/gap bookkeeping
 Phase/Brief: Phase 1 evidence-planned-v5 focused paid smoke

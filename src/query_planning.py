@@ -41,15 +41,19 @@ MAX_ORIGINAL_QUERY_CHARS = 4_000
 MAX_ADDED_QUERY_CHARS = 1_200
 MAX_PLANNER_REQUIREMENTS = MAX_ANSWER_REQUIREMENTS
 MAX_PLANNER_FACETS = MAX_ADDED_SEARCH_FACETS
+MIN_BROAD_STAGE_REQUIREMENTS = 5
 PLAN_STRUCTURE_INVALID = "plan_structure_invalid"
 PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
     {
+        "broad_plan_under_decomposed",
         "duplicate_query",
         "established_answer_claim",
+        "missing_premise_framing",
         "missing_requirement_mapping",
         "original_query_changed",
         "original_query_too_long",
         "planner_owned_original",
+        "premise_route_mismatch",
         "query_drift",
         "too_many_facets",
         "unknown_document_hint",
@@ -580,7 +584,13 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
         _ABSENCE_REQUEST.search(text) or _ABSENCE_REQUEST_REVERSED.search(text)
     )
     if neutral_manuscript_request:
-        traits.add(RouteTrait.ABSENCE_SENSITIVE)
+        # A local absence decision requires a conservative user-supplied target.
+        # Without one, "how does the book treat..." is an unbounded thematic
+        # synthesis request rather than a named-subject absence request.
+        if extract_trusted_targets(turn):
+            traits.add(RouteTrait.ABSENCE_SENSITIVE)
+        else:
+            traits.add(RouteTrait.BROAD_SYNTHESIS)
 
     if not bounded_between_relationship:
         if (
@@ -999,7 +1009,18 @@ def validate_question_plan(
     parsed = _coerce_plan(plan)
     turn = _coerce_resolved_turn(resolved_turn)
     catalog = _coerce_catalog(document_catalog)
+    deterministic_traits = set(route_question(turn))
 
+    if parsed.premises and RouteTrait.PREMISE_SENSITIVE not in deterministic_traits:
+        raise PlanValidationError(
+            "premise_route_mismatch",
+            "planner premises require the application-owned premise-sensitive route",
+        )
+    if any(premise.framing_facet_id is None for premise in parsed.premises):
+        raise PlanValidationError(
+            "missing_premise_framing",
+            "every planner premise requires a distinct framing facet",
+        )
     if any(
         facet.facet_id == F0_FACET_ID or facet.role is FacetRole.ORIGINAL for facet in parsed.facets
     ):
@@ -1078,7 +1099,70 @@ def validate_question_plan(
                 f"target {target.target_id!r} changes a local trust decision",
             )
 
-    deterministic_traits = set(route_question(turn))
+    if RouteTrait.BROAD_SYNTHESIS in deterministic_traits:
+        requirement_ids = {
+            requirement.requirement_id for requirement in parsed.requirements
+        }
+        dedicated_stage_facets = [
+            facet
+            for facet in parsed.facets
+            if facet.role
+            in {
+                FacetRole.ORIGIN,
+                FacetRole.TRANSITION,
+                FacetRole.MECHANISM,
+                FacetRole.ENDPOINT,
+            }
+            and len(facet.requirement_ids) == 1
+        ]
+        dedicated_stage_facets_by_requirement = {
+            requirement_id: [
+                facet
+                for facet in dedicated_stage_facets
+                if facet.requirement_ids == (requirement_id,)
+            ]
+            for requirement_id in requirement_ids
+        }
+        ordered_requirements = sorted(
+            parsed.requirements,
+            key=lambda requirement: requirement.order,
+        )
+        ordered_stage_roles = [
+            dedicated_stage_facets_by_requirement[
+                requirement.requirement_id
+            ][0].role
+            for requirement in ordered_requirements
+            if len(
+                dedicated_stage_facets_by_requirement[
+                    requirement.requirement_id
+                ]
+            )
+            == 1
+        ]
+        stage_chain_valid = (
+            len(ordered_stage_roles) == len(ordered_requirements)
+            and ordered_stage_roles[0] is FacetRole.ORIGIN
+            and ordered_stage_roles[-1] is FacetRole.ENDPOINT
+            and all(
+                role in {FacetRole.TRANSITION, FacetRole.MECHANISM}
+                for role in ordered_stage_roles[1:-1]
+            )
+        )
+        if (
+            len(parsed.requirements) < MIN_BROAD_STAGE_REQUIREMENTS
+            or any(
+                len(facets) != 1
+                for facets in dedicated_stage_facets_by_requirement.values()
+            )
+            or not stage_chain_valid
+        ):
+            raise PlanValidationError(
+                "broad_plan_under_decomposed",
+                "broad synthesis requires at least five dedicated, ordered "
+                "narrative-stage requirements: origin, at least three "
+                "transition-or-mechanism stages, and endpoint",
+            )
+
     payload = parsed.model_dump()
     payload.update(
         traits=tuple(trait for trait in RouteTrait if trait in deterministic_traits),
@@ -1337,31 +1421,72 @@ def deterministic_fallback_plan(
         end = _bounded_text(span.group("end"))
         context = _bounded_text(question[: span.start()].strip(" ,;:?"))
         relationship = _bounded_text(turn.relationship or f"{start} {end}")
-        requirements = (
-            _fallback_requirement(1, start),
-            _fallback_requirement(2, end),
-            _fallback_requirement(3, relationship),
-        )
-        facets = (
-            _fallback_facet(
-                1,
-                requirements[0],
-                FacetRole.ORIGIN,
-                f"origin {context} {start}",
-            ),
-            _fallback_facet(
-                2,
-                requirements[1],
-                FacetRole.ENDPOINT,
-                f"endpoint {context} {end}",
-            ),
-            _fallback_facet(
-                3,
-                requirements[2],
-                FacetRole.TRANSITION,
-                f"transition {start} {end} {relationship}",
-            ),
-        )
+        if RouteTrait.BROAD_SYNTHESIS in traits:
+            requirements = (
+                _fallback_requirement(1, start),
+                _fallback_requirement(2, f"Early development after {start}"),
+                _fallback_requirement(3, relationship),
+                _fallback_requirement(4, f"Later transformation toward {end}"),
+                _fallback_requirement(5, end),
+            )
+            facets = (
+                _fallback_facet(
+                    1,
+                    requirements[0],
+                    FacetRole.ORIGIN,
+                    f"origin {context} {start}",
+                ),
+                _fallback_facet(
+                    2,
+                    requirements[1],
+                    FacetRole.TRANSITION,
+                    f"early development {start} {relationship}",
+                ),
+                _fallback_facet(
+                    3,
+                    requirements[2],
+                    FacetRole.MECHANISM,
+                    f"middle mechanism {start} {end} {relationship}",
+                ),
+                _fallback_facet(
+                    4,
+                    requirements[3],
+                    FacetRole.TRANSITION,
+                    f"later transformation {end} {relationship}",
+                ),
+                _fallback_facet(
+                    5,
+                    requirements[4],
+                    FacetRole.ENDPOINT,
+                    f"endpoint {context} {end}",
+                ),
+            )
+        else:
+            requirements = (
+                _fallback_requirement(1, start),
+                _fallback_requirement(2, relationship),
+                _fallback_requirement(3, end),
+            )
+            facets = (
+                _fallback_facet(
+                    1,
+                    requirements[0],
+                    FacetRole.ORIGIN,
+                    f"origin {context} {start}",
+                ),
+                _fallback_facet(
+                    2,
+                    requirements[1],
+                    FacetRole.TRANSITION,
+                    f"transition {start} {end} {relationship}",
+                ),
+                _fallback_facet(
+                    3,
+                    requirements[2],
+                    FacetRole.ENDPOINT,
+                    f"endpoint {context} {end}",
+                ),
+            )
     elif relational is not None:
         left, right, predicate, relationship_context = relational
         relationship_label = _bounded_text(
@@ -1449,6 +1574,46 @@ def deterministic_fallback_plan(
                 framing_facet_id="F3",
             ),
         )
+    elif RouteTrait.BROAD_SYNTHESIS in traits:
+        requirements = (
+            _fallback_requirement(1, "Earliest concrete origin"),
+            _fallback_requirement(2, "Early institutional development"),
+            _fallback_requirement(3, "Middle-period mechanism or consolidation"),
+            _fallback_requirement(4, "Later transformation or normalization"),
+            _fallback_requirement(5, "Latest consequences and endpoint"),
+        )
+        facets = (
+            _fallback_facet(
+                1,
+                requirements[0],
+                FacetRole.ORIGIN,
+                f"earliest concrete origin {question}",
+            ),
+            _fallback_facet(
+                2,
+                requirements[1],
+                FacetRole.TRANSITION,
+                f"early institutional development {question}",
+            ),
+            _fallback_facet(
+                3,
+                requirements[2],
+                FacetRole.TRANSITION,
+                f"middle mechanism consolidation {question}",
+            ),
+            _fallback_facet(
+                4,
+                requirements[3],
+                FacetRole.TRANSITION,
+                f"later transformation normalization {question}",
+            ),
+            _fallback_facet(
+                5,
+                requirements[4],
+                FacetRole.ENDPOINT,
+                f"latest consequence endpoint {question}",
+            ),
+        )
     else:
         requirements = (_fallback_requirement(1, question.strip(" ?")),)
         facets = ()
@@ -1529,11 +1694,20 @@ Return no route traits, evidence targets, requirement order, execution status, o
 the application owns those fields.
 Use only IDs declared in the response, and map every requirement to at least one added facet.
 Prefer the smallest sufficient proposal. A single-clause request normally needs one requirement
-and one to three facets. Broad or explicitly multi-part requests may use more within the schema
-limits; do not merge or omit independently requested parts merely to stay under four.
+and one to three facets. Obey the application-owned route_traits supplied in the input. When
+broad_synthesis is present, return at least five ordered requirements, normally exactly five.
+Give every requirement exactly one dedicated narrative-stage facet: first an origin facet, then
+at least three transition or mechanism facets for distinct developments in the argument, and
+finally an endpoint facet. Do not use generic early/middle/late labels: make each requirement and
+query identify the distinct function or development it must find while staying neutral about the
+answer.
+Do not merge or omit independently requested parts merely to stay under four.
 Keep labels and search queries terse and copy document hints only as exact catalog IDs.
 For relational questions, search each named concept plus evidence that explicitly links them.
-Treat factual premises as hypotheses with support and counter facets.
+Return premise hypotheses only when premise_sensitive is present. For every factual premise, use
+distinct support, counter, and framing facets. The framing facet searches for the manuscript's own
+alternative chronology, origin, identity, or causal frame if the premise fails; do not state that
+alternative in the plan.
 Document hints must exactly match the supplied eligible catalog.
 Do not state conclusions, cite sources, invent aliases, or use prior assistant answers as evidence.
 Respect the version-1 limits encoded in the response schema.
@@ -1561,6 +1735,7 @@ __all__ = [
     "FacetRole",
     "MAX_ADDED_QUERY_CHARS",
     "MAX_ADDED_SEARCH_FACETS",
+    "MIN_BROAD_STAGE_REQUIREMENTS",
     "MAX_ORIGINAL_QUERY_CHARS",
     "MAX_PLANNER_FACETS",
     "MAX_PLANNER_REQUIREMENTS",

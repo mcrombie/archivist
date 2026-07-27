@@ -45,6 +45,7 @@ __all__ = [
     "EvidenceCoverageResult",
     "GapReason",
     "PremiseDecision",
+    "PremiseSourceScope",
     "PremiseStatus",
     "RequirementCoverage",
     "RequirementStatus",
@@ -57,10 +58,10 @@ __all__ = [
 ]
 
 
-EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/1"
-EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/3"
+EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/2"
+EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/4"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
-EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/3"
+EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/4"
 
 MAX_REQUIREMENTS = 8
 MAX_PREMISES = 2
@@ -179,10 +180,15 @@ class CoverageValidationErrorCode(StrEnum):
     STATUS_UNIT_MISMATCH = "status_unit_mismatch"
     STATUS_GAP_MISMATCH = "status_gap_mismatch"
     PREMISE_SOURCE_MISMATCH = "premise_source_mismatch"
+    PREMISE_PROVENANCE_MISMATCH = "premise_provenance_mismatch"
     PREMISE_STATUS_INVALID = "premise_status_invalid"
     PREMISE_CORRECTION_MISSING = "premise_correction_missing"
     PREMISE_CORRECTION_INVALID = "premise_correction_invalid"
     PREMISE_CORRECTION_NOT_FIRST = "premise_correction_not_first"
+    PREMISE_CORRECTION_REQUIREMENT_MISMATCH = (
+        "premise_correction_requirement_mismatch"
+    )
+    MISSING_UNIT_REQUIREMENT_ID = "missing_unit_requirement_id"
     DUPLICATE_SOURCE_NUMBER = "duplicate_source_number"
     SOURCE_NUMBER_OUT_OF_RANGE = "source_number_out_of_range"
     SOURCE_MAPPING_MISMATCH = "source_mapping_mismatch"
@@ -223,7 +229,6 @@ class RequirementCoverage(_ContractModel):
 class AnswerUnit(_ContractModel):
     unit_id: Identifier
     requirement_ids: tuple[Identifier, ...] = Field(
-        min_length=1,
         max_length=MAX_REQUIREMENTS,
     )
     role: AnswerUnitRole
@@ -254,7 +259,7 @@ class AnswerUnit(_ContractModel):
 
 
 class EvidenceCoverageAnswer(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage/1"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage/2"] = Field(alias="schema")
     premise_decisions: tuple[PremiseDecision, ...] = Field(max_length=MAX_PREMISES)
     coverage: tuple[RequirementCoverage, ...] = Field(
         min_length=1,
@@ -267,12 +272,24 @@ class EvidenceCoverageAnswer(_ContractModel):
         return self.schema_version
 
 
+class PremiseSourceScope(_ContractModel):
+    """Trusted post-gate source provenance for one premise hypothesis."""
+
+    premise_id: Identifier
+    support_source_numbers: tuple[SourceNumber, ...] = Field(max_length=MAX_SOURCES)
+    counter_source_numbers: tuple[SourceNumber, ...] = Field(max_length=MAX_SOURCES)
+    framing_source_numbers: tuple[SourceNumber, ...] = Field(max_length=MAX_SOURCES)
+
+
 class CoverageValidationContext(_ContractModel):
     requirement_ids: tuple[Identifier, ...] = Field(
         min_length=1,
         max_length=MAX_REQUIREMENTS,
     )
     premise_ids: tuple[Identifier, ...] = Field(max_length=MAX_PREMISES)
+    premise_source_scopes: tuple[PremiseSourceScope, ...] = Field(
+        max_length=MAX_PREMISES
+    )
     source_count: Annotated[int, Field(strict=True, ge=0, le=MAX_SOURCES)]
 
 
@@ -314,7 +331,7 @@ class PremiseStatusCounts(_ContractModel):
 
 
 class CoverageDiagnosticSummary(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage_diagnostics/3"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage_diagnostics/4"] = Field(alias="schema")
     renderer_version: Literal["evidence-coverage-renderer/1"]
     validation_result: DiagnosticValidationResult
     error_code: CoverageValidationErrorCode | None
@@ -322,6 +339,7 @@ class CoverageDiagnosticSummary(_ContractModel):
     repair_codes: tuple[CoverageValidationErrorCode, ...]
     requirement_ids: tuple[Identifier, ...]
     premise_ids: tuple[Identifier, ...]
+    premise_source_scopes: tuple[PremiseSourceScope, ...]
     requirement_count: int = Field(ge=0, le=MAX_REQUIREMENTS)
     premise_count: int = Field(ge=0, le=MAX_PREMISES)
     source_count: int = Field(ge=0, le=MAX_SOURCES)
@@ -394,6 +412,7 @@ def validate_evidence_coverage(
     *,
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
     source_count: int,
 ) -> ValidatedEvidenceCoverage:
     """Validate a structured answer against its trusted call inputs.
@@ -403,7 +422,12 @@ def validate_evidence_coverage(
     :func:`process_evidence_coverage` for a stable fail-closed result.
     """
 
-    context = _validation_context(requirement_ids, premise_ids, source_count)
+    context = _validation_context(
+        requirement_ids,
+        premise_ids,
+        premise_source_scopes,
+        source_count,
+    )
     answer = _parse_payload(payload)
 
     _validate_exact_ids(
@@ -448,6 +472,15 @@ def validate_evidence_coverage(
 
     citation_count = 0
     for unit in answer.answer_units:
+        if unit.role is AnswerUnitRole.PREMISE_CORRECTION:
+            if unit.requirement_ids:
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.PREMISE_CORRECTION_REQUIREMENT_MISMATCH
+                )
+        elif not unit.requirement_ids:
+            raise CoverageContractError(
+                CoverageValidationErrorCode.MISSING_UNIT_REQUIREMENT_ID
+            )
         if _has_duplicates(unit.requirement_ids):
             raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_REQUIREMENT_ID)
         if any(requirement_id not in requirement_order for requirement_id in unit.requirement_ids):
@@ -469,8 +502,13 @@ def validate_evidence_coverage(
             raise CoverageContractError(CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH)
         citation_count += len(cited_numbers)
 
+    premise_scopes = {
+        scope.premise_id: scope for scope in context.premise_source_scopes
+    }
+    correction_reference_counts: Counter[str] = Counter()
     for decision in answer.premise_decisions:
         _validate_source_numbers(decision.source_numbers, context.source_count)
+        scope = premise_scopes[decision.premise_id]
         if decision.status in {PremiseStatus.SUPPORTED, PremiseStatus.CONTRADICTED}:
             if not decision.source_numbers:
                 raise CoverageContractError(CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH)
@@ -478,6 +516,11 @@ def validate_evidence_coverage(
             raise CoverageContractError(CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH)
         if decision.status is PremiseStatus.NOT_APPLICABLE:
             raise CoverageContractError(CoverageValidationErrorCode.PREMISE_STATUS_INVALID)
+        if decision.status is PremiseStatus.SUPPORTED:
+            if not set(decision.source_numbers) <= set(scope.support_source_numbers):
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
+                )
         if decision.status is PremiseStatus.CONTRADICTED:
             if decision.correction_unit_id is None:
                 raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_MISSING)
@@ -485,15 +528,41 @@ def validate_evidence_coverage(
             if (
                 correction is None
                 or correction.role is not AnswerUnitRole.PREMISE_CORRECTION
-                or not set(decision.source_numbers).issubset(correction.source_numbers)
+                or decision.source_numbers != correction.source_numbers
             ):
                 raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID)
+            allowed_correction_sources = set(scope.counter_source_numbers) | set(
+                scope.framing_source_numbers
+            )
+            if (
+                not set(decision.source_numbers) <= allowed_correction_sources
+                or (
+                    scope.framing_source_numbers
+                    and not set(decision.source_numbers)
+                    & set(scope.framing_source_numbers)
+                )
+            ):
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
+                )
             if decision.correction_unit_id != first_rendered_unit_id:
                 raise CoverageContractError(
                     CoverageValidationErrorCode.PREMISE_CORRECTION_NOT_FIRST
                 )
+            correction_reference_counts[decision.correction_unit_id] += 1
         elif decision.correction_unit_id is not None:
             raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID)
+
+    correction_unit_ids = {
+        unit.unit_id
+        for unit in answer.answer_units
+        if unit.role is AnswerUnitRole.PREMISE_CORRECTION
+    }
+    if (
+        set(correction_reference_counts) != correction_unit_ids
+        or any(count != 1 for count in correction_reference_counts.values())
+    ):
+        raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID)
 
     coverage_by_requirement = {record.requirement_id: record for record in answer.coverage}
     for record in answer.coverage:
@@ -603,6 +672,7 @@ def coverage_diagnostic_summary(
         repair_codes=normalized_repair_codes,
         requirement_ids=validated.context.requirement_ids,
         premise_ids=validated.context.premise_ids,
+        premise_source_scopes=validated.context.premise_source_scopes,
         requirement_count=len(validated.context.requirement_ids),
         premise_count=len(validated.context.premise_ids),
         source_count=validated.context.source_count,
@@ -657,6 +727,7 @@ def process_evidence_coverage(
     *,
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
     source_count: int,
     requirement_labels: Mapping[str, str] | None = None,
     refused: bool = False,
@@ -668,7 +739,12 @@ def process_evidence_coverage(
     """
 
     try:
-        context = _validation_context(requirement_ids, premise_ids, source_count)
+        context = _validation_context(
+            requirement_ids,
+            premise_ids,
+            premise_source_scopes,
+            source_count,
+        )
     except CoverageContractError as error:
         return _contract_failure_result(
             context=None,
@@ -703,6 +779,7 @@ def process_evidence_coverage(
             normalized_payload,
             requirement_ids=context.requirement_ids,
             premise_ids=context.premise_ids,
+            premise_source_scopes=context.premise_source_scopes,
             source_count=context.source_count,
         )
     except CoverageContractError as error:
@@ -737,19 +814,51 @@ def process_evidence_coverage(
 def _validation_context(
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str],
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]],
     source_count: int,
 ) -> CoverageValidationContext:
-    if isinstance(requirement_ids, (str, bytes)) or isinstance(premise_ids, (str, bytes)):
+    if (
+        isinstance(requirement_ids, (str, bytes))
+        or isinstance(premise_ids, (str, bytes))
+        or isinstance(premise_source_scopes, (str, bytes, Mapping))
+    ):
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
     try:
+        scopes = tuple(
+            (
+                value
+                if isinstance(value, PremiseSourceScope)
+                else PremiseSourceScope.model_validate(value)
+            )
+            for value in premise_source_scopes
+        )
         context = CoverageValidationContext(
             requirement_ids=tuple(requirement_ids),
             premise_ids=tuple(premise_ids),
+            premise_source_scopes=scopes,
             source_count=source_count,
         )
     except (TypeError, ValidationError):
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT) from None
-    if _has_duplicates(context.requirement_ids) or _has_duplicates(context.premise_ids):
+    scope_ids = tuple(scope.premise_id for scope in context.premise_source_scopes)
+    if (
+        _has_duplicates(context.requirement_ids)
+        or _has_duplicates(context.premise_ids)
+        or scope_ids != context.premise_ids
+        or any(
+            _has_duplicates(source_numbers)
+            or any(
+                source_number < 1 or source_number > context.source_count
+                for source_number in source_numbers
+            )
+            for scope in context.premise_source_scopes
+            for source_numbers in (
+                scope.support_source_numbers,
+                scope.counter_source_numbers,
+                scope.framing_source_numbers,
+            )
+        )
+    ):
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
     return context
 
@@ -1061,6 +1170,7 @@ def _empty_diagnostic_summary(
         repair_codes=normalized_repair_codes,
         requirement_ids=context.requirement_ids,
         premise_ids=context.premise_ids,
+        premise_source_scopes=context.premise_source_scopes,
         requirement_count=len(context.requirement_ids),
         premise_count=len(context.premise_ids),
         source_count=context.source_count,
@@ -1101,6 +1211,7 @@ def _contract_failure_result(
             repair_codes=normalized_repair_codes,
             requirement_ids=(),
             premise_ids=(),
+            premise_source_scopes=(),
             requirement_count=0,
             premise_count=0,
             source_count=0,

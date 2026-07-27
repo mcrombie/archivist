@@ -1,7 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v6 implemented and measured on the unchanged ten-question set on
-2026-07-25; operational recovery confirmed, with three measured quality gaps remaining
+Status: evidence-planned-v10 implemented and verified offline on 2026-07-26; five-stage
+overlapping narrative retrieval clears G007's target-document gate but not its claim-completeness
+gate
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -158,6 +159,101 @@ These are measurement results, not licenses to alter the questions or rubric. Th
 must target premise/absence precedence, requirement survival through source allocation, and
 source-bounded correction coverage separately.
 
+The `evidence-planned-v7` cohort implements those three measured boundaries without changing the
+corpus, index, frozen evaluation, model settings, eight-source cap, or one-generation-call design:
+
+- query-planner input includes application-owned route traits. A provider premise is rejected
+  unless local routing already marked the question `premise_sensitive`, and the evidence gate
+  repeats that condition before widening context for premise evaluation;
+- unbounded manuscript-treatment questions without a conservative named target route as broad
+  synthesis. Broad proposals require at least two ordered requirements with a dedicated facet for
+  each, and deterministic fallback reserves origin, development/mechanism, and endpoint lanes;
+- direct-anchor promotion admits at most one certified hit per target scan, then protects one
+  source for each answer requirement, premise side, and live broad facet before filling remaining
+  positions. Text-free trace counts expose requested/deferred anchors and protected-source
+  shortfalls;
+- `archivist.evidence_coverage/2` separates premise-correction units from ordinary requirement
+  units. Exact post-gate support, counter, and framing source scopes are passed to generation and
+  validation. A contradicted premise must cite the correction’s exact sources and include a
+  retained framing source when available; the underlying requested answer must be covered in
+  separate units.
+
+No OpenAI request was made while implementing v7. The complete offline suite passes with 416 tests
+and one intentional skip, and Ruff passes. These checks establish contract behavior only; v7 has
+not yet demonstrated better claim or document-group coverage on the unchanged paid questions.
+
+The focused v7 confirmation subsequently showed that those control repairs were real but
+substantive coverage remained weak. G006 covered 1/8 strict claims and 2/8 target groups; G007
+covered 0/7 and 3/5; G009 produced a valid qualification but selected Chapter 20 rather than the
+required Epilogue. That evidence opened `evidence-planned-v8`:
+
+- broad plans require an ordered origin, transition-or-mechanism, and endpoint chain;
+- those lanes search application-owned early, middle, and late document bands;
+- spare slots prefer an unseen document before same-document surplus, and protected stage
+  sources reserve capacity before newly promoted anchors;
+- trace schema 4 records safe chronology-band and stage-survival diagnostics;
+- absence-sensitive planner facets may rank distant related material only when an exact validated
+  document hint and every trusted subject/relation surface are preserved, with a two-source cap.
+
+The complete v8 offline suite passes with 421 tests and one intentional skip; Ruff and
+`git diff --check` pass. Its unchanged G006/G007/G009 confirmation completed without retries for
+`$0.29427521`. G009 improved to about 3/5 strict claims and 1/1 target groups using exactly two
+Epilogue passages. G006 improved modestly to 2/8 and 3/8. G007 remained 0/7 and fell to 2/5.
+Because both broad traces reported 3/3 stages covered, v8 demonstrates that chronology-band
+survival is a useful allocation invariant but an inadequate proxy for book-wide argument-stage
+coverage. The full ten-question cohort remains gated pending a narrower broad-stage repair.
+
+A subsequent controlled retrieval-only diagnostic tested whether the fixed source ceiling itself
+was binding. For each of G006 and G007, one accepted live plan and one batched facet embedding
+were reused at limits 8, 12, and 16; no answer or judge call was made. G006 target-group coverage
+was 3/8, 3/8, and 6/8. G007 remained 3/5 at every limit. All larger contexts retained their eight
+baseline chunks. The run cost `$0.05277158` across exactly two planner and two embedding calls.
+
+The result splits the next work into independent cohort changes:
+
+- a broad-only sixteen-source ceiling is justified for an answer-generation test because it
+  recovered three additional G006 target groups;
+- twelve sources has no measured advantage in this sample;
+- G007 requires richer argument-stage planning or ranking because sixteen sources did not recover
+  its missing early and endpoint groups;
+- focused questions retain eight, and qualified absence retains its separate two-source cap.
+
+The two follow-up gates resolved those candidates differently.
+
+For G006, one accepted live plan and its embeddings were allocated at 8 and 16 sources and each
+allocation received one structured generation. The eight-source context covered 2/8 target
+groups; sixteen covered 6/8. The sixteen-source answer could not validate because the independent
+evidence-coverage contract still bounds `source_count` at eight. Its already-paid stored
+structured output was recovered without regeneration and inspected directly. It added several
+intermediate institutions but still missed most of the unchanged lineage rubric, including its
+modern endpoint. A broad-only sixteen-source production ceiling was therefore not adopted.
+
+For G007, `query-planner-v6` now requires at least five ordered requirements with exactly one
+dedicated narrative-stage facet per requirement: origin, at least three distinct
+transition-or-mechanism stages, and endpoint. Deterministic fallback has the same five-stage
+shape. Retrieval recognizes numbered-book structure, starts stage allocation at Chapter 1, ends
+at conclusion or Epilogue, and excludes supplemental back matter from narrative chronology.
+
+The first `evidence-planned-v9` confirmation accepted that live plan and validated its answer but
+remained at 3/5 target groups. Its trace showed that rigid band boundaries excluded the
+Revolutionary/Civil-War passages intended by adjacent queries, while the endpoint lane never
+considered the Epilogue. `Evidence-planned-v10` therefore overlaps each adjacent stage by two
+narrative documents and performs one additional endpoint-restricted Chroma lookup with the same
+embedding. It does not add a planner call, embedding call, source slot, retry, or corpus-specific
+chapter name.
+
+A controlled v10 confirmation reused the exact accepted v9 requirements and queries. With only
+retrieval behavior changed, G007 improved from 3/5 to 5/5 target-document groups, returned eight
+sources, passed strict citation/source validation, and cost `$0.10395228` for one embedding and
+one generation. The complete offline suite passes 422 tests with one intentional skip.
+
+That result clears argument-stage allocation, not answer completeness. The returned passages and
+answer still miss several required within-stage mechanisms: imperial conflict for the interior,
+war debt as Hamiltonian federal power, Pentagon/employment, NSC-68 and Keynesian permanent
+spending, NATO persistence, and the Epilogue's security-dilemma component. The next bounded
+optimization target is passage-level mechanism query/ranking inside the five recovered stages.
+The unchanged ten-question cohort remains gated.
+
 The implementation follows the bounded-call design in this document:
 
 - a follow-up resolver runs only when conversation history exists;
@@ -183,13 +279,14 @@ The question endpoint also rechecks the configured hard cost limit immediately b
 OpenAI operation. If an earlier operation in the same turn crosses the limit, the next operation is
 not sent unless the reader explicitly enabled the per-request override.
 
-The implementation was verified with 403 passing offline tests and one skipped test, strict
-provider-schema conversion, local inspection of the current private index, and replay of the
-preserved v4 retrieval contexts. Earlier paid smokes verified narrower source-retention,
-citation-structure, and relationship-routing behaviors, while the clean ten-question evaluation
-exposed the three v4 failures repaired here. The v5 smoke passed G008 and G010 and isolated the
-remaining G009 contract boundary; the v6 confirmation passed that branch, and the subsequent
-unchanged ten-question cohort produced the directional results recorded above.
+The current implementation was verified with 422 passing offline tests and one skipped test,
+strict provider-schema conversion, local inspection of the current private index, and replay of
+preserved retrieval contexts. Earlier paid smokes verified narrower source-retention,
+citation-structure, and relationship-routing behaviors. The v5 smoke passed G008 and G010 and
+isolated a G009 contract boundary; the v6 confirmation passed that branch, and the subsequent
+unchanged ten-question cohort exposed the three v7 targets recorded above. V8 received the
+three-item directional confirmation described above; v9 and v10 received the bounded G007
+confirmations recorded above. None is a full run of record.
 
 ## Decision
 
@@ -435,6 +532,11 @@ Add a planned wrapper beside `retrieve_from_collection()`; do not fork a second 
 11. For broad synthesis, order the selected context by corpus ordinal after ranking so the model
     sees a coherent sequence.
 
+That first-cohort ceiling has now been measured rather than assumed. A later retrieval-only
+diagnostic found that sixteen sources doubled G006 target-group coverage from 3/8 to 6/8 but did
+not improve G007 beyond 3/5; twelve improved neither. Any production change should therefore be
+route-specific and should treat sixteen as a broad ceiling, not a quota or universal replacement.
+
 The result is a `PlannedContext` containing ordered chunks, evidence-lane labels, and a
 `facet_id -> source_numbers` map. This map is an input to evidence coverage, not a declaration that
 the sources actually support the facet.
@@ -568,7 +670,7 @@ It returns:
 
 ```python
 EvidenceCoverageAnswer
-    schema: "archivist.evidence_coverage/1"
+    schema: "archivist.evidence_coverage/2"
     premise_decisions: tuple[PremiseDecision, ...]
     coverage: tuple[RequirementCoverage, ...]
     answer_units: tuple[AnswerUnit, ...]
@@ -590,10 +692,17 @@ AnswerUnit
     requirement_ids: tuple[str, ...]
     role: "definition" | "identity" | "cause" | "mechanism" | "event" |
           "consequence" | "quantity" | "counterargument" |
-          "qualification" | "chronology"
+          "qualification" | "chronology" | "premise_correction"
     text: str
     source_numbers: tuple[int, ...]
     paragraph: int
+
+# Trusted application input, not model-owned output:
+PremiseSourceScope
+    premise_id: str
+    support_source_numbers: tuple[int, ...]
+    counter_source_numbers: tuple[int, ...]
+    framing_source_numbers: tuple[int, ...]
 ```
 
 The prompt requires the model to:
@@ -607,7 +716,9 @@ The prompt requires the model to:
 6. state only retrieved-evidence insufficiency unless the absence gate supplied a corpus-scan
    certificate;
 7. preserve requirement or chronological order;
-8. emit `[Source N]` in each factual unit.
+8. emit `[Source N]` in each factual unit;
+9. keep a premise correction separate from requirement coverage and, when framing candidates
+   survive source selection, state the positive replacement frame using at least one of them.
 
 Neutral answers remain compact. Compact means no conversational filler; it does not mean omitting
 source-supported requirements. Broad questions may use one concise bullet per supported stage
@@ -628,6 +739,11 @@ Before an answer is displayed:
 - parse each unit’s citations with the locked citation grammar;
 - require cited source numbers to equal the unit’s declared source numbers;
 - require every unit to map to a requirement and every referenced unit to exist;
+- require ordinary units to map to a requirement and premise-correction units to map to none;
+- validate premise decisions and corrections against exact support, counter, and framing source
+  scopes supplied by the application;
+- require every contradicted premise to use exactly one leading correction and require that
+  correction to cite a retained framing source whenever one is available;
 - realize every validated unit exactly once;
 - enforce bounded unit counts and text length.
 
@@ -654,14 +770,16 @@ be added without exposing the private structured ledger.
 Apply decisions in this order:
 
 1. corpus-integrity failure;
-2. source-backed premise contradiction;
-3. direct subject and facet evidence;
-4. partial direct evidence;
-5. certified absence with a qualified broader match;
-6. certified absence with clean abstention;
-7. indeterminate insufficiency.
+2. application-owned route classification and trusted-target extraction;
+3. source-backed premise contradiction, but only for a locally premise-sensitive route;
+4. direct subject and facet evidence;
+5. partial direct evidence;
+6. certified absence with a qualified broader match;
+7. certified absence with clean abstention;
+8. indeterminate insufficiency.
 
-No later step may promote an analogue or semantic-only passage into direct evidence.
+No provider-created premise may override the application-owned route. No later step may promote an
+analogue or semantic-only passage into direct evidence.
 
 ## Observability, run identity, and privacy
 
@@ -760,6 +878,8 @@ All first-pass tests are local and synthetic. They must not include manuscript o
 - one batched embedding operation for multiple facets;
 - one anchor per live facet before second anchors;
 - premise lanes reserved without displacing the original lane;
+- broad proposals require dedicated requirements/facets and their protected sources survive
+  direct-anchor promotion under the eight-source cap;
 - no neighbor displaces a selected facet anchor;
 - eight-source cap and chronological ordering;
 - planner failure falls back without a paid retry;
@@ -778,6 +898,7 @@ All first-pass tests are local and synthetic. They must not include manuscript o
 - all-distant fallback cannot override the evidence gate;
 - corpus mismatch produces `indeterminate`;
 - clean abstention makes zero answer-generation calls;
+- planner-created premises cannot override an application-owned absence-only route;
 - premise contradiction takes precedence and is source-cited.
 
 ### Evidence coverage
@@ -786,6 +907,9 @@ All first-pass tests are local and synthetic. They must not include manuscript o
 - out-of-range, missing, malformed, and mismatched citations;
 - unsupported requirements containing factual units;
 - supported requirements missing units;
+- premise corrections cannot satisfy answer requirements, and ordinary units cannot omit them;
+- premise support/correction citations stay within their support, counter, and framing lanes;
+- a retained premise-framing source is required in a contradicted correction;
 - partial and conflicting support;
 - deterministic unit rendering and chronological ordering;
 - exactly one generation call;

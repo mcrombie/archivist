@@ -200,6 +200,277 @@ def test_broad_context_is_reordered_by_corpus_ordinal_after_selection(monkeypatc
     assert 1 in outcome.facet_source_numbers["F1"]
 
 
+def test_broad_stage_lanes_use_document_terciles_and_fill_new_documents_first(
+    monkeypatch,
+):
+    chunks = [
+        chunk(
+            f"stage_{index:03}",
+            f"document-{index}.md",
+            f"stage evidence {index}",
+            1,
+        )
+        for index in range(9)
+    ]
+    embedded: list[list[str]] = []
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: (
+            embedded.append(list(queries))
+            or [[float(index)] for index in range(len(queries))]
+        ),
+    )
+    requests: list[dict] = []
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            requests.append(request)
+            where = request.get("where")
+            if where is None:
+                return semantic_results([chunks[4]])
+            documents = set(where["document"]["$in"])
+            return semantic_results(
+                [item for item in chunks if item["document"] in documents]
+            )
+
+    outcome = retrieve_plan_from_collection(
+        plan(
+            facet("F0", "original", "whole history"),
+            facet("F1", "origin", "early history"),
+            facet("F2", "transition", "middle history"),
+            facet("F3", "endpoint", "late history"),
+            traits=("broad_synthesis",),
+        ),
+        Collection(),
+        chunks,
+        max_final_sources=6,
+    )
+
+    assert embedded == [[
+        "whole history",
+        "early history",
+        "middle history",
+        "late history",
+    ]]
+    assert requests[0].get("where") is None
+    assert [
+        set(request["where"]["document"]["$in"])
+        for request in requests[1:]
+    ] == [
+        {f"document-{index}.md" for index in range(0, 3)},
+        {f"document-{index}.md" for index in range(3, 6)},
+        {f"document-{index}.md" for index in range(6, 9)},
+    ]
+    assert len({item["document"] for item in outcome.final_chunks}) == 6
+    assert outcome.trace["selection"]["stage_coverage_required_count"] == 3
+    assert outcome.trace["selection"]["stage_coverage_satisfied_count"] == 3
+    assert outcome.trace["selection"]["stage_coverage_shortfall_count"] == 0
+    lanes = {lane["facet_id"]: lane for lane in outcome.trace["lanes"]}
+    assert (
+        lanes["F1"]["chronology_band"],
+        lanes["F1"]["chronology_min_document_ordinal"],
+        lanes["F1"]["chronology_max_document_ordinal"],
+    ) == ("early", 0, 2)
+    assert (
+        lanes["F2"]["chronology_band"],
+        lanes["F2"]["chronology_min_document_ordinal"],
+        lanes["F2"]["chronology_max_document_ordinal"],
+    ) == ("middle", 3, 5)
+    assert (
+        lanes["F3"]["chronology_band"],
+        lanes["F3"]["chronology_min_document_ordinal"],
+        lanes["F3"]["chronology_max_document_ordinal"],
+    ) == ("late", 6, 8)
+    assert [
+        item["document_ordinal"]
+        for item in outcome.trace["selection"]["context"]
+    ] == sorted(
+        item["document_ordinal"]
+        for item in outcome.trace["selection"]["context"]
+    )
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_five_broad_stages_span_numbered_chapters_through_epilogue(
+    monkeypatch,
+):
+    document_names = [
+        "05_Introduction.md",
+        "07_Prologue.md",
+        *(f"{index + 7:02}_Chapter {index}.md" for index in range(1, 21)),
+        "28_Epilogue.md",
+        "29_Afterword.md",
+        "30_Appendix A.md",
+    ]
+    chunks = [
+        chunk(
+            f"narrative_{index:03}",
+            document,
+            f"central power war stage {index}",
+            1,
+        )
+        for index, document in enumerate(document_names)
+    ]
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: [
+            [float(index)] for index in range(len(queries))
+        ],
+    )
+    requests: list[dict] = []
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            requests.append(request)
+            where = request.get("where")
+            if where is None:
+                return semantic_results([chunks[0]])
+            document_filter = where["document"]
+            documents = (
+                set(document_filter["$in"])
+                if isinstance(document_filter, dict)
+                else {document_filter}
+            )
+            return semantic_results(
+                [item for item in chunks if item["document"] in documents]
+            )
+
+    requirements = tuple(
+        SimpleNamespace(requirement_id=f"R{index}", order=index - 1)
+        for index in range(1, 6)
+    )
+    facets = (
+        SimpleNamespace(
+            facet_id="F0",
+            role="original",
+            search_query="war as an engine of central power",
+            document_hints=(),
+            requirement_ids=tuple(f"R{index}" for index in range(1, 6)),
+        ),
+        *(
+            SimpleNamespace(
+                facet_id=f"F{index}",
+                role=(
+                    "origin"
+                    if index == 1
+                    else "endpoint"
+                    if index == 5
+                    else "mechanism"
+                ),
+                search_query=f"war central power stage {index}",
+                document_hints=(),
+                requirement_ids=(f"R{index}",),
+            )
+            for index in range(1, 6)
+        ),
+    )
+    broad_plan = SimpleNamespace(
+        schema="archivist.question_plan/1",
+        traits=("broad_synthesis",),
+        facets=facets,
+        requirements=requirements,
+        planner_used=True,
+        fallback_reason=None,
+    )
+
+    outcome = retrieve_plan_from_collection(
+        broad_plan,
+        Collection(),
+        chunks,
+        max_final_sources=8,
+    )
+
+    assert requests[0].get("where") is None
+    assert [
+        list(request["where"]["document"]["$in"])
+        for request in requests[1:6]
+    ] == [
+        [f"{index + 7:02}_Chapter {index}.md" for index in range(1, 8)],
+        [f"{index + 7:02}_Chapter {index}.md" for index in range(4, 12)],
+        [f"{index + 7:02}_Chapter {index}.md" for index in range(8, 16)],
+        [f"{index + 7:02}_Chapter {index}.md" for index in range(12, 20)],
+        [
+            *(f"{index + 7:02}_Chapter {index}.md" for index in range(16, 21)),
+            "28_Epilogue.md",
+        ],
+    ]
+    assert requests[6]["where"]["document"] == "28_Epilogue.md"
+    lanes = {lane["facet_id"]: lane for lane in outcome.trace["lanes"]}
+    assert [
+        (
+            lanes[f"F{index}"]["chronology_min_document_ordinal"],
+            lanes[f"F{index}"]["chronology_max_document_ordinal"],
+        )
+        for index in range(1, 6)
+    ] == [(2, 8), (5, 12), (9, 16), (13, 20), (17, 22)]
+    assert outcome.trace["selection"]["stage_coverage_required_count"] == 5
+    assert outcome.trace["selection"]["stage_coverage_satisfied_count"] == 5
+    assert outcome.trace["selection"]["stage_coverage_shortfall_count"] == 0
+    assert "28_Epilogue.md" in {
+        item["document"] for item in outcome.final_chunks
+    }
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_hinted_absence_relation_lane_may_use_bounded_distant_fallback(
+    monkeypatch,
+):
+    generic = chunk("generic_001", "generic.md", "generic material", 1)
+    related = chunk("related_001", "related.md", "bounded related material", 1)
+    chunks = [generic, related]
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda *_args, **_kwargs: [[0.0], [1.0]],
+    )
+
+    class Collection:
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            if request["query_embeddings"][0] == [0.0]:
+                return semantic_results([generic], [0.2])
+            return semantic_results([related], [1.4])
+
+    outcome = retrieve_plan_from_collection(
+        plan(
+            facet("F0", "original", "missing event and bounded relation"),
+            facet(
+                "F1",
+                "mechanism",
+                "missing event bounded relation",
+                document_hints=("related.md",),
+            ),
+            traits=("absence_sensitive",),
+        ),
+        Collection(),
+        chunks,
+        max_final_sources=3,
+    )
+
+    related_lane = next(
+        lane for lane in outcome.trace["lanes"] if lane["facet_id"] == "F1"
+    )
+    assert related_lane["raw_primary_fallback_detected"] is True
+    assert related_lane["semantic_fallback_used"] is True
+    assert related_lane["candidate_chunk_ids"] == ["related_001"]
+    assert outcome.facet_source_numbers["F1"]
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
 def test_shared_candidate_is_mapped_to_each_facet_without_duplicate_source(
     monkeypatch,
 ):

@@ -21,6 +21,7 @@ from answer_coverage import (
     EvidenceCoverageAnswer,
     GapReason,
     PremiseDecision,
+    PremiseSourceScope,
     PremiseStatus,
     RequirementCoverage,
     RequirementStatus,
@@ -64,6 +65,24 @@ def _coverage(
         unit_ids=unit_ids,
         source_numbers=source_numbers,
         gap_reason=gap_reason,
+    )
+
+
+def _premise_scopes(
+    premise_ids: tuple[str, ...],
+    source_count: int,
+    *,
+    framing_source_numbers: tuple[int, ...] = (),
+) -> tuple[PremiseSourceScope, ...]:
+    all_sources = tuple(range(1, source_count + 1))
+    return tuple(
+        PremiseSourceScope(
+            premise_id=premise_id,
+            support_source_numbers=all_sources,
+            counter_source_numbers=all_sources,
+            framing_source_numbers=framing_source_numbers,
+        )
+        for premise_id in premise_ids
     )
 
 
@@ -119,6 +138,7 @@ def _validate(answer: EvidenceCoverageAnswer):
         answer,
         requirement_ids=("R1", "R2"),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
         source_count=3,
     )
 
@@ -136,6 +156,7 @@ def _assert_error(
             answer,
             requirement_ids=requirement_ids,
             premise_ids=premise_ids,
+            premise_source_scopes=_premise_scopes(premise_ids, source_count),
             source_count=source_count,
         )
     assert captured.value.code is code
@@ -164,6 +185,7 @@ def test_json_shaped_payload_is_accepted_and_validated_against_trusted_inputs():
         _valid_answer().model_dump(mode="json"),
         requirement_ids=("R1", "R2"),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
         source_count=3,
     )
 
@@ -292,10 +314,17 @@ def test_non_evidentiary_premise_decisions_forbid_sources(status):
 def test_contradicted_premise_requires_a_source_bound_leading_correction():
     correction = _unit(
         "U1",
-        ("R1",),
+        (),
         "The assumed premise is contradicted [Source 1].",
         (1,),
         role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    substantive = _unit(
+        "U2",
+        ("R1",),
+        "The requested point is separately supported [Source 1].",
+        (1,),
+        paragraph=2,
     )
     answer = EvidenceCoverageAnswer(
         schema=EVIDENCE_COVERAGE_SCHEMA,
@@ -311,18 +340,19 @@ def test_contradicted_premise_requires_a_source_bound_leading_correction():
             _coverage(
                 "R1",
                 RequirementStatus.SUPPORTED,
-                ("U1",),
+                ("U2",),
                 (1,),
                 GapReason.NONE,
             ),
         ),
-        answer_units=(correction,),
+        answer_units=(correction, substantive),
     )
 
     validated = validate_evidence_coverage(
         answer,
         requirement_ids=("R1",),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 1),
         source_count=1,
     )
     assert render_evidence_coverage(validated).startswith("The assumed premise is contradicted")
@@ -336,9 +366,14 @@ def test_contradicted_premise_requires_a_source_bound_leading_correction():
         source_count=1,
     )
 
-    wrong_role = correction.model_copy(update={"role": AnswerUnitRole.EVENT})
+    wrong_role = correction.model_copy(
+        update={
+            "role": AnswerUnitRole.EVENT,
+            "requirement_ids": ("R1",),
+        }
+    )
     _assert_error(
-        answer.model_copy(update={"answer_units": (wrong_role,)}),
+        answer.model_copy(update={"answer_units": (wrong_role, substantive)}),
         CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID,
         requirement_ids=("R1",),
         premise_ids=("P1",),
@@ -356,7 +391,7 @@ def test_contradicted_premise_correction_must_render_first():
     )
     correction = _unit(
         "U1",
-        ("R1",),
+        (),
         "The premise is corrected later [Source 1].",
         (1,),
         paragraph=2,
@@ -376,7 +411,7 @@ def test_contradicted_premise_correction_must_render_first():
             _coverage(
                 "R1",
                 RequirementStatus.SUPPORTED,
-                ("U1", "U2"),
+                ("U2",),
                 (1,),
                 GapReason.NONE,
             ),
@@ -550,6 +585,7 @@ def test_locality_failure_keeps_its_precise_diagnostic_and_never_renders_prose()
         answer.model_copy(update={"answer_units": (unit, answer.answer_units[1])}),
         requirement_ids=("R1", "R2"),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
         source_count=3,
     )
 
@@ -879,6 +915,7 @@ def test_process_normalizes_only_order_and_redundant_derived_mappings():
         answer,
         requirement_ids=("R1", "R2"),
         premise_ids=("P1", "P2"),
+        premise_source_scopes=_premise_scopes(("P1", "P2"), 2),
         source_count=2,
     )
 
@@ -1010,10 +1047,17 @@ def test_gap_normalization_never_admits_an_unsupported_factual_unit():
 def test_process_derives_contradicted_premise_sources_from_its_correction_unit():
     correction = _unit(
         "U1",
-        ("R1",),
+        (),
         "The synthetic premise began earlier [Source 1].",
         (1,),
         role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    substantive = _unit(
+        "U2",
+        ("R1",),
+        "The supported answer remains separate [Source 2].",
+        (2,),
+        paragraph=2,
     )
     answer = EvidenceCoverageAnswer(
         schema=EVIDENCE_COVERAGE_SCHEMA,
@@ -1029,29 +1073,29 @@ def test_process_derives_contradicted_premise_sources_from_its_correction_unit()
             _coverage(
                 "R1",
                 RequirementStatus.SUPPORTED,
-                ("U1",),
+                ("U2",),
                 (2,),
                 GapReason.NONE,
             ),
         ),
-        answer_units=(correction,),
+        answer_units=(correction, substantive),
     )
 
     result = process_evidence_coverage(
         answer,
         requirement_ids=("R1",),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 2),
         source_count=2,
     )
 
     assert result.status is CoverageOutcomeStatus.ANSWERED
-    assert result.answer == correction.text
+    assert result.answer == f"{correction.text}\n\n{substantive.text}"
     assert result.diagnostics.repair_codes == (
-        CoverageValidationErrorCode.SOURCE_MAPPING_MISMATCH,
         CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH,
     )
     assert result.diagnostics.premise_decisions[0].source_numbers == (1,)
-    assert result.diagnostics.coverage[0].source_numbers == (1,)
+    assert result.diagnostics.coverage[0].source_numbers == (2,)
 
 
 @pytest.mark.parametrize(
@@ -1079,7 +1123,10 @@ def test_process_derives_contradicted_premise_sources_from_its_correction_unit()
         ),
         (
             {},
-            {"role": AnswerUnitRole.EVENT},
+            {
+                "role": AnswerUnitRole.EVENT,
+                "requirement_ids": ("R1",),
+            },
             CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID,
         ),
     ],
@@ -1103,19 +1150,26 @@ def test_premise_source_normalization_never_repairs_malformed_or_semantic_fields
             _coverage(
                 "R1",
                 RequirementStatus.SUPPORTED,
-                ("U1",),
-                (1,),
+                ("U2",),
+                (2,),
                 GapReason.NONE,
             ),
         ),
         answer_units=(
             _unit(
                 "U1",
-                ("R1",),
+                (),
                 "The synthetic premise began earlier [Source 1].",
                 (1,),
                 role=AnswerUnitRole.PREMISE_CORRECTION,
             ).model_copy(update=unit_update),
+            _unit(
+                "U2",
+                ("R1",),
+                "The supported answer remains separate [Source 2].",
+                (2,),
+                paragraph=2,
+            ),
         ),
     )
 
@@ -1123,6 +1177,7 @@ def test_premise_source_normalization_never_repairs_malformed_or_semantic_fields
         answer,
         requirement_ids=("R1",),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 2),
         source_count=2,
     )
 
@@ -1133,13 +1188,20 @@ def test_premise_source_normalization_never_repairs_malformed_or_semantic_fields
     )
 
 
-def test_premise_source_normalization_preserves_an_already_valid_subset():
+def test_premise_decision_sources_must_equal_its_correction_sources():
     correction = _unit(
         "U1",
-        ("R1",),
+        (),
         "The synthetic premise began earlier [Source 1, Source 2].",
         (1, 2),
         role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    substantive = _unit(
+        "U2",
+        ("R1",),
+        "The supported answer remains separate [Source 2].",
+        (2,),
+        paragraph=2,
     )
     answer = EvidenceCoverageAnswer(
         schema=EVIDENCE_COVERAGE_SCHEMA,
@@ -1155,26 +1217,246 @@ def test_premise_source_normalization_preserves_an_already_valid_subset():
             _coverage(
                 "R1",
                 RequirementStatus.SUPPORTED,
-                ("U1",),
-                (1, 2),
+                ("U2",),
+                (2,),
                 GapReason.NONE,
             ),
         ),
-        answer_units=(correction,),
+        answer_units=(correction, substantive),
     )
 
     result = process_evidence_coverage(
         answer,
         requirement_ids=("R1",),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 2),
         source_count=2,
     )
 
-    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
     assert (
-        CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH not in result.diagnostics.repair_codes
+        result.diagnostics.error_code
+        is CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID
     )
-    assert result.diagnostics.premise_decisions[0].source_numbers == (1,)
+
+
+@pytest.mark.parametrize(
+    ("unit", "error_code"),
+    [
+        (
+            _unit(
+                "U1",
+                ("R1",),
+                "A correction cannot double as requirement evidence [Source 1].",
+                (1,),
+                role=AnswerUnitRole.PREMISE_CORRECTION,
+            ),
+            CoverageValidationErrorCode.PREMISE_CORRECTION_REQUIREMENT_MISMATCH,
+        ),
+        (
+            _unit(
+                "U1",
+                (),
+                "An ordinary answer unit must map to a requirement [Source 1].",
+                (1,),
+            ),
+            CoverageValidationErrorCode.MISSING_UNIT_REQUIREMENT_ID,
+        ),
+    ],
+)
+def test_answer_unit_roles_enforce_separate_correction_and_requirement_evidence(
+    unit,
+    error_code,
+):
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    _assert_error(
+        answer,
+        error_code,
+        requirement_ids=("R1",),
+        premise_ids=(),
+        source_count=1,
+    )
+
+
+def test_contradicted_premise_requires_a_retained_framing_source():
+    correction = _unit(
+        "U1",
+        (),
+        "The proposed origin is too late [Source 2].",
+        (2,),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    substantive = _unit(
+        "U2",
+        ("R1",),
+        "The later development is supported separately [Source 1].",
+        (1,),
+        paragraph=2,
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(
+            PremiseDecision(
+                premise_id="P1",
+                status=PremiseStatus.CONTRADICTED,
+                source_numbers=(2,),
+                correction_unit_id="U1",
+            ),
+        ),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U2",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(correction, substantive),
+    )
+    scopes = (
+        PremiseSourceScope(
+            premise_id="P1",
+            support_source_numbers=(1,),
+            counter_source_numbers=(2,),
+            framing_source_numbers=(3,),
+        ),
+    )
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            answer,
+            requirement_ids=("R1",),
+            premise_ids=("P1",),
+            premise_source_scopes=scopes,
+            source_count=3,
+        )
+
+    assert (
+        captured.value.code
+        is CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
+    )
+
+
+def test_contradicted_premise_accepts_framing_plus_counter_provenance():
+    correction = _unit(
+        "U1",
+        (),
+        "The proposed origin is too late and the manuscript begins earlier "
+        "[Source 2, Source 3].",
+        (2, 3),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    substantive = _unit(
+        "U2",
+        ("R1",),
+        "The later development is supported separately [Source 1].",
+        (1,),
+        paragraph=2,
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(
+            PremiseDecision(
+                premise_id="P1",
+                status=PremiseStatus.CONTRADICTED,
+                source_numbers=(2, 3),
+                correction_unit_id="U1",
+            ),
+        ),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U2",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(correction, substantive),
+    )
+    scopes = (
+        PremiseSourceScope(
+            premise_id="P1",
+            support_source_numbers=(1,),
+            counter_source_numbers=(2,),
+            framing_source_numbers=(3,),
+        ),
+    )
+
+    validated = validate_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        premise_ids=("P1",),
+        premise_source_scopes=scopes,
+        source_count=3,
+    )
+
+    assert validated.answer == answer
+
+
+def test_supported_premise_must_use_its_support_lane():
+    answer = _valid_answer().model_copy(
+        update={
+            "premise_decisions": (
+                PremiseDecision(
+                    premise_id="P1",
+                    status=PremiseStatus.SUPPORTED,
+                    source_numbers=(2,),
+                ),
+            )
+        }
+    )
+    scopes = (
+        PremiseSourceScope(
+            premise_id="P1",
+            support_source_numbers=(1,),
+            counter_source_numbers=(2,),
+            framing_source_numbers=(3,),
+        ),
+    )
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            answer,
+            requirement_ids=("R1", "R2"),
+            premise_ids=("P1",),
+            premise_source_scopes=scopes,
+            source_count=3,
+        )
+
+    assert (
+        captured.value.code
+        is CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
+    )
+
+
+def test_missing_premise_source_scope_fails_closed_as_invalid_context():
+    result = process_evidence_coverage(
+        _valid_answer(),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=(),
+        source_count=3,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.diagnostics.error_code is CoverageValidationErrorCode.INVALID_CONTEXT
+    assert result.diagnostics.premise_source_scopes == ()
 
 
 def test_process_never_repairs_an_unsupported_requirement_with_a_factual_unit():
@@ -1267,6 +1549,7 @@ def test_process_retains_precise_nonrepairable_error_codes_in_diagnostics(
         mutate(_valid_answer()),
         requirement_ids=("R1", "R2"),
         premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
         source_count=3,
     )
 

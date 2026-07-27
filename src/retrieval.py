@@ -55,7 +55,7 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v2"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v5"
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS_DIR"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
@@ -664,6 +664,8 @@ def build_hybrid_results(
     n_results: int = 5,
     corpus: Mapping[str, Any] | None = None,
     allow_semantic_fallback: bool = True,
+    retrieval_mode_override: str | None = None,
+    broad_max_per_document: int | None = None,
 ) -> dict[str, Any]:
     """Attach deterministic BM25/RRF primary anchors to raw semantic results."""
     if n_results <= 0:
@@ -671,7 +673,11 @@ def build_hybrid_results(
 
     semantic = _semantic_candidates(semantic_results)
     lexical, lexical_query = lexical_candidates(query, chunks)
-    retrieval_mode = classify_retrieval_mode(query)
+    if retrieval_mode_override not in {None, "standard", "broad_synthesis"}:
+        raise ValueError("retrieval_mode_override must be standard or broad_synthesis")
+    if broad_max_per_document is not None and broad_max_per_document <= 0:
+        raise ValueError("broad_max_per_document must be greater than zero")
+    retrieval_mode = retrieval_mode_override or classify_retrieval_mode(query)
     lookup = build_chunk_lookup(chunks)
     discarded: list[dict[str, Any]] = []
     semantic_reachable: list[dict[str, Any]] = []
@@ -812,7 +818,11 @@ def build_hybrid_results(
         fused,
         limit=n_results,
         max_per_document=(
-            MAX_PRIMARY_PER_DOCUMENT
+            (
+                broad_max_per_document
+                if broad_max_per_document is not None
+                else MAX_PRIMARY_PER_DOCUMENT
+            )
             if retrieval_mode == "broad_synthesis"
             else None
         ),
@@ -898,7 +908,11 @@ def build_hybrid_results(
             "semantic_weight": SEMANTIC_WEIGHT,
             "lexical_weight": LEXICAL_WEIGHT,
             "max_primary_per_document": (
-                MAX_PRIMARY_PER_DOCUMENT
+                (
+                    broad_max_per_document
+                    if broad_max_per_document is not None
+                    else MAX_PRIMARY_PER_DOCUMENT
+                )
                 if retrieval_mode == "broad_synthesis"
                 else None
             ),
@@ -1028,6 +1042,192 @@ def _facet_priority(facet: object) -> tuple[int, str]:
     return priorities.get(role, 2), facet_id
 
 
+_BROAD_STAGE_BANDS = {
+    "origin": ("early", 0),
+    "transition": ("middle", 1),
+    "mechanism": ("middle", 1),
+    "endpoint": ("late", 2),
+}
+_BOUNDED_RELATED_FALLBACK_ROLES = frozenset(
+    {"broader_related", "endpoint", "mechanism", "origin", "transition"}
+)
+_BROAD_STAGE_ROLES = frozenset(
+    {"endpoint", "mechanism", "origin", "transition"}
+)
+BROAD_STAGE_OVERLAP_DOCUMENTS = 2
+_NUMBERED_CHAPTER_ONE_PATTERN = re.compile(r"\bchapter\s+1\b")
+_NARRATIVE_ENDPOINT_PATTERN = re.compile(r"\b(?:conclusion|epilogue)\b")
+_SUPPLEMENTAL_BACK_MATTER_PATTERN = re.compile(
+    r"\b(?:acknowledg(?:e)?ments?|afterword|appendix|bibliograph(?:y|ies)|"
+    r"credits?|index|notes?|works\s+consulted)\b"
+)
+
+
+def _eligible_document_ordinals(
+    chunks: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[str, ...], dict[str, int]]:
+    documents: list[str] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        document = str(chunk.get("document") or "")
+        if not document or document in seen or should_skip_document(document):
+            continue
+        seen.add(document)
+        documents.append(document)
+    return tuple(documents), {
+        document: ordinal for ordinal, document in enumerate(documents)
+    }
+
+
+def _document_structure_label(document: str) -> str:
+    normalized = unicodedata.normalize("NFKD", document).casefold()
+    normalized = "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", normalized).split())
+
+
+def _broad_narrative_documents(documents: Sequence[str]) -> tuple[str, ...]:
+    """Prefer the numbered narrative body over front and supplemental matter."""
+
+    if not documents:
+        return ()
+    labels = [_document_structure_label(document) for document in documents]
+    chapter_one_indices = [
+        index
+        for index, label in enumerate(labels)
+        if _NUMBERED_CHAPTER_ONE_PATTERN.search(label) is not None
+    ]
+    start = chapter_one_indices[0] if chapter_one_indices else 0
+    supplemental_indices = [
+        index
+        for index, label in enumerate(labels[start:], start=start)
+        if _SUPPLEMENTAL_BACK_MATTER_PATTERN.search(label) is not None
+    ]
+    supplemental_start = (
+        supplemental_indices[0] if supplemental_indices else len(documents)
+    )
+    endpoint_indices = [
+        index
+        for index, label in enumerate(labels[start:supplemental_start], start=start)
+        if _NARRATIVE_ENDPOINT_PATTERN.search(label) is not None
+    ]
+    end = (
+        endpoint_indices[-1] + 1
+        if endpoint_indices
+        else supplemental_start
+    )
+    selected = tuple(documents[start:end])
+    return selected or tuple(documents)
+
+
+def _broad_stage_positions(
+    facets: Sequence[object],
+    requirements: Sequence[object],
+) -> dict[str, tuple[int, int]]:
+    requirement_order = {
+        str(_plan_value(requirement, "requirement_id", "")): int(
+            _plan_value(requirement, "order", 0)
+        )
+        for requirement in requirements
+        if str(_plan_value(requirement, "requirement_id", ""))
+    }
+    dedicated = [
+        facet
+        for facet in facets
+        if str(_plan_value(facet, "role", "")) in _BROAD_STAGE_ROLES
+        and len(tuple(_plan_value(facet, "requirement_ids", ()) or ())) == 1
+        and str(tuple(_plan_value(facet, "requirement_ids", ()) or ())[0])
+        in requirement_order
+    ]
+    dedicated.sort(
+        key=lambda facet: (
+            requirement_order[
+                str(tuple(_plan_value(facet, "requirement_ids", ()) or ())[0])
+            ],
+            str(_plan_value(facet, "facet_id", "")),
+        )
+    )
+    count = len(dedicated)
+    return {
+        str(_plan_value(facet, "facet_id", "")): (index, count)
+        for index, facet in enumerate(dedicated)
+    }
+
+
+def _broad_stage_scope(
+    role: str,
+    documents: Sequence[str],
+    *,
+    stage_index: int | None = None,
+    stage_count: int | None = None,
+) -> tuple[tuple[str, ...], str, int | None, int | None]:
+    if role not in _BROAD_STAGE_ROLES or not documents:
+        return (), "none", None, None
+    narrative_documents = _broad_narrative_documents(documents)
+    if (
+        stage_index is not None
+        and stage_count is not None
+        and stage_count >= 3
+        and 0 <= stage_index < stage_count
+    ):
+        label = (
+            "early"
+            if stage_index == 0
+            else "late"
+            if stage_index == stage_count - 1
+            else "middle"
+        )
+        target_band = stage_index
+        band_count = stage_count
+    else:
+        stage = _BROAD_STAGE_BANDS.get(role)
+        if stage is None:
+            return (), "none", None, None
+        label, target_band = stage
+        band_count = 3
+    count = len(narrative_documents)
+    selected_ordinals = [
+        ordinal
+        for ordinal in range(count)
+        if min(
+            band_count - 1,
+            (band_count * ordinal) // count,
+        )
+        == target_band
+    ]
+    if (
+        stage_index is not None
+        and stage_count is not None
+        and selected_ordinals
+    ):
+        selected_start = max(
+            0,
+            selected_ordinals[0] - BROAD_STAGE_OVERLAP_DOCUMENTS,
+        )
+        selected_end = min(
+            count - 1,
+            selected_ordinals[-1] + BROAD_STAGE_OVERLAP_DOCUMENTS,
+        )
+        selected_ordinals = list(range(selected_start, selected_end + 1))
+    selected = tuple(
+        narrative_documents[ordinal] for ordinal in selected_ordinals
+    )
+    if not selected:
+        return (), label, None, None
+    ordinal_by_document = {
+        document: ordinal for ordinal, document in enumerate(documents)
+    }
+    return (
+        selected,
+        label,
+        ordinal_by_document[selected[0]],
+        ordinal_by_document[selected[-1]],
+    )
+
+
 def _empty_semantic_results() -> dict[str, list[list[object]]]:
     return {"ids": [[]], "metadatas": [[]], "distances": [[]]}
 
@@ -1084,6 +1284,31 @@ def _pick_first_lane_candidate(
     return available[0]
 
 
+def _pick_new_document_lane_candidate(
+    candidates: list[dict[str, Any]],
+    *,
+    selected_ids: set[str],
+    selected_documents: set[str],
+) -> dict[str, Any] | None:
+    available = [
+        candidate
+        for candidate in candidates
+        if str(candidate.get("chunk_id") or "") not in selected_ids
+    ]
+    if not available:
+        return None
+    strongest = float(available[0].get("rrf_score") or 0.0)
+    for candidate in available:
+        document = str(candidate.get("document") or "")
+        score = float(candidate.get("rrf_score") or 0.0)
+        if (
+            document not in selected_documents
+            and (strongest <= 0.0 or score >= strongest * DIVERSITY_MIN_SCORE_RATIO)
+        ):
+            return candidate
+    return None
+
+
 def retrieve_plan_from_collection(
     plan: object,
     collection_handle: Any,
@@ -1110,12 +1335,24 @@ def retrieve_plan_from_collection(
     if len(original_facets) != 1:
         raise ValueError("query plan must contain exactly one original facet")
 
+    raw_traits = _plan_value(plan, "traits", ())
+    traits = tuple(
+        str(getattr(value, "value", value))
+        for value in (raw_traits or ())
+    )
+    broad = "broad_synthesis" in traits
+    absence_sensitive = "absence_sensitive" in traits
+    document_order, document_ordinal_by_id = _eligible_document_ordinals(chunks)
     queries = [str(_plan_value(facet, "search_query", "")).strip() for facet in facets]
     if any(not query for query in queries):
         raise ValueError("query plan contains an empty search facet")
     embeddings = embed_queries(queries, embedding_client=embedding_client)
     collection_count = int(collection_handle.count())
-    lane_primary_limit = min(max(n_results, 3), max_final_sources)
+    lane_primary_limit = (
+        max_final_sources
+        if broad
+        else min(max(n_results, 3), max_final_sources)
+    )
     candidate_count = min(collection_count, max(SEMANTIC_CANDIDATE_LIMIT, n_results))
     corpus_trace = dict(corpus or {})
     corpus_trace.setdefault("collection_count", collection_count)
@@ -1123,29 +1360,63 @@ def retrieve_plan_from_collection(
     if hnsw_space:
         corpus_trace.setdefault("hnsw_space", hnsw_space)
 
+    requirements = tuple(_plan_value(plan, "requirements", ()) or ())
+    broad_stage_positions = (
+        _broad_stage_positions(facets, requirements) if broad else {}
+    )
     lanes: list[dict[str, Any]] = []
     for facet, query, embedding in zip(facets, queries, embeddings, strict=True):
         facet_id = str(_plan_value(facet, "facet_id", ""))
         role = str(_plan_value(facet, "role", ""))
         raw_hints = _plan_value(facet, "document_hints", ())
         document_hints = tuple(str(value) for value in (raw_hints or ()))
+        (
+            stage_scope,
+            chronology_band,
+            chronology_min_document_ordinal,
+            chronology_max_document_ordinal,
+        ) = (
+            _broad_stage_scope(
+                role,
+                document_order,
+                stage_index=(
+                    broad_stage_positions[facet_id][0]
+                    if facet_id in broad_stage_positions
+                    else None
+                ),
+                stage_count=(
+                    broad_stage_positions[facet_id][1]
+                    if facet_id in broad_stage_positions
+                    else None
+                ),
+            )
+            if broad
+            else ((), "none", None, None)
+        )
+        document_scope = stage_scope or document_hints
         lane_chunks = [
             chunk
             for chunk in chunks
-            if not document_hints
-            or str(chunk.get("document") or "") in document_hints
+            if not document_scope
+            or str(chunk.get("document") or "") in document_scope
         ]
         semantic_results = (
             _semantic_lane_query(
                 collection_handle,
                 embedding,
                 candidate_count=candidate_count,
-                document_hints=document_hints,
+                document_hints=document_scope,
             )
             if lane_chunks
             else _empty_semantic_results()
         )
-        allow_fallback = role == "original"
+        bounded_related_fallback = (
+            absence_sensitive
+            and facet_id != "F0"
+            and bool(document_hints)
+            and role in _BOUNDED_RELATED_FALLBACK_ROLES
+        )
+        allow_fallback = role == "original" or bounded_related_fallback
         results = build_hybrid_results(
             query,
             semantic_results,
@@ -1153,6 +1424,8 @@ def retrieve_plan_from_collection(
             n_results=lane_primary_limit,
             corpus=corpus_trace,
             allow_semantic_fallback=allow_fallback,
+            retrieval_mode_override=("broad_synthesis" if broad else None),
+            broad_max_per_document=(1 if broad else None),
         )
         hybrid = results.get("hybrid")
         primary_candidates = (
@@ -1160,6 +1433,44 @@ def retrieve_plan_from_collection(
             if isinstance(hybrid, Mapping)
             else []
         )
+        endpoint_anchor_candidates: list[dict[str, Any]] = []
+        stage_position = broad_stage_positions.get(facet_id)
+        narrative_documents = _broad_narrative_documents(document_order)
+        if (
+            broad
+            and role == "endpoint"
+            and stage_position is not None
+            and stage_position[0] == stage_position[1] - 1
+            and narrative_documents
+        ):
+            endpoint_scope = (narrative_documents[-1],)
+            endpoint_chunks = [
+                chunk
+                for chunk in chunks
+                if str(chunk.get("document") or "") in endpoint_scope
+            ]
+            endpoint_semantic_results = _semantic_lane_query(
+                collection_handle,
+                embedding,
+                candidate_count=candidate_count,
+                document_hints=endpoint_scope,
+            )
+            endpoint_results = build_hybrid_results(
+                query,
+                endpoint_semantic_results,
+                endpoint_chunks,
+                n_results=1,
+                corpus=corpus_trace,
+                allow_semantic_fallback=True,
+                retrieval_mode_override="broad_synthesis",
+                broad_max_per_document=1,
+            )
+            endpoint_hybrid = endpoint_results.get("hybrid")
+            endpoint_anchor_candidates = (
+                list(endpoint_hybrid.get("primary_candidates", []))
+                if isinstance(endpoint_hybrid, Mapping)
+                else []
+            )
         lane_trace = hybrid.get("trace", {}) if isinstance(hybrid, Mapping) else {}
         lanes.append(
             {
@@ -1168,17 +1479,15 @@ def retrieve_plan_from_collection(
                 "role": role,
                 "query": query,
                 "document_hints": document_hints,
+                "chronology_band": chronology_band,
+                "chronology_min_document_ordinal": chronology_min_document_ordinal,
+                "chronology_max_document_ordinal": chronology_max_document_ordinal,
                 "candidates": primary_candidates,
+                "endpoint_anchor_candidates": endpoint_anchor_candidates,
                 "trace": lane_trace,
             }
         )
 
-    raw_traits = _plan_value(plan, "traits", ())
-    traits = tuple(
-        str(getattr(value, "value", value))
-        for value in (raw_traits or ())
-    )
-    broad = "broad_synthesis" in traits
     ordered_lanes = sorted(lanes, key=lambda lane: _facet_priority(lane["facet"]))
     selected_ids: set[str] = set()
     selected_documents: set[str] = set()
@@ -1232,6 +1541,42 @@ def retrieve_plan_from_collection(
         )
         if candidate is not None:
             accept(candidate, facet_id)
+    # A broad endpoint lane also checks the book's structural conclusion or
+    # epilogue with the same embedding. Protect one such source before refill.
+    if broad and len(selected_chunks) < max_final_sources:
+        for lane in ordered_lanes:
+            candidate = _pick_first_lane_candidate(
+                lane["endpoint_anchor_candidates"],
+                selected_ids=selected_ids,
+                selected_documents=selected_documents,
+                prefer_new_document=True,
+            )
+            if candidate is not None:
+                accept(candidate, str(lane["facet_id"]))
+            if len(selected_chunks) >= max_final_sources:
+                break
+    # Broad synthesis spends every remaining strong slot on an unseen document
+    # before permitting same-document surplus. This is a soft pass: candidates
+    # below the existing diversity score floor remain available only to the
+    # unrestricted refill below.
+    if broad:
+        while len(selected_chunks) < max_final_sources:
+            made_progress = False
+            for lane in ordered_lanes:
+                candidate = _pick_new_document_lane_candidate(
+                    lane["candidates"],
+                    selected_ids=selected_ids,
+                    selected_documents=selected_documents,
+                )
+                if candidate is not None and accept(
+                    candidate,
+                    str(lane["facet_id"]),
+                ):
+                    made_progress = True
+                if len(selected_chunks) >= max_final_sources:
+                    break
+            if not made_progress:
+                break
     # Fill remaining positions round-robin so one prolific lane cannot monopolize context.
     candidate_offsets = {str(lane["facet_id"]): 0 for lane in ordered_lanes}
     while len(selected_chunks) < max_final_sources:
@@ -1286,6 +1631,19 @@ def retrieve_plan_from_collection(
     for facet_id, chunk_ids in selected_by_facet.items():
         for chunk_id in chunk_ids:
             lane_by_chunk.setdefault(chunk_id, []).append(facet_id)
+    stage_lanes = [
+        lane
+        for lane in lanes
+        if str(lane.get("chronology_band") or "none") != "none"
+    ]
+    stage_coverage_required_count = len(stage_lanes)
+    stage_coverage_satisfied_count = sum(
+        any(
+            chunk_id in source_number_by_id
+            for chunk_id in selected_by_facet[str(lane["facet_id"])]
+        )
+        for lane in stage_lanes
+    )
 
     original_query = str(_plan_value(original_facets[0], "search_query", ""))
     safe_lane_trace = []
@@ -1303,9 +1661,23 @@ def retrieve_plan_from_collection(
                     document_identifier_sha256(hint)
                     for hint in lane["document_hints"]
                 ],
+                "chronology_band": lane["chronology_band"],
+                "chronology_min_document_ordinal": lane[
+                    "chronology_min_document_ordinal"
+                ],
+                "chronology_max_document_ordinal": lane[
+                    "chronology_max_document_ordinal"
+                ],
                 "candidate_chunk_ids": [
-                    str(candidate.get("chunk_id") or "")
-                    for candidate in lane["candidates"]
+                    chunk_id
+                    for chunk_id in dict.fromkeys(
+                        str(candidate.get("chunk_id") or "")
+                        for candidate in (
+                            *lane["candidates"],
+                            *lane["endpoint_anchor_candidates"],
+                        )
+                    )
+                    if chunk_id
                 ],
                 "selected_chunk_ids": selected_by_facet[str(lane["facet_id"])],
                 "raw_primary_fallback_detected": bool(
@@ -1318,7 +1690,6 @@ def retrieve_plan_from_collection(
         )
 
     plan_schema = str(_plan_value(plan, "schema", ""))
-    requirements = _plan_value(plan, "requirements", ())
     trace = {
         "schema": RETRIEVAL_TRACE_SCHEMA,
         "trace_id": uuid4().hex,
@@ -1337,7 +1708,11 @@ def retrieve_plan_from_collection(
             "final_context_source_limit": max_final_sources,
             "lane_primary_limit": lane_primary_limit,
             "facet_embedding": "single_batched_request",
-            "lane_selection": "one_each_then_round_robin",
+            "lane_selection": (
+                "stage_coverage_then_document_diversity"
+                if broad
+                else "one_each_then_round_robin"
+            ),
             "premise_lane_reservation": True,
             "broad_context_order": "corpus_ordinal" if broad else "selection",
             "neighbor_expansion": "primaries_first_then_immediate_neighbors",
@@ -1356,6 +1731,11 @@ def retrieve_plan_from_collection(
             "primary_chunk_ids": [
                 str(chunk.get("chunk_id") or "") for chunk in selected_chunks
             ],
+            "stage_coverage_required_count": stage_coverage_required_count,
+            "stage_coverage_satisfied_count": stage_coverage_satisfied_count,
+            "stage_coverage_shortfall_count": (
+                stage_coverage_required_count - stage_coverage_satisfied_count
+            ),
             "discarded": [],
             "document_distribution": {
                 "selected_primary": _document_distribution(selected_chunks),
@@ -1364,6 +1744,9 @@ def retrieve_plan_from_collection(
             "context": [
                 {
                     **_safe_chunk_fields(chunk),
+                    "document_ordinal": document_ordinal_by_id.get(
+                        str(chunk.get("document") or "")
+                    ),
                     "source_number": source_number,
                     "origin": (
                         "primary"

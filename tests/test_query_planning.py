@@ -12,6 +12,7 @@ from query_planning import (
     FacetRole,
     PlanValidationError,
     PlannerAnswerRequirement,
+    PlannerPremiseHypothesis,
     PlannerQuestionPlan,
     PlannerSearchFacet,
     PremiseHypothesis,
@@ -35,9 +36,14 @@ CATALOG = (
         corpus_ordinal=0,
     ),
     DocumentCatalogEntry(
+        document_id="part-middle.md",
+        chapter_title="Development of the Harbor Network",
+        corpus_ordinal=1,
+    ),
+    DocumentCatalogEntry(
         document_id="part-b.md",
         chapter_title="Closure of the Harbor Network",
-        corpus_ordinal=1,
+        corpus_ordinal=2,
     ),
 )
 
@@ -74,6 +80,9 @@ def valid_planner_plan() -> QuestionPlan:
         requirements=(
             requirement("R1", order=0),
             requirement("R2", order=1),
+            requirement("R3", order=2),
+            requirement("R4", order=3),
+            requirement("R5", order=4),
         ),
         facets=(
             facet(
@@ -86,6 +95,27 @@ def valid_planner_plan() -> QuestionPlan:
             facet(
                 "F2",
                 ("R2",),
+                "Harbor Network development",
+                role=FacetRole.TRANSITION,
+                hints=("part-middle.md",),
+            ),
+            facet(
+                "F3",
+                ("R3",),
+                "Harbor Network middle mechanism",
+                role=FacetRole.MECHANISM,
+                hints=("part-middle.md",),
+            ),
+            facet(
+                "F4",
+                ("R4",),
+                "Harbor Network later development",
+                role=FacetRole.TRANSITION,
+                hints=("part-middle.md",),
+            ),
+            facet(
+                "F5",
+                ("R5",),
                 "Harbor Network closure",
                 role=FacetRole.ENDPOINT,
                 hints=("part-b.md",),
@@ -103,6 +133,18 @@ def valid_planner_proposal() -> PlannerQuestionPlan:
             ),
             PlannerAnswerRequirement(
                 requirement_id="R2",
+                label="Harbor Network development",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R3",
+                label="Harbor Network middle mechanism",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R4",
+                label="Harbor Network later development",
+            ),
+            PlannerAnswerRequirement(
+                requirement_id="R5",
                 label="Harbor Network closure",
             ),
         ),
@@ -117,6 +159,27 @@ def valid_planner_proposal() -> PlannerQuestionPlan:
             PlannerSearchFacet(
                 facet_id="F2",
                 requirement_ids=("R2",),
+                role=FacetRole.TRANSITION,
+                search_query="Harbor Network development",
+                document_hints=("part-middle.md",),
+            ),
+            PlannerSearchFacet(
+                facet_id="F3",
+                requirement_ids=("R3",),
+                role=FacetRole.MECHANISM,
+                search_query="Harbor Network middle mechanism",
+                document_hints=("part-middle.md",),
+            ),
+            PlannerSearchFacet(
+                facet_id="F4",
+                requirement_ids=("R4",),
+                role=FacetRole.TRANSITION,
+                search_query="Harbor Network later development",
+                document_hints=("part-middle.md",),
+            ),
+            PlannerSearchFacet(
+                facet_id="F5",
+                requirement_ids=("R5",),
                 role=FacetRole.ENDPOINT,
                 search_query="Harbor Network closure",
                 document_hints=("part-b.md",),
@@ -165,6 +228,14 @@ def test_resolved_turn_carries_conversation_resolution_structure():
         ),
         (
             "What does the manuscript say about Project Lumen?",
+            (RouteTrait.ABSENCE_SENSITIVE,),
+        ),
+        (
+            "How does the book treat conflict as an engine of central power?",
+            (RouteTrait.BROAD_SYNTHESIS,),
+        ),
+        (
+            "How does the book treat the Hudson Bay Consortium?",
             (RouteTrait.ABSENCE_SENSITIVE,),
         ),
         ("Who led Project Lumen?", ()),
@@ -503,7 +574,7 @@ def test_valid_plan_gets_trusted_traits_targets_and_unchanged_f0():
     assert result.fallback_reason is None
     assert result.facets[0] == SearchFacet(
         facet_id="F0",
-        requirement_ids=("R1", "R2"),
+        requirement_ids=("R1", "R2", "R3", "R4", "R5"),
         role=FacetRole.ORIGINAL,
         search_query=question,
         document_hints=(),
@@ -530,7 +601,13 @@ def test_provider_proposal_materializes_application_owned_plan_fields():
     assert result.planner_used is True
     assert result.fallback_reason is None
     assert result.traits == (RouteTrait.BROAD_SYNTHESIS,)
-    assert [requirement.order for requirement in result.requirements] == [0, 1]
+    assert [requirement.order for requirement in result.requirements] == [
+        0,
+        1,
+        2,
+        3,
+        4,
+    ]
     assert all(requirement.required for requirement in result.requirements)
     assert result.facets[0].facet_id == "F0"
     assert result.targets == (
@@ -605,6 +682,172 @@ def test_structurally_invalid_proposal_records_only_normalized_code():
     assert diagnostics == {"planner_validation_code": "plan_structure_invalid"}
 
 
+def test_planner_premise_is_rejected_when_the_local_route_is_absence_only():
+    proposal = PlannerQuestionPlan(
+        requirements=(
+            PlannerAnswerRequirement(
+                requirement_id="R1",
+                label="Hudson Bay Consortium treatment",
+            ),
+        ),
+        facets=(
+            PlannerSearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.PREMISE_SUPPORT,
+                search_query="Hudson Bay Consortium support",
+            ),
+            PlannerSearchFacet(
+                facet_id="F2",
+                requirement_ids=("R1",),
+                role=FacetRole.PREMISE_COUNTER,
+                search_query="Hudson Bay Consortium counter evidence",
+            ),
+            PlannerSearchFacet(
+                facet_id="F3",
+                requirement_ids=("R1",),
+                role=FacetRole.FRAMING,
+                search_query="Hudson Bay Consortium framing",
+            ),
+        ),
+        premises=(
+            PlannerPremiseHypothesis(
+                premise_id="P1",
+                proposition="The manuscript treats the Hudson Bay Consortium as central",
+                support_facet_id="F1",
+                counter_facet_id="F2",
+                framing_facet_id="F3",
+            ),
+        ),
+    )
+    diagnostics = {}
+    question = "What does the manuscript say about the Hudson Bay Consortium?"
+
+    result = build_question_plan(
+        question,
+        proposal,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert route_question(question) == (RouteTrait.ABSENCE_SENSITIVE,)
+    assert result.premises == ()
+    assert result.fallback_reason == "invalid_planner_output"
+    assert diagnostics == {"planner_validation_code": "premise_route_mismatch"}
+
+
+def test_genuine_planner_premise_requires_a_framing_facet():
+    plan = QuestionPlan(
+        requirements=(requirement(),),
+        facets=(
+            facet(
+                "F1",
+                ("R1",),
+                "Project Lumen signal failure support",
+                role=FacetRole.PREMISE_SUPPORT,
+            ),
+            facet(
+                "F2",
+                ("R1",),
+                "Project Lumen earlier signal failure",
+                role=FacetRole.PREMISE_COUNTER,
+            ),
+        ),
+        premises=(
+            PremiseHypothesis(
+                premise_id="P1",
+                proposition="Project Lumen caused the signal failure",
+                support_facet_id="F1",
+                counter_facet_id="F2",
+            ),
+        ),
+    )
+
+    with pytest.raises(PlanValidationError, match="missing_premise_framing"):
+        validate_question_plan(plan, "Why did Project Lumen cause the signal failure?")
+
+
+def test_under_decomposed_broad_proposal_falls_back_to_five_protected_lanes():
+    proposal = PlannerQuestionPlan(
+        requirements=(
+            PlannerAnswerRequirement(
+                requirement_id="R1",
+                label="Conflict and central power",
+            ),
+        ),
+        facets=(
+            PlannerSearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.MECHANISM,
+                search_query="conflict engine central power",
+            ),
+        ),
+    )
+    diagnostics = {}
+    question = "How does the book treat conflict as an engine of central power?"
+
+    result = build_question_plan(
+        question,
+        proposal,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.fallback_reason == "invalid_planner_output"
+    assert len(result.requirements) == 5
+    assert [facet.role for facet in result.facets[1:]] == [
+        FacetRole.ORIGIN,
+        FacetRole.TRANSITION,
+        FacetRole.TRANSITION,
+        FacetRole.TRANSITION,
+        FacetRole.ENDPOINT,
+    ]
+    assert diagnostics == {"planner_validation_code": "broad_plan_under_decomposed"}
+
+
+def test_broad_proposal_requires_origin_middle_endpoint_requirement_order():
+    proposal = valid_planner_proposal().model_copy(
+        update={
+            "facets": (
+                valid_planner_proposal().facets[0],
+                PlannerSearchFacet(
+                    facet_id="F2",
+                    requirement_ids=("R2",),
+                    role=FacetRole.ENDPOINT,
+                    search_query="Harbor Network premature closure",
+                    document_hints=("part-b.md",),
+                ),
+                PlannerSearchFacet(
+                    facet_id="F3",
+                    requirement_ids=("R3",),
+                    role=FacetRole.TRANSITION,
+                    search_query="Harbor Network middle development",
+                    document_hints=("part-middle.md",),
+                ),
+                *valid_planner_proposal().facets[3:],
+            )
+        }
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        "Trace the Harbor Network from formation to closure.",
+        proposal,
+        CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert result.fallback_reason == "invalid_planner_output"
+    assert diagnostics == {"planner_validation_code": "broad_plan_under_decomposed"}
+    assert [facet.role for facet in result.facets[1:]] == [
+        FacetRole.ORIGIN,
+        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.TRANSITION,
+        FacetRole.ENDPOINT,
+    ]
+
+
 def test_planner_cannot_promote_a_focused_question_to_a_sensitive_route():
     plan = QuestionPlan(
         traits=(RouteTrait.PREMISE_SENSITIVE, RouteTrait.ABSENCE_SENSITIVE),
@@ -650,7 +893,7 @@ def test_planner_cannot_supply_or_replace_the_original_lane():
                             "Harbor Network formation",
                             hints=("unknown.md",),
                         ),
-                        plan.facets[1],
+                        *plan.facets[1:],
                     )
                 }
             ),
@@ -661,7 +904,7 @@ def test_planner_cannot_supply_or_replace_the_original_lane():
                 update={
                     "facets": (
                         facet("F1", ("R1",), "unrelated orbital taxonomy"),
-                        plan.facets[1],
+                        *plan.facets[1:],
                     )
                 }
             ),
@@ -676,7 +919,7 @@ def test_planner_cannot_supply_or_replace_the_original_lane():
                             ("R1",),
                             "The answer is that Harbor Network formed",
                         ),
-                        plan.facets[1],
+                        *plan.facets[1:],
                     )
                 }
             ),
@@ -849,19 +1092,28 @@ def test_duplicate_queries_are_rejected_after_normalization():
         )
 
 
-def test_start_end_fallback_has_origin_endpoint_transition_and_original_lanes():
+def test_start_end_fallback_has_five_ordered_narrative_stage_lanes():
     question = "Trace the Harbor Network from formation to closure."
 
     plan = deterministic_fallback_plan(question, fallback_reason="planner_timeout")
 
     assert plan.planner_used is False
     assert plan.fallback_reason == "planner_timeout"
-    assert [facet.facet_id for facet in plan.facets] == ["F0", "F1", "F2", "F3"]
+    assert [facet.facet_id for facet in plan.facets] == [
+        "F0",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+    ]
     assert [facet.role for facet in plan.facets] == [
         FacetRole.ORIGINAL,
         FacetRole.ORIGIN,
-        FacetRole.ENDPOINT,
         FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.TRANSITION,
+        FacetRole.ENDPOINT,
     ]
     assert plan.facets[0].search_query == question
 

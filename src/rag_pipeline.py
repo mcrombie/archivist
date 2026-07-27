@@ -23,6 +23,7 @@ from answer_coverage import (
     EvidenceCoverageAnswer,
     EvidenceCoverageResult,
     CoverageValidationErrorCode,
+    PremiseSourceScope,
     process_evidence_coverage,
 )
 from costs import (
@@ -34,6 +35,7 @@ from costs import (
 from evidence_policy import (
     EVIDENCE_DIAGNOSTICS_SCHEMA,
     EVIDENCE_POLICY_VERSION,
+    MAX_QUALIFIED_NEAR_MATCH_SOURCES,
     CorpusIntegrity,
     EvidenceDecision,
     EvidenceGateResult,
@@ -68,9 +70,11 @@ from query_planning import (
     PlannerQuestionPlan,
     QuestionPlan,
     ResolvedTurn,
+    RouteTrait,
     build_question_plan,
     normalize_search_query,
     requires_planning,
+    route_question,
     safe_planner_validation_code,
 )
 from retrieval import (
@@ -83,13 +87,13 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v6"
+RAG_POLICY_VERSION = "evidence-planned-v10"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
-QUERY_PLANNER_PROMPT_VERSION = "query-planner-v3"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v2"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v6"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v3"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 8_000
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -164,9 +168,14 @@ claim. Its declared source_numbers must exactly match the one citation group.
 
 Treat every listed premise as a hypothesis. If sources contradict one, the first answer
 unit must use role premise_correction, correct it with citations before addressing the
-useful underlying question, and be named in correction_unit_id. If sources do not resolve
-it, mark it unresolved with a null correction_unit_id. Do not use not_applicable for a
-listed premise. Never validate a premise merely because the question assumes it.
+useful underlying question, have no requirement IDs, and be named in correction_unit_id.
+Premise adjudication and requested-point coverage are separate: a correction unit never
+satisfies an answer requirement. When framing candidate sources are supplied, the correction
+must cite at least one and state the manuscript's positive replacement chronology, origin,
+identity, or causal frame; a bare denial or merely earlier/later counterexample is insufficient.
+Then cover every supported requirement in separate non-correction units. If sources do not
+resolve a premise, mark it unresolved with a null correction_unit_id. Do not use not_applicable
+for a listed premise. Never validate a premise merely because the question assumes it.
 
 Respect the evidence-boundary decision. A qualified near match must begin by saying the
 searchable manuscript does not directly establish the named subject or relationship, and
@@ -435,6 +444,7 @@ def build_planner_input(
 ) -> str:
     payload = {
         "resolved_turn": resolved_turn.model_dump(mode="json", by_alias=True),
+        "route_traits": [trait.value for trait in route_question(resolved_turn)],
         "eligible_document_catalog": [entry.model_dump(mode="json") for entry in document_catalog],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -795,6 +805,85 @@ def _derive_trusted_related_probe(
     return None
 
 
+_BOUNDED_RELATED_FACET_ROLES = frozenset(
+    {
+        FacetRole.BROADER_RELATED,
+        FacetRole.ENDPOINT,
+        FacetRole.MECHANISM,
+        FacetRole.ORIGIN,
+        FacetRole.TRANSITION,
+    }
+)
+
+
+def _contains_normalized_surface(query: str, surface: str) -> bool:
+    normalized_query = f" {normalize_search_query(query)} "
+    normalized_surface = normalize_search_query(surface)
+    return bool(
+        normalized_surface
+        and f" {normalized_surface} " in normalized_query
+    )
+
+
+def _bounded_planner_related_chunk_ids(
+    plan: QuestionPlan,
+    planned: PlannedContext,
+    subject_scan: EvidenceTargetScan,
+    related_spec: tuple[str, tuple[str, ...]] | None,
+) -> tuple[str, ...]:
+    """Return at most two requirement-linked hinted sources for qualified absence.
+
+    The planner may rank related material but cannot establish that the absent
+    subject exists. Every admitted facet must preserve the exact trusted subject
+    and relation surfaces and remain scoped by an exact validated catalog hint.
+    """
+
+    if (
+        RouteTrait.ABSENCE_SENSITIVE not in plan.traits
+        or not plan.planner_used
+        or plan.premises
+        or related_spec is None
+    ):
+        return ()
+    subject_surface = next(
+        (
+            target.query_surface_span
+            for target in plan.targets
+            if target.target_id == subject_scan.target_id
+        ),
+        "",
+    )
+    trusted_surfaces = (
+        subject_surface,
+        related_spec[0],
+        *related_spec[1],
+    )
+    selected: list[str] = []
+    for facet in plan.facets:
+        if (
+            facet.facet_id == "F0"
+            or facet.role not in _BOUNDED_RELATED_FACET_ROLES
+            or not facet.requirement_ids
+            or not facet.document_hints
+            or not all(
+                _contains_normalized_surface(facet.search_query, surface)
+                for surface in trusted_surfaces
+            )
+        ):
+            continue
+        for source_number in planned.facet_source_numbers.get(facet.facet_id, ()):
+            if not 1 <= source_number <= len(planned.final_chunks):
+                continue
+            chunk_id = str(
+                planned.final_chunks[source_number - 1].get("chunk_id") or ""
+            )
+            if chunk_id and chunk_id not in selected:
+                selected.append(chunk_id)
+            if len(selected) == MAX_QUALIFIED_NEAR_MATCH_SOURCES:
+                return tuple(selected)
+    return tuple(selected)
+
+
 def _all_sources_gate(
     planned: PlannedContext,
     integrity: CorpusIntegrity,
@@ -823,6 +912,7 @@ def _all_sources_gate(
 
 
 def _promote_direct_anchor_chunks(
+    plan: QuestionPlan,
     planned: PlannedContext,
     scans: Sequence[EvidenceTargetScan],
     eligible_chunks: Sequence[Mapping[str, object]],
@@ -830,11 +920,11 @@ def _promote_direct_anchor_chunks(
     facet_scan: EvidenceTargetScan | None,
     immediate_neighbors: Mapping[str, Sequence[str]],
 ) -> None:
-    """Guarantee corpus-scan hits are actually present in the model context."""
+    """Guarantee corpus-scan hits without erasing planned coverage obligations."""
     lookup = {str(chunk.get("chunk_id") or ""): dict(chunk) for chunk in eligible_chunks}
-    mandatory_ids: list[str] = []
+    requested_anchor_ids: list[str] = []
     if scans and facet_scan is not None:
-        mandatory_ids.extend(
+        requested_anchor_ids.extend(
             relationship_evidence_chunk_ids(
                 scans[0],
                 facet_scan,
@@ -842,9 +932,15 @@ def _promote_direct_anchor_chunks(
             )
         )
     for scan in scans:
-        mandatory_ids.extend(scan.direct_chunk_ids[:2])
-    mandatory_ids = list(dict.fromkeys(mandatory_ids))[:MAX_FINAL_SOURCES]
-    if not mandatory_ids:
+        # One certified hit per target is a hard admission obligation.
+        # Additional hits remain available through ordinary retrieval.
+        requested_anchor_ids.extend(scan.direct_chunk_ids[:1])
+    requested_anchor_ids = list(
+        dict.fromkeys(
+            chunk_id for chunk_id in requested_anchor_ids if chunk_id in lookup
+        )
+    )
+    if not requested_anchor_ids:
         return
 
     old_chunks = list(planned.final_chunks)
@@ -859,11 +955,105 @@ def _promote_direct_anchor_chunks(
         ]
         for facet_id, source_numbers in planned.facet_source_numbers.items()
     }
+
+    protected_ids: list[str] = []
+    protected_facet_ids: set[str] = set()
+
+    def protect_first(facet_id: str) -> None:
+        if facet_id in protected_facet_ids:
+            return
+        protected_facet_ids.add(facet_id)
+        for chunk_id in old_facet_chunk_ids.get(facet_id, ()):
+            if chunk_id not in protected_ids:
+                protected_ids.append(chunk_id)
+                return
+
+    # Preserve one dedicated lane for every requested answer component.
+    for requirement in plan.requirements:
+        for facet in plan.facets:
+            if (
+                facet.facet_id != "F0"
+                and requirement.requirement_id in facet.requirement_ids
+                and old_facet_chunk_ids.get(facet.facet_id)
+            ):
+                protect_first(facet.facet_id)
+                break
+
+    # Premise support, counter, and framing remain independent obligations.
+    for premise in plan.premises:
+        protect_first(premise.support_facet_id)
+        protect_first(premise.counter_facet_id)
+        if premise.framing_facet_id is not None:
+            protect_first(premise.framing_facet_id)
+
+    # Broad plans promise coverage across their live facets, not merely across
+    # a shared requirement identifier.
+    if RouteTrait.BROAD_SYNTHESIS in plan.traits:
+        for facet in plan.facets:
+            if facet.facet_id != "F0":
+                protect_first(facet.facet_id)
+
+    # Protected retrieval lanes reserve their capacity before a newly promoted
+    # corpus anchor can consume it. Anchors already present in a protected lane
+    # require no additional slot.
+    admitted_anchor_ids: list[str] = []
+    mandatory_ids = list(dict.fromkeys(protected_ids))
+    for chunk_id in requested_anchor_ids:
+        if chunk_id in mandatory_ids:
+            admitted_anchor_ids.append(chunk_id)
+            continue
+        if len(mandatory_ids) + len(
+            [value for value in admitted_anchor_ids if value not in mandatory_ids]
+        ) >= MAX_FINAL_SOURCES:
+            continue
+        admitted_anchor_ids.append(chunk_id)
+    mandatory_order = list(
+        dict.fromkeys((*admitted_anchor_ids, *protected_ids))
+    )
+    remaining_old_ids = [
+        chunk_id for chunk_id in old_ids if chunk_id not in mandatory_order
+    ]
+    represented_documents = {
+        str(lookup[chunk_id].get("document") or "")
+        for chunk_id in mandatory_order
+        if chunk_id in lookup
+    }
+    unique_document_fill: list[str] = []
+    same_document_fill: list[str] = []
+    for chunk_id in remaining_old_ids:
+        document = str(lookup[chunk_id].get("document") or "")
+        if document not in represented_documents:
+            unique_document_fill.append(chunk_id)
+            represented_documents.add(document)
+        else:
+            same_document_fill.append(chunk_id)
     new_ids = [
-        *mandatory_ids,
-        *(chunk_id for chunk_id in old_ids if chunk_id not in mandatory_ids),
+        *mandatory_order,
+        *unique_document_fill,
+        *same_document_fill,
     ][:MAX_FINAL_SOURCES]
+    if RouteTrait.BROAD_SYNTHESIS in plan.traits:
+        corpus_ordinal = {
+            str(chunk.get("chunk_id") or ""): ordinal
+            for ordinal, chunk in enumerate(eligible_chunks)
+        }
+        new_ids.sort(
+            key=lambda chunk_id: (
+                corpus_ordinal.get(chunk_id, 10**9),
+                chunk_id,
+            )
+        )
+    selection["anchor_requested_count"] = len(requested_anchor_ids)
+    selection["anchor_deferred_count"] = sum(
+        chunk_id not in admitted_anchor_ids or chunk_id not in new_ids
+        for chunk_id in requested_anchor_ids
+    )
+    selection["protected_source_count"] = len(protected_ids)
+    selection["protected_source_shortfall_count"] = sum(
+        chunk_id not in new_ids for chunk_id in protected_ids
+    )
     if new_ids == old_ids:
+        planned.trace.setdefault("plan", {})["anchor_promoted_count"] = 0
         return
 
     new_chunks = [lookup[chunk_id] for chunk_id in new_ids if chunk_id in lookup]
@@ -879,7 +1069,7 @@ def _promote_direct_anchor_chunks(
     for facet_id, chunk_ids in old_facet_chunk_ids.items():
         mapped_ids = list(chunk_ids)
         if facet_id == f0_id:
-            mapped_ids = list(dict.fromkeys((*mandatory_ids, *mapped_ids)))
+            mapped_ids = list(dict.fromkeys((*admitted_anchor_ids, *mapped_ids)))
         new_facet_sources[facet_id] = tuple(
             source_number_by_id[chunk_id]
             for chunk_id in mapped_ids
@@ -888,7 +1078,7 @@ def _promote_direct_anchor_chunks(
 
     new_lane_by_id = {chunk_id: planned.lane_by_chunk_id.get(chunk_id, ()) for chunk_id in new_ids}
     if f0_id is not None:
-        for chunk_id in mandatory_ids:
+        for chunk_id in admitted_anchor_ids:
             new_lane_by_id[chunk_id] = tuple(
                 dict.fromkeys((*new_lane_by_id.get(chunk_id, ()), f0_id))
             )
@@ -898,8 +1088,30 @@ def _promote_direct_anchor_chunks(
     planned.facet_source_numbers.update(new_facet_sources)
     planned.lane_by_chunk_id.clear()
     planned.lane_by_chunk_id.update(new_lane_by_id)
+    if RouteTrait.BROAD_SYNTHESIS in plan.traits:
+        stage_facet_ids = {
+            facet.facet_id
+            for facet in plan.facets
+            if facet.role
+            in {
+                FacetRole.ORIGIN,
+                FacetRole.TRANSITION,
+                FacetRole.MECHANISM,
+                FacetRole.ENDPOINT,
+            }
+        }
+        satisfied_stage_ids = {
+            facet_id
+            for facet_id in stage_facet_ids
+            if new_facet_sources.get(facet_id)
+        }
+        selection["stage_coverage_required_count"] = len(stage_facet_ids)
+        selection["stage_coverage_satisfied_count"] = len(satisfied_stage_ids)
+        selection["stage_coverage_shortfall_count"] = (
+            len(stage_facet_ids) - len(satisfied_stage_ids)
+        )
 
-    promoted = [chunk_id for chunk_id in mandatory_ids if chunk_id not in old_ids]
+    promoted = [chunk_id for chunk_id in admitted_anchor_ids if chunk_id not in old_ids]
     planned.trace.setdefault("plan", {})["anchor_promoted_count"] = len(promoted)
     selection["anchor_source_number_remap"] = [
         {
@@ -1019,6 +1231,7 @@ def apply_evidence_gate(
     facet_scan = facet_scans[0] if facet_scans else None
     neighbors = build_immediate_neighbor_map(eligible_chunks)
     _promote_direct_anchor_chunks(
+        plan,
         planned,
         scans,
         eligible_chunks,
@@ -1095,11 +1308,20 @@ def apply_evidence_gate(
         if related_spec is not None
         else None
     )
+    bounded_planner_related_ids = _bounded_planner_related_chunk_ids(
+        plan,
+        planned,
+        subject_scan,
+        related_spec,
+    )
     lane_assignments = classify_evidence_lanes(
         planned.final_chunks,
         subject_scan=subject_scan,
         facet_scan=facet_scan,
-        broader_related_scan=broader_scan,
+        broader_related_scan=(
+            None if bounded_planner_related_ids else broader_scan
+        ),
+        qualified_related_chunk_ids=bounded_planner_related_ids,
         immediate_neighbors=neighbors,
     )
     gate = decide_evidence(
@@ -1109,7 +1331,31 @@ def apply_evidence_gate(
         broader_related_scan=broader_scan,
         immediate_neighbors=neighbors,
     )
-    if trusted_tail_related and gate.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH:
+    if (
+        bounded_planner_related_ids
+        and gate.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH
+    ):
+        gate = replace(
+            gate,
+            rules_fired=(
+                *gate.rules_fired,
+                "planner_bounded_related_material",
+            ),
+        )
+    selected_exact_related_ids = (
+        set(broader_scan.qualified_chunk_ids)
+        if broader_scan is not None
+        else set()
+    ).intersection(
+        assignment.chunk_id
+        for assignment in lane_assignments
+        if assignment.lane is EvidenceLane.BROADER_RELATED
+    )
+    if (
+        trusted_tail_related
+        and selected_exact_related_ids
+        and gate.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH
+    ):
         gate = replace(
             gate,
             rules_fired=(
@@ -1120,7 +1366,11 @@ def apply_evidence_gate(
 
     # Premise status is adjudicated against the sources in the one structured answer
     # call. Do not let a surface-form absence suppress those support/counter lanes first.
-    if plan.premises and policy.premise_checking:
+    if (
+        plan.premises
+        and policy.premise_checking
+        and RouteTrait.PREMISE_SENSITIVE in plan.traits
+    ):
         gate = _all_sources_gate(
             planned,
             gate.integrity,
@@ -1216,11 +1466,35 @@ def _requirement_source_map(
     }
 
 
+def _premise_source_scopes(
+    plan: QuestionPlan,
+    facet_source_numbers: Mapping[str, Sequence[int]],
+) -> tuple[PremiseSourceScope, ...]:
+    return tuple(
+        PremiseSourceScope(
+            premise_id=premise.premise_id,
+            support_source_numbers=tuple(
+                facet_source_numbers.get(premise.support_facet_id, ())
+            ),
+            counter_source_numbers=tuple(
+                facet_source_numbers.get(premise.counter_facet_id, ())
+            ),
+            framing_source_numbers=(
+                tuple(facet_source_numbers.get(premise.framing_facet_id, ()))
+                if premise.framing_facet_id is not None
+                else ()
+            ),
+        )
+        for premise in plan.premises
+    )
+
+
 def build_coverage_input(
     resolved_turn: ResolvedTurn,
     plan: QuestionPlan,
     final_chunks: list[dict[str, Any]],
     facet_source_numbers: Mapping[str, Sequence[int]],
+    premise_source_scopes: Sequence[PremiseSourceScope],
     gate: EvidenceGateResult,
     *,
     historiographical_lens: HistoriographicalLens | str,
@@ -1228,24 +1502,17 @@ def build_coverage_input(
     worldview: Worldview | str,
 ) -> str:
     requirement_sources = _requirement_source_map(plan, facet_source_numbers)
-    premise_sources = []
-    for premise in plan.premises:
-        support = facet_source_numbers.get(premise.support_facet_id, ())
-        counter = facet_source_numbers.get(premise.counter_facet_id, ())
-        framing = (
-            facet_source_numbers.get(premise.framing_facet_id, ())
-            if premise.framing_facet_id is not None
-            else ()
-        )
-        premise_sources.append(
-            {
-                "premise_id": premise.premise_id,
-                "proposition": premise.proposition,
-                "support_candidate_sources": list(support),
-                "counter_candidate_sources": list(counter),
-                "framing_candidate_sources": list(framing),
-            }
-        )
+    premise_by_id = {premise.premise_id: premise for premise in plan.premises}
+    premise_sources = [
+        {
+            "premise_id": scope.premise_id,
+            "proposition": premise_by_id[scope.premise_id].proposition,
+            "support_candidate_sources": list(scope.support_source_numbers),
+            "counter_candidate_sources": list(scope.counter_source_numbers),
+            "framing_candidate_sources": list(scope.framing_source_numbers),
+        }
+        for scope in premise_source_scopes
+    ]
     control = {
         "schema": "archivist.answer_request/1",
         "question": resolved_turn.standalone_question,
@@ -1522,6 +1789,7 @@ def run_evidence_planned_answer(
     requirement_labels = {
         requirement.requirement_id: requirement.label for requirement in plan.requirements
     }
+    premise_source_scopes = _premise_source_scopes(plan, remapped_facets)
     stage_timings_ms["context_preparation"] = _elapsed_ms(context_started_ns)
 
     if not final_chunks:
@@ -1530,6 +1798,7 @@ def run_evidence_planned_answer(
             None,
             requirement_ids=requirement_ids,
             premise_ids=premise_ids,
+            premise_source_scopes=premise_source_scopes,
             source_count=0,
             requirement_labels=requirement_labels,
         )
@@ -1556,6 +1825,7 @@ def run_evidence_planned_answer(
         plan,
         final_chunks,
         remapped_facets,
+        premise_source_scopes,
         gate,
         historiographical_lens=historiographical_lens,
         voice=voice,
@@ -1594,6 +1864,7 @@ def run_evidence_planned_answer(
         parsed,
         requirement_ids=requirement_ids,
         premise_ids=premise_ids,
+        premise_source_scopes=premise_source_scopes,
         source_count=len(final_chunks),
         requirement_labels=requirement_labels,
         refused=refused,

@@ -18,9 +18,10 @@ from enum import StrEnum
 
 
 ANCHOR_NORMALIZER_VERSION = "unicode-nfkc-casefold-anchor-v1"
-EVIDENCE_POLICY_VERSION = "evidence-gate-v2"
+EVIDENCE_POLICY_VERSION = "evidence-gate-v3"
 EVIDENCE_DIAGNOSTICS_SCHEMA = "archivist.evidence_policy_diagnostics/1"
 WEAK_MATCH_WINDOW_TOKENS = 12
+MAX_QUALIFIED_NEAR_MATCH_SOURCES = 2
 
 _APOSTROPHES = frozenset(
     {
@@ -904,6 +905,7 @@ def classify_evidence_lanes(
     additional_subject_scans: Sequence[EvidenceTargetScan] = (),
     facet_scan: EvidenceTargetScan | None = None,
     broader_related_scan: BroaderRelatedScan | None = None,
+    qualified_related_chunk_ids: Iterable[str] = (),
     analogue_chunk_ids: Iterable[str] = (),
     immediate_neighbors: Mapping[str, Iterable[str]] | None = None,
 ) -> tuple[EvidenceLaneAssignment, ...]:
@@ -935,6 +937,11 @@ def classify_evidence_lanes(
         )
     broader_ids = (
         set(broader_related_scan.qualified_chunk_ids) if broader_related_scan is not None else set()
+    )
+    broader_ids.update(
+        str(chunk_id)
+        for chunk_id in qualified_related_chunk_ids
+        if str(chunk_id)
     )
     analogue_ids = {str(chunk_id) for chunk_id in analogue_chunk_ids}
 
@@ -1061,11 +1068,14 @@ def _allowed_and_suppressed_sources(
             if assignment.lane in {EvidenceLane.DIRECT, EvidenceLane.BROADER_RELATED}
         }
     elif decision is EvidenceDecision.QUALIFIED_NEAR_MATCH:
-        allowed = {
+        allowed = set(
             assignment.source_number
             for assignment in assignments
             if assignment.lane is EvidenceLane.BROADER_RELATED
-        }
+        )
+        allowed = set(
+            sorted(allowed)[:MAX_QUALIFIED_NEAR_MATCH_SOURCES]
+        )
     else:
         allowed = set()
     allowed_numbers = tuple(
@@ -1125,15 +1135,14 @@ def decide_evidence(
     direct_present = subject_scan.direct_present
     certified_absence = subject_scan.absence_checkable and integrity.passed and not direct_present
     qualified_broader_ids: set[str] = set()
-    if broader_related_scan is not None:
+    if assignments:
+        qualified_broader_ids.update(
+            assignment.chunk_id
+            for assignment in assignments
+            if assignment.lane is EvidenceLane.BROADER_RELATED
+        )
+    elif broader_related_scan is not None:
         qualified_broader_ids.update(broader_related_scan.qualified_chunk_ids)
-        if assignments:
-            selected_broader_ids = {
-                assignment.chunk_id
-                for assignment in assignments
-                if assignment.lane is EvidenceLane.BROADER_RELATED
-            }
-            qualified_broader_ids.intersection_update(selected_broader_ids)
 
     if not integrity.passed:
         decision = EvidenceDecision.INDETERMINATE
@@ -1237,6 +1246,7 @@ __all__ = [
     "ANCHOR_NORMALIZER_VERSION",
     "EVIDENCE_DIAGNOSTICS_SCHEMA",
     "EVIDENCE_POLICY_VERSION",
+    "MAX_QUALIFIED_NEAR_MATCH_SOURCES",
     "WEAK_MATCH_WINDOW_TOKENS",
     "AnchorMatch",
     "AnchorMatchKind",

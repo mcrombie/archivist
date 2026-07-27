@@ -54,7 +54,7 @@ def answer_run_diagnostics_payload(**overrides):
         "cohort": {
             "rag_policy_version": "evidence-planned-v4",
             "query_planner_prompt_version": "query-planner-v2",
-            "coverage_prompt_version": "evidence-coverage-v2",
+            "coverage_prompt_version": "evidence-coverage-v3",
             "normalizer_version": "evidence-coverage-normalizer/1",
             "coverage_instructions_sha256": "a" * 64,
             "coverage_schema_sha256": "b" * 64,
@@ -970,9 +970,9 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["resolved_query"] == "Standalone question?"
     run_diagnostics = dict(response["run_diagnostics"])
     cohort = run_diagnostics.pop("cohort")
-    assert cohort["rag_policy_version"] == "evidence-planned-v6"
-    assert cohort["query_planner_prompt_version"] == "query-planner-v3"
-    assert cohort["normalizer_version"] == "evidence-coverage-normalizer/3"
+    assert cohort["rag_policy_version"] == "evidence-planned-v10"
+    assert cohort["query_planner_prompt_version"] == "query-planner-v6"
+    assert cohort["normalizer_version"] == "evidence-coverage-normalizer/4"
     assert len(cohort["coverage_instructions_sha256"]) == 64
     assert run_diagnostics == {
         "schema": "archivist.answer_run_diagnostics/2",
