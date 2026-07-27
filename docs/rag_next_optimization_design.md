@@ -1,8 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v10 implemented and verified offline on 2026-07-26; five-stage
-overlapping narrative retrieval clears G007's target-document gate but not its claim-completeness
-gate
+Status: evidence-planned-v11 implemented and evaluated directionally on 2026-07-26;
+mechanism-aware stage retrieval improves broad source breadth, while citation locality,
+source-present answer omissions, and fresh-plan variance remain open
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -253,6 +253,44 @@ war debt as Hamiltonian federal power, Pentagon/employment, NSC-68 and Keynesian
 spending, NATO persistence, and the Epilogue's security-dilemma component. The next bounded
 optimization target is passage-level mechanism query/ranking inside the five recovered stages.
 The unchanged ten-question cohort remains gated.
+
+`Evidence-planned-v11` implemented that bounded retrieval target without changing the source
+limit, query planner, generator prompt, or operation count:
+
+- within planner-hinted narrative documents, deterministic role-scoped lexical probes rank
+  origin, fiscal/consolidation, institutional or military mechanism, and endpoint
+  persistence/transformation evidence;
+- broad coverage prefers distinct candidates for distinct stages when capacity allows and can
+  protect one additional mechanism-bearing hinted document;
+- mechanism queries and candidates are represented in trace schema 5 only by hashes, IDs, counts,
+  and finite role labels;
+- the complete offline suite passes 424 tests with one intentional skip, and Ruff and whitespace
+  checks pass.
+
+A zero-cost G007 replay was followed by one focused paid confirmation that reused the exact
+accepted five-stage plan. The focused context covered 5/5 target document groups for an estimated
+`$0.13844353`, but the answer still realized only about 1/7 strict claims. Much of the omitted
+material was present in the selected passages, moving the dominant defect from stage retrieval to
+source-bounded generation obligations.
+
+The clean unchanged ten-question v11 cohort then completed at commit
+`7ba7382ff48828c1c854034e2d78217751eba826` for an estimated `$0.91198718`. Directional grading
+found 19/58 expected claims, 21/26 target document groups, and 8/10 high-level behaviors. This is
+two more claims and four more target groups than v6 at slightly lower estimated API cost, but
+total latency rose from 280.803 to 334.051 seconds. All 61 rendered citation tokens resolved.
+
+Three bounded defects now replace the earlier full-cohort gate:
+
+1. G001 and G009 found their expected source groups but failed closed on
+   `citation_locality_invalid`;
+2. broad stage labels remain too coarse to require every supported mechanism to appear in the
+   answer; and
+3. fresh broad planning remains variable: focused G007 covered 5/5 target groups while the clean
+   cohort's accepted fresh plan covered 3/5.
+
+The next implementation should address those boundaries separately and should reuse preserved
+contexts for offline or zero-cost isolation before another paid full cohort. The frozen questions,
+claims, target groups, and grading rules remain unchanged.
 
 The implementation follows the bounded-call design in this document:
 

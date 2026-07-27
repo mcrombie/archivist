@@ -45,6 +45,40 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-26] Valid source selections were discarded by citation-locality validation
+Phase/Brief: Phase 1 evidence-planned-v11 directional ten-question evaluation
+Symptom: G001 retrieved both expected document groups and G009 correctly stayed on the
+qualified-near-match route with only the expected Epilogue group. Both paid for a full structured
+generation and then returned no reader-facing answer because strict validation reported
+`citation_locality_invalid`. G001 therefore regressed from its earlier valid answer, while G009
+failed after the absence and near-match retrieval repairs had already succeeded.
+Cause: model error and spec gap in the brief - the one-generation evidence-coverage contract can
+still emit an answer-unit/citation shape that violates the application's atomic locality rule.
+The failure is correctly closed, but diagnostics do not yet isolate a safe canonical repair from
+a genuinely compound or unsupported unit.
+Resolution and verification: unresolved. The next repair must preserve the existing citation
+grammar and fail-closed validation, distinguish mechanically repairable locality shapes from
+substantive multi-claim units, and prove the distinction with synthetic G001- and G009-shaped
+fixtures before one focused paid confirmation. It must not move citations, split prose, or infer
+support unless the transformation is deterministic and source scopes remain identical.
+
+## [2026-07-26] Retrieved broad mechanisms were omitted by the answer contract
+Phase/Brief: Phase 1 evidence-planned-v11 focused G007 confirmation and directional ten-question
+evaluation
+Symptom: the focused G007 confirmation returned passages covering all 5/5 expected document
+groups, including source text for several required mechanisms, but its answer realized only about
+1/7 strict claims. The clean ten-question run improved broad target coverage to 5/8 for G006 and
+3/5 for G007, yet realized only 2/8 and 1/7 claims. Five high-level stage requirements did not
+force the generator to state the source-present submechanisms inside those stages.
+Cause: spec gap in the brief - retrieval obligations are stage-sized while generation
+requirements remain too coarse to express the independently supportable mechanisms found within
+each selected passage. A requirement can be marked covered even when only one part of its
+historical mechanism reaches the answer.
+Resolution and verification: unresolved. The next repair should derive explicit, source-bounded
+mechanism obligations from the selected evidence and pass those obligations through the existing
+coverage ledger. It must remain corpus-agnostic, use no private expected-answer text, add no
+automatic critic or retry, and be tested first against preserved contexts before paid generation.
+
 ## [2026-07-25] Bounded absence retrieval chose adjacent contracting history instead of the requested near-match
 Phase/Brief: Phase 1 evidence-planned-v7 focused paid confirmation
 Symptom: unchanged G009 now routed and validated correctly as `qualified_near_match`, stated the
@@ -155,6 +189,15 @@ chapters, including war debt as Hamiltonian power, Pentagon/employment, NSC-68 a
 permanent spending, NATO persistence, and the security dilemma. The next defect is therefore
 passage-level mechanism targeting/ranking inside the now-correct narrative stages, not another
 source-limit increase or chronology-band change. The full ten-question cohort remains gated.
+
+`Evidence-planned-v11` added deterministic role-scoped mechanism probes inside the accepted
+narrative stages without adding an API operation or changing the eight-source ceiling. A focused
+G007 confirmation reused the accepted v9 five-stage plan and covered 5/5 target groups. The clean
+unchanged ten-question v11 cohort then improved G006 from 2/8 to 5/8 target groups and G007 from
+2/5 to 3/5 compared with v6. The fresh G007 plan's regression from the focused 5/5 context to 3/5
+shows that broad allocation remains nondeterministic across accepted plans. Mechanism-aware
+ranking is retained as a directional breadth improvement, while plan stability remains
+unresolved and the separate source-present generation omission is logged above.
 
 ## [2026-07-25] A valid premise correction still omitted the manuscript's origin frame
 Phase/Brief: Phase 1 evidence-planned-v6 directional ten-question evaluation

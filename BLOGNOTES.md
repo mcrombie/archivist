@@ -1175,6 +1175,58 @@ sources could not rescue a vague lineage, while eight sources could cover every 
 the planner and allocator agreed on five overlapping narrative obligations. Even then, reaching
 the right chapters was not the same as reaching the right claims.
 
+### 2026-07-26 - Mechanism-aware retrieval improved breadth, then the full test exposed the next boundary
+
+- Froze the v10 checkpoint at commit `c8045a3` and opened `evidence-planned-v11` as a retrieval-only
+  cohort. The final source ceiling stayed at eight, the planner and generator prompts stayed
+  unchanged, and no additional planner, embedding, generation, critic, or retry call was added.
+- Inside planner-scoped narrative stages, retrieval now makes deterministic, corpus-agnostic
+  lexical probes for origin, fiscal consolidation, institutional or military mechanisms, and
+  endpoint persistence or transformation. The trace records only hashes, candidate IDs, counts,
+  and role labels.
+- A zero-cost replay against preserved G007 candidates recovered all five target document groups.
+  Because the original query vectors were not persisted, this was a directional replay rather
+  than a claim of exact semantic reconstruction.
+- One paid focused G007 confirmation reused the exact accepted five-stage plan. Its eight sources
+  covered all five target groups and included the early colonial frame, federal consolidation,
+  Civil War centralization, permanent national-security spending, NATO transformation, and the
+  Epilogue. It cost an estimated `$0.13844353`, made one embedding call and one generation call,
+  and made no planner call or retry.
+- That focused answer still realized only about 1/7 strict rubric claims. Several mechanisms were
+  already present in the selected passages but disappeared during generation. The test therefore
+  separated source selection from source-bounded answer adequacy.
+- Ran the owner's unchanged ten questions once from clean commit
+  `7ba7382ff48828c1c854034e2d78217751eba826`. The questions, 58-claim practical rubric, corpus,
+  index, neutral interpretation, eight-source limit, and no-retry policy were unchanged.
+- The clean v11 cohort completed all ten questions for an estimated `$0.91198718`. It made eight
+  planning calls, ten embedding calls, and nine answer-generation calls. Total question latency
+  was 334.051 seconds; median latency was 25.461 seconds.
+- Directional grading found 19/58 expected claims present, 21/26 target document groups represented,
+  and 8/10 high-level behaviors passing. All 61 rendered citation tokens were syntactically valid
+  and resolved to returned sources. Compared with the earlier clean v6 sample, that is two more
+  claims and four more target groups at slightly lower estimated API cost, but about 19 percent
+  greater total latency.
+- The broad items improved without becoming complete. G006 rose from 2/8 to 5/8 target groups;
+  G007 rose from 2/5 to 3/5 and now explicitly reached NATO's post-Cold-War transformation. A
+  fresh G007 plan nevertheless fell short of the focused confirmation's 5/5 coverage, exposing
+  residual planner and allocation variance.
+- G010 is the clearest answer-level success: it rejected the 1898 premise, placed the manuscript's
+  origin at Jamestown, and described the Spanish-American War as an overseas turn rather than the
+  beginning.
+- G001 and G009 retrieved the expected source groups and paid for generation, then failed closed
+  on `citation_locality_invalid`. This is a generation-contract defect, not a retrieval miss.
+- The next work is deliberately bounded: repair citation locality without weakening validation,
+  express broad stages as explicit source-bounded mechanism obligations for generation, and make
+  broad plan allocation less variable. The frozen questions and rubric will not be changed.
+- Offline verification at this milestone passes 424 tests with one intentional skip. Ruff and
+  whitespace checks pass.
+
+Useful blog lesson: retrieval quality and answer quality can finally be seen as different layers.
+The system can reach the right pages and still leave the book's argument unstated; conversely, a
+strict validator can protect readers by refusing an answer whose source mapping is ambiguous.
+Progress came from measuring both layers instead of treating a fluent response as proof that the
+RAG worked.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
