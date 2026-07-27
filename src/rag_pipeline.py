@@ -18,11 +18,14 @@ from time import perf_counter_ns
 from typing import Any
 
 from answer_coverage import (
+    CoverageValidationErrorCode,
     DiagnosticValidationResult,
     EVIDENCE_COVERAGE_NORMALIZER_VERSION,
+    EvidenceDimension,
     EvidenceCoverageAnswer,
     EvidenceCoverageResult,
-    CoverageValidationErrorCode,
+    EvidenceObligationFocus,
+    EvidenceObligationScope,
     PremiseSourceScope,
     process_evidence_coverage,
 )
@@ -87,15 +90,16 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v11"
+RAG_POLICY_VERSION = "evidence-planned-v12"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v6"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v3"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v4"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
-MAX_COVERAGE_OUTPUT_TOKENS = 8_000
+MAX_COVERAGE_OUTPUT_TOKENS = 12_000
+MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
 EMBEDDING_MODEL = "text-embedding-3-small"
 ANSWER_STAGE_TIMING_KEYS = frozenset(
     {
@@ -184,7 +188,76 @@ into a direct answer.
 
 Neutral output should be compact but must not omit supported requirements. Use one short
 paragraph for focused questions or compact ordered paragraphs/bullets for broad questions.
+
+For a broad question, the request includes an ordered evidence_obligations ledger. It is a
+source-bounded completeness pass, not permission to add claims. Inspect every obligation in
+order. The first blank-line-separated text block in a source is its paragraph_start, with
+later blocks following in order; a range covering several paragraphs is one fallback scope.
+Return every obligation_id and every dimension_id exactly once and in the supplied order.
+
+For each obligation dimension:
+- mark it supported only when an atomic answer unit states material directly supported by
+  that obligation's one source scope;
+- otherwise use partial, unsupported, or conflicting honestly and keep unsupported
+  dimensions free of unit and source mappings;
+- link every ordinary broad-answer unit to the exact obligation and dimension it realizes;
+- cite only that obligation's single source in a linked unit, even if another source is
+  similar; and
+- use only the obligation's allowed requirement IDs on that unit.
+
+Role compatibility is exact: stage_development uses definition, identity, event, or
+chronology; cause_or_enabler and mechanism use cause or mechanism; consequence uses event,
+mechanism, consequence, or chronology; continuity_or_change uses mechanism, consequence,
+chronology, or qualification; qualification uses counterargument or qualification. A unit
+may realize several dimensions of the same source scope when its one claim genuinely does
+so. Premise corrections have no obligation links. When no evidence_obligations are listed,
+return an empty obligation_coverage list and empty obligation_links on every unit.
+
+For broad output, mark a coarse requirement supported only when every supplied obligation
+dimension flagged as required for that requirement is supported. If some directly supported
+material is present but that completeness condition is not met, mark the requirement partial.
 """
+
+
+_OBLIGATION_DIMENSIONS_BY_FOCUS: Mapping[
+    EvidenceObligationFocus,
+    tuple[EvidenceDimension, ...],
+] = {
+    EvidenceObligationFocus.ORIGIN: (
+        EvidenceDimension.STAGE_DEVELOPMENT,
+        EvidenceDimension.CAUSE_OR_ENABLER,
+    ),
+    EvidenceObligationFocus.TRANSITION: (
+        EvidenceDimension.STAGE_DEVELOPMENT,
+        EvidenceDimension.CAUSE_OR_ENABLER,
+        EvidenceDimension.CONSEQUENCE,
+    ),
+    EvidenceObligationFocus.MECHANISM: (
+        EvidenceDimension.CAUSE_OR_ENABLER,
+        EvidenceDimension.MECHANISM,
+        EvidenceDimension.CONSEQUENCE,
+    ),
+    EvidenceObligationFocus.ENDPOINT: (
+        EvidenceDimension.CONSEQUENCE,
+        EvidenceDimension.CONTINUITY_OR_CHANGE,
+        EvidenceDimension.QUALIFICATION,
+    ),
+    EvidenceObligationFocus.CROSS_CUTTING: (
+        EvidenceDimension.STAGE_DEVELOPMENT,
+        EvidenceDimension.MECHANISM,
+        EvidenceDimension.CONSEQUENCE,
+    ),
+}
+
+_OBLIGATION_FOCUS_BY_FACET_ROLE: Mapping[
+    FacetRole,
+    EvidenceObligationFocus,
+] = {
+    FacetRole.ORIGIN: EvidenceObligationFocus.ORIGIN,
+    FacetRole.TRANSITION: EvidenceObligationFocus.TRANSITION,
+    FacetRole.MECHANISM: EvidenceObligationFocus.MECHANISM,
+    FacetRole.ENDPOINT: EvidenceObligationFocus.ENDPOINT,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -1489,12 +1562,186 @@ def _premise_source_scopes(
     )
 
 
+def _paragraph_scope_ranges(
+    chunk: Mapping[str, object],
+) -> tuple[tuple[int, int], ...]:
+    """Return paragraph-exact ranges when chunk metadata and text agree.
+
+    A mismatch falls back to one source-wide range so no passage is silently
+    omitted and no paragraph identity is invented.
+    """
+
+    raw_start = chunk.get("paragraph_start")
+    raw_end = chunk.get("paragraph_end")
+    if (
+        not isinstance(raw_start, int)
+        or isinstance(raw_start, bool)
+        or raw_start < 1
+        or not isinstance(raw_end, int)
+        or isinstance(raw_end, bool)
+        or raw_end < raw_start
+    ):
+        return ((1, 1),)
+
+    text = str(chunk.get("text") or "").strip()
+    paragraph_blocks = tuple(
+        block
+        for block in re.split(r"\r?\n[ \t]*\r?\n", text)
+        if block.strip()
+    )
+    expected_count = raw_end - raw_start + 1
+    if len(paragraph_blocks) != expected_count:
+        return ((raw_start, raw_end),)
+    return tuple(
+        (paragraph_number, paragraph_number)
+        for paragraph_number in range(raw_start, raw_end + 1)
+    )
+
+
+def _coalesce_paragraph_ranges(
+    ranges: Sequence[tuple[int, int]],
+    group_count: int,
+) -> tuple[tuple[int, int], ...]:
+    """Partition ordered paragraph ranges into deterministic contiguous groups."""
+
+    if group_count >= len(ranges):
+        return tuple(ranges)
+    if group_count <= 1:
+        return ((ranges[0][0], ranges[-1][1]),)
+    return tuple(
+        (
+            ranges[(group_index * len(ranges)) // group_count][0],
+            ranges[
+                (((group_index + 1) * len(ranges)) // group_count) - 1
+            ][1],
+        )
+        for group_index in range(group_count)
+    )
+
+
+def _bounded_obligation_ranges(
+    final_chunks: Sequence[Mapping[str, object]],
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    """Cover every retained source within the structured-output obligation cap."""
+
+    raw_ranges = tuple(_paragraph_scope_ranges(chunk) for chunk in final_chunks)
+    if sum(len(ranges) for ranges in raw_ranges) <= MAX_BROAD_EVIDENCE_OBLIGATIONS:
+        return raw_ranges
+
+    group_counts = [1 for _ranges in raw_ranges]
+    remaining = MAX_BROAD_EVIDENCE_OBLIGATIONS - len(raw_ranges)
+    while remaining > 0:
+        candidates = [
+            index
+            for index, ranges in enumerate(raw_ranges)
+            if group_counts[index] < len(ranges)
+        ]
+        if not candidates:
+            break
+        selected = max(
+            candidates,
+            key=lambda index: (
+                len(raw_ranges[index]) / group_counts[index],
+                -index,
+            ),
+        )
+        group_counts[selected] += 1
+        remaining -= 1
+
+    return tuple(
+        _coalesce_paragraph_ranges(ranges, group_counts[index])
+        for index, ranges in enumerate(raw_ranges)
+    )
+
+
+def _evidence_obligation_scopes(
+    plan: QuestionPlan,
+    final_chunks: Sequence[Mapping[str, object]],
+    facet_source_numbers: Mapping[str, Sequence[int]],
+) -> tuple[EvidenceObligationScope, ...]:
+    """Build an opaque, source-bounded completeness ledger for broad answers."""
+
+    if RouteTrait.BROAD_SYNTHESIS not in plan.traits or not final_chunks:
+        return ()
+
+    requirement_order = {
+        requirement.requirement_id: requirement.order
+        for requirement in plan.requirements
+    }
+    all_requirement_ids = tuple(
+        requirement.requirement_id
+        for requirement in sorted(plan.requirements, key=lambda item: item.order)
+    )
+    facet_order = {
+        facet.facet_id: index for index, facet in enumerate(plan.facets)
+    }
+    ranges_by_source = _bounded_obligation_ranges(final_chunks)
+    scopes: list[EvidenceObligationScope] = []
+
+    for source_number, paragraph_ranges in enumerate(ranges_by_source, start=1):
+        stage_facets = tuple(
+            facet
+            for facet in plan.facets
+            if (
+                facet.role in _OBLIGATION_FOCUS_BY_FACET_ROLE
+                and source_number
+                in facet_source_numbers.get(facet.facet_id, ())
+            )
+        )
+        allowed_requirement_ids = tuple(
+            requirement_id
+            for requirement_id in all_requirement_ids
+            if any(
+                requirement_id in facet.requirement_ids
+                for facet in stage_facets
+            )
+        )
+        if not allowed_requirement_ids:
+            allowed_requirement_ids = all_requirement_ids
+
+        if stage_facets:
+            focus_facet = min(
+                stage_facets,
+                key=lambda facet: (
+                    min(
+                        (
+                            requirement_order[requirement_id]
+                            for requirement_id in facet.requirement_ids
+                            if requirement_id in requirement_order
+                        ),
+                        default=len(requirement_order),
+                    ),
+                    facet_order[facet.facet_id],
+                ),
+            )
+            focus = _OBLIGATION_FOCUS_BY_FACET_ROLE[focus_facet.role]
+        else:
+            focus = EvidenceObligationFocus.CROSS_CUTTING
+
+        for paragraph_start, paragraph_end in paragraph_ranges:
+            scopes.append(
+                EvidenceObligationScope(
+                    obligation_id=f"O{len(scopes) + 1}",
+                    source_number=source_number,
+                    paragraph_start=paragraph_start,
+                    paragraph_end=paragraph_end,
+                    allowed_requirement_ids=allowed_requirement_ids,
+                    focus=focus,
+                    dimension_ids=_OBLIGATION_DIMENSIONS_BY_FOCUS[focus],
+                    required_for_requirement_status=bool(stage_facets),
+                )
+            )
+
+    return tuple(scopes)
+
+
 def build_coverage_input(
     resolved_turn: ResolvedTurn,
     plan: QuestionPlan,
     final_chunks: list[dict[str, Any]],
     facet_source_numbers: Mapping[str, Sequence[int]],
     premise_source_scopes: Sequence[PremiseSourceScope],
+    obligation_scopes: Sequence[EvidenceObligationScope],
     gate: EvidenceGateResult,
     *,
     historiographical_lens: HistoriographicalLens | str,
@@ -1514,7 +1761,7 @@ def build_coverage_input(
         for scope in premise_source_scopes
     ]
     control = {
-        "schema": "archivist.answer_request/1",
+        "schema": "archivist.answer_request/2",
         "question": resolved_turn.standalone_question,
         "conversation_context": {
             "entities": list(resolved_turn.entities),
@@ -1536,6 +1783,23 @@ def build_coverage_input(
             for requirement in plan.requirements
         ],
         "premises": premise_sources,
+        "evidence_obligations": [
+            {
+                "obligation_id": scope.obligation_id,
+                "source_number": scope.source_number,
+                "paragraph_start": scope.paragraph_start,
+                "paragraph_end": scope.paragraph_end,
+                "allowed_requirement_ids": list(scope.allowed_requirement_ids),
+                "focus": scope.focus.value,
+                "dimension_ids": [
+                    dimension.value for dimension in scope.dimension_ids
+                ],
+                "required_for_requirement_status": (
+                    scope.required_for_requirement_status
+                ),
+            }
+            for scope in obligation_scopes
+        ],
         "evidence_boundary": {
             "decision": gate.decision.value,
             "certified_direct_absence": gate.certified_direct_absence,
@@ -1790,6 +2054,11 @@ def run_evidence_planned_answer(
         requirement.requirement_id: requirement.label for requirement in plan.requirements
     }
     premise_source_scopes = _premise_source_scopes(plan, remapped_facets)
+    obligation_scopes = _evidence_obligation_scopes(
+        plan,
+        final_chunks,
+        remapped_facets,
+    )
     stage_timings_ms["context_preparation"] = _elapsed_ms(context_started_ns)
 
     if not final_chunks:
@@ -1799,6 +2068,7 @@ def run_evidence_planned_answer(
             requirement_ids=requirement_ids,
             premise_ids=premise_ids,
             premise_source_scopes=premise_source_scopes,
+            obligation_scopes=obligation_scopes,
             source_count=0,
             requirement_labels=requirement_labels,
         )
@@ -1826,6 +2096,7 @@ def run_evidence_planned_answer(
         final_chunks,
         remapped_facets,
         premise_source_scopes,
+        obligation_scopes,
         gate,
         historiographical_lens=historiographical_lens,
         voice=voice,
@@ -1865,6 +2136,7 @@ def run_evidence_planned_answer(
         requirement_ids=requirement_ids,
         premise_ids=premise_ids,
         premise_source_scopes=premise_source_scopes,
+        obligation_scopes=obligation_scopes,
         source_count=len(final_chunks),
         requirement_labels=requirement_labels,
         refused=refused,

@@ -1,8 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v11 implemented and evaluated directionally on 2026-07-26;
-mechanism-aware stage retrieval improves broad source breadth, while citation locality,
-source-present answer omissions, and fresh-plan variance remain open
+Status: evidence-planned-v12 implemented offline on 2026-07-27; focused live confirmation
+pending for citation repair, source-bounded broad-answer obligations, and canonical stage cores
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -291,6 +290,36 @@ Three bounded defects now replace the earlier full-cohort gate:
 The next implementation should address those boundaries separately and should reuse preserved
 contexts for offline or zero-cost isolation before another paid full cohort. The frozen questions,
 claims, target groups, and grading rules remain unchanged.
+
+`Evidence-planned-v12` implements those three repairs without changing the frozen evaluation,
+manuscript, index, eight-source ceiling, or one-planner/one-embedding/one-generation operation
+budget:
+
+- the answer schema exposes the exact atomic terminal-citation pattern to Structured Outputs, and
+  the local normalizer removes only the observed redundant terminator shape
+  `claim.[Source N].`; it changes no words, claims, or sources, while every other locality shape
+  still fails closed with a text-free subtype;
+- broad generation receives an ordered paragraph-addressable evidence-obligation ledger. Each
+  obligation names one retained source range, its allowed requirement IDs, a generic narrative
+  focus, and explicit evidence dimensions. Units must link back to exact obligation/dimension
+  pairs with compatible roles and the same single source. Unsupported dimensions remain explicit,
+  and a coarse requirement cannot remain fully supported when any required source-bound
+  obligation is incomplete;
+- when exact paragraph metadata and blank-line blocks agree, the ledger addresses each paragraph.
+  A metadata mismatch becomes one source-wide range, while an unusually large context is
+  deterministically coalesced to at most 32 contiguous ranges without dropping a source;
+- broad retrieval derives one protected canonical query per narrative stage solely from unchanged
+  F0 plus fixed position/role vocabulary. Provider queries and hints remain useful only in the
+  supplemental pool. Canonical and provider embeddings share the same single batched API
+  operation, and spare slots use global rank utility rather than earliest-facet order;
+- retrieval trace schema 6 and evidence diagnostics schema 5 record only hashes, IDs, source and
+  paragraph numbers, finite enums, mappings, and counts for these decisions.
+
+The complete offline suite passes 439 tests with one intentional skip; Ruff and whitespace checks
+pass. These checks establish deterministic contracts, trace privacy, stage-core stability under
+provider wording/hint/order variation, and paragraph-ledger validation. They do not establish
+live model adherence or improved historical answers. The next bounded gate is one clean focused
+confirmation of G001, G007, and G009 before any repeat of the unchanged ten-question cohort.
 
 The implementation follows the bounded-call design in this document:
 

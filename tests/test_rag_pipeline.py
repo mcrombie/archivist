@@ -10,8 +10,13 @@ from answer_coverage import (
     EVIDENCE_COVERAGE_SCHEMA,
     AnswerUnit,
     AnswerUnitRole,
+    EvidenceDimension,
+    EvidenceDimensionCoverage,
     EvidenceCoverageAnswer,
+    EvidenceObligationCoverage,
+    EvidenceObligationScope,
     GapReason,
+    ObligationLink,
     PremiseDecision,
     PremiseStatus,
     RequirementCoverage,
@@ -27,6 +32,7 @@ from query_planning import (
     ResolvedTurn,
     RouteTrait,
     SearchFacet,
+    build_question_plan,
 )
 from retrieval import PlannedContext, RETRIEVAL_TRACE_SCHEMA
 from retrieval_trace_contract import validate_text_free_retrieval_trace
@@ -176,6 +182,89 @@ def supported_answer(
     )
 
 
+def supported_obligation_answer(
+    requirement_ids: tuple[str, ...],
+    obligation_scopes: tuple[EvidenceObligationScope, ...],
+) -> EvidenceCoverageAnswer:
+    role_by_dimension = {
+        EvidenceDimension.STAGE_DEVELOPMENT: AnswerUnitRole.EVENT,
+        EvidenceDimension.CAUSE_OR_ENABLER: AnswerUnitRole.CAUSE,
+        EvidenceDimension.MECHANISM: AnswerUnitRole.MECHANISM,
+        EvidenceDimension.CONSEQUENCE: AnswerUnitRole.CONSEQUENCE,
+        EvidenceDimension.CONTINUITY_OR_CHANGE: AnswerUnitRole.CHRONOLOGY,
+        EvidenceDimension.QUALIFICATION: AnswerUnitRole.QUALIFICATION,
+    }
+    units: list[AnswerUnit] = []
+    obligation_coverage: list[EvidenceObligationCoverage] = []
+    for scope in obligation_scopes:
+        dimension_coverage: list[EvidenceDimensionCoverage] = []
+        for dimension in scope.dimension_ids:
+            unit_id = f"U{len(units) + 1}"
+            units.append(
+                AnswerUnit(
+                    unit_id=unit_id,
+                    requirement_ids=scope.allowed_requirement_ids,
+                    role=role_by_dimension[dimension],
+                    text=(
+                        f"Synthetic obligation point {len(units) + 1} "
+                        f"[Source {scope.source_number}]."
+                    ),
+                    source_numbers=(scope.source_number,),
+                    paragraph=len(units) + 1,
+                    obligation_links=(
+                        ObligationLink(
+                            obligation_id=scope.obligation_id,
+                            dimension=dimension,
+                        ),
+                    ),
+                )
+            )
+            dimension_coverage.append(
+                EvidenceDimensionCoverage(
+                    dimension=dimension,
+                    status=RequirementStatus.SUPPORTED,
+                    unit_ids=(unit_id,),
+                    source_numbers=(scope.source_number,),
+                    gap_reason=GapReason.NONE,
+                )
+            )
+        obligation_coverage.append(
+            EvidenceObligationCoverage(
+                obligation_id=scope.obligation_id,
+                dimensions=tuple(dimension_coverage),
+            )
+        )
+
+    coverage = []
+    for requirement_id in requirement_ids:
+        mapped_units = tuple(
+            unit for unit in units if requirement_id in unit.requirement_ids
+        )
+        coverage.append(
+            RequirementCoverage(
+                requirement_id=requirement_id,
+                status=RequirementStatus.SUPPORTED,
+                unit_ids=tuple(unit.unit_id for unit in mapped_units),
+                source_numbers=tuple(
+                    dict.fromkeys(
+                        source_number
+                        for unit in mapped_units
+                        for source_number in unit.source_numbers
+                    )
+                ),
+                gap_reason=GapReason.NONE,
+            )
+        )
+
+    return EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=tuple(coverage),
+        obligation_coverage=tuple(obligation_coverage),
+        answer_units=tuple(units),
+    )
+
+
 def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
     def fake_retrieve(plan, *_args, **_kwargs):
         return planned_context(plan, chunks)
@@ -191,7 +280,7 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v3"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v4"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -201,6 +290,142 @@ def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     assert "correction unit never satisfies an answer requirement" in instructions
     assert "framing candidate sources" in instructions
     assert "positive replacement chronology" in instructions
+    assert "evidence_obligations ledger" in instructions
+    assert "Inspect every obligation in order" in instructions
+    assert "cite only that obligation's single source" in instructions
+    assert "required for that requirement is supported" in instructions
+
+
+def test_broad_obligation_scopes_cover_exact_paragraphs_and_safe_fallback_ranges():
+    requirements = (
+        AnswerRequirement(requirement_id="R1", label="Origin", order=0),
+        AnswerRequirement(requirement_id="R2", label="Endpoint", order=1),
+    )
+    plan = QuestionPlan(
+        traits=(RouteTrait.BROAD_SYNTHESIS,),
+        requirements=requirements,
+        facets=(
+            SearchFacet(
+                facet_id="F0",
+                requirement_ids=("R1", "R2"),
+                role=FacetRole.ORIGINAL,
+                search_query="Trace a synthetic development.",
+            ),
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGIN,
+                search_query="synthetic origin",
+            ),
+            SearchFacet(
+                facet_id="F2",
+                requirement_ids=("R2",),
+                role=FacetRole.ENDPOINT,
+                search_query="synthetic endpoint",
+            ),
+        ),
+    )
+    chunks = [
+        {
+            **CHUNK,
+            "chunk_id": "synthetic_origin",
+            "paragraph_start": 10,
+            "paragraph_end": 11,
+            "text": "First synthetic paragraph.\n\nSecond synthetic paragraph.",
+        },
+        {
+            **CHUNK,
+            "chunk_id": "synthetic_endpoint",
+            "paragraph_start": 20,
+            "paragraph_end": 22,
+            "text": "Metadata mismatch safely becomes one source-wide scope.",
+        },
+    ]
+
+    scopes = rag_pipeline._evidence_obligation_scopes(
+        plan,
+        chunks,
+        {
+            "F0": (1, 2),
+            "F1": (1,),
+            "F2": (2,),
+        },
+    )
+
+    assert [
+        (
+            scope.obligation_id,
+            scope.source_number,
+            scope.paragraph_start,
+            scope.paragraph_end,
+            scope.allowed_requirement_ids,
+            scope.focus.value,
+        )
+        for scope in scopes
+    ] == [
+        ("O1", 1, 10, 10, ("R1",), "origin"),
+        ("O2", 1, 11, 11, ("R1",), "origin"),
+        ("O3", 2, 20, 22, ("R2",), "endpoint"),
+    ]
+    assert all(scope.required_for_requirement_status for scope in scopes)
+
+
+def test_broad_obligation_scope_cap_coalesces_without_omitting_any_source_range():
+    requirements = (
+        AnswerRequirement(requirement_id="R1", label="Development", order=0),
+    )
+    plan = QuestionPlan(
+        traits=(RouteTrait.BROAD_SYNTHESIS,),
+        requirements=requirements,
+        facets=(
+            SearchFacet(
+                facet_id="F0",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGINAL,
+                search_query="Trace a synthetic development.",
+            ),
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.TRANSITION,
+                search_query="synthetic transition",
+            ),
+        ),
+    )
+    chunks = [
+        {
+            **CHUNK,
+            "chunk_id": f"synthetic_{source_number}",
+            "paragraph_start": (source_number * 10) + 1,
+            "paragraph_end": (source_number * 10) + 10,
+            "text": "\n\n".join(
+                f"Synthetic paragraph {paragraph_number}."
+                for paragraph_number in range(1, 11)
+            ),
+        }
+        for source_number in range(1, 9)
+    ]
+
+    scopes = rag_pipeline._evidence_obligation_scopes(
+        plan,
+        chunks,
+        {
+            "F0": tuple(range(1, 9)),
+            "F1": tuple(range(1, 9)),
+        },
+    )
+
+    assert len(scopes) == rag_pipeline.MAX_BROAD_EVIDENCE_OBLIGATIONS
+    for source_number, chunk in enumerate(chunks, start=1):
+        source_scopes = [
+            scope for scope in scopes if scope.source_number == source_number
+        ]
+        assert source_scopes[0].paragraph_start == chunk["paragraph_start"]
+        assert source_scopes[-1].paragraph_end == chunk["paragraph_end"]
+        assert all(
+            left.paragraph_end + 1 == right.paragraph_start
+            for left, right in zip(source_scopes, source_scopes[1:])
+        )
 
 
 def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch):
@@ -379,6 +604,10 @@ def test_directional_resolved_relationship_does_not_call_the_planner(
 
 def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     install_planned_retrieval(monkeypatch, [CHUNK])
+    turn = ResolvedTurn(
+        standalone_question=("Trace Project Lumen from its origin to its endpoint."),
+        entities=("Project Lumen",),
+    )
     raw_plan = PlannerQuestionPlan(
         requirements=(
             PlannerAnswerRequirement(
@@ -435,6 +664,15 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
             ),
         ),
     )
+    finalized_plan = build_question_plan(turn, raw_plan)
+    obligation_scopes = rag_pipeline._evidence_obligation_scopes(
+        finalized_plan,
+        [CHUNK],
+        {facet.facet_id: (1,) for facet in finalized_plan.facets},
+    )
+    requirement_ids = tuple(
+        requirement.requirement_id for requirement in finalized_plan.requirements
+    )
     calls: list[dict] = []
 
     def fake_parse(_client, *, operation, **request):
@@ -442,17 +680,17 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
         parsed = (
                 raw_plan
                 if operation == "query_planning"
-                else supported_answer(("R1", "R2", "R3", "R4", "R5"))
+                else supported_obligation_answer(
+                    requirement_ids,
+                    obligation_scopes,
+                )
         )
         return SimpleNamespace(output_parsed=parsed, output=())
 
     monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
 
     result = rag_pipeline.run_evidence_planned_answer(
-        resolved_turn=ResolvedTurn(
-            standalone_question=("Trace Project Lumen from its origin to its endpoint."),
-            entities=("Project Lumen",),
-        ),
+        resolved_turn=turn,
         collection_handle=Collection(),
         chunks=[CHUNK],
         client=object(),
@@ -478,6 +716,9 @@ def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
     monkeypatch,
 ):
     install_planned_retrieval(monkeypatch, [CHUNK])
+    turn = ResolvedTurn(
+        standalone_question=("Trace Project Lumen from its origin to its endpoint."),
+    )
     emitted_trace: dict[str, object] = {}
     monkeypatch.setattr(
         rag_pipeline,
@@ -504,19 +745,33 @@ def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
             ),
         ),
     )
+    finalized_plan = build_question_plan(turn, proposal)
+    obligation_scopes = rag_pipeline._evidence_obligation_scopes(
+        finalized_plan,
+        [CHUNK],
+        {facet.facet_id: (1,) for facet in finalized_plan.facets},
+    )
+    requirement_ids = tuple(
+        requirement.requirement_id for requirement in finalized_plan.requirements
+    )
     calls: list[str] = []
 
     def fake_parse(_client, *, operation, **_request):
         calls.append(operation)
-        parsed = proposal if operation == "query_planning" else supported_answer(("R1", "R2", "R3"))
+        parsed = (
+            proposal
+            if operation == "query_planning"
+            else supported_obligation_answer(
+                requirement_ids,
+                obligation_scopes,
+            )
+        )
         return SimpleNamespace(output_parsed=parsed, output=())
 
     monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
 
     result = rag_pipeline.run_evidence_planned_answer(
-        resolved_turn=ResolvedTurn(
-            standalone_question=("Trace Project Lumen from its origin to its endpoint."),
-        ),
+        resolved_turn=turn,
         collection_handle=Collection(),
         chunks=[CHUNK],
         client=object(),
@@ -549,6 +804,22 @@ def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
 
 def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch):
     install_planned_retrieval(monkeypatch, [CHUNK])
+    turn = ResolvedTurn(
+        standalone_question=("Trace Project Lumen from its origin to its endpoint."),
+    )
+    finalized_plan = build_question_plan(
+        turn,
+        None,
+        fallback_reason="planner_call_failed",
+    )
+    obligation_scopes = rag_pipeline._evidence_obligation_scopes(
+        finalized_plan,
+        [CHUNK],
+        {facet.facet_id: (1,) for facet in finalized_plan.facets},
+    )
+    requirement_ids = tuple(
+        requirement.requirement_id for requirement in finalized_plan.requirements
+    )
     emitted_trace: dict[str, object] = {}
     monkeypatch.setattr(
         rag_pipeline,
@@ -566,16 +837,17 @@ def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch)
         if operation == "query_planning":
             raise SyntheticPlannerFailure(private_provider_message)
         return SimpleNamespace(
-            output_parsed=supported_answer(("R1", "R2", "R3")),
+            output_parsed=supported_obligation_answer(
+                requirement_ids,
+                obligation_scopes,
+            ),
             output=(),
         )
 
     monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
 
     result = rag_pipeline.run_evidence_planned_answer(
-        resolved_turn=ResolvedTurn(
-            standalone_question=("Trace Project Lumen from its origin to its endpoint."),
-        ),
+        resolved_turn=turn,
         collection_handle=Collection(),
         chunks=[CHUNK],
         client=object(),

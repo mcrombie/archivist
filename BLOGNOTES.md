@@ -1227,6 +1227,43 @@ strict validator can protect readers by refusing an answer whose source mapping 
 Progress came from measuring both layers instead of treating a fluent response as proof that the
 RAG worked.
 
+### 2026-07-27 - V12 turns three observed failures into explicit application-owned contracts
+
+- Opened `evidence-planned-v12` without changing the manuscript, index, frozen questions, practical
+  rubric, neutral model settings, eight-source cap, or number of paid operation types.
+- The two v11 citation-locality failures were reconstructed from their stored response IDs without
+  regenerating answers. Every rejected unit had the same harmless shape:
+  `claim.[Source N].`. V12 repairs only that exact duplicated terminator, then reruns the full
+  validator. Multiple sentences, semicolons, newlines, extra citation groups, trailing material,
+  changed source sets, and other locality failures still fail closed. The provider schema now
+  receives the same atomic-citation pattern, and traces retain only a finite failure subtype plus
+  unit ID and ordinal.
+- Broad answers now receive a paragraph-addressable obligation ledger inside the existing single
+  generation call. Each obligation binds one source range to allowed requirement IDs, a generic
+  narrative focus, and dimensions such as stage development, mechanism, consequence, continuity,
+  or qualification. Generated units must map back to exact obligation/dimension pairs, use a
+  compatible claim role, and cite that obligation's source. This makes source-present omissions
+  visible instead of treating a high source count as evidence that the answer used the passages.
+- The ledger is corpus-agnostic and bounded. Exact paragraph metadata produces paragraph-level
+  scopes; mismatched metadata falls back to a whole-source scope; oversized contexts are
+  deterministically grouped into at most 32 contiguous ranges without dropping a retained source.
+- Fresh broad plans no longer own the protected stage queries. Each stage gets an
+  application-derived canonical core made from unchanged F0 plus fixed stage vocabulary. Planner
+  wording and hints remain supplemental, all vectors still share one batched embedding operation,
+  and spare source slots are allocated by global rank utility instead of early-facet priority.
+- Trace schema 6 records canonical/provider query hashes, core candidate and selected IDs,
+  obligation ranges, dimension mappings, and safe counts without storing questions, manuscript
+  prose, or generated answer text.
+- Offline verification passes 439 tests with one intentional skip. Ruff and whitespace checks
+  pass. No OpenAI generation, planning, or embedding call was made during implementation. The
+  focused live G001/G007/G009 gate remains deliberately separate and must pass before another
+  unchanged ten-question run.
+
+Useful blog lesson: once a failure is reproducible, the repair can be much narrower than a more
+powerful model or a larger context. One defect was a single redundant period, one was missing
+accountability between selected paragraphs and answer claims, and one was provider wording
+deciding protected retrieval slots. Each needed a different contract.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific

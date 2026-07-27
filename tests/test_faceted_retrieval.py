@@ -30,12 +30,14 @@ def facet(
     query: str,
     *,
     document_hints: tuple[str, ...] = (),
+    requirement_ids: tuple[str, ...] = (),
 ) -> SimpleNamespace:
     return SimpleNamespace(
         facet_id=facet_id,
         role=role,
         search_query=query,
         document_hints=document_hints,
+        requirement_ids=requirement_ids,
     )
 
 
@@ -125,7 +127,9 @@ def test_scoped_verification_lane_does_not_force_all_distant_semantic_results(
     monkeypatch.setattr(
         retrieval,
         "embed_queries",
-        lambda *_args, **_kwargs: [[0.0], [1.0]],
+        lambda queries, **_kwargs: [
+            [float(index)] for index in range(len(queries))
+        ],
     )
     requests: list[dict] = []
 
@@ -169,7 +173,9 @@ def test_broad_context_is_reordered_by_corpus_ordinal_after_selection(monkeypatc
     monkeypatch.setattr(
         retrieval,
         "embed_queries",
-        lambda *_args, **_kwargs: [[0.0], [1.0]],
+        lambda queries, **_kwargs: [
+            [float(index)] for index in range(len(queries))
+        ],
     )
 
     class Collection:
@@ -252,16 +258,18 @@ def test_broad_stage_lanes_use_document_terciles_and_fill_new_documents_first(
         max_final_sources=6,
     )
 
-    assert embedded == [[
+    assert embedded[0][:4] == [
         "whole history",
         "early history",
         "middle history",
         "late history",
-    ]]
+    ]
+    assert len(embedded[0]) == 7
+    assert all(query.startswith("whole history ") for query in embedded[0][4:])
     assert requests[0].get("where") is None
     assert [
         set(request["where"]["document"]["$in"])
-        for request in requests[1:]
+        for request in requests[1:7:2]
     ] == [
         {f"document-{index}.md" for index in range(0, 3)},
         {f"document-{index}.md" for index in range(3, 6)},
@@ -395,7 +403,7 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     assert requests[0].get("where") is None
     assert [
         list(request["where"]["document"]["$in"])
-        for request in requests[1:6]
+        for request in requests[1:11:2]
     ] == [
         [f"{index + 7:02}_Chapter {index}.md" for index in range(1, 8)],
         [f"{index + 7:02}_Chapter {index}.md" for index in range(4, 12)],
@@ -406,7 +414,7 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
             "28_Epilogue.md",
         ],
     ]
-    assert requests[6]["where"]["document"] == "28_Epilogue.md"
+    assert requests[11]["where"]["document"] == "28_Epilogue.md"
     lanes = {lane["facet_id"]: lane for lane in outcome.trace["lanes"]}
     assert [
         (
@@ -423,7 +431,11 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     }
     assert (
         outcome.trace["parameters"]["lane_selection"]
-        == "stage_mechanism_coverage_then_document_diversity"
+        == "canonical_stage_core_then_global_supplement"
+    )
+    assert (
+        outcome.trace["parameters"]["broad_execution_version"]
+        == "broad-canonical-core-v1"
     )
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
@@ -431,7 +443,316 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     )
     assert lanes["F2"]["mechanism_query_sha256s"]
     assert lanes["F2"]["mechanism_candidate_chunk_ids"]
+    assert lanes["F2"]["provider_query_sha256"] == lanes["F2"]["query_sha256"]
+    assert lanes["F2"]["canonical_query_sha256"]
+    assert lanes["F2"]["canonical_candidate_chunk_ids"]
+    assert lanes["F2"]["canonical_core_selected_chunk_ids"]
+    assert outcome.trace["selection"]["canonical_core_required_count"] == 5
+    assert outcome.trace["selection"]["canonical_core_satisfied_count"] == 5
+    assert outcome.trace["selection"]["canonical_core_shortfall_count"] == 0
     validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_canonical_broad_core_survives_provider_query_hint_and_order_variance(
+    monkeypatch,
+):
+    documents = [
+        *(f"{index:02}_Chapter {index}.md" for index in range(1, 21)),
+        "21_Epilogue.md",
+    ]
+    chunks = [
+        chunk(
+            f"synthetic_{index:03}",
+            document,
+            "shared topic background",
+            1,
+        )
+        for index, document in enumerate(documents, start=1)
+    ]
+    core_by_position = {
+        "earliest origin emergence": chunks[1],
+        "early development expansion": chunks[6],
+        "middle mechanism consolidation": chunks[10],
+        "later transformation normalization": chunks[14],
+        "latest endpoint consequence": chunks[20],
+    }
+    for marker, item in core_by_position.items():
+        item["text"] = f"shared topic {marker} cause finance institution persistence"
+
+    def embed(queries, embedding_client=None):
+        del embedding_client
+        vectors = []
+        for query in queries:
+            if query == "shared topic":
+                vectors.append([0.0])
+                continue
+            marker_index = next(
+                (
+                    index
+                    for index, marker in enumerate(core_by_position, start=1)
+                    if marker in query
+                ),
+                None,
+            )
+            if marker_index is not None:
+                vectors.append([float(10 + marker_index)])
+            elif query.startswith("provider-a"):
+                vectors.append([101.0])
+            else:
+                vectors.append([201.0])
+        return vectors
+
+    monkeypatch.setattr(retrieval, "embed_queries", embed)
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            value = int(request["query_embeddings"][0][0])
+            if 11 <= value <= 15:
+                selected = list(core_by_position.values())[value - 11]
+            elif value == 101:
+                selected = chunks[3]
+            elif value == 201:
+                selected = chunks[5]
+            else:
+                selected = chunks[16]
+            where = request.get("where")
+            if where is not None:
+                document_filter = where["document"]
+                allowed = (
+                    set(document_filter["$in"])
+                    if isinstance(document_filter, dict)
+                    else {document_filter}
+                )
+                if selected["document"] not in allowed:
+                    selected = next(
+                        item for item in chunks if item["document"] in allowed
+                    )
+            return semantic_results([selected])
+
+    original_mechanism_candidates = retrieval._broad_mechanism_candidates
+
+    def deterministic_core_candidates(query, role, lane_chunks, primary_candidates):
+        for marker, item in core_by_position.items():
+            if marker in query:
+                return (
+                    [
+                        {
+                            "chunk_id": item["chunk_id"],
+                            "document": item["document"],
+                            "rrf_score": 1.0,
+                        }
+                    ],
+                    (f"{query} fixed mechanism",),
+                )
+        return original_mechanism_candidates(
+            query,
+            role,
+            lane_chunks,
+            primary_candidates,
+        )
+
+    monkeypatch.setattr(
+        retrieval,
+        "_broad_mechanism_candidates",
+        deterministic_core_candidates,
+    )
+
+    requirements = tuple(
+        SimpleNamespace(requirement_id=f"R{index}", order=index - 1)
+        for index in range(1, 6)
+    )
+    roles = ("origin", "transition", "mechanism", "transition", "endpoint")
+
+    def variant_plan(variant: str, *, reverse: bool) -> SimpleNamespace:
+        stage_facets = [
+            facet(
+                f"F{index}",
+                role,
+                f"provider-{variant} shared topic stage {index}",
+                document_hints=(
+                    documents[(index * 3 + (0 if variant == "a" else 1)) % 20],
+                ),
+                requirement_ids=(f"R{index}",),
+            )
+            for index, role in enumerate(roles, start=1)
+        ]
+        if reverse:
+            stage_facets.reverse()
+        return SimpleNamespace(
+            schema="archivist.question_plan/1",
+            traits=("broad_synthesis",),
+            facets=(
+                facet(
+                    "F0",
+                    "original",
+                    "shared topic",
+                    requirement_ids=tuple(f"R{index}" for index in range(1, 6)),
+                ),
+                *stage_facets,
+            ),
+            requirements=requirements,
+            planner_used=True,
+            fallback_reason=None,
+        )
+
+    outcomes = [
+        retrieve_plan_from_collection(
+            variant_plan("a", reverse=False),
+            Collection(),
+            chunks,
+            max_final_sources=8,
+        ),
+        retrieve_plan_from_collection(
+            variant_plan("b", reverse=True),
+            Collection(),
+            chunks,
+            max_final_sources=8,
+        ),
+    ]
+    lane_maps = [
+        {lane["facet_id"]: lane for lane in outcome.trace["lanes"]}
+        for outcome in outcomes
+    ]
+    expected_core_ids = tuple(
+        item["chunk_id"] for item in core_by_position.values()
+    )
+    selected_core_ids = [
+        tuple(
+            lane_map[f"F{index}"]["canonical_core_selected_chunk_ids"][0]
+            for index in range(1, 6)
+        )
+        for lane_map in lane_maps
+    ]
+
+    assert selected_core_ids == [expected_core_ids, expected_core_ids]
+    assert {
+        item["chunk_id"] for item in outcomes[0].final_chunks
+    }.issuperset(expected_core_ids)
+    assert {
+        item["chunk_id"] for item in outcomes[1].final_chunks
+    }.issuperset(expected_core_ids)
+    assert [
+        lane_maps[0][f"F{index}"]["canonical_query_sha256"]
+        for index in range(1, 6)
+    ] == [
+        lane_maps[1][f"F{index}"]["canonical_query_sha256"]
+        for index in range(1, 6)
+    ]
+    assert lane_maps[0]["F3"]["provider_query_sha256"] != (
+        lane_maps[1]["F3"]["provider_query_sha256"]
+    )
+    assert all(
+        outcome.trace["selection"]["canonical_core_satisfied_count"] == 5
+        for outcome in outcomes
+    )
+    for outcome in outcomes:
+        validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_origin_uses_canonical_mechanism_core_instead_of_semantic_decoy(
+    monkeypatch,
+):
+    generic = chunk(
+        "generic_001",
+        "01_Chapter 1.md",
+        "Conflict expanded authority across the region.",
+        1,
+    )
+    mechanism = chunk(
+        "mechanism_001",
+        "01_Chapter 1.md",
+        (
+            "Conflict expanded authority because finance enabled an "
+            "administrative institution and established a precedent."
+        ),
+        2,
+    )
+    chunks = [generic, mechanism]
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: [
+            [float(index)] for index in range(len(queries))
+        ],
+    )
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            return semantic_results([generic])
+
+    outcome = retrieve_plan_from_collection(
+        plan(
+            facet("F0", "original", "How did conflict expand authority?"),
+            facet(
+                "F1",
+                "origin",
+                "provider wording about conflict",
+            ),
+            traits=("broad_synthesis",),
+        ),
+        Collection(),
+        chunks,
+        max_final_sources=1,
+    )
+    origin_lane = next(
+        lane for lane in outcome.trace["lanes"] if lane["facet_id"] == "F1"
+    )
+
+    assert origin_lane["canonical_core_selected_chunk_ids"] == [
+        "mechanism_001"
+    ]
+    assert [item["chunk_id"] for item in outcome.final_chunks] == [
+        "mechanism_001"
+    ]
+
+
+def test_broad_supplemental_utility_is_global_not_facet_ordered():
+    early = {
+        "chunk_id": "early_001",
+        "document": "early.md",
+        "rrf_score": 1.0,
+    }
+    consensus = {
+        "chunk_id": "consensus_001",
+        "document": "later.md",
+        "rrf_score": 1.0,
+    }
+    lanes = [
+        {
+            "facet_id": "F1",
+            "canonical_core_candidates": [early],
+            "mechanism_candidates": [],
+            "candidates": [],
+        },
+        {
+            "facet_id": "F5",
+            "canonical_core_candidates": [consensus],
+            "mechanism_candidates": [consensus],
+            "candidates": [consensus],
+        },
+    ]
+
+    forward = retrieval._ranked_broad_supplemental_options(
+        lanes,
+        document_ordinal_by_id={"early.md": 1, "later.md": 5},
+    )
+    reverse = retrieval._ranked_broad_supplemental_options(
+        list(reversed(lanes)),
+        document_ordinal_by_id={"early.md": 1, "later.md": 5},
+    )
+
+    assert forward[0]["chunk_id"] == "consensus_001"
+    assert reverse[0]["chunk_id"] == "consensus_001"
 
 
 def test_broad_mechanism_rerank_prefers_explicit_financing_link():
@@ -661,3 +982,63 @@ def test_immediate_neighbor_still_fills_a_slot_left_after_all_primaries(
         item["origin"]
         for item in outcome.trace["selection"]["context"]
     ] == ["primary", "primary", "neighbor"]
+
+
+def test_trace_contract_accepts_text_free_evidence_obligation_diagnostics():
+    trace = {
+        "generation_contract": {
+            "schema": "archivist.evidence_coverage_diagnostics/5",
+            "normalizer_version": "evidence-coverage-normalizer/5",
+            "prompt_version": "evidence-coverage-v4",
+            "citation_locality_failure": {
+                "unit_id": "U1",
+                "unit_ordinal": 1,
+                "code": "semicolon_in_claim",
+            },
+            "obligation_count": 1,
+            "obligation_scopes": [
+                {
+                    "obligation_id": "O1",
+                    "source_number": 1,
+                    "paragraph_start": 3,
+                    "paragraph_end": 4,
+                    "allowed_requirement_ids": ["R1"],
+                    "focus": "mechanism",
+                    "dimension_ids": ["cause_or_enabler", "mechanism"],
+                    "required_for_requirement_status": True,
+                }
+            ],
+            "obligation_coverage": [
+                {
+                    "obligation_id": "O1",
+                    "dimensions": [
+                        {
+                            "dimension": "mechanism",
+                            "status": "supported",
+                            "unit_ids": ["U1"],
+                            "source_numbers": [1],
+                            "gap_reason": "none",
+                        }
+                    ],
+                }
+            ],
+            "answer_units": [
+                {
+                    "unit_id": "U1",
+                    "requirement_ids": ["R1"],
+                    "role": "mechanism",
+                    "source_numbers": [1],
+                    "paragraph": 1,
+                    "obligation_links": [
+                        {
+                            "obligation_id": "O1",
+                            "dimension": "mechanism",
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+
+    assert_text_free(trace)
+    validate_text_free_retrieval_trace(trace)

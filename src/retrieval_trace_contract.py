@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/5"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/6"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -119,6 +119,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
         {
             "bm25_b",
             "bm25_k1",
+            "broad_execution_version",
             "broad_mechanism_candidate_limit",
             "broad_mechanism_lexical_version",
             "broad_context_order",
@@ -159,6 +160,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "anchor_deferred_count",
             "anchor_requested_count",
             "anchor_source_number_remap",
+            "canonical_core_required_count",
+            "canonical_core_satisfied_count",
+            "canonical_core_shortfall_count",
             "context",
             "discarded",
             "diversity_applied",
@@ -227,6 +231,10 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
     ("lanes", "[]"): frozenset(
         {
             "candidate_chunk_ids",
+            "canonical_candidate_chunk_ids",
+            "canonical_core_selected_chunk_ids",
+            "canonical_query_char_count",
+            "canonical_query_sha256",
             "chronology_band",
             "chronology_max_document_ordinal",
             "chronology_min_document_ordinal",
@@ -235,6 +243,8 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "mechanism_candidate_chunk_ids",
             "mechanism_query_char_counts",
             "mechanism_query_sha256s",
+            "provider_query_char_count",
+            "provider_query_sha256",
             "query_char_count",
             "query_sha256",
             "raw_primary_fallback_detected",
@@ -315,6 +325,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "answer_unit_count",
             "answer_units",
             "citation_count",
+            "citation_locality_failure",
             "coverage",
             "coverage_status_counts",
             "error_code",
@@ -323,6 +334,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "generator_verbosity",
             "instructions_sha256",
             "normalizer_version",
+            "obligation_count",
+            "obligation_coverage",
+            "obligation_scopes",
             "premise_count",
             "premise_decisions",
             "premise_ids",
@@ -374,13 +388,66 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "support_source_numbers",
         }
     ),
+    ("generation_contract", "citation_locality_failure"): frozenset(
+        {
+            "code",
+            "unit_id",
+            "unit_ordinal",
+        }
+    ),
+    ("generation_contract", "obligation_scopes", "[]"): frozenset(
+        {
+            "allowed_requirement_ids",
+            "dimension_ids",
+            "focus",
+            "obligation_id",
+            "paragraph_end",
+            "paragraph_start",
+            "required_for_requirement_status",
+            "source_number",
+        }
+    ),
+    ("generation_contract", "obligation_coverage", "[]"): frozenset(
+        {
+            "dimensions",
+            "obligation_id",
+        }
+    ),
+    (
+        "generation_contract",
+        "obligation_coverage",
+        "[]",
+        "dimensions",
+        "[]",
+    ): frozenset(
+        {
+            "dimension",
+            "gap_reason",
+            "source_numbers",
+            "status",
+            "unit_ids",
+        }
+    ),
     ("generation_contract", "answer_units", "[]"): frozenset(
         {
+            "obligation_links",
             "paragraph",
             "requirement_ids",
             "role",
             "source_numbers",
             "unit_id",
+        }
+    ),
+    (
+        "generation_contract",
+        "answer_units",
+        "[]",
+        "obligation_links",
+        "[]",
+    ): frozenset(
+        {
+            "dimension",
+            "obligation_id",
         }
     ),
 }
@@ -408,11 +475,43 @@ _ARRAY_PATHS = frozenset(
         ("evidence", "targets"),
         ("evidence", "broader_related", "related_probe_sha256"),
         ("generation_contract", "answer_units"),
+        ("generation_contract", "answer_units", "[]", "obligation_links"),
         ("generation_contract", "answer_units", "[]", "requirement_ids"),
         ("generation_contract", "answer_units", "[]", "source_numbers"),
         ("generation_contract", "coverage"),
         ("generation_contract", "coverage", "[]", "source_numbers"),
         ("generation_contract", "coverage", "[]", "unit_ids"),
+        ("generation_contract", "obligation_coverage"),
+        ("generation_contract", "obligation_coverage", "[]", "dimensions"),
+        (
+            "generation_contract",
+            "obligation_coverage",
+            "[]",
+            "dimensions",
+            "[]",
+            "source_numbers",
+        ),
+        (
+            "generation_contract",
+            "obligation_coverage",
+            "[]",
+            "dimensions",
+            "[]",
+            "unit_ids",
+        ),
+        ("generation_contract", "obligation_scopes"),
+        (
+            "generation_contract",
+            "obligation_scopes",
+            "[]",
+            "allowed_requirement_ids",
+        ),
+        (
+            "generation_contract",
+            "obligation_scopes",
+            "[]",
+            "dimension_ids",
+        ),
         ("generation_contract", "premise_decisions"),
         ("generation_contract", "premise_decisions", "[]", "source_numbers"),
         ("generation_contract", "premise_ids"),
@@ -439,6 +538,8 @@ _ARRAY_PATHS = frozenset(
         ("generation_contract", "requirement_ids"),
         ("lanes",),
         ("lanes", "[]", "candidate_chunk_ids"),
+        ("lanes", "[]", "canonical_candidate_chunk_ids"),
+        ("lanes", "[]", "canonical_core_selected_chunk_ids"),
         ("lanes", "[]", "document_hint_sha256s"),
         ("lanes", "[]", "mechanism_candidate_chunk_ids"),
         ("lanes", "[]", "mechanism_query_char_counts"),
@@ -465,7 +566,12 @@ _ARRAY_PATHS = frozenset(
     }
 )
 
-_NULLABLE_OBJECT_PATHS = frozenset({("evidence", "broader_related")})
+_NULLABLE_OBJECT_PATHS = frozenset(
+    {
+        ("evidence", "broader_related"),
+        ("generation_contract", "citation_locality_failure"),
+    }
+)
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _TRACE_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -478,6 +584,7 @@ _IDENTIFIER_FIELDS = frozenset(
         "conversation_id",
         "correction_unit_id",
         "facet_id",
+        "obligation_id",
         "premise_id",
         "project_id",
         "requirement_id",
@@ -490,6 +597,7 @@ _MODEL_FIELDS = frozenset({"generator_model", "planner_model"})
 _IDENTIFIER_ARRAY_FIELDS = frozenset(
     {
         "facet_ids",
+        "allowed_requirement_ids",
         "premise_ids",
         "requirement_ids",
         "unit_ids",
@@ -500,9 +608,12 @@ _COVERAGE_ERROR_CODES = frozenset(
         "citation_locality_invalid",
         "citation_source_mismatch",
         "conflict_requires_multiple_sources",
+        "duplicate_obligation_dimension",
+        "duplicate_obligation_id",
         "duplicate_premise_id",
         "duplicate_requirement_id",
         "duplicate_source_number",
+        "duplicate_unit_obligation_link",
         "duplicate_unit_id",
         "duplicate_unit_reference",
         "generation_refused",
@@ -510,11 +621,23 @@ _COVERAGE_ERROR_CODES = frozenset(
         "invalid_payload",
         "malformed_citation",
         "missing_citation",
+        "missing_obligation_dimension",
+        "missing_obligation_id",
         "missing_premise_id",
         "missing_requirement_id",
+        "missing_unit_obligation_link",
         "missing_unit_requirement_id",
+        "obligation_requirement_mismatch",
+        "obligation_requirement_status_mismatch",
+        "obligation_role_mismatch",
+        "obligation_source_mapping_mismatch",
+        "obligation_source_mismatch",
+        "obligation_unit_mapping_mismatch",
+        "out_of_order_obligation_dimension",
+        "out_of_order_obligation_id",
         "out_of_order_premise_id",
         "out_of_order_requirement_id",
+        "out_of_order_unit_obligation_link",
         "out_of_order_unit_requirement_id",
         "premise_correction_invalid",
         "premise_correction_missing",
@@ -531,9 +654,13 @@ _COVERAGE_ERROR_CODES = frozenset(
         "unit_mapping_mismatch",
         "unknown_premise_id",
         "unknown_requirement_id",
+        "unknown_obligation_dimension",
+        "unknown_obligation_id",
         "unknown_unit_id",
+        "unknown_unit_obligation_link",
         "unknown_unit_requirement_id",
         "unresolvable_citation",
+        "unsupported_obligation_has_unit",
         "unsupported_requirement_has_unit",
     }
 )
@@ -616,9 +743,44 @@ _EXCEPTION_CODES = frozenset(
 )
 _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "anchor_normalizer_version": frozenset({"unicode-nfkc-casefold-anchor-v1"}),
+    "broad_execution_version": frozenset(
+        {"broad-canonical-core-v1", "not_applicable"}
+    ),
     "broad_context_order": frozenset({"corpus_ordinal", "selection"}),
     "chronology_band": frozenset({"early", "late", "middle", "none"}),
     "displacement_cause": frozenset({"distance_filtering", "document_filtering", "truncation"}),
+    "code": frozenset(
+        {
+            "empty_claim",
+            "internal_sentence_terminator",
+            "missing_terminal_punctuation",
+            "multiline_claim",
+            "multiple_citation_groups",
+            "pre_citation_terminal_punctuation",
+            "semicolon_in_claim",
+            "trailing_content_after_citation",
+        }
+    ),
+    "dimension": frozenset(
+        {
+            "cause_or_enabler",
+            "consequence",
+            "continuity_or_change",
+            "mechanism",
+            "qualification",
+            "stage_development",
+        }
+    ),
+    "dimension_ids": frozenset(
+        {
+            "cause_or_enabler",
+            "consequence",
+            "continuity_or_change",
+            "mechanism",
+            "qualification",
+            "stage_development",
+        }
+    ),
     "error_code": _COVERAGE_ERROR_CODES,
     "exception_code": _EXCEPTION_CODES,
     "facet_embedding": frozenset({"single_batched_request"}),
@@ -643,6 +805,15 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "planner_unavailable",
         }
     ),
+    "focus": frozenset(
+        {
+            "cross_cutting",
+            "endpoint",
+            "mechanism",
+            "origin",
+            "transition",
+        }
+    ),
     "gap_reason": frozenset({"no_direct_support", "none", "partial_support", "source_conflict"}),
     "generator_reasoning_effort": frozenset({"high", "low", "max", "medium", "none", "xhigh"}),
     "generator_verbosity": frozenset({"high", "low", "medium"}),
@@ -651,6 +822,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "lane_selection": frozenset(
         {
             "one_each_then_round_robin",
+            "canonical_stage_core_then_global_supplement",
             "stage_coverage_then_document_diversity",
             "stage_mechanism_coverage_then_document_diversity",
         }
@@ -667,6 +839,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-normalizer/2",
             "evidence-coverage-normalizer/3",
             "evidence-coverage-normalizer/4",
+            "evidence-coverage-normalizer/5",
         }
     ),
     "origin": frozenset({"corpus_anchor", "neighbor", "primary", "retrieval"}),
@@ -713,9 +886,16 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v9",
             "evidence-planned-v10",
             "evidence-planned-v11",
+            "evidence-planned-v12",
         }
     ),
-    "prompt_version": frozenset({"evidence-coverage-v2", "evidence-coverage-v3"}),
+    "prompt_version": frozenset(
+        {
+            "evidence-coverage-v2",
+            "evidence-coverage-v3",
+            "evidence-coverage-v4",
+        }
+    ),
     "reason": frozenset(
         {
             "distance_threshold",
@@ -734,6 +914,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v4",
             "faceted-hybrid-rrf-v5",
             "faceted-hybrid-rrf-v6",
+            "faceted-hybrid-rrf-v7",
             "hybrid-bm25-rrf-v1",
         }
     ),
@@ -768,6 +949,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             RETRIEVAL_TRACE_SCHEMA,
             "archivist.evidence_coverage_diagnostics/3",
             "archivist.evidence_coverage_diagnostics/4",
+            "archivist.evidence_coverage_diagnostics/5",
             "archivist.evidence_policy_diagnostics/1",
             "archivist.planner_call_diagnostics/1",
             "archivist.planner_call_diagnostics/2",
@@ -820,6 +1002,8 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
 _CHUNK_ID_ARRAY_FIELDS = frozenset(
     {
         "candidate_chunk_ids",
+        "canonical_candidate_chunk_ids",
+        "canonical_core_selected_chunk_ids",
         "mechanism_candidate_chunk_ids",
         "parent_primary_chunk_ids",
         "primary_chunk_ids",

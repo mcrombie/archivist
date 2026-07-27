@@ -14,12 +14,19 @@ from answer_coverage import (
     NO_SOURCES_MESSAGE,
     AnswerUnit,
     AnswerUnitRole,
+    CitationLocalityFailureCode,
     CoverageContractError,
     CoverageOutcomeStatus,
     CoverageValidationErrorCode,
     DiagnosticValidationResult,
+    EvidenceDimension,
+    EvidenceDimensionCoverage,
     EvidenceCoverageAnswer,
+    EvidenceObligationCoverage,
+    EvidenceObligationFocus,
+    EvidenceObligationScope,
     GapReason,
+    ObligationLink,
     PremiseDecision,
     PremiseSourceScope,
     PremiseStatus,
@@ -83,6 +90,22 @@ def _premise_scopes(
             framing_source_numbers=framing_source_numbers,
         )
         for premise_id in premise_ids
+    )
+
+
+def _obligation_scope(
+    *,
+    dimensions: tuple[EvidenceDimension, ...] = (EvidenceDimension.MECHANISM,),
+) -> EvidenceObligationScope:
+    return EvidenceObligationScope(
+        obligation_id="O1",
+        source_number=1,
+        paragraph_start=1,
+        paragraph_end=1,
+        allowed_requirement_ids=("R1",),
+        focus=EvidenceObligationFocus.MECHANISM,
+        dimension_ids=dimensions,
+        required_for_requirement_status=True,
     )
 
 
@@ -591,7 +614,99 @@ def test_locality_failure_keeps_its_precise_diagnostic_and_never_renders_prose()
 
     assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
     assert result.diagnostics.error_code is CoverageValidationErrorCode.CITATION_LOCALITY_INVALID
+    assert result.diagnostics.citation_locality_failure is not None
+    assert (
+        result.diagnostics.citation_locality_failure.code
+        is CitationLocalityFailureCode.INTERNAL_SENTENCE_TERMINATOR
+    )
+    assert result.diagnostics.citation_locality_failure.unit_id == "U1"
+    assert result.diagnostics.citation_locality_failure.unit_ordinal == 1
     assert bundled_text not in result.answer
+
+
+def test_one_duplicate_pre_citation_terminator_is_repaired_without_changing_claim():
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(
+            _unit(
+                "U1",
+                ("R1",),
+                "One synthetic atomic claim.[Source 1].",
+                (1,),
+            ),
+        ),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.answer == "One synthetic atomic claim [Source 1]."
+    assert result.diagnostics.citation_locality_failure is None
+    assert result.diagnostics.repair_codes == (
+        CoverageValidationErrorCode.CITATION_LOCALITY_INVALID,
+    )
+
+
+@pytest.mark.parametrize(
+    "text,expected_code",
+    [
+        (
+            "First synthetic claim. Second synthetic claim.[Source 1].",
+            CitationLocalityFailureCode.INTERNAL_SENTENCE_TERMINATOR,
+        ),
+        (
+            "One synthetic claim; another synthetic claim.[Source 1].",
+            CitationLocalityFailureCode.SEMICOLON_IN_CLAIM,
+        ),
+        (
+            "One synthetic claim\ncontinued.[Source 1].",
+            CitationLocalityFailureCode.MULTILINE_CLAIM,
+        ),
+    ],
+)
+def test_duplicate_terminator_repair_rejects_every_nonexact_shape(
+    text,
+    expected_code,
+):
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        answer_units=(_unit("U1", ("R1",), text, (1,)),),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.diagnostics.citation_locality_failure is not None
+    assert result.diagnostics.citation_locality_failure.code is expected_code
+    assert result.diagnostics.repair_applied is False
 
 
 @pytest.mark.parametrize(
@@ -635,13 +750,296 @@ def test_locality_validation_does_not_guess_semantics_from_safe_punctuation(
 
 
 def test_answer_unit_schema_explicitly_requires_one_independently_checkable_claim():
-    description = EvidenceCoverageAnswer.model_json_schema()["$defs"]["AnswerUnit"]["properties"][
-        "text"
-    ]["description"]
+    text_schema = EvidenceCoverageAnswer.model_json_schema()["$defs"]["AnswerUnit"][
+        "properties"
+    ]["text"]
+    description = text_schema["description"]
 
     assert "one independently checkable factual claim" in description
     assert "one terminal citation group" in description
     assert "period-containing abbreviations" in description
+    assert text_schema["pattern"].endswith(r"\][.!?]$")
+
+
+def test_openai_strict_response_schema_preserves_atomic_citation_pattern():
+    from openai.lib._parsing._responses import type_to_text_format_param
+
+    response_format = type_to_text_format_param(EvidenceCoverageAnswer)
+    text_schema = response_format["schema"]["$defs"]["AnswerUnit"]["properties"]["text"]
+
+    assert response_format["strict"] is True
+    assert text_schema["pattern"].endswith(r"\][.!?]$")
+
+
+def test_broad_obligation_ledger_validates_exact_source_dimension_and_role():
+    scope = _obligation_scope()
+    unit = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.MECHANISM,
+        text="A synthetic process connected the stages [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O1",
+                dimension=EvidenceDimension.MECHANISM,
+            ),
+        ),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=(
+            EvidenceObligationCoverage(
+                obligation_id="O1",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.MECHANISM,
+                        status=RequirementStatus.SUPPORTED,
+                        unit_ids=("U1",),
+                        source_numbers=(1,),
+                        gap_reason=GapReason.NONE,
+                    ),
+                ),
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    validated = validate_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=1,
+    )
+
+    assert validated.answer.obligation_coverage[0].dimensions[0].unit_ids == ("U1",)
+    assert validated.answer.answer_units[0].obligation_links[0].obligation_id == "O1"
+
+
+def test_broad_obligation_role_mismatch_fails_closed():
+    scope = _obligation_scope()
+    unit = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.QUALIFICATION,
+        text="A synthetic process connected the stages [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O1",
+                dimension=EvidenceDimension.MECHANISM,
+            ),
+        ),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=(
+            EvidenceObligationCoverage(
+                obligation_id="O1",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.MECHANISM,
+                        status=RequirementStatus.SUPPORTED,
+                        unit_ids=("U1",),
+                        source_numbers=(1,),
+                        gap_reason=GapReason.NONE,
+                    ),
+                ),
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            answer,
+            requirement_ids=("R1",),
+            obligation_scopes=(scope,),
+            source_count=1,
+        )
+
+    assert captured.value.code is CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
+
+
+def test_each_obligation_link_must_individually_allow_every_unit_requirement():
+    scopes = (
+        _obligation_scope(),
+        EvidenceObligationScope(
+            obligation_id="O2",
+            source_number=1,
+            paragraph_start=2,
+            paragraph_end=2,
+            allowed_requirement_ids=("R2",),
+            focus=EvidenceObligationFocus.MECHANISM,
+            dimension_ids=(EvidenceDimension.MECHANISM,),
+            required_for_requirement_status=True,
+        ),
+    )
+    unit = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.MECHANISM,
+        text="A synthetic process connected the stages [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O1",
+                dimension=EvidenceDimension.MECHANISM,
+            ),
+            ObligationLink(
+                obligation_id="O2",
+                dimension=EvidenceDimension.MECHANISM,
+            ),
+        ),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+            _coverage(
+                "R2",
+                RequirementStatus.UNSUPPORTED,
+                (),
+                (),
+                GapReason.NO_DIRECT_SUPPORT,
+            ),
+        ),
+        obligation_coverage=(
+            *(
+                EvidenceObligationCoverage(
+                    obligation_id=scope.obligation_id,
+                    dimensions=(
+                        EvidenceDimensionCoverage(
+                            dimension=EvidenceDimension.MECHANISM,
+                            status=RequirementStatus.SUPPORTED,
+                            unit_ids=("U1",),
+                            source_numbers=(1,),
+                            gap_reason=GapReason.NONE,
+                        ),
+                    ),
+                )
+                for scope in scopes
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            answer,
+            requirement_ids=("R1", "R2"),
+            obligation_scopes=scopes,
+            source_count=1,
+        )
+
+    assert (
+        captured.value.code
+        is CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
+    )
+
+
+def test_incomplete_required_obligation_dimensions_downgrade_supported_to_partial():
+    scope = _obligation_scope(
+        dimensions=(
+            EvidenceDimension.MECHANISM,
+            EvidenceDimension.CONSEQUENCE,
+        )
+    )
+    unit = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.MECHANISM,
+        text="A synthetic process connected the stages [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O1",
+                dimension=EvidenceDimension.MECHANISM,
+            ),
+        ),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=(
+            EvidenceObligationCoverage(
+                obligation_id="O1",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.MECHANISM,
+                        status=RequirementStatus.SUPPORTED,
+                        unit_ids=("U1",),
+                        source_numbers=(1,),
+                        gap_reason=GapReason.NONE,
+                    ),
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.CONSEQUENCE,
+                        status=RequirementStatus.UNSUPPORTED,
+                        unit_ids=(),
+                        source_numbers=(),
+                        gap_reason=GapReason.NO_DIRECT_SUPPORT,
+                    ),
+                ),
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.coverage[0].status is RequirementStatus.PARTIAL
+    assert (
+        CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_STATUS_MISMATCH
+        in result.diagnostics.repair_codes
+    )
+    assert result.diagnostics.obligation_count == 1
+    assert result.diagnostics.obligation_scopes == (scope,)
 
 
 def test_missing_unresolvable_and_mismatched_citations_are_distinct_errors():

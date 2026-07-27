@@ -21,6 +21,7 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    ValidationInfo,
     field_validator,
 )
 
@@ -40,10 +41,18 @@ __all__ = [
     "CoverageOutcomeStatus",
     "CoverageValidationContext",
     "CoverageValidationErrorCode",
+    "CitationLocalityFailure",
+    "CitationLocalityFailureCode",
     "DiagnosticValidationResult",
+    "EvidenceDimension",
+    "EvidenceDimensionCoverage",
+    "EvidenceObligationCoverage",
+    "EvidenceObligationFocus",
+    "EvidenceObligationScope",
     "EvidenceCoverageAnswer",
     "EvidenceCoverageResult",
     "GapReason",
+    "ObligationLink",
     "PremiseDecision",
     "PremiseSourceScope",
     "PremiseStatus",
@@ -58,15 +67,17 @@ __all__ = [
 ]
 
 
-EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/2"
-EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/4"
+EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/3"
+EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/5"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
-EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/4"
+EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/5"
 
 MAX_REQUIREMENTS = 8
 MAX_PREMISES = 2
 MAX_SOURCES = 8
 MAX_ANSWER_UNITS = 32
+MAX_EVIDENCE_OBLIGATIONS = 32
+MAX_OBLIGATION_DIMENSIONS = 4
 MAX_UNIT_TEXT_CHARACTERS = 2_000
 MAX_TOTAL_UNIT_TEXT_CHARACTERS = 12_000
 MAX_REQUIREMENT_LABEL_CHARACTERS = 240
@@ -76,6 +87,10 @@ CITATION_PATTERN = re.compile(CITATION_GRAMMAR)
 _BRACKETED_PATTERN = re.compile(r"\[[^\[\]]*\]")
 _CITATION_NUMBER_PATTERN = re.compile(r"Source\s+(\d+)")
 _TERMINAL_CITATION_PATTERN = re.compile(rf"{CITATION_GRAMMAR}[.!?]$")
+ATOMIC_CITATION_TEXT_PATTERN = (
+    rf"^[^.!?;\r\n\[\]]*[^\s.!?;\r\n\[\]][^.!?;\r\n\[\]]*"
+    rf"{CITATION_GRAMMAR}[.!?]$"
+)
 
 NO_SOURCES_MESSAGE = (
     "The retrieved passages do not provide enough evidence to answer this question."
@@ -158,6 +173,80 @@ class DiagnosticValidationResult(StrEnum):
     NOT_RUN = "not_run"
 
 
+class CitationLocalityFailureCode(StrEnum):
+    MULTIPLE_CITATION_GROUPS = "multiple_citation_groups"
+    MISSING_TERMINAL_PUNCTUATION = "missing_terminal_punctuation"
+    TRAILING_CONTENT_AFTER_CITATION = "trailing_content_after_citation"
+    EMPTY_CLAIM = "empty_claim"
+    MULTILINE_CLAIM = "multiline_claim"
+    SEMICOLON_IN_CLAIM = "semicolon_in_claim"
+    PRE_CITATION_TERMINAL_PUNCTUATION = "pre_citation_terminal_punctuation"
+    INTERNAL_SENTENCE_TERMINATOR = "internal_sentence_terminator"
+
+
+class EvidenceObligationFocus(StrEnum):
+    ORIGIN = "origin"
+    TRANSITION = "transition"
+    MECHANISM = "mechanism"
+    ENDPOINT = "endpoint"
+    CROSS_CUTTING = "cross_cutting"
+
+
+class EvidenceDimension(StrEnum):
+    STAGE_DEVELOPMENT = "stage_development"
+    CAUSE_OR_ENABLER = "cause_or_enabler"
+    MECHANISM = "mechanism"
+    CONSEQUENCE = "consequence"
+    CONTINUITY_OR_CHANGE = "continuity_or_change"
+    QUALIFICATION = "qualification"
+
+
+_DIMENSION_COMPATIBLE_ROLES = {
+    EvidenceDimension.STAGE_DEVELOPMENT: frozenset(
+        {
+            AnswerUnitRole.DEFINITION,
+            AnswerUnitRole.IDENTITY,
+            AnswerUnitRole.EVENT,
+            AnswerUnitRole.CHRONOLOGY,
+        }
+    ),
+    EvidenceDimension.CAUSE_OR_ENABLER: frozenset(
+        {
+            AnswerUnitRole.CAUSE,
+            AnswerUnitRole.MECHANISM,
+        }
+    ),
+    EvidenceDimension.MECHANISM: frozenset(
+        {
+            AnswerUnitRole.CAUSE,
+            AnswerUnitRole.MECHANISM,
+        }
+    ),
+    EvidenceDimension.CONSEQUENCE: frozenset(
+        {
+            AnswerUnitRole.EVENT,
+            AnswerUnitRole.MECHANISM,
+            AnswerUnitRole.CONSEQUENCE,
+            AnswerUnitRole.CHRONOLOGY,
+        }
+    ),
+    EvidenceDimension.CONTINUITY_OR_CHANGE: frozenset(
+        {
+            AnswerUnitRole.MECHANISM,
+            AnswerUnitRole.CONSEQUENCE,
+            AnswerUnitRole.CHRONOLOGY,
+            AnswerUnitRole.QUALIFICATION,
+        }
+    ),
+    EvidenceDimension.QUALIFICATION: frozenset(
+        {
+            AnswerUnitRole.COUNTERARGUMENT,
+            AnswerUnitRole.QUALIFICATION,
+        }
+    ),
+}
+
+
 class CoverageValidationErrorCode(StrEnum):
     INVALID_CONTEXT = "invalid_context"
     INVALID_PAYLOAD = "invalid_payload"
@@ -198,6 +287,25 @@ class CoverageValidationErrorCode(StrEnum):
     UNRESOLVABLE_CITATION = "unresolvable_citation"
     CITATION_SOURCE_MISMATCH = "citation_source_mismatch"
     CITATION_LOCALITY_INVALID = "citation_locality_invalid"
+    MISSING_OBLIGATION_ID = "missing_obligation_id"
+    DUPLICATE_OBLIGATION_ID = "duplicate_obligation_id"
+    UNKNOWN_OBLIGATION_ID = "unknown_obligation_id"
+    OUT_OF_ORDER_OBLIGATION_ID = "out_of_order_obligation_id"
+    MISSING_OBLIGATION_DIMENSION = "missing_obligation_dimension"
+    DUPLICATE_OBLIGATION_DIMENSION = "duplicate_obligation_dimension"
+    UNKNOWN_OBLIGATION_DIMENSION = "unknown_obligation_dimension"
+    OUT_OF_ORDER_OBLIGATION_DIMENSION = "out_of_order_obligation_dimension"
+    MISSING_UNIT_OBLIGATION_LINK = "missing_unit_obligation_link"
+    DUPLICATE_UNIT_OBLIGATION_LINK = "duplicate_unit_obligation_link"
+    UNKNOWN_UNIT_OBLIGATION_LINK = "unknown_unit_obligation_link"
+    OUT_OF_ORDER_UNIT_OBLIGATION_LINK = "out_of_order_unit_obligation_link"
+    OBLIGATION_SOURCE_MISMATCH = "obligation_source_mismatch"
+    OBLIGATION_REQUIREMENT_MISMATCH = "obligation_requirement_mismatch"
+    OBLIGATION_UNIT_MAPPING_MISMATCH = "obligation_unit_mapping_mismatch"
+    OBLIGATION_SOURCE_MAPPING_MISMATCH = "obligation_source_mapping_mismatch"
+    UNSUPPORTED_OBLIGATION_HAS_UNIT = "unsupported_obligation_has_unit"
+    OBLIGATION_ROLE_MISMATCH = "obligation_role_mismatch"
+    OBLIGATION_REQUIREMENT_STATUS_MISMATCH = "obligation_requirement_status_mismatch"
     TEXT_LIMIT_EXCEEDED = "text_limit_exceeded"
 
 
@@ -226,6 +334,11 @@ class RequirementCoverage(_ContractModel):
     gap_reason: GapReason
 
 
+class ObligationLink(_ContractModel):
+    obligation_id: Identifier
+    dimension: EvidenceDimension
+
+
 class AnswerUnit(_ContractModel):
     unit_id: Identifier
     requirement_ids: tuple[Identifier, ...] = Field(
@@ -238,7 +351,8 @@ class AnswerUnit(_ContractModel):
             "factual claim, followed by exactly one terminal citation group and "
             "its only ending punctuation. The claim must spell out or rephrase "
             "period-containing abbreviations, titles, and initials."
-        )
+        ),
+        json_schema_extra={"pattern": ATOMIC_CITATION_TEXT_PATTERN},
     )
     source_numbers: tuple[SourceNumber, ...] = Field(
         min_length=1,
@@ -249,6 +363,14 @@ class AnswerUnit(_ContractModel):
         ),
     )
     paragraph: Annotated[int, Field(strict=True, ge=1, le=MAX_ANSWER_UNITS)]
+    obligation_links: tuple[ObligationLink, ...] = Field(
+        default=(),
+        max_length=MAX_EVIDENCE_OBLIGATIONS,
+        description=(
+            "Exact paragraph-level evidence obligations and dimensions realized by "
+            "this unit. Premise corrections use an empty list."
+        ),
+    )
 
     @field_validator("text")
     @classmethod
@@ -258,12 +380,32 @@ class AnswerUnit(_ContractModel):
         return value
 
 
+class EvidenceDimensionCoverage(_ContractModel):
+    dimension: EvidenceDimension
+    status: RequirementStatus
+    unit_ids: tuple[Identifier, ...] = Field(max_length=MAX_ANSWER_UNITS)
+    source_numbers: tuple[SourceNumber, ...] = Field(max_length=MAX_SOURCES)
+    gap_reason: GapReason
+
+
+class EvidenceObligationCoverage(_ContractModel):
+    obligation_id: Identifier
+    dimensions: tuple[EvidenceDimensionCoverage, ...] = Field(
+        min_length=1,
+        max_length=MAX_OBLIGATION_DIMENSIONS,
+    )
+
+
 class EvidenceCoverageAnswer(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage/2"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage/3"] = Field(alias="schema")
     premise_decisions: tuple[PremiseDecision, ...] = Field(max_length=MAX_PREMISES)
     coverage: tuple[RequirementCoverage, ...] = Field(
         min_length=1,
         max_length=MAX_REQUIREMENTS,
+    )
+    obligation_coverage: tuple[EvidenceObligationCoverage, ...] = Field(
+        default=(),
+        max_length=MAX_EVIDENCE_OBLIGATIONS,
     )
     answer_units: tuple[AnswerUnit, ...] = Field(max_length=MAX_ANSWER_UNITS)
 
@@ -281,6 +423,44 @@ class PremiseSourceScope(_ContractModel):
     framing_source_numbers: tuple[SourceNumber, ...] = Field(max_length=MAX_SOURCES)
 
 
+class EvidenceObligationScope(_ContractModel):
+    """Trusted paragraph-level source provenance for a broad-answer obligation."""
+
+    obligation_id: Identifier
+    source_number: SourceNumber
+    paragraph_start: Annotated[int, Field(strict=True, ge=1)]
+    paragraph_end: Annotated[int, Field(strict=True, ge=1)]
+    allowed_requirement_ids: tuple[Identifier, ...] = Field(
+        min_length=1,
+        max_length=MAX_REQUIREMENTS,
+    )
+    focus: EvidenceObligationFocus
+    dimension_ids: tuple[EvidenceDimension, ...] = Field(
+        min_length=1,
+        max_length=MAX_OBLIGATION_DIMENSIONS,
+    )
+    required_for_requirement_status: bool
+
+    @field_validator("paragraph_end")
+    @classmethod
+    def paragraph_range_is_forward(
+        cls,
+        value: int,
+        info: ValidationInfo,
+    ) -> int:
+        start = info.data.get("paragraph_start")
+        if isinstance(start, int) and value < start:
+            raise ValueError("obligation paragraph range must be forward")
+        return value
+
+    @field_validator("allowed_requirement_ids", "dimension_ids")
+    @classmethod
+    def obligation_values_are_unique(cls, values: tuple[Any, ...]) -> tuple[Any, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("obligation scope values must be unique")
+        return values
+
+
 class CoverageValidationContext(_ContractModel):
     requirement_ids: tuple[Identifier, ...] = Field(
         min_length=1,
@@ -289,6 +469,9 @@ class CoverageValidationContext(_ContractModel):
     premise_ids: tuple[Identifier, ...] = Field(max_length=MAX_PREMISES)
     premise_source_scopes: tuple[PremiseSourceScope, ...] = Field(
         max_length=MAX_PREMISES
+    )
+    obligation_scopes: tuple[EvidenceObligationScope, ...] = Field(
+        max_length=MAX_EVIDENCE_OBLIGATIONS,
     )
     source_count: Annotated[int, Field(strict=True, ge=0, le=MAX_SOURCES)]
 
@@ -314,6 +497,13 @@ class AnswerUnitDiagnostic(_ContractModel):
     role: AnswerUnitRole
     source_numbers: tuple[SourceNumber, ...]
     paragraph: int
+    obligation_links: tuple[ObligationLink, ...]
+
+
+class CitationLocalityFailure(_ContractModel):
+    unit_id: Identifier
+    unit_ordinal: Annotated[int, Field(strict=True, ge=1, le=MAX_ANSWER_UNITS)]
+    code: CitationLocalityFailureCode
 
 
 class RequirementStatusCounts(_ContractModel):
@@ -331,23 +521,27 @@ class PremiseStatusCounts(_ContractModel):
 
 
 class CoverageDiagnosticSummary(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage_diagnostics/4"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage_diagnostics/5"] = Field(alias="schema")
     renderer_version: Literal["evidence-coverage-renderer/1"]
     validation_result: DiagnosticValidationResult
     error_code: CoverageValidationErrorCode | None
+    citation_locality_failure: CitationLocalityFailure | None
     repair_applied: bool
     repair_codes: tuple[CoverageValidationErrorCode, ...]
     requirement_ids: tuple[Identifier, ...]
     premise_ids: tuple[Identifier, ...]
     premise_source_scopes: tuple[PremiseSourceScope, ...]
+    obligation_scopes: tuple[EvidenceObligationScope, ...]
     requirement_count: int = Field(ge=0, le=MAX_REQUIREMENTS)
     premise_count: int = Field(ge=0, le=MAX_PREMISES)
+    obligation_count: int = Field(ge=0, le=MAX_EVIDENCE_OBLIGATIONS)
     source_count: int = Field(ge=0, le=MAX_SOURCES)
     coverage_status_counts: RequirementStatusCounts
     premise_status_counts: PremiseStatusCounts
     answer_unit_count: int = Field(ge=0, le=MAX_ANSWER_UNITS)
     citation_count: int = Field(ge=0)
     coverage: tuple[RequirementCoverageDiagnostic, ...]
+    obligation_coverage: tuple[EvidenceObligationCoverage, ...]
     premise_decisions: tuple[PremiseDecisionDiagnostic, ...]
     answer_units: tuple[AnswerUnitDiagnostic, ...]
 
@@ -371,9 +565,11 @@ class CoverageContractError(ValueError):
         code: CoverageValidationErrorCode,
         *,
         repair_codes: Sequence[CoverageValidationErrorCode] = (),
+        citation_locality_failure: CitationLocalityFailure | None = None,
     ):
         self.code = code
         self.repair_codes = tuple(dict.fromkeys(repair_codes))
+        self.citation_locality_failure = citation_locality_failure
         super().__init__(code.value)
 
 
@@ -413,6 +609,7 @@ def validate_evidence_coverage(
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str] = (),
     premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
     source_count: int,
 ) -> ValidatedEvidenceCoverage:
     """Validate a structured answer against its trusted call inputs.
@@ -426,6 +623,7 @@ def validate_evidence_coverage(
         requirement_ids,
         premise_ids,
         premise_source_scopes,
+        obligation_scopes,
         source_count,
     )
     answer = _parse_payload(payload)
@@ -446,6 +644,14 @@ def validate_evidence_coverage(
         unknown=CoverageValidationErrorCode.UNKNOWN_PREMISE_ID,
         out_of_order=CoverageValidationErrorCode.OUT_OF_ORDER_PREMISE_ID,
     )
+    _validate_exact_ids(
+        actual=tuple(record.obligation_id for record in answer.obligation_coverage),
+        expected=tuple(scope.obligation_id for scope in context.obligation_scopes),
+        missing=CoverageValidationErrorCode.MISSING_OBLIGATION_ID,
+        duplicate=CoverageValidationErrorCode.DUPLICATE_OBLIGATION_ID,
+        unknown=CoverageValidationErrorCode.UNKNOWN_OBLIGATION_ID,
+        out_of_order=CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_ID,
+    )
 
     unit_ids = tuple(unit.unit_id for unit in answer.answer_units)
     if _has_duplicates(unit_ids):
@@ -465,21 +671,41 @@ def validate_evidence_coverage(
     requirement_order = {
         requirement_id: index for index, requirement_id in enumerate(context.requirement_ids)
     }
+    obligation_scopes_by_id = {
+        scope.obligation_id: scope for scope in context.obligation_scopes
+    }
+    obligation_order = {
+        scope.obligation_id: index
+        for index, scope in enumerate(context.obligation_scopes)
+    }
+    obligation_dimension_order = {
+        (scope.obligation_id, dimension): index
+        for scope in context.obligation_scopes
+        for index, dimension in enumerate(scope.dimension_ids)
+    }
 
     total_text_characters = sum(len(unit.text) for unit in answer.answer_units)
     if total_text_characters > MAX_TOTAL_UNIT_TEXT_CHARACTERS:
         raise CoverageContractError(CoverageValidationErrorCode.TEXT_LIMIT_EXCEEDED)
 
     citation_count = 0
-    for unit in answer.answer_units:
+    for unit_ordinal, unit in enumerate(answer.answer_units, start=1):
         if unit.role is AnswerUnitRole.PREMISE_CORRECTION:
-            if unit.requirement_ids:
+            if unit.requirement_ids or unit.obligation_links:
                 raise CoverageContractError(
                     CoverageValidationErrorCode.PREMISE_CORRECTION_REQUIREMENT_MISMATCH
                 )
         elif not unit.requirement_ids:
             raise CoverageContractError(
                 CoverageValidationErrorCode.MISSING_UNIT_REQUIREMENT_ID
+            )
+        if (
+            context.obligation_scopes
+            and unit.role is not AnswerUnitRole.PREMISE_CORRECTION
+            and not unit.obligation_links
+        ):
+            raise CoverageContractError(
+                CoverageValidationErrorCode.MISSING_UNIT_OBLIGATION_LINK
             )
         if _has_duplicates(unit.requirement_ids):
             raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_REQUIREMENT_ID)
@@ -495,11 +721,72 @@ def validate_evidence_coverage(
         cited_numbers = parse_citation_numbers(unit.text)
         if not cited_numbers:
             raise CoverageContractError(CoverageValidationErrorCode.MISSING_CITATION)
-        _validate_citation_locality(unit.text, cited_numbers)
+        locality_failure = _citation_locality_failure(
+            unit.text,
+            cited_numbers,
+            unit_id=unit.unit_id,
+            unit_ordinal=unit_ordinal,
+        )
+        if locality_failure is not None:
+            raise CoverageContractError(
+                CoverageValidationErrorCode.CITATION_LOCALITY_INVALID,
+                citation_locality_failure=locality_failure,
+            )
         if any(number > context.source_count for number in cited_numbers):
             raise CoverageContractError(CoverageValidationErrorCode.UNRESOLVABLE_CITATION)
         if _ordered_unique(cited_numbers) != unit.source_numbers:
             raise CoverageContractError(CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH)
+
+        link_keys = tuple(
+            (link.obligation_id, link.dimension)
+            for link in unit.obligation_links
+        )
+        if len(link_keys) != len(set(link_keys)):
+            raise CoverageContractError(
+                CoverageValidationErrorCode.DUPLICATE_UNIT_OBLIGATION_LINK
+            )
+        if any(
+            obligation_id not in obligation_scopes_by_id
+            or (obligation_id, dimension) not in obligation_dimension_order
+            for obligation_id, dimension in link_keys
+        ):
+            raise CoverageContractError(
+                CoverageValidationErrorCode.UNKNOWN_UNIT_OBLIGATION_LINK
+            )
+        canonical_link_order = tuple(
+            sorted(
+                link_keys,
+                key=lambda value: (
+                    obligation_order[value[0]],
+                    obligation_dimension_order[value],
+                ),
+            )
+        )
+        if link_keys != canonical_link_order:
+            raise CoverageContractError(
+                CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_OBLIGATION_LINK
+            )
+        if unit.obligation_links:
+            linked_source_numbers = _ordered_unique(
+                obligation_scopes_by_id[link.obligation_id].source_number
+                for link in unit.obligation_links
+            )
+            if set(linked_source_numbers) != set(unit.source_numbers):
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH
+                )
+            if any(
+                not set(unit.requirement_ids)
+                <= set(
+                    obligation_scopes_by_id[
+                        link.obligation_id
+                    ].allowed_requirement_ids
+                )
+                for link in unit.obligation_links
+            ):
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
+                )
         citation_count += len(cited_numbers)
 
     premise_scopes = {
@@ -564,6 +851,67 @@ def validate_evidence_coverage(
     ):
         raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID)
 
+    obligation_coverage_by_id = {
+        record.obligation_id: record for record in answer.obligation_coverage
+    }
+    for record in answer.obligation_coverage:
+        scope = obligation_scopes_by_id[record.obligation_id]
+        _validate_exact_ids(
+            actual=tuple(dimension.dimension.value for dimension in record.dimensions),
+            expected=tuple(dimension.value for dimension in scope.dimension_ids),
+            missing=CoverageValidationErrorCode.MISSING_OBLIGATION_DIMENSION,
+            duplicate=CoverageValidationErrorCode.DUPLICATE_OBLIGATION_DIMENSION,
+            unknown=CoverageValidationErrorCode.UNKNOWN_OBLIGATION_DIMENSION,
+            out_of_order=CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_DIMENSION,
+        )
+        for dimension_record in record.dimensions:
+            _validate_source_numbers(
+                dimension_record.source_numbers,
+                context.source_count,
+            )
+            _validate_status_shape(dimension_record)
+            mapped_units = tuple(
+                unit
+                for unit in answer.answer_units
+                if any(
+                    link.obligation_id == record.obligation_id
+                    and link.dimension is dimension_record.dimension
+                    for link in unit.obligation_links
+                )
+            )
+            mapped_unit_ids = tuple(unit.unit_id for unit in mapped_units)
+            mapped_source_numbers = _ordered_unique(
+                number for unit in mapped_units for number in unit.source_numbers
+            )
+            if (
+                dimension_record.status is RequirementStatus.UNSUPPORTED
+                and mapped_units
+            ):
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.UNSUPPORTED_OBLIGATION_HAS_UNIT
+                )
+            if dimension_record.unit_ids != mapped_unit_ids:
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.OBLIGATION_UNIT_MAPPING_MISMATCH
+                )
+            if dimension_record.source_numbers != mapped_source_numbers:
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.OBLIGATION_SOURCE_MAPPING_MISMATCH
+                )
+            if mapped_units and mapped_source_numbers != (scope.source_number,):
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH
+                )
+            if any(
+                unit.role not in _DIMENSION_COMPATIBLE_ROLES[
+                    dimension_record.dimension
+                ]
+                for unit in mapped_units
+            ):
+                raise CoverageContractError(
+                    CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
+                )
+
     coverage_by_requirement = {record.requirement_id: record for record in answer.coverage}
     for record in answer.coverage:
         if _has_duplicates(record.unit_ids):
@@ -592,6 +940,32 @@ def validate_evidence_coverage(
         if record.status is RequirementStatus.CONFLICTING and len(record.source_numbers) < 2:
             raise CoverageContractError(
                 CoverageValidationErrorCode.CONFLICT_REQUIRES_MULTIPLE_SOURCES
+            )
+        required_obligation_dimensions = {
+            (scope.obligation_id, dimension)
+            for scope in context.obligation_scopes
+            if scope.required_for_requirement_status
+            and record.requirement_id in scope.allowed_requirement_ids
+            for dimension in scope.dimension_ids
+        }
+        supported_obligation_dimensions = {
+            (scope.obligation_id, dimension_record.dimension)
+            for scope in context.obligation_scopes
+            if scope.required_for_requirement_status
+            and record.requirement_id in scope.allowed_requirement_ids
+            for dimension_record in obligation_coverage_by_id[
+                scope.obligation_id
+            ].dimensions
+            if dimension_record.status is RequirementStatus.SUPPORTED
+        }
+        if (
+            record.status is RequirementStatus.SUPPORTED
+            and required_obligation_dimensions
+            and not required_obligation_dimensions
+            <= supported_obligation_dimensions
+        ):
+            raise CoverageContractError(
+                CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_STATUS_MISMATCH
             )
 
     for unit in answer.answer_units:
@@ -668,13 +1042,16 @@ def coverage_diagnostic_summary(
         renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
         validation_result=DiagnosticValidationResult.VALID,
         error_code=None,
+        citation_locality_failure=None,
         repair_applied=bool(normalized_repair_codes),
         repair_codes=normalized_repair_codes,
         requirement_ids=validated.context.requirement_ids,
         premise_ids=validated.context.premise_ids,
         premise_source_scopes=validated.context.premise_source_scopes,
+        obligation_scopes=validated.context.obligation_scopes,
         requirement_count=len(validated.context.requirement_ids),
         premise_count=len(validated.context.premise_ids),
+        obligation_count=len(validated.context.obligation_scopes),
         source_count=validated.context.source_count,
         coverage_status_counts=RequirementStatusCounts(
             supported=coverage_counts[RequirementStatus.SUPPORTED],
@@ -700,6 +1077,7 @@ def coverage_diagnostic_summary(
             )
             for record in answer.coverage
         ),
+        obligation_coverage=answer.obligation_coverage,
         premise_decisions=tuple(
             PremiseDecisionDiagnostic(
                 premise_id=record.premise_id,
@@ -716,6 +1094,7 @@ def coverage_diagnostic_summary(
                 role=unit.role,
                 source_numbers=unit.source_numbers,
                 paragraph=unit.paragraph,
+                obligation_links=unit.obligation_links,
             )
             for unit in answer.answer_units
         ),
@@ -728,6 +1107,7 @@ def process_evidence_coverage(
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str] = (),
     premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
     source_count: int,
     requirement_labels: Mapping[str, str] | None = None,
     refused: bool = False,
@@ -743,6 +1123,7 @@ def process_evidence_coverage(
             requirement_ids,
             premise_ids,
             premise_source_scopes,
+            obligation_scopes,
             source_count,
         )
     except CoverageContractError as error:
@@ -780,6 +1161,7 @@ def process_evidence_coverage(
             requirement_ids=context.requirement_ids,
             premise_ids=context.premise_ids,
             premise_source_scopes=context.premise_source_scopes,
+            obligation_scopes=context.obligation_scopes,
             source_count=context.source_count,
         )
     except CoverageContractError as error:
@@ -787,6 +1169,7 @@ def process_evidence_coverage(
             context=context,
             error_code=error.code,
             repair_codes=error.repair_codes or repair_codes,
+            citation_locality_failure=error.citation_locality_failure,
         )
 
     rendered = render_evidence_coverage(
@@ -815,12 +1198,14 @@ def _validation_context(
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str],
     premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]],
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]],
     source_count: int,
 ) -> CoverageValidationContext:
     if (
         isinstance(requirement_ids, (str, bytes))
         or isinstance(premise_ids, (str, bytes))
         or isinstance(premise_source_scopes, (str, bytes, Mapping))
+        or isinstance(obligation_scopes, (str, bytes, Mapping))
     ):
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
     try:
@@ -832,19 +1217,37 @@ def _validation_context(
             )
             for value in premise_source_scopes
         )
+        parsed_obligation_scopes = tuple(
+            (
+                value
+                if isinstance(value, EvidenceObligationScope)
+                else EvidenceObligationScope.model_validate(value)
+            )
+            for value in obligation_scopes
+        )
         context = CoverageValidationContext(
             requirement_ids=tuple(requirement_ids),
             premise_ids=tuple(premise_ids),
             premise_source_scopes=scopes,
+            obligation_scopes=parsed_obligation_scopes,
             source_count=source_count,
         )
     except (TypeError, ValidationError):
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT) from None
     scope_ids = tuple(scope.premise_id for scope in context.premise_source_scopes)
+    obligation_ids = tuple(
+        scope.obligation_id for scope in context.obligation_scopes
+    )
     if (
         _has_duplicates(context.requirement_ids)
         or _has_duplicates(context.premise_ids)
         or scope_ids != context.premise_ids
+        or _has_duplicates(obligation_ids)
+        or any(
+            not set(scope.allowed_requirement_ids) <= set(context.requirement_ids)
+            or scope.source_number > context.source_count
+            for scope in context.obligation_scopes
+        )
         or any(
             _has_duplicates(source_numbers)
             or any(
@@ -897,6 +1300,15 @@ def _normalize_mechanical_contract(
     requirement_order = {
         requirement_id: index for index, requirement_id in enumerate(context.requirement_ids)
     }
+    obligation_order = {
+        scope.obligation_id: index
+        for index, scope in enumerate(context.obligation_scopes)
+    }
+    dimension_order = {
+        (scope.obligation_id, dimension): index
+        for scope in context.obligation_scopes
+        for index, dimension in enumerate(scope.dimension_ids)
+    }
 
     normalized_units: list[AnswerUnit] = []
     for unit in answer.answer_units:
@@ -911,9 +1323,13 @@ def _normalize_mechanical_contract(
                 repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_REQUIREMENT_ID)
                 requirement_ids = canonical_requirement_ids
 
+        text, citation_repaired = _normalize_pre_citation_terminal(unit.text)
+        if citation_repaired:
+            repair_codes.append(CoverageValidationErrorCode.CITATION_LOCALITY_INVALID)
+
         source_numbers = unit.source_numbers
         try:
-            cited_numbers = parse_citation_numbers(unit.text)
+            cited_numbers = parse_citation_numbers(text)
         except CoverageContractError as error:
             raise CoverageContractError(
                 error.code,
@@ -925,17 +1341,139 @@ def _normalize_mechanical_contract(
                 repair_codes.append(CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH)
             source_numbers = canonical_citations
 
+        obligation_links = unit.obligation_links
+        link_keys = tuple(
+            (link.obligation_id, link.dimension)
+            for link in obligation_links
+        )
+        if (
+            len(link_keys) == len(set(link_keys))
+            and all(key[0] in obligation_order and key in dimension_order for key in link_keys)
+        ):
+            canonical_links = tuple(
+                sorted(
+                    obligation_links,
+                    key=lambda link: (
+                        obligation_order[link.obligation_id],
+                        dimension_order[(link.obligation_id, link.dimension)],
+                    ),
+                )
+            )
+            if canonical_links != obligation_links:
+                repair_codes.append(
+                    CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_OBLIGATION_LINK
+                )
+                obligation_links = canonical_links
+
         normalized_units.append(
             unit.model_copy(
                 update={
                     "requirement_ids": requirement_ids,
+                    "text": text,
                     "source_numbers": source_numbers,
+                    "obligation_links": obligation_links,
                 }
             )
         )
 
     answer_units = tuple(normalized_units)
     known_unit_ids = {unit.unit_id for unit in answer_units}
+
+    obligation_coverage = _reorder_exact_records(
+        answer.obligation_coverage,
+        expected_ids=tuple(
+            scope.obligation_id for scope in context.obligation_scopes
+        ),
+        id_attribute="obligation_id",
+    )
+    if obligation_coverage != answer.obligation_coverage:
+        repair_codes.append(
+            CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_ID
+        )
+    scopes_by_id = {
+        scope.obligation_id: scope for scope in context.obligation_scopes
+    }
+    normalized_obligation_coverage: list[EvidenceObligationCoverage] = []
+    for record in obligation_coverage:
+        scope = scopes_by_id.get(record.obligation_id)
+        if scope is None:
+            normalized_obligation_coverage.append(record)
+            continue
+        dimensions = _reorder_exact_records(
+            record.dimensions,
+            expected_ids=scope.dimension_ids,
+            id_attribute="dimension",
+        )
+        if dimensions != record.dimensions:
+            repair_codes.append(
+                CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_DIMENSION
+            )
+        normalized_dimensions: list[EvidenceDimensionCoverage] = []
+        for dimension_record in dimensions:
+            expected_gap = _STATUS_GAP_REASON[dimension_record.status]
+            if dimension_record.gap_reason is not expected_gap:
+                repair_codes.append(CoverageValidationErrorCode.STATUS_GAP_MISMATCH)
+                dimension_record = dimension_record.model_copy(
+                    update={"gap_reason": expected_gap}
+                )
+            if dimension_record.status is RequirementStatus.UNSUPPORTED:
+                normalized_dimensions.append(dimension_record)
+                continue
+            mappings_are_safe_to_derive = (
+                not _has_duplicates(dimension_record.unit_ids)
+                and all(
+                    unit_id in known_unit_ids
+                    for unit_id in dimension_record.unit_ids
+                )
+                and not _has_duplicates(dimension_record.source_numbers)
+                and all(
+                    1 <= source_number <= context.source_count
+                    for source_number in dimension_record.source_numbers
+                )
+            )
+            if not mappings_are_safe_to_derive:
+                normalized_dimensions.append(dimension_record)
+                continue
+            mapped_units = tuple(
+                unit
+                for unit in answer_units
+                if any(
+                    link.obligation_id == record.obligation_id
+                    and link.dimension is dimension_record.dimension
+                    for link in unit.obligation_links
+                )
+            )
+            mapped_unit_ids = tuple(unit.unit_id for unit in mapped_units)
+            mapped_source_numbers = _ordered_unique(
+                source_number
+                for unit in mapped_units
+                for source_number in unit.source_numbers
+            )
+            if dimension_record.unit_ids != mapped_unit_ids:
+                repair_codes.append(
+                    CoverageValidationErrorCode.OBLIGATION_UNIT_MAPPING_MISMATCH
+                )
+            if dimension_record.source_numbers != mapped_source_numbers:
+                repair_codes.append(
+                    CoverageValidationErrorCode.OBLIGATION_SOURCE_MAPPING_MISMATCH
+                )
+            normalized_dimensions.append(
+                dimension_record.model_copy(
+                    update={
+                        "unit_ids": mapped_unit_ids,
+                        "source_numbers": mapped_source_numbers,
+                    }
+                )
+            )
+        normalized_obligation_coverage.append(
+            record.model_copy(
+                update={"dimensions": tuple(normalized_dimensions)}
+            )
+        )
+    obligation_coverage_by_id = {
+        record.obligation_id: record
+        for record in normalized_obligation_coverage
+    }
 
     coverage = _reorder_exact_records(
         answer.coverage,
@@ -946,6 +1484,39 @@ def _normalize_mechanical_contract(
         repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_REQUIREMENT_ID)
     normalized_coverage: list[RequirementCoverage] = []
     for record in coverage:
+        required_obligation_dimensions = {
+            (scope.obligation_id, dimension)
+            for scope in context.obligation_scopes
+            if scope.required_for_requirement_status
+            and record.requirement_id in scope.allowed_requirement_ids
+            for dimension in scope.dimension_ids
+        }
+        supported_obligation_dimensions = {
+            (scope.obligation_id, dimension_record.dimension)
+            for scope in context.obligation_scopes
+            if scope.required_for_requirement_status
+            and record.requirement_id in scope.allowed_requirement_ids
+            and scope.obligation_id in obligation_coverage_by_id
+            for dimension_record in obligation_coverage_by_id[
+                scope.obligation_id
+            ].dimensions
+            if dimension_record.status is RequirementStatus.SUPPORTED
+        }
+        if (
+            record.status is RequirementStatus.SUPPORTED
+            and required_obligation_dimensions
+            and not required_obligation_dimensions
+            <= supported_obligation_dimensions
+        ):
+            repair_codes.append(
+                CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_STATUS_MISMATCH
+            )
+            record = record.model_copy(
+                update={
+                    "status": RequirementStatus.PARTIAL,
+                    "gap_reason": GapReason.PARTIAL_SUPPORT,
+                }
+            )
         expected_gap = _STATUS_GAP_REASON[record.status]
         if record.gap_reason is not expected_gap:
             repair_codes.append(CoverageValidationErrorCode.STATUS_GAP_MISMATCH)
@@ -1033,6 +1604,7 @@ def _normalize_mechanical_contract(
         update={
             "premise_decisions": tuple(normalized_premise_decisions),
             "coverage": tuple(normalized_coverage),
+            "obligation_coverage": tuple(normalized_obligation_coverage),
             "answer_units": answer_units,
         }
     )
@@ -1085,10 +1657,43 @@ def _validate_source_numbers(
         raise CoverageContractError(CoverageValidationErrorCode.SOURCE_NUMBER_OUT_OF_RANGE)
 
 
-def _validate_citation_locality(
+def _normalize_pre_citation_terminal(text: str) -> tuple[str, bool]:
+    """Remove only a duplicated sentence terminator immediately before a citation.
+
+    The v11 failures used ``claim.[Source N].`` for every otherwise atomic unit.
+    This repair changes no words, sources, claim boundaries, or citation set. Any
+    other locality shape remains untouched for strict validation.
+    """
+
+    citations = tuple(CITATION_PATTERN.finditer(text))
+    if len(citations) != 1:
+        return text, False
+    citation = citations[0]
+    if _TERMINAL_CITATION_PATTERN.fullmatch(text[citation.start() :]) is None:
+        return text, False
+    claim = text[: citation.start()].rstrip()
+    if (
+        not claim
+        or claim[-1] not in ".!?"
+        or "\n" in claim
+        or "\r" in claim
+        or ";" in claim
+        or sum(claim.count(mark) for mark in ".!?") != 1
+    ):
+        return text, False
+    normalized_claim = claim[:-1].rstrip()
+    if not normalized_claim:
+        return text, False
+    return f"{normalized_claim} {text[citation.start():]}", True
+
+
+def _citation_locality_failure(
     text: str,
     _cited_numbers: Sequence[int],
-) -> None:
+    *,
+    unit_id: str,
+    unit_ordinal: int,
+) -> CitationLocalityFailure | None:
     """Require one terminally cited sentence-shaped unit.
 
     Local code cannot decide whether a passage entails prose or whether one
@@ -1101,20 +1706,49 @@ def _validate_citation_locality(
 
     citations = tuple(CITATION_PATTERN.finditer(text))
     if len(citations) != 1:
-        raise CoverageContractError(CoverageValidationErrorCode.CITATION_LOCALITY_INVALID)
+        return CitationLocalityFailure(
+            unit_id=unit_id,
+            unit_ordinal=unit_ordinal,
+            code=CitationLocalityFailureCode.MULTIPLE_CITATION_GROUPS,
+        )
     citation = citations[0]
-    if _TERMINAL_CITATION_PATTERN.fullmatch(text[citation.start() :]) is None:
-        raise CoverageContractError(CoverageValidationErrorCode.CITATION_LOCALITY_INVALID)
+    suffix = text[citation.start() :]
+    if not suffix or suffix[-1] not in ".!?":
+        code = CitationLocalityFailureCode.MISSING_TERMINAL_PUNCTUATION
+        return CitationLocalityFailure(
+            unit_id=unit_id,
+            unit_ordinal=unit_ordinal,
+            code=code,
+        )
+    if _TERMINAL_CITATION_PATTERN.fullmatch(suffix) is None:
+        return CitationLocalityFailure(
+            unit_id=unit_id,
+            unit_ordinal=unit_ordinal,
+            code=CitationLocalityFailureCode.TRAILING_CONTENT_AFTER_CITATION,
+        )
 
     claim = text[: citation.start()].rstrip()
-    if (
-        not claim
-        or "\n" in claim
-        or "\r" in claim
-        or ";" in claim
-        or any(mark in claim for mark in ".!?")
-    ):
-        raise CoverageContractError(CoverageValidationErrorCode.CITATION_LOCALITY_INVALID)
+    if not claim:
+        code = CitationLocalityFailureCode.EMPTY_CLAIM
+    elif "\n" in claim or "\r" in claim:
+        code = CitationLocalityFailureCode.MULTILINE_CLAIM
+    elif ";" in claim:
+        code = CitationLocalityFailureCode.SEMICOLON_IN_CLAIM
+    else:
+        terminators = tuple(
+            index for index, character in enumerate(claim) if character in ".!?"
+        )
+        if len(terminators) == 1 and terminators[0] == len(claim) - 1:
+            code = CitationLocalityFailureCode.PRE_CITATION_TERMINAL_PUNCTUATION
+        elif terminators:
+            code = CitationLocalityFailureCode.INTERNAL_SENTENCE_TERMINATOR
+        else:
+            return None
+    return CitationLocalityFailure(
+        unit_id=unit_id,
+        unit_ordinal=unit_ordinal,
+        code=code,
+    )
 
 
 def _validate_status_shape(record: RequirementCoverage) -> None:
@@ -1158,6 +1792,7 @@ def _empty_diagnostic_summary(
     *,
     validation_result: DiagnosticValidationResult,
     error_code: CoverageValidationErrorCode | None,
+    citation_locality_failure: CitationLocalityFailure | None = None,
     repair_codes: Sequence[CoverageValidationErrorCode] = (),
 ) -> CoverageDiagnosticSummary:
     normalized_repair_codes = tuple(dict.fromkeys(repair_codes))
@@ -1166,13 +1801,16 @@ def _empty_diagnostic_summary(
         renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
         validation_result=validation_result,
         error_code=error_code,
+        citation_locality_failure=citation_locality_failure,
         repair_applied=bool(normalized_repair_codes),
         repair_codes=normalized_repair_codes,
         requirement_ids=context.requirement_ids,
         premise_ids=context.premise_ids,
         premise_source_scopes=context.premise_source_scopes,
+        obligation_scopes=context.obligation_scopes,
         requirement_count=len(context.requirement_ids),
         premise_count=len(context.premise_ids),
+        obligation_count=len(context.obligation_scopes),
         source_count=context.source_count,
         coverage_status_counts=RequirementStatusCounts(
             supported=0,
@@ -1189,6 +1827,7 @@ def _empty_diagnostic_summary(
         answer_unit_count=0,
         citation_count=0,
         coverage=(),
+        obligation_coverage=(),
         premise_decisions=(),
         answer_units=(),
     )
@@ -1198,6 +1837,7 @@ def _contract_failure_result(
     *,
     context: CoverageValidationContext | None,
     error_code: CoverageValidationErrorCode,
+    citation_locality_failure: CitationLocalityFailure | None = None,
     repair_codes: Sequence[CoverageValidationErrorCode] = (),
 ) -> EvidenceCoverageResult:
     normalized_repair_codes = tuple(dict.fromkeys(repair_codes))
@@ -1207,13 +1847,16 @@ def _contract_failure_result(
             renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
             validation_result=DiagnosticValidationResult.INVALID,
             error_code=error_code,
+            citation_locality_failure=citation_locality_failure,
             repair_applied=bool(normalized_repair_codes),
             repair_codes=normalized_repair_codes,
             requirement_ids=(),
             premise_ids=(),
             premise_source_scopes=(),
+            obligation_scopes=(),
             requirement_count=0,
             premise_count=0,
+            obligation_count=0,
             source_count=0,
             coverage_status_counts=RequirementStatusCounts(
                 supported=0,
@@ -1230,6 +1873,7 @@ def _contract_failure_result(
             answer_unit_count=0,
             citation_count=0,
             coverage=(),
+            obligation_coverage=(),
             premise_decisions=(),
             answer_units=(),
         )
@@ -1238,6 +1882,7 @@ def _contract_failure_result(
             context,
             validation_result=DiagnosticValidationResult.INVALID,
             error_code=error_code,
+            citation_locality_failure=citation_locality_failure,
             repair_codes=normalized_repair_codes,
         )
     return EvidenceCoverageResult(
