@@ -1,8 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v13 implemented offline on 2026-07-27; the focused v12 gate confirmed
-G001 and G009, exposed a broad-ledger capacity defect on G007, and now awaits one G007-only
-live confirmation
+Status: evidence-planned-v13 measured on the unchanged ten-question cohort on 2026-07-27;
+contract reliability improved, while strict claim realization and target breadth remained flat
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -336,8 +335,28 @@ and rejects an over-capacity trusted context with
 `obligation_dimension_capacity_exceeded`. A zero-cost replay of the same G007 scopes reduces the
 ledger from 84 to 32 dimension slots while retaining all 32 source ranges and representation of all
 six historical-function dimensions. The v13 suite passes 441 tests with one intentional skip;
-Ruff and whitespace checks pass. The next bounded gate is G007 alone; G001 and G009 must not be
-regenerated.
+Ruff and whitespace checks pass.
+
+The G007-only v13 confirmation then completed once without retry in 102.9 seconds for an estimated
+`$0.26043497`. Its answer validated with 28 well-formed, resolvable citation tokens and no repair.
+The capacity defect was therefore fixed. The content gate remained weak: directional strict
+grading found 0/7 composite claims and 4/5 target document groups. The answer accounted for 28
+selected paragraphs but did not reconstruct the requested mechanism chain.
+
+The subsequent clean v13 cohort ran all ten unchanged questions at commit
+`87bee716e5fcc79607c843e8ad3087bf2fe0ae08`. All ten completed once without retry for an estimated
+`$1.22828221`; nine generated answers validated, and G008 cleanly abstained before generation. All
+106 rendered citation tokens were well formed and resolved to returned sources. Directional strict
+grading found 19/58 claims, 21/26 target document groups, no contradicted expected claim, and 10/10
+high-level behaviors. Relative to the clean v11 sample, claim realization and target breadth were
+unchanged, while the two previous contract failures became visible bounded answers.
+
+The reliability gain came with a 37 percent increase in generation tokens, from 60,399 to 83,024,
+and comparable increases in cost and latency. G006 and G007 produced 30 and 28 citations but only
+one strict composite claim each. The next bounded repair is therefore not a larger context or a
+second model call. It should choose protected broad-stage anchors by consensus across canonical,
+mechanism, and provider-relevance pools, then distinguish paragraphs that must be inspected from
+historical mechanisms that must become claims.
 
 The implementation follows the bounded-call design in this document:
 

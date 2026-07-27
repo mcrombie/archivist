@@ -1296,6 +1296,48 @@ contract. The model's impossible source map was downstream of an impossible ledg
 application. Counting the contract's requested slots against its output capacity turned a vague
 generation failure into a small, testable repair.
 
+### 2026-07-27 - V13 restored every answer, but verbosity did not improve strict recall
+
+- Froze the capacity repair at commit `87bee716e5fcc79607c843e8ad3087bf2fe0ae08`.
+  The implementation, tests, and development notes are separate from the private manuscript and
+  evaluation artifacts.
+- The G007-only confirmation completed once without retry in 102.9 seconds for an estimated
+  `$0.26043497`. It made one planner call, one batched embedding call, and one answer-generation
+  call. The answer validated with 28 well-formed, resolvable citations and no mechanical repair.
+- That focused result proved the 84-slot/32-unit capacity defect was gone, but it did not prove
+  answer quality. Strict grading found 0/7 composite claims and 4/5 target document groups.
+- Honoring the decision not to keep deferring the central evaluation, ran the owner's unchanged
+  ten questions once from the same clean commit. The questions, 58 claims, 26 target groups,
+  corpus, index, neutral interpretation, eight-source ceiling, and no-retry rule were unchanged.
+- All ten turns completed once. Nine generated answers validated and the absent-subject item
+  cleanly abstained without answer generation. The run used eight planner calls, ten embedding
+  calls, and nine answer-generation calls; it contained zero unpriced events and cost an estimated
+  `$1.22828221`.
+- All 106 rendered citation tokens were well formed and resolved to returned sources. G001 and
+  G009, which had failed closed in v11, now returned bounded visible answers. High-level behavior
+  therefore improved from 8/10 to 10/10.
+- Strict answer completeness did not improve in aggregate: 19/58 expected claims and 21/26 target
+  document groups, exactly matching the clean v11 sample. No expected claim was contradicted.
+  Seven of eight live plans were accepted; G003's planner output failed on `query_drift`, and the
+  deterministic fallback still produced a valid answer without a retry.
+- The broad items explain the ceiling. G006 emitted 30 citations and G007 emitted 28, yet each
+  realized only one strict composite claim. Generation usage rose from 60,399 tokens in v11 to
+  83,024 in v13; total question latency rose from 334.051 to 456.336 seconds. More paragraph-level
+  accountability produced more prose, not a better reconstruction of the book's argument.
+- G007's missing Civil War requirement was honestly marked unsupported. Its trace showed relevant
+  Chapter 14 passages inside the provider and mechanism candidate pools, while the protected
+  generic canonical stage core admitted a different passage. G006 likewise missed four of eight
+  target groups, including its modern endpoint.
+- The next repair should be narrow and two-part: select each protected broad-stage anchor by
+  consensus across canonical, mechanism, and provider-relevance pools; then distinguish passages
+  the model must inspect from historical mechanisms the answer must explicitly synthesize. This
+  should reduce tangential output rather than purchasing more sources or another model call.
+
+Useful blog lesson: grounding, reliability, and completeness are separate achievements. V13 made
+every answer visible and every citation resolvable, which matters. But a source-grounded list of 30
+facts can still miss the argument a reader asked for. The next quality gain has to come from
+choosing and organizing evidence, not merely requiring more of it to appear.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
