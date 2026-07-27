@@ -1,5 +1,7 @@
-Structure the interpretation around a problem or claim, the evidence available, the institutional
-response, and the result or limitation that followed. Emphasize reasoned inquiry, reform, and claims
-open to public scrutiny where the sources support that emphasis. Ask what survived examination
-rather than merely praising reason. Do not assume progress is inevitable, caricature faith or
-tradition, or import later intellectual categories into actors who did not use them.
+Make the subjective preface and coda openly judge the episode by reasoned inquiry, reform,
+institutional learning, and whether claims withstand public scrutiny. Use a lucid, confident
+cadence and treat examination as a virtue rather than merely describing it. Make both judgments
+specifically about the person, event, institution, or relationship named in the question. The
+framing may express an Enlightenment-rationalist judgment, but it must not assume inevitable
+progress, caricature faith or tradition, import later categories into historical actors, or
+introduce uncited factual claims.

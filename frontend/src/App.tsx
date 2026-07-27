@@ -259,6 +259,14 @@ function compactAnswerFacetSummary(facets: AnswerFacets) {
   return summary === "Neutral baseline" ? "Neutral" : summary;
 }
 
+function hasInterpretiveFrame(facets: AnswerFacets) {
+  return (
+    facets.historiographicalLens
+      !== DEFAULT_ANSWER_FACETS.historiographicalLens
+    || facets.worldview !== DEFAULT_ANSWER_FACETS.worldview
+  );
+}
+
 function ProcessStatus({ messages }: { messages: string[] }) {
   const [messageIndex, setMessageIndex] = useState(0);
 
@@ -815,6 +823,22 @@ type ChatTurn = {
   budgetBlocked?: boolean;
   turnCostUsd?: number;
 };
+
+function splitInterpretiveAnswer(turn: ChatTurn) {
+  const framed = turn.answerStatus === "answered"
+    && hasInterpretiveFrame(turn.facets);
+  const paragraphs = turn.answer.split(/\n{2,}/);
+  if (!framed || paragraphs.length < 3) return null;
+  return {
+    preface: paragraphs[0],
+    evidence: paragraphs.slice(1, -1).join("\n\n"),
+    coda: paragraphs[paragraphs.length - 1]
+  };
+}
+
+function answerForConversationHistory(turn: ChatTurn) {
+  return splitInterpretiveAnswer(turn)?.evidence ?? turn.answer;
+}
 
 function createClientId(prefix: "turn" | "conversation") {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -1581,7 +1605,7 @@ function QuestionMode({
       .slice(-6)
       .map((turn) => ({
         question: turn.question.slice(0, 4_000),
-        answer: turn.answer.slice(0, 12_000)
+        answer: answerForConversationHistory(turn).slice(0, 12_000)
       }));
     const turnId = createTurnId();
     const firstTurn = turns.length === 0;
@@ -1613,7 +1637,7 @@ function QuestionMode({
       .slice(-6)
       .map((candidate) => ({
         question: candidate.question.slice(0, 4_000),
-        answer: candidate.answer.slice(0, 12_000)
+        answer: answerForConversationHistory(candidate).slice(0, 12_000)
       }));
 
     setTurns((current) => current.map((candidate) => candidate.id === turnId ? {
@@ -1875,8 +1899,8 @@ function ConversationComposer({
       <legend>Interpretive settings</legend>
       <div className="chat-answer-settings-heading">
         <p id={facetDescriptionId}>
-          A non-default lens or worldview adds a cited interpretive paragraph; voice changes
-          expression. Manuscript evidence stays fixed.
+          A non-default lens or worldview shapes the opening and conclusion around the cited
+          manuscript answer; voice changes expression.
         </p>
         <span>{answerFacetSummary(facets)}</span>
       </div>
@@ -2109,7 +2133,7 @@ function ConversationTurn({
             <span className="sr-only" role="status">Archivist's answer is ready.</span>
             <div className="assistant-paper">
               <OutputBlock
-                title="From the manuscript"
+                title="Archivist's answer"
                 body={turn.answer}
                 empty=""
                 sources={turn.sources}
@@ -2342,6 +2366,7 @@ function OutputBlock({
   sources?: SourceChunk[];
   sourceScopeId?: string;
 }) {
+  const paragraphs = body ? body.split(/\n{2,}/) : [];
   return (
     <section className="output-block">
       <div className="panel-title">
@@ -2350,7 +2375,7 @@ function OutputBlock({
       </div>
       {body ? (
         <div className="answer-copy">
-          {body.split(/\n{2,}/).map((paragraph, index) => (
+          {paragraphs.map((paragraph, index) => (
             <p key={index}>
               <CitationText body={paragraph} sources={sources} sourceScopeId={sourceScopeId} />
             </p>

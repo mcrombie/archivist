@@ -227,7 +227,7 @@ def test_single_active_facet_does_not_emit_default_facet_sections():
     assert "Selected Worldview:" not in block
 
 
-def test_lens_or_worldview_requires_a_distinct_interpretive_paragraph():
+def test_lens_or_worldview_requires_a_subjective_frame_around_the_evidence():
     assert requires_interpretive_expansion(
         HistoriographicalLens.TRAGIC,
         Worldview.NONE,
@@ -250,7 +250,48 @@ def test_lens_or_worldview_requires_a_distinct_interpretive_paragraph():
         ),
     ):
         assert INTERPRETIVE_EXPANSION_RULES in block
-        assert "at least one distinct paragraph" in block
+        assert "two or three sentences" in block
+        assert "ordinary source-grounded factual answer" in block
+        assert "question's subject" in block
+        assert "first-person" in block
+        assert "one cohesive answer" in block
+        assert "no headings, labels" in block
+
+
+def test_triumphalist_prompt_requires_an_unmistakable_non_neutral_judgment():
+    prompt = load_historiographical_lens_prompt(
+        HistoriographicalLens.TRIUMPHALIST
+    )
+    normalized = " ".join(prompt.split())
+
+    assert "deliberately and unmistakably triumphalist" in normalized
+    assert "close on accomplishment" in normalized
+    assert "canceling itself with a neutral qualification" in normalized
+
+
+def test_tragic_prompt_conditions_the_judgment_on_concrete_factual_tension():
+    prompt = load_historiographical_lens_prompt(HistoriographicalLens.TRAGIC)
+    normalized = " ".join(prompt.split())
+
+    assert "concrete tension already present in the factual middle" in normalized
+    assert "Do not manufacture a tragedy" in normalized
+    assert 'generic "human cost," "better possibilities," "moral burden,"' in normalized
+    assert "Genuine achievement must remain genuine achievement" in normalized
+    assert "state that tension proportionately" in normalized
+
+
+def test_stacked_settings_form_one_judgment_instead_of_multiplying_themes():
+    block = build_interpretive_prompt_block(
+        HistoriographicalLens.TRAGIC,
+        AnswerVoice.ROMANTIC,
+        Worldview.PIOUS,
+    )
+    normalized = " ".join(block.split())
+
+    assert "one coherent interpretive judgment" in normalized
+    assert "do not stack independent moral themes" in normalized
+    assert "smallest fitting moral frame" in normalized
+    assert "adding a second thesis" in normalized
 
 
 def test_voice_alone_changes_expression_without_forcing_a_longer_answer():

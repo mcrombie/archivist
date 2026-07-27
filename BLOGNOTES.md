@@ -1392,33 +1392,62 @@ architecture. A private full-corpus index can support better answers while an ed
 presentation layer gives readers verifiable locations and only the minimum quotation needed to
 check a claim.
 
-### 2026-07-27 - Interpretive settings now make a visible, enforceable difference
+### 2026-07-27 - The first enforceable interpretation was still too neutral
 
 - Replaced the earlier vague request for an interpretive "bridge" with a concrete output rule.
   Evidence-first + Scholarly + None still uses the byte-for-byte neutral prompt path and remains
   concise.
-- A non-Evidence-first historiographical lens or any selected worldview now requires at least one
-  additional paragraph after the factual answer. A selected voice alone changes diction and
-  cadence without automatically making the answer longer.
-- Implemented the expansion as a separate structured response schema rather than weakening the
-  factual answer contract. Ordinary answer units still own requested facts, premises, coverage,
-  obligations, and citations. One to four additional interpretive units render together as a
-  distinct final paragraph and cannot satisfy factual coverage.
-- Each interpretive unit must contain one source-grounded inference with a terminal citation whose
-  source numbers match its declared sources. Missing interpretation on an otherwise answered turn,
-  malformed citations, and out-of-range sources fail closed. If every requested point is
-  unsupported, Archivist may still abstain without inventing an interpretive paragraph.
-- The selected lens and worldview can share the required paragraph when both are active. This pass
-  guarantees a visible structural difference; it does not yet claim that every lens or worldview
-  produces historically persuasive interpretation.
+- The first implementation required an additional cited interpretive paragraph for a non-neutral
+  lens or worldview. It made answer length enforceable but still asked the same paragraph to be
+  both visibly biased and evidentially cautious.
+- A live triumphalist test about Pocahontas exposed the contradiction. The model used phrases such
+  as "cross-cultural capacities" and "achievement forged through adaptation," then immediately
+  balanced them with coercion. The result was defensible but read almost neutral.
+- Replaced that design with an internal three-part frame: an uncited interpretive opening of two or
+  three sentences, the unchanged source-grounded factual middle, and an uncited one-sentence
+  interpretive conclusion. The structured contract records the exact rhetorical move requested.
+- A second live test about Edwin Sandys exposed a presentation and relevance failure: the model
+  wrote generic first-person judgments such as “I read this record” and “My judgment,” while the
+  UI split those sentences into conspicuous labeled boxes. The stance was stronger, but the answer
+  did not feel like a response to the actual question.
+- The application now supplies trusted question targets such as `Edwin Sandys` to the generation
+  contract and rejects an interpretive opening or conclusion that does not name every required
+  target. It separately rejects first-person pronouns and narrator self-reference.
+- The UI no longer labels, boxes, italicizes, or separately copies the interpretive parts. The
+  opening, cited middle, and conclusion display and copy as ordinary consecutive paragraphs in one
+  cohesive answer. Their boundary remains machine-readable, so follow-up conversation history
+  still sends only the factual middle back for contextual resolution.
+- A direct tragic-versus-triumphalist comparison then exposed a subtler calibration failure. The
+  triumphalist reading could point to the answer's actual institution-building evidence, while the
+  tragic reading supplied unnamed “human cost,” “better paths,” and “moral burden” that the factual
+  middle never identified. The result performed tragedy instead of interpreting the retrieved
+  facts.
+- The tragic move is now `tragic_tension_and_contingency`, replacing the contract language that
+  itself demanded loss and foreclosure. Its prompt must first find a concrete loss, coercion,
+  failed plan, incomplete reform, or supported tension in the factual answer. If the evidence
+  offers only a limited tension, the judgment must remain proportionate and genuine achievement
+  must remain achievement.
+- Combined settings now form one thesis: the lens determines the central interpretation, the
+  worldview evaluates that same interpretation, and the voice controls its expression. The pious
+  prompt chooses the smallest relevant moral frame instead of layering duty, sin, sacrifice,
+  redemption, and providence into every answer.
+- The interpretive framing paragraphs may make clear value judgments but cannot contain citations
+  or introduce new names, dates, events, quantities, quotations, motives, or historical assertions. The
+  triumphalist prompt now explicitly leads with accomplishment and forbids a closing qualification
+  from canceling the stance; the other lenses and worldviews receive parallel instructions.
+- A selected voice alone still changes diction and cadence without automatically adding the
+  preface and conclusion. If the factual answer is entirely unsupported, Archivist returns its
+  abstention without the subjective frame.
 - No retrieval, source ordering, neutral prompt, model setting, corpus, or embedding changed, and
   no paid API call was made.
 - Verification: Ruff checks passed, the OpenAI structured-output adapter accepted the new schema,
-  and the focused perspectives, evidence-coverage, and RAG pipeline suites passed all 161 tests.
+  the focused perspectives, evidence-coverage, and RAG pipeline suites passed all 166 tests, and
+  the frontend production build passed.
 
-Useful blog lesson: prompt adjectives are not a product contract. Making interpretation visibly
-different required separating it from factual coverage, validating it independently, and deciding
-exactly which controls should purchase more prose.
+Useful blog lesson: more prose is not the same as a different perspective, and stronger judgment
+is not enough if it floats above the user's question. The two live tests led to a useful split:
+keep editorial and evidentiary prose separate in the machine contract, but make them read as one
+subject-specific, impersonal answer in the interface.
 
 ## Suggested demo sequence
 

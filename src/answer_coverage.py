@@ -8,6 +8,7 @@ adapter may construct :class:`EvidenceCoverageAnswer`, but only a
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -55,7 +56,7 @@ __all__ = [
     "EvidenceCoverageResult",
     "GapReason",
     "InterpretiveEvidenceCoverageAnswer",
-    "InterpretiveUnit",
+    "InterpretiveMove",
     "ObligationLink",
     "PremiseDecision",
     "PremiseSourceScope",
@@ -74,7 +75,7 @@ __all__ = [
 
 EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/3"
 INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = (
-    "archivist.interpretive_evidence_coverage/1"
+    "archivist.interpretive_evidence_coverage/2"
 )
 EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/5"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
@@ -86,10 +87,10 @@ MAX_SOURCES = 8
 MAX_ANSWER_UNITS = 32
 MAX_EVIDENCE_OBLIGATIONS = 32
 MAX_OBLIGATION_DIMENSIONS = 4
-MAX_INTERPRETIVE_UNITS = 4
 MAX_UNIT_TEXT_CHARACTERS = 2_000
 MAX_TOTAL_UNIT_TEXT_CHARACTERS = 12_000
-MAX_TOTAL_INTERPRETIVE_TEXT_CHARACTERS = 4_000
+MAX_INTERPRETIVE_PREFACE_CHARACTERS = 1_200
+MAX_INTERPRETIVE_CODA_CHARACTERS = 600
 MAX_REQUIREMENT_LABEL_CHARACTERS = 240
 
 CITATION_GRAMMAR = r"\[Source\s+\d+(?:\s*,\s*Source\s+\d+)*\]"
@@ -97,6 +98,13 @@ CITATION_PATTERN = re.compile(CITATION_GRAMMAR)
 _BRACKETED_PATTERN = re.compile(r"\[[^\[\]]*\]")
 _CITATION_NUMBER_PATTERN = re.compile(r"Source\s+(\d+)")
 _TERMINAL_CITATION_PATTERN = re.compile(rf"{CITATION_GRAMMAR}[.!?]$")
+_FIRST_PERSON_PATTERN = re.compile(
+    r"(?<![\w])(?:"
+    r"i|me|my|mine|myself|we|us|our|ours|ourselves|"
+    r"i['’](?:m|ve|d|ll)|we['’](?:re|ve|d|ll)|let['’]s"
+    r")(?![\w])",
+    flags=re.IGNORECASE,
+)
 ATOMIC_CITATION_TEXT_PATTERN = (
     rf"^[^.!?;\r\n\[\]]*[^\s.!?;\r\n\[\]][^.!?;\r\n\[\]]*"
     rf"{CITATION_GRAMMAR}[.!?]$"
@@ -125,6 +133,22 @@ SourceNumber = Annotated[int, Field(strict=True, ge=1)]
 UnitText = Annotated[
     str,
     StringConstraints(strict=True, min_length=1, max_length=MAX_UNIT_TEXT_CHARACTERS),
+]
+InterpretivePrefaceText = Annotated[
+    str,
+    StringConstraints(
+        strict=True,
+        min_length=1,
+        max_length=MAX_INTERPRETIVE_PREFACE_CHARACTERS,
+    ),
+]
+InterpretiveCodaText = Annotated[
+    str,
+    StringConstraints(
+        strict=True,
+        min_length=1,
+        max_length=MAX_INTERPRETIVE_CODA_CHARACTERS,
+    ),
 ]
 
 
@@ -169,6 +193,14 @@ class AnswerUnitRole(StrEnum):
     COUNTERARGUMENT = "counterargument"
     QUALIFICATION = "qualification"
     CHRONOLOGY = "chronology"
+
+
+class InterpretiveMove(StrEnum):
+    ACHIEVEMENT_AND_DURABLE_CAPACITY = "achievement_and_durable_capacity"
+    TRAGIC_TENSION_AND_CONTINGENCY = "tragic_tension_and_contingency"
+    FAITH_DUTY_AND_MORAL_CONSEQUENCE = "faith_duty_and_moral_consequence"
+    HUMAN_DIGNITY_AND_LIVED_CONSEQUENCE = "human_dignity_and_lived_consequence"
+    INQUIRY_REFORM_AND_SCRUTINY = "inquiry_reform_and_scrutiny"
 
 
 class CoverageOutcomeStatus(StrEnum):
@@ -320,6 +352,11 @@ class CoverageValidationErrorCode(StrEnum):
         "obligation_dimension_capacity_exceeded"
     )
     MISSING_INTERPRETIVE_PARAGRAPH = "missing_interpretive_paragraph"
+    INTERPRETIVE_MOVE_MISMATCH = "interpretive_move_mismatch"
+    INTERPRETIVE_CITATION_FORBIDDEN = "interpretive_citation_forbidden"
+    INTERPRETIVE_SENTENCE_COUNT_INVALID = "interpretive_sentence_count_invalid"
+    INTERPRETIVE_FIRST_PERSON_FORBIDDEN = "interpretive_first_person_forbidden"
+    INTERPRETIVE_SUBJECT_MISSING = "interpretive_subject_missing"
     TEXT_LIMIT_EXCEEDED = "text_limit_exceeded"
 
 
@@ -428,51 +465,47 @@ class EvidenceCoverageAnswer(_ContractModel):
         return self.schema_version
 
 
-class InterpretiveUnit(_ContractModel):
-    unit_id: Identifier
-    text: UnitText = Field(
-        description=(
-            "Exactly one complete sentence making one source-grounded historical "
-            "interpretation or inference, followed by exactly one terminal citation "
-            "group and its only ending punctuation. It must synthesize rather than "
-            "merely repeat an answer unit."
-        ),
-        json_schema_extra={"pattern": ATOMIC_CITATION_TEXT_PATTERN},
-    )
-    source_numbers: tuple[SourceNumber, ...] = Field(
-        min_length=1,
-        max_length=MAX_SOURCES,
-        description=(
-            "The exact sources in the terminal citation group; every listed source "
-            "must support the same interpretation or inference."
-        ),
-    )
-
-    @field_validator("text")
-    @classmethod
-    def reject_blank_or_padded_text(cls, value: str) -> str:
-        if not value.strip() or value != value.strip():
-            raise ValueError(
-                "interpretive unit text must be nonblank and have no outer whitespace"
-            )
-        return value
-
-
 class InterpretiveEvidenceCoverageAnswer(EvidenceCoverageAnswer):
-    """Evidence coverage plus one separately rendered interpretive paragraph.
+    """Evidence coverage framed by explicitly subjective, uncited prose."""
 
-    ``interpretive_units`` is allowed to be empty at schema level so an entirely
-    unsupported answer can remain honest. Local validation requires at least one
-    unit whenever the factual coverage renders an answer.
-    """
-
-    schema_version: Literal["archivist.interpretive_evidence_coverage/1"] = (
+    schema_version: Literal["archivist.interpretive_evidence_coverage/2"] = (
         Field(alias="schema")
     )
-    interpretive_units: tuple[InterpretiveUnit, ...] = Field(
-        default=(),
-        max_length=MAX_INTERPRETIVE_UNITS,
+    interpretive_moves: tuple[InterpretiveMove, ...] = Field(
+        min_length=1,
+        max_length=2,
+        description=(
+            "The exact ordered rhetorical moves requested in the input contract."
+        ),
     )
+    interpretive_preface: InterpretivePrefaceText = Field(
+        description=(
+            "An impersonal, uncited two- or three-sentence opening paragraph that "
+            "directly names the question's subject, makes value judgments through "
+            "the selected settings, and introduces no new historical facts."
+        ),
+    )
+    interpretive_coda: InterpretiveCodaText = Field(
+        description=(
+            "An impersonal, uncited one-sentence closing judgment that directly "
+            "returns to the question's subject, embodies the selected settings, "
+            "and introduces no new historical facts."
+        ),
+    )
+
+    @field_validator("interpretive_preface", "interpretive_coda")
+    @classmethod
+    def reject_blank_padded_or_multiline_framing(cls, value: str) -> str:
+        if (
+            not value.strip()
+            or value != value.strip()
+            or "\n" in value
+            or "\r" in value
+        ):
+            raise ValueError(
+                "interpretive framing must be one nonblank paragraph with no outer whitespace"
+            )
+        return value
 
 
 class PremiseSourceScope(_ContractModel):
@@ -1258,6 +1291,8 @@ def process_evidence_coverage(
 def process_interpretive_evidence_coverage(
     payload: InterpretiveEvidenceCoverageAnswer | Mapping[str, Any] | None,
     *,
+    required_moves: Sequence[InterpretiveMove],
+    question_anchors: Sequence[str] = (),
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str] = (),
     premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
@@ -1266,11 +1301,11 @@ def process_interpretive_evidence_coverage(
     requirement_labels: Mapping[str, str] | None = None,
     refused: bool = False,
 ) -> EvidenceCoverageResult:
-    """Validate factual coverage and append one mandatory interpretive paragraph.
+    """Frame validated factual coverage with explicitly subjective prose.
 
     The ordinary evidence-coverage validator remains the authority for requested
-    facts, premise handling, completeness, and citation mappings. Interpretive
-    units are validated separately and never satisfy a requirement or obligation.
+    facts, premise handling, completeness, and citations. The uncited preface and
+    coda are validated separately and never satisfy a requirement or obligation.
     """
 
     try:
@@ -1280,6 +1315,10 @@ def process_interpretive_evidence_coverage(
             premise_source_scopes,
             obligation_scopes,
             source_count,
+        )
+        expected_moves = _validate_required_interpretive_moves(required_moves)
+        expected_question_anchors = _validate_interpretive_question_anchors(
+            question_anchors
         )
     except CoverageContractError as error:
         return _contract_failure_result(
@@ -1327,9 +1366,10 @@ def process_interpretive_evidence_coverage(
         return factual_result
 
     try:
-        _validate_interpretive_units(
-            answer.interpretive_units,
-            source_count=context.source_count,
+        _validate_interpretive_frame(
+            answer,
+            required_moves=expected_moves,
+            question_anchors=expected_question_anchors,
         )
     except CoverageContractError as error:
         return _contract_failure_result(
@@ -1339,12 +1379,13 @@ def process_interpretive_evidence_coverage(
             repair_codes=factual_result.diagnostics.repair_codes,
         )
 
-    interpretive_paragraph = " ".join(
-        unit.text for unit in answer.interpretive_units
-    )
     return factual_result.model_copy(
         update={
-            "answer": f"{factual_result.answer}\n\n{interpretive_paragraph}",
+            "answer": (
+                f"{answer.interpretive_preface}\n\n"
+                f"{factual_result.answer}\n\n"
+                f"{answer.interpretive_coda}"
+            ),
         }
     )
 
@@ -1454,44 +1495,123 @@ def _parse_interpretive_payload(
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
 
 
-def _validate_interpretive_units(
-    units: Sequence[InterpretiveUnit],
+def _validate_required_interpretive_moves(
+    required_moves: Sequence[InterpretiveMove],
+) -> tuple[InterpretiveMove, ...]:
+    if (
+        isinstance(required_moves, (str, bytes, Mapping))
+        or not required_moves
+        or len(required_moves) > 2
+    ):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
+    try:
+        normalized = tuple(InterpretiveMove(move) for move in required_moves)
+    except (TypeError, ValueError):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT) from None
+    if _has_duplicates(normalized):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
+    return normalized
+
+
+def _validate_interpretive_question_anchors(
+    question_anchors: Sequence[str],
+) -> tuple[str, ...]:
+    if isinstance(question_anchors, (str, bytes, Mapping)):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
+    try:
+        normalized = tuple(anchor.strip() for anchor in question_anchors)
+    except (AttributeError, TypeError):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT) from None
+    if (
+        len(normalized) > MAX_REQUIREMENTS
+        or any(
+            not anchor or len(anchor) > MAX_REQUIREMENT_LABEL_CHARACTERS
+            for anchor in normalized
+        )
+        or _has_duplicates(
+            tuple(_normalize_interpretive_text(anchor) for anchor in normalized)
+        )
+    ):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
+    return normalized
+
+
+def _validate_interpretive_frame(
+    answer: InterpretiveEvidenceCoverageAnswer,
     *,
-    source_count: int,
+    required_moves: Sequence[InterpretiveMove],
+    question_anchors: Sequence[str],
 ) -> None:
-    if not units:
+    if not answer.interpretive_preface or not answer.interpretive_coda:
         raise CoverageContractError(
             CoverageValidationErrorCode.MISSING_INTERPRETIVE_PARAGRAPH
         )
-    if _has_duplicates(tuple(unit.unit_id for unit in units)):
-        raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_UNIT_ID)
-    if sum(len(unit.text) for unit in units) > MAX_TOTAL_INTERPRETIVE_TEXT_CHARACTERS:
-        raise CoverageContractError(CoverageValidationErrorCode.TEXT_LIMIT_EXCEEDED)
-
-    for unit_ordinal, unit in enumerate(units, start=1):
-        _validate_source_numbers(unit.source_numbers, source_count)
-        cited_numbers = parse_citation_numbers(unit.text)
-        if not cited_numbers:
-            raise CoverageContractError(CoverageValidationErrorCode.MISSING_CITATION)
-        locality_failure = _citation_locality_failure(
-            unit.text,
-            cited_numbers,
-            unit_id=unit.unit_id,
-            unit_ordinal=unit_ordinal,
+    if answer.interpretive_moves != tuple(required_moves):
+        raise CoverageContractError(
+            CoverageValidationErrorCode.INTERPRETIVE_MOVE_MISMATCH
         )
-        if locality_failure is not None:
-            raise CoverageContractError(
-                CoverageValidationErrorCode.CITATION_LOCALITY_INVALID,
-                citation_locality_failure=locality_failure,
-            )
-        if any(number > source_count for number in cited_numbers):
-            raise CoverageContractError(
-                CoverageValidationErrorCode.UNRESOLVABLE_CITATION
-            )
-        if _ordered_unique(cited_numbers) != unit.source_numbers:
-            raise CoverageContractError(
-                CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH
-            )
+    if any(
+        "[" in text or "]" in text
+        for text in (
+            answer.interpretive_preface,
+            answer.interpretive_coda,
+        )
+    ):
+        raise CoverageContractError(
+            CoverageValidationErrorCode.INTERPRETIVE_CITATION_FORBIDDEN
+        )
+    if (
+        _sentence_count(answer.interpretive_preface) not in {2, 3}
+        or _sentence_count(answer.interpretive_coda) != 1
+    ):
+        raise CoverageContractError(
+            CoverageValidationErrorCode.INTERPRETIVE_SENTENCE_COUNT_INVALID
+        )
+    if any(
+        _FIRST_PERSON_PATTERN.search(text)
+        for text in (
+            answer.interpretive_preface,
+            answer.interpretive_coda,
+        )
+    ):
+        raise CoverageContractError(
+            CoverageValidationErrorCode.INTERPRETIVE_FIRST_PERSON_FORBIDDEN
+        )
+    if question_anchors and any(
+        not _contains_every_interpretive_anchor(text, question_anchors)
+        for text in (
+            answer.interpretive_preface,
+            answer.interpretive_coda,
+        )
+    ):
+        raise CoverageContractError(
+            CoverageValidationErrorCode.INTERPRETIVE_SUBJECT_MISSING
+        )
+
+
+def _normalize_interpretive_text(text: str) -> str:
+    folded = unicodedata.normalize("NFKC", text).casefold()
+    return " ".join(re.findall(r"\w+", folded, flags=re.UNICODE))
+
+
+def _contains_every_interpretive_anchor(
+    text: str,
+    question_anchors: Sequence[str],
+) -> bool:
+    normalized_text = f" {_normalize_interpretive_text(text)} "
+    return all(
+        f" {_normalize_interpretive_text(anchor)} " in normalized_text
+        for anchor in question_anchors
+    )
+
+
+def _sentence_count(text: str) -> int:
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    if not sentences or any(
+        not sentence or sentence[-1] not in ".!?" for sentence in sentences
+    ):
+        return 0
+    return len(sentences)
 
 
 def _normalize_mechanical_contract(

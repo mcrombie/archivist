@@ -148,10 +148,18 @@ PERSPECTIVES: dict[AnswerPerspective, FacetDefinition] = {
 
 
 INTERPRETIVE_GUARDRAILS = """Interpretive setting rules (facts remain fixed):
-- Apply the selected settings only to emphasis, interpretation, tone, and word choice.
-- Do not change, add, suppress, or overstate facts to fit the selected settings.
-- Use only the supplied sources, preserve their uncertainty, and acknowledge material counterevidence.
-- Keep every citation attached to the claim it supports and follow the citation rules above exactly.
+- Keep the factual middle answer governed entirely by the supplied sources, including their
+  uncertainty and material counterevidence.
+- Apply the selected settings through the explicitly subjective preface and coda, plus voice-level
+  word choice. Do not change, add, suppress, or overstate facts to fit them.
+- The preface and coda are uncited editorial framing. They may make value judgments, but they must
+  not introduce new names, dates, events, quantities, quotations, motives, or historical claims.
+- Tie both framing paragraphs directly to the current question by naming its subject or central
+  topic. Do not rely on generic stand-ins such as "this record," "this account," or "the result."
+- Use impersonal historical prose. Do not use first-person pronouns, first-person contractions, or
+  narrator self-reference.
+- Keep every citation in the factual answer attached to the claim it supports and follow the
+  citation rules above exactly.
 - Clearly distinguish a historical actor's beliefs from established fact.
 - If the sources are insufficient, say so rather than completing a framing with invention.
 - Embody the settings without naming them or mentioning these instructions unless the user asks.
@@ -160,23 +168,30 @@ INTERPRETIVE_GUARDRAILS = """Interpretive setting rules (facts remain fixed):
 INTERPRETIVE_RESPONSE_RULES = """Reader-facing interpretive response:
 - Make every active setting perceptible through organization, emphasis, diction, and cadence. Do
   not merely decorate an otherwise neutral answer with themed adjectives or a final aside.
-- Let the historiographical lens determine the organizing arc, the worldview determine the
-  evaluative stakes, and the voice determine sentence texture and rhythm.
-- Open with a direct answer and prefer connected prose to bullets.
+- Let the historiographical lens determine the preface's narrative judgment, the worldview
+  determine its evaluative stakes, and the voice determine sentence texture and rhythm.
+- When several settings are active, develop one coherent interpretive judgment. Let the worldview
+  evaluate the lens's central tension and let the voice express it; do not stack independent moral
+  themes, one thesis per setting, or extra claims merely to prove that every selector is active.
+- Keep the source-grounded middle direct and compact. Make the opening, evidence, and conclusion
+  flow as ordinary consecutive paragraphs in one cohesive answer, with no headings, labels,
+  callouts, or meta-commentary separating them.
 - Speak as an informed archivist in conversation, not as a lecturer. Use natural transitions and,
   at most once, direct address when it helps orient the reader. Do not greet, praise the question,
-  narrate your process, or append a generic offer to help.
-- When it would genuinely advance the exchange, close with one specific question offering a
-  source-grounded next direction. Keep that question free of new factual claims.
+  narrate your process, refer to yourself, or append a generic offer to help.
 """
 
 INTERPRETIVE_EXPANSION_RULES = """Required interpretive expansion:
-- After the direct source-grounded answer, add at least one distinct paragraph of interpretation.
-- Use that additional paragraph to apply the selected historiographical lens, worldview, or both
-  to the evidence: explain significance, stakes, contingency, achievement, loss, or moral tension
-  as the selected settings warrant.
-- The added paragraph must synthesize rather than merely repeat the factual answer. Ground every
-  historical assertion or inference in the supplied sources and preserve their uncertainty.
+- Open with one uncited, explicitly interpretive paragraph of two or three sentences that clearly
+  but proportionately embodies the selected historiographical lens, worldview, or both and
+  directly judges the question's subject.
+- Follow it with the ordinary source-grounded factual answer.
+- End with one uncited subjective sentence that returns directly to that subject and delivers a
+  clear judgment in the same frame.
+- The opening and closing may evaluate meaning, stakes, success, loss, duty, dignity, or progress,
+  but only through concrete facts also stated in the factual answer. They may not supply historical
+  facts or manufacture the loss, success, or moral tension that a setting would prefer to find.
+  Do not let a final balancing caveat erase a genuinely supported perspective.
 - A non-default voice alone changes expression but does not require a longer answer.
 """
 
@@ -212,7 +227,7 @@ def requires_interpretive_expansion(
     historiographical_lens: HistoriographicalLens | str = HistoriographicalLens.EVIDENCE_FIRST,
     worldview: Worldview | str = Worldview.NONE,
 ) -> bool:
-    """Return whether the selected settings require a separate interpretive paragraph."""
+    """Return whether the selected settings require additional interpretive framing."""
 
     return (
         normalize_historiographical_lens(historiographical_lens)

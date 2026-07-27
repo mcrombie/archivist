@@ -18,7 +18,7 @@ from answer_coverage import (
     EvidenceObligationScope,
     GapReason,
     InterpretiveEvidenceCoverageAnswer,
-    InterpretiveUnit,
+    InterpretiveMove,
     ObligationLink,
     PremiseDecision,
     PremiseStatus,
@@ -189,6 +189,7 @@ def supported_answer(
 def supported_interpretive_answer(
     requirement_ids: tuple[str, ...],
     *,
+    moves: tuple[InterpretiveMove, ...],
     source_number: int = 1,
 ) -> InterpretiveEvidenceCoverageAnswer:
     factual = supported_answer(
@@ -201,15 +202,13 @@ def supported_interpretive_answer(
         coverage=factual.coverage,
         obligation_coverage=factual.obligation_coverage,
         answer_units=factual.answer_units,
-        interpretive_units=(
-            InterpretiveUnit(
-                unit_id="I1",
-                text=(
-                    "This evidence reveals the historical stakes of that pattern "
-                    f"[Source {source_number}]."
-                ),
-                source_numbers=(source_number,),
-            ),
+        interpretive_moves=moves,
+        interpretive_preface=(
+            "Project Lumen deserves recognition as a meaningful achievement. "
+            "Project Lumen turns pressure into a proving ground of durable capacity."
+        ),
+        interpretive_coda=(
+            "Project Lumen therefore stands as a meaningful accomplishment."
         ),
     )
 
@@ -571,16 +570,25 @@ def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch)
 
 
 @pytest.mark.parametrize(
-    ("lens", "worldview"),
+    ("lens", "worldview", "move"),
     [
-        (HistoriographicalLens.TRAGIC, Worldview.NONE),
-        (HistoriographicalLens.EVIDENCE_FIRST, Worldview.PIOUS),
+        (
+            HistoriographicalLens.TRAGIC,
+            Worldview.NONE,
+            InterpretiveMove.TRAGIC_TENSION_AND_CONTINGENCY,
+        ),
+        (
+            HistoriographicalLens.EVIDENCE_FIRST,
+            Worldview.PIOUS,
+            InterpretiveMove.FAITH_DUTY_AND_MORAL_CONSEQUENCE,
+        ),
     ],
 )
-def test_lens_or_worldview_requires_a_separate_interpretive_paragraph(
+def test_lens_or_worldview_frames_the_evidence_with_subjective_prose(
     monkeypatch,
     lens,
     worldview,
+    move,
 ):
     install_planned_retrieval(monkeypatch, [CHUNK])
     calls: list[dict] = []
@@ -588,7 +596,10 @@ def test_lens_or_worldview_requires_a_separate_interpretive_paragraph(
     def fake_parse(_client, *, operation, **request):
         calls.append({"operation": operation, **request})
         return SimpleNamespace(
-            output_parsed=supported_interpretive_answer(("R1",)),
+            output_parsed=supported_interpretive_answer(
+                ("R1",),
+                moves=(move,),
+            ),
             output=(),
         )
 
@@ -597,7 +608,6 @@ def test_lens_or_worldview_requires_a_separate_interpretive_paragraph(
     result = rag_pipeline.run_evidence_planned_answer(
         resolved_turn=ResolvedTurn(
             standalone_question="Who was Project Lumen?",
-            entities=("Project Lumen",),
             trusted_user_texts=("Who was Project Lumen?",),
         ),
         collection_handle=Collection(),
@@ -611,11 +621,16 @@ def test_lens_or_worldview_requires_a_separate_interpretive_paragraph(
 
     assert result.status == "answered"
     assert result.answer == (
+        "Project Lumen deserves recognition as a meaningful achievement. "
+        "Project Lumen turns pressure into a proving ground of durable capacity.\n\n"
         "Synthetic supported point 1 [Source 1].\n\n"
-        "This evidence reveals the historical stakes of that pattern [Source 1]."
+        "Project Lumen therefore stands as a meaningful accomplishment."
     )
     assert calls[0]["text_format"] is InterpretiveEvidenceCoverageAnswer
     assert rag_pipeline.INTERPRETIVE_STRUCTURED_OUTPUT_RULES in calls[0]["input"]
+    assert f'"required_moves": [\n      "{move.value}"' in calls[0]["input"]
+    assert '"required_question_anchors": [\n      "Project Lumen"' in calls[0]["input"]
+    assert '"first_person": "forbidden"' in calls[0]["input"]
 
 
 def test_voice_alone_keeps_the_ordinary_compact_answer_contract(monkeypatch):

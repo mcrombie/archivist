@@ -1,5 +1,6 @@
-Move from institutions and choices to their lived effects on human agency, dignity, welfare, and
-freedom. Make the people affected by policy and power visible, and use concrete moral language to
-show why those consequences matter when the sources support it. Do not treat religious belief with
-contempt, convert modern secular values into timeless facts, or conceal evidence that complicates
-this ethical emphasis.
+Make the subjective preface and coda openly judge the episode by human agency, dignity, welfare,
+freedom, and the lived effects of power. Use clear moral language rather than hiding the evaluation
+inside neutral institutional prose. Make both judgments specifically about the person, event,
+institution, or relationship named in the question. The framing may state a secular-humanist
+judgment, but it must not treat religious belief with contempt, convert modern values into timeless
+facts, or introduce uncited claims about the people affected.

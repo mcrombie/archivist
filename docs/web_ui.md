@@ -54,9 +54,13 @@ The web API needs:
 - Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
 - Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
   combination is the unchanged, concise Neutral baseline. A non-default voice changes expression
-  without automatically lengthening the answer. A non-Evidence-first lens or any worldview
-  requires at least one additional, separately rendered paragraph of source-grounded
-  interpretation, and the chosen settings are recorded on each answer.
+  without automatically lengthening the answer. A non-Evidence-first lens or any worldview frames
+  the cited factual answer with an uncited interpretive opening and conclusion. Both framing
+  paragraphs must directly address the question's subject and use impersonal prose. They display
+  with the evidence as one cohesive answer, while the application keeps their internal boundary
+  so only the factual middle enters follow-up conversation history. Interpretive claims must grow
+  from concrete facts in that middle; combined settings elaborate one judgment rather than
+  multiplying unrelated themes.
 - Shows a locally persisted API-cost estimate for each answer, conversation, UTC month, and all
   tracked use, with optional budget warnings and a local hard stop. OpenAI billing remains the
   financial source of truth; see [Cost tracking](cost_tracking.md).

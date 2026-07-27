@@ -28,7 +28,7 @@ from answer_coverage import (
     EvidenceObligationScope,
     GapReason,
     InterpretiveEvidenceCoverageAnswer,
-    InterpretiveUnit,
+    InterpretiveMove,
     ObligationLink,
     PremiseDecision,
     PremiseSourceScope,
@@ -162,28 +162,25 @@ def _valid_answer() -> EvidenceCoverageAnswer:
 
 def _interpretive_answer(
     *,
-    interpretive_units: tuple[InterpretiveUnit, ...] | None = None,
+    interpretive_moves: tuple[InterpretiveMove, ...] = (
+        InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY,
+    ),
+    preface: str = (
+        "Project Lumen deserves recognition as a meaningful achievement. "
+        "Project Lumen turns pressure into a proving ground of durable capacity."
+    ),
+    coda: str = "Project Lumen therefore stands as a meaningful accomplishment.",
 ) -> InterpretiveEvidenceCoverageAnswer:
     factual = _valid_answer()
-    units = interpretive_units
-    if units is None:
-        units = (
-            InterpretiveUnit(
-                unit_id="I1",
-                text=(
-                    "This pattern makes the institution's achievement inseparable "
-                    "from its human cost [Source 1]."
-                ),
-                source_numbers=(1,),
-            ),
-        )
     return InterpretiveEvidenceCoverageAnswer(
         schema=INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
         premise_decisions=factual.premise_decisions,
         coverage=factual.coverage,
         obligation_coverage=factual.obligation_coverage,
         answer_units=factual.answer_units,
-        interpretive_units=units,
+        interpretive_moves=interpretive_moves,
+        interpretive_preface=preface,
+        interpretive_coda=coda,
     )
 
 
@@ -248,9 +245,12 @@ def test_json_shaped_payload_is_accepted_and_validated_against_trusted_inputs():
     assert CITATION_GRAMMAR == r"\[Source\s+\d+(?:\s*,\s*Source\s+\d+)*\]"
 
 
-def test_interpretive_coverage_appends_one_distinct_cited_paragraph():
+def test_interpretive_coverage_frames_the_factual_answer_with_subjective_prose():
+    move = InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY
     result = process_interpretive_evidence_coverage(
         _interpretive_answer(),
+        required_moves=(move,),
+        question_anchors=("Project Lumen",),
         requirement_ids=("R1", "R2"),
         premise_ids=("P1",),
         premise_source_scopes=_premise_scopes(("P1",), 3),
@@ -258,16 +258,26 @@ def test_interpretive_coverage_appends_one_distinct_cited_paragraph():
     )
 
     assert result.status is CoverageOutcomeStatus.ANSWERED
-    assert result.answer.split("\n\n")[-1] == (
-        "This pattern makes the institution's achievement inseparable "
-        "from its human cost [Source 1]."
+    paragraphs = result.answer.split("\n\n")
+    assert paragraphs[0] == (
+        "Project Lumen deserves recognition as a meaningful achievement. "
+        "Project Lumen turns pressure into a proving ground of durable capacity."
     )
+    assert paragraphs[-1] == (
+        "Project Lumen therefore stands as a meaningful accomplishment."
+    )
+    assert "A synthetic later point is bounded [Source 2, Source 3]." in result.answer
     assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
 
 
-def test_answered_interpretive_coverage_fails_without_the_required_paragraph():
+def test_answered_interpretive_coverage_fails_without_the_required_coda():
+    answer = _interpretive_answer().model_copy(
+        update={"interpretive_coda": ""},
+    )
     result = process_interpretive_evidence_coverage(
-        _interpretive_answer(interpretive_units=()),
+        answer,
+        required_moves=(InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY,),
+        question_anchors=("Project Lumen",),
         requirement_ids=("R1", "R2"),
         premise_ids=("P1",),
         premise_source_scopes=_premise_scopes(("P1",), 3),
@@ -281,8 +291,81 @@ def test_answered_interpretive_coverage_fails_without_the_required_paragraph():
     )
 
 
+def test_interpretive_frame_rejects_citations_and_wrong_sentence_counts():
+    cited = process_interpretive_evidence_coverage(
+        _interpretive_answer(
+            coda="This achievement deserves admiration [Source 1].",
+        ),
+        required_moves=(InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY,),
+        question_anchors=("Project Lumen",),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+    too_short = process_interpretive_evidence_coverage(
+        _interpretive_answer(preface="Achievement should define this account."),
+        required_moves=(InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY,),
+        question_anchors=("Project Lumen",),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    assert (
+        cited.diagnostics.error_code
+        is CoverageValidationErrorCode.INTERPRETIVE_CITATION_FORBIDDEN
+    )
+    assert (
+        too_short.diagnostics.error_code
+        is CoverageValidationErrorCode.INTERPRETIVE_SENTENCE_COUNT_INVALID
+    )
+
+
+def test_interpretive_frame_rejects_first_person_and_generic_subjectless_prose():
+    first_person = process_interpretive_evidence_coverage(
+        _interpretive_answer(
+            preface=(
+                "I regard Project Lumen as a meaningful achievement. "
+                "Project Lumen turns pressure into durable capacity."
+            ),
+        ),
+        required_moves=(InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY,),
+        question_anchors=("Project Lumen",),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+    generic = process_interpretive_evidence_coverage(
+        _interpretive_answer(
+            preface=(
+                "Achievement deserves to stand at the center of this account. "
+                "Pressure becomes the proving ground of durable capacity."
+            ),
+            coda="The result therefore stands as a meaningful accomplishment.",
+        ),
+        required_moves=(InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY,),
+        question_anchors=("Project Lumen",),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    assert (
+        first_person.diagnostics.error_code
+        is CoverageValidationErrorCode.INTERPRETIVE_FIRST_PERSON_FORBIDDEN
+    )
+    assert (
+        generic.diagnostics.error_code
+        is CoverageValidationErrorCode.INTERPRETIVE_SUBJECT_MISSING
+    )
+
+
 def test_entirely_unsupported_coverage_does_not_invent_interpretation():
-    answer = _interpretive_answer(interpretive_units=()).model_copy(
+    answer = _interpretive_answer().model_copy(
         update={
             "coverage": (
                 _coverage(
@@ -306,6 +389,8 @@ def test_entirely_unsupported_coverage_does_not_invent_interpretation():
 
     result = process_interpretive_evidence_coverage(
         answer,
+        required_moves=(InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY,),
+        question_anchors=("Project Lumen",),
         requirement_ids=("R1", "R2"),
         premise_ids=("P1",),
         premise_source_scopes=_premise_scopes(("P1",), 3),

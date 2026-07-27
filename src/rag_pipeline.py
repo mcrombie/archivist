@@ -27,6 +27,7 @@ from answer_coverage import (
     EvidenceObligationFocus,
     EvidenceObligationScope,
     InterpretiveEvidenceCoverageAnswer,
+    InterpretiveMove,
     MAX_ANSWER_UNITS,
     PremiseSourceScope,
     process_evidence_coverage,
@@ -68,11 +69,13 @@ from perspectives import (
     HistoriographicalLens,
     Worldview,
     build_interpretive_prompt_block,
-    requires_interpretive_expansion,
+    normalize_historiographical_lens,
+    normalize_worldview,
 )
 from query_planning import (
     QUERY_PLANNER_INSTRUCTIONS,
     DocumentCatalogEntry,
+    EvidenceTargetRole,
     FacetRole,
     PlannerQuestionPlan,
     QuestionPlan,
@@ -126,17 +129,91 @@ CORPUS_INTEGRITY_FAILED_MESSAGE = (
 )
 
 INTERPRETIVE_STRUCTURED_OUTPUT_RULES = """\
-Structured interpretive expansion:
+Structured interpretive frame:
 - Keep all requested factual coverage in answer_units under the ordinary evidence contract.
-- If any requested point is supported, return one to four interpretive_units. They render together
-  as one distinct final paragraph after the factual answer.
-- Each interpretive_unit must make exactly one source-grounded historical interpretation or
-  inference through the selected lens, worldview, or both, followed by exactly one terminal
-  citation group whose numbers exactly match source_numbers.
-- Interpretive units never satisfy requirements or evidence obligations, must not introduce
-  outside facts, and must synthesize rather than merely restate answer_units.
-- Leave interpretive_units empty only when every requested point is unsupported.
+- Return interpretive_moves exactly as ordered in the request contract.
+- Write interpretive_preface as one uncited paragraph of two or three sentences before the factual
+  answer. It should make a clear but proportionate value judgment through an integrated use of
+  every requested move and directly address the current question.
+- Write interpretive_coda as one uncited sentence after the factual answer. It should close with a
+  clear judgment about the current question in the same frame rather than balancing the
+  perspective back to neutrality.
+- Name every required_question_anchor in both interpretive_preface and interpretive_coda. Do not
+  substitute generic phrases such as "this record," "this account," or "the result" for the
+  question's actual subject.
+- Use impersonal historical prose throughout the preface and coda. Never use first-person
+  pronouns, first-person contractions, or narrator self-reference.
+- The preface and coda are editorial framing, not manuscript evidence. Do not place citations in
+  them and do not introduce names, dates, events, quantities, quotations, or other historical
+  assertions absent from the factual answer.
+- Ground every interpretive judgment in a concrete fact that also appears in the factual answer.
+  Do not invent an unnamed human cost, moral burden, lost possibility, triumph, or failure merely
+  to make a selected setting conspicuous.
+- The framing must remain unmistakably recognizable as the selected reading when its setting label
+  is hidden. It never satisfies a factual requirement or evidence obligation.
+- Treat the preface, factual answer, and coda as consecutive paragraphs in one cohesive response.
+  Use natural transitions and do not write headings, labels, or meta-commentary for any part.
 """
+
+_INTERPRETIVE_MOVE_BY_LENS = {
+    HistoriographicalLens.TRIUMPHALIST: (
+        InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY
+    ),
+    HistoriographicalLens.TRAGIC: (
+        InterpretiveMove.TRAGIC_TENSION_AND_CONTINGENCY
+    ),
+}
+
+_INTERPRETIVE_MOVE_BY_WORLDVIEW = {
+    Worldview.PIOUS: InterpretiveMove.FAITH_DUTY_AND_MORAL_CONSEQUENCE,
+    Worldview.SECULAR_HUMANIST: (
+        InterpretiveMove.HUMAN_DIGNITY_AND_LIVED_CONSEQUENCE
+    ),
+    Worldview.ENLIGHTENMENT_RATIONALIST: (
+        InterpretiveMove.INQUIRY_REFORM_AND_SCRUTINY
+    ),
+}
+
+
+def _required_interpretive_moves(
+    historiographical_lens: HistoriographicalLens | str,
+    worldview: Worldview | str,
+) -> tuple[InterpretiveMove, ...]:
+    selected_lens = normalize_historiographical_lens(historiographical_lens)
+    selected_worldview = normalize_worldview(worldview)
+    moves: list[InterpretiveMove] = []
+    if selected_lens is not HistoriographicalLens.EVIDENCE_FIRST:
+        moves.append(_INTERPRETIVE_MOVE_BY_LENS[selected_lens])
+    if selected_worldview is not Worldview.NONE:
+        moves.append(_INTERPRETIVE_MOVE_BY_WORLDVIEW[selected_worldview])
+    return tuple(moves)
+
+
+def _interpretive_question_anchors(
+    resolved_turn: ResolvedTurn,
+    plan: QuestionPlan,
+) -> tuple[str, ...]:
+    """Return application-owned subject names that framing must address."""
+
+    subject_targets = tuple(
+        target.query_surface_span
+        for target in plan.targets
+        if target.role is EvidenceTargetRole.SUBJECT
+    )
+    target_candidates = subject_targets or tuple(
+        target.query_surface_span for target in plan.targets
+    )
+    candidates = target_candidates or resolved_turn.entities
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = normalize_search_query(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        anchors.append(candidate.strip())
+    return tuple(anchors)
+
 
 _RELATED_PROBE_PATTERN = re.compile(
     r"^\s*broader\s*:\s*(?P<broader>[^;]{1,120})\s*;\s*"
@@ -1795,6 +1872,14 @@ def build_coverage_input(
         }
         for scope in premise_source_scopes
     ]
+    required_interpretive_moves = _required_interpretive_moves(
+        historiographical_lens,
+        worldview,
+    )
+    required_question_anchors = _interpretive_question_anchors(
+        resolved_turn,
+        plan,
+    )
     control = {
         "schema": "archivist.answer_request/2",
         "question": resolved_turn.standalone_question,
@@ -1841,15 +1926,25 @@ def build_coverage_input(
             "rules_fired": list(gate.rules_fired),
         },
     }
+    if required_interpretive_moves:
+        control["interpretive_frame"] = {
+            "required_moves": [
+                move.value for move in required_interpretive_moves
+            ],
+            "required_question_anchors": list(required_question_anchors),
+            "preface_sentence_count": "2-3",
+            "coda_sentence_count": 1,
+            "citations": "forbidden",
+            "historical_facts": "factual answer only",
+            "first_person": "forbidden",
+            "reader_presentation": "one cohesive answer with no section labels",
+        }
     style = build_interpretive_prompt_block(
         historiographical_lens,
         voice,
         worldview,
     )
-    interpretive_expansion = requires_interpretive_expansion(
-        historiographical_lens,
-        worldview,
-    )
+    interpretive_expansion = bool(required_interpretive_moves)
     sections = [
         "Request contract:\n" + json.dumps(control, ensure_ascii=False, indent=2),
         "Numbered manuscript sources:\n" + build_context(final_chunks),
@@ -2153,19 +2248,19 @@ def run_evidence_planned_answer(
         voice,
         worldview,
     )
-    interpretive_expansion = requires_interpretive_expansion(
+    required_interpretive_moves = _required_interpretive_moves(
         historiographical_lens,
         worldview,
     )
+    required_question_anchors = _interpretive_question_anchors(
+        resolved_turn,
+        plan,
+    )
+    interpretive_expansion = bool(required_interpretive_moves)
     response_format = (
         InterpretiveEvidenceCoverageAnswer
         if interpretive_expansion
         else EvidenceCoverageAnswer
-    )
-    coverage_processor = (
-        process_interpretive_evidence_coverage
-        if interpretive_expansion
-        else process_evidence_coverage
     )
     style_prompt_sha256 = (
         hashlib.sha256(style_block.encode("utf-8")).hexdigest() if style_block else None
@@ -2191,16 +2286,30 @@ def run_evidence_planned_answer(
     stage_timings_ms["answer_generation"] = _elapsed_ms(generation_started_ns)
 
     validation_started_ns = perf_counter_ns()
-    coverage = coverage_processor(
-        parsed,
-        requirement_ids=requirement_ids,
-        premise_ids=premise_ids,
-        premise_source_scopes=premise_source_scopes,
-        obligation_scopes=obligation_scopes,
-        source_count=len(final_chunks),
-        requirement_labels=requirement_labels,
-        refused=refused,
-    )
+    if interpretive_expansion:
+        coverage = process_interpretive_evidence_coverage(
+            parsed,
+            required_moves=required_interpretive_moves,
+            question_anchors=required_question_anchors,
+            requirement_ids=requirement_ids,
+            premise_ids=premise_ids,
+            premise_source_scopes=premise_source_scopes,
+            obligation_scopes=obligation_scopes,
+            source_count=len(final_chunks),
+            requirement_labels=requirement_labels,
+            refused=refused,
+        )
+    else:
+        coverage = process_evidence_coverage(
+            parsed,
+            requirement_ids=requirement_ids,
+            premise_ids=premise_ids,
+            premise_source_scopes=premise_source_scopes,
+            obligation_scopes=obligation_scopes,
+            source_count=len(final_chunks),
+            requirement_labels=requirement_labels,
+            refused=refused,
+        )
     stage_timings_ms["answer_validation"] = _elapsed_ms(validation_started_ns)
     planned.trace["generation_contract"] = _generation_trace(
         coverage,

@@ -72,9 +72,17 @@ Worldview. Evidence-first + Scholarly + None remains the unchanged Neutral basel
 settings affect generation only; visual vibes are presentation only. Neither may alter retrieval,
 source ordering, or citation rules. A non-default voice changes prose style without guaranteeing
 more text. A non-Evidence-first lens or non-None worldview uses a separate structured-output
-contract that requires at least one additional cited interpretive paragraph after the ordinary
-source-grounded answer. Those interpretive units cannot satisfy factual coverage requirements or
-evidence obligations.
+contract with an uncited interpretive opening of two or three sentences, the ordinary cited
+factual answer, and an uncited one-sentence interpretive conclusion. The opening and conclusion
+must directly name the trusted subject of the question, use no first-person narration, and flow
+with the cited middle as ordinary paragraphs in one cohesive reader-facing answer. Their boundary
+remains internal: they may make value judgments but may not introduce historical facts, satisfy
+factual coverage requirements, or enter follow-up conversation history as evidence-bearing answer
+text. Interpretive strength is evidence-conditioned: a tragic lens, for example, must locate a
+specific loss, coercion, incomplete reform, failed plan, or other tension already present in the
+factual middle rather than manufacture an unnamed human cost or foreclosed possibility. When
+several settings are active, the lens supplies one central judgment, the worldview evaluates that
+same judgment, and the voice shapes its expression.
 
 ## Public demo and edition locators
 
