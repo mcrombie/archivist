@@ -421,7 +421,80 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     assert "28_Epilogue.md" in {
         item["document"] for item in outcome.final_chunks
     }
+    assert (
+        outcome.trace["parameters"]["lane_selection"]
+        == "stage_mechanism_coverage_then_document_diversity"
+    )
+    assert (
+        outcome.trace["parameters"]["broad_mechanism_lexical_version"]
+        == "role-scoped-mechanism-lexical-v1"
+    )
+    assert lanes["F2"]["mechanism_query_sha256s"]
+    assert lanes["F2"]["mechanism_candidate_chunk_ids"]
     validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_broad_mechanism_rerank_prefers_explicit_financing_link():
+    generic = chunk(
+        "generic_001",
+        "chapter.md",
+        "The conflict expanded authority across the region.",
+        1,
+    )
+    mechanism = chunk(
+        "mechanism_001",
+        "chapter.md",
+        (
+            "The conflict enabled central authority because debt and taxation "
+            "financed a permanent administrative institution."
+        ),
+        2,
+    )
+
+    candidates, queries = retrieval._broad_mechanism_candidates(
+        "How did conflict expand central authority?",
+        "transition",
+        [generic, mechanism],
+        [
+            {
+                "chunk_id": generic["chunk_id"],
+                "document": generic["document"],
+                "rrf_score": 0.02,
+            }
+        ],
+    )
+
+    assert len(queries) == 2
+    assert candidates[0]["chunk_id"] == "mechanism_001"
+    assert candidates[0]["mechanism_utility_score"] > 0
+
+
+def test_broad_endpoint_rerank_prefers_institutional_transformation():
+    generic = chunk(
+        "generic_001",
+        "ending.md",
+        "Central authority remained important after the conflict.",
+        1,
+    )
+    transformed = chunk(
+        "transformed_001",
+        "ending.md",
+        (
+            "After the conflict, central authority preserved the alliance; it "
+            "was not retired but transformed into a permanent institution that "
+            "continued the earlier policy."
+        ),
+        2,
+    )
+
+    candidates, _queries = retrieval._broad_mechanism_candidates(
+        "What happened to central authority after the conflict?",
+        "endpoint",
+        [generic, transformed],
+        [],
+    )
+
+    assert candidates[0]["chunk_id"] == "transformed_001"
 
 
 def test_hinted_absence_relation_lane_may_use_bounded_distant_fallback(

@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/4"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/5"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -119,6 +119,8 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
         {
             "bm25_b",
             "bm25_k1",
+            "broad_mechanism_candidate_limit",
+            "broad_mechanism_lexical_version",
             "broad_context_order",
             "diversity_min_score_ratio",
             "facet_embedding",
@@ -230,6 +232,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "chronology_min_document_ordinal",
             "document_hint_sha256s",
             "facet_id",
+            "mechanism_candidate_chunk_ids",
+            "mechanism_query_char_counts",
+            "mechanism_query_sha256s",
             "query_char_count",
             "query_sha256",
             "raw_primary_fallback_detected",
@@ -435,6 +440,9 @@ _ARRAY_PATHS = frozenset(
         ("lanes",),
         ("lanes", "[]", "candidate_chunk_ids"),
         ("lanes", "[]", "document_hint_sha256s"),
+        ("lanes", "[]", "mechanism_candidate_chunk_ids"),
+        ("lanes", "[]", "mechanism_query_char_counts"),
+        ("lanes", "[]", "mechanism_query_sha256s"),
         ("lanes", "[]", "selected_chunk_ids"),
         ("plan", "traits"),
         ("selection", "anchor_source_number_remap"),
@@ -644,7 +652,11 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "one_each_then_round_robin",
             "stage_coverage_then_document_diversity",
+            "stage_mechanism_coverage_then_document_diversity",
         }
+    ),
+    "broad_mechanism_lexical_version": frozenset(
+        {"not_applicable", "role-scoped-mechanism-lexical-v1"}
     ),
     "lexical_scoring_version": frozenset({"bm25-nfkd-word-v1"}),
     "mode": frozenset({"broad_synthesis", "planned", "standard"}),
@@ -700,6 +712,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v8",
             "evidence-planned-v9",
             "evidence-planned-v10",
+            "evidence-planned-v11",
         }
     ),
     "prompt_version": frozenset({"evidence-coverage-v2", "evidence-coverage-v3"}),
@@ -720,6 +733,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v3",
             "faceted-hybrid-rrf-v4",
             "faceted-hybrid-rrf-v5",
+            "faceted-hybrid-rrf-v6",
             "hybrid-bm25-rrf-v1",
         }
     ),
@@ -806,6 +820,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
 _CHUNK_ID_ARRAY_FIELDS = frozenset(
     {
         "candidate_chunk_ids",
+        "mechanism_candidate_chunk_ids",
         "parent_primary_chunk_ids",
         "primary_chunk_ids",
         "relationship_chunk_ids",

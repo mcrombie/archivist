@@ -55,7 +55,9 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v5"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v6"
+BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
+BROAD_MECHANISM_CANDIDATE_LIMIT = 20
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS_DIR"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
@@ -1055,6 +1057,63 @@ _BROAD_STAGE_ROLES = frozenset(
     {"endpoint", "mechanism", "origin", "transition"}
 )
 BROAD_STAGE_OVERLAP_DOCUMENTS = 2
+_BROAD_MECHANISM_QUERY_SUFFIXES = {
+    "origin": (
+        (
+            "origin precedent emergence pattern recurrence expansion enforcement "
+            "administration finance private interests"
+        ),
+    ),
+    "transition": (
+        "cause mechanism finance debt tax consolidation",
+        (
+            "policy doctrine strategy program budget deficit finance permanent "
+            "military spending alliance bases"
+        ),
+    ),
+    "mechanism": (
+        "cause mechanism finance debt tax consolidation",
+        (
+            "policy doctrine strategy program budget deficit finance permanent "
+            "military spending alliance bases"
+        ),
+    ),
+    "endpoint": (
+        (
+            "persistence transformation continuation adaptation retirement replacement "
+            "aftermath legacy"
+        ),
+        (
+            "institution alliance authority finance budget spending employment "
+            "industry security dilemma"
+        ),
+    ),
+}
+_BROAD_MECHANISM_SIGNAL_PATTERNS = {
+    "causal": re.compile(
+        r"\b(?:because|since|thereby|enable\w*|allow\w*|drive\w*|drove|"
+        r"lead\w*|led|result\w*|consequen\w*|mechanism\w*|through|"
+        r"require\w*)\b",
+        flags=re.IGNORECASE,
+    ),
+    "institutional": re.compile(
+        r"\b(?:law\w*|act\w*|institution\w*|agency|agencies|department\w*|"
+        r"council\w*|government\w*|administration\w*|authorit\w*|"
+        r"bureaucr\w*|congress\w*|bank\w*|alliance\w*|military)\b",
+        flags=re.IGNORECASE,
+    ),
+    "fiscal": re.compile(
+        r"\b(?:financ\w*|debt\w*|tax\w*|budget\w*|deficit\w*|spend\w*|"
+        r"credit\w*|bond\w*|employ\w*|industr\w*|contract\w*|profit\w*)\b",
+        flags=re.IGNORECASE,
+    ),
+    "persistence": re.compile(
+        r"\b(?:permanent\w*|indefinite\w*|persist\w*|continu\w*|"
+        r"transform\w*|retain\w*|retire\w*|remain\w*|maintain\w*|"
+        r"normaliz\w*|establish\w*|adapt\w*|replace\w*)\b",
+        flags=re.IGNORECASE,
+    ),
+}
 _NUMBERED_CHAPTER_ONE_PATTERN = re.compile(r"\bchapter\s+1\b")
 _NARRATIVE_ENDPOINT_PATTERN = re.compile(r"\b(?:conclusion|epilogue)\b")
 _SUPPLEMENTAL_BACK_MATTER_PATTERN = re.compile(
@@ -1309,6 +1368,148 @@ def _pick_new_document_lane_candidate(
     return None
 
 
+def _broad_mechanism_queries(query: str, role: str) -> tuple[str, ...]:
+    suffixes = _BROAD_MECHANISM_QUERY_SUFFIXES.get(role, ())
+    return tuple(f"{query} {suffix}".strip() for suffix in suffixes)
+
+
+def _broad_mechanism_signal_score(
+    chunk: Mapping[str, Any],
+    *,
+    role: str,
+) -> int:
+    text = str(chunk.get("text") or "")
+    counts = {
+        name: len(pattern.findall(text))
+        for name, pattern in _BROAD_MECHANISM_SIGNAL_PATTERNS.items()
+    }
+    causal = min(counts["causal"], 3)
+    institutional = min(counts["institutional"], 2)
+    fiscal = min(counts["fiscal"], 3)
+    persistence = min(counts["persistence"], 3)
+    if role == "origin":
+        return causal * 2 + institutional + fiscal + persistence
+    if role == "endpoint":
+        return persistence * 2 + causal + institutional + fiscal
+    return causal * 2 + fiscal * 2 + institutional + persistence
+
+
+def _broad_mechanism_candidates(
+    query: str,
+    role: str,
+    chunks: list[dict[str, Any]],
+    primary_candidates: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
+    """Rerank a bounded stage locally for explicit historical mechanisms.
+
+    Semantic retrieval still establishes relevance. This pass adds a deterministic
+    lexical route over planner-hinted documents and favors passages that state how
+    power was financed, institutionalized, implemented, or preserved.
+    """
+
+    mechanism_queries = _broad_mechanism_queries(query, role)
+    if not mechanism_queries or not chunks:
+        return [], ()
+
+    lookup = build_chunk_lookup(chunks)
+    primary_by_id = {
+        str(candidate.get("chunk_id") or ""): (rank, candidate)
+        for rank, candidate in enumerate(primary_candidates, start=1)
+        if str(candidate.get("chunk_id") or "") in lookup
+    }
+    original_query_terms = frozenset(_query_terms(query))
+    lexical_by_id: dict[str, dict[str, Any]] = {}
+    for mechanism_query in mechanism_queries:
+        lexical, diagnostics = lexical_candidates(
+            mechanism_query,
+            chunks,
+            limit=BROAD_MECHANISM_CANDIDATE_LIMIT,
+        )
+        query_term_count = max(int(diagnostics["query_term_count"]), 1)
+        for candidate in lexical:
+            chunk_id = str(candidate.get("chunk_id") or "")
+            chunk = lookup.get(chunk_id)
+            if chunk is None:
+                continue
+            original_query_match_count = len(
+                original_query_terms.intersection(
+                    _tokens(str(chunk.get("text") or ""))
+                )
+            )
+            if original_query_match_count <= 0:
+                continue
+            mechanism_signal_score = _broad_mechanism_signal_score(
+                chunk,
+                role=role,
+            )
+            normalized_lexical_score = (
+                float(candidate["score"]) / query_term_count
+            )
+            mechanism_utility_score = normalized_lexical_score * (
+                1.0 + 0.02 * mechanism_signal_score
+            )
+            existing = lexical_by_id.get(chunk_id)
+            if existing is None or mechanism_utility_score > float(
+                existing["mechanism_utility_score"]
+            ):
+                lexical_by_id[chunk_id] = {
+                    "lexical_rank": int(candidate["rank"]),
+                    "original_query_match_count": original_query_match_count,
+                    "mechanism_signal_score": mechanism_signal_score,
+                    "mechanism_utility_score": mechanism_utility_score,
+                }
+    candidate_ids = set(primary_by_id) | set(lexical_by_id)
+    ranked: list[dict[str, Any]] = []
+    for chunk_id in candidate_ids:
+        chunk = lookup[chunk_id]
+        primary_entry = primary_by_id.get(chunk_id)
+        lexical_entry = lexical_by_id.get(chunk_id)
+        primary_rank = primary_entry[0] if primary_entry else None
+        lexical_rank = (
+            int(lexical_entry["lexical_rank"])
+            if lexical_entry is not None
+            else None
+        )
+        mechanism_signal_score = (
+            int(lexical_entry["mechanism_signal_score"])
+            if lexical_entry is not None
+            else _broad_mechanism_signal_score(chunk, role=role)
+        )
+        mechanism_utility_score = (
+            float(lexical_entry["mechanism_utility_score"])
+            if lexical_entry is not None
+            else 0.0
+        )
+        ranked.append(
+            {
+                "chunk_id": chunk_id,
+                "document": str(chunk.get("document") or ""),
+                "rrf_score": mechanism_utility_score,
+                "mechanism_signal_score": mechanism_signal_score,
+                "mechanism_utility_score": mechanism_utility_score,
+                "original_query_match_count": (
+                    int(lexical_entry["original_query_match_count"])
+                    if lexical_entry is not None
+                    else 0
+                ),
+                "primary_rank": primary_rank,
+                "lexical_rank": lexical_rank,
+            }
+        )
+
+    ranked.sort(
+        key=lambda candidate: (
+            -float(candidate["mechanism_utility_score"]),
+            -int(candidate["original_query_match_count"]),
+            -int(candidate["mechanism_signal_score"]),
+            int(candidate["primary_rank"] or 10**9),
+            int(candidate["lexical_rank"] or 10**9),
+            str(candidate["chunk_id"]),
+        )
+    )
+    return ranked[:BROAD_MECHANISM_CANDIDATE_LIMIT], mechanism_queries
+
+
 def retrieve_plan_from_collection(
     plan: object,
     collection_handle: Any,
@@ -1433,6 +1634,22 @@ def retrieve_plan_from_collection(
             if isinstance(hybrid, Mapping)
             else []
         )
+        mechanism_scope = document_hints or stage_scope
+        mechanism_chunks = [
+            chunk
+            for chunk in chunks
+            if str(chunk.get("document") or "") in mechanism_scope
+        ]
+        mechanism_candidates, mechanism_queries = (
+            _broad_mechanism_candidates(
+                query,
+                role,
+                mechanism_chunks,
+                primary_candidates,
+            )
+            if broad and role in _BROAD_STAGE_ROLES and mechanism_chunks
+            else ([], "")
+        )
         endpoint_anchor_candidates: list[dict[str, Any]] = []
         stage_position = broad_stage_positions.get(facet_id)
         narrative_documents = _broad_narrative_documents(document_order)
@@ -1483,6 +1700,8 @@ def retrieve_plan_from_collection(
                 "chronology_min_document_ordinal": chronology_min_document_ordinal,
                 "chronology_max_document_ordinal": chronology_max_document_ordinal,
                 "candidates": primary_candidates,
+                "mechanism_candidates": mechanism_candidates,
+                "mechanism_queries": mechanism_queries,
                 "endpoint_anchor_candidates": endpoint_anchor_candidates,
                 "trace": lane_trace,
             }
@@ -1517,20 +1736,27 @@ def retrieve_plan_from_collection(
     # Coverage pass: give each live lane an anchor before any lane receives a second.
     for lane in ordered_lanes:
         facet_id = str(lane["facet_id"])
+        coverage_candidates = lane["candidates"]
+        if (
+            broad
+            and lane["role"] in {"transition", "mechanism", "endpoint"}
+            and lane["mechanism_candidates"]
+        ):
+            coverage_candidates = lane["mechanism_candidates"]
         shared_candidate = (
-            lane["candidates"][0]
-            if lane["candidates"]
-            and str(lane["candidates"][0].get("chunk_id") or "")
+            coverage_candidates[0]
+            if coverage_candidates
+            and str(coverage_candidates[0].get("chunk_id") or "")
             in selected_ids
             else None
         )
-        if shared_candidate is not None:
+        if shared_candidate is not None and not broad:
             accept(shared_candidate, facet_id)
             continue
         if len(selected_chunks) >= max_final_sources:
             continue
         candidate = _pick_first_lane_candidate(
-            lane["candidates"],
+            coverage_candidates,
             selected_ids=selected_ids,
             selected_documents=selected_documents,
             prefer_new_document=broad and lane["role"] not in {
@@ -1550,6 +1776,22 @@ def retrieve_plan_from_collection(
                 selected_ids=selected_ids,
                 selected_documents=selected_documents,
                 prefer_new_document=True,
+            )
+            if candidate is not None:
+                accept(candidate, str(lane["facet_id"]))
+            if len(selected_chunks) >= max_final_sources:
+                break
+    # Planner hints identify stage-specific documents, while chronology bands
+    # protect the overall arc. Spend any remaining broad slots on a new
+    # mechanism-bearing hinted document before generic diversity refill.
+    if broad and len(selected_chunks) < max_final_sources:
+        for lane in ordered_lanes:
+            if lane["role"] not in _BROAD_STAGE_ROLES:
+                continue
+            candidate = _pick_new_document_lane_candidate(
+                lane["mechanism_candidates"],
+                selected_ids=selected_ids,
+                selected_documents=selected_documents,
             )
             if candidate is not None:
                 accept(candidate, str(lane["facet_id"]))
@@ -1674,11 +1916,30 @@ def retrieve_plan_from_collection(
                         str(candidate.get("chunk_id") or "")
                         for candidate in (
                             *lane["candidates"],
+                            *lane["mechanism_candidates"],
                             *lane["endpoint_anchor_candidates"],
                         )
                     )
                     if chunk_id
                 ],
+                **(
+                    {
+                        "mechanism_query_sha256s": [
+                            hashlib.sha256(query.encode("utf-8")).hexdigest()
+                            for query in lane["mechanism_queries"]
+                        ],
+                        "mechanism_query_char_counts": [
+                            len(query) for query in lane["mechanism_queries"]
+                        ],
+                        "mechanism_candidate_chunk_ids": [
+                            str(candidate.get("chunk_id") or "")
+                            for candidate in lane["mechanism_candidates"]
+                            if str(candidate.get("chunk_id") or "")
+                        ],
+                    }
+                    if lane["mechanism_queries"]
+                    else {}
+                ),
                 "selected_chunk_ids": selected_by_facet[str(lane["facet_id"])],
                 "raw_primary_fallback_detected": bool(
                     selection.get("raw_primary_fallback_detected")
@@ -1709,9 +1970,15 @@ def retrieve_plan_from_collection(
             "lane_primary_limit": lane_primary_limit,
             "facet_embedding": "single_batched_request",
             "lane_selection": (
-                "stage_coverage_then_document_diversity"
+                "stage_mechanism_coverage_then_document_diversity"
                 if broad
                 else "one_each_then_round_robin"
+            ),
+            "broad_mechanism_lexical_version": (
+                BROAD_MECHANISM_LEXICAL_VERSION if broad else "not_applicable"
+            ),
+            "broad_mechanism_candidate_limit": (
+                BROAD_MECHANISM_CANDIDATE_LIMIT if broad else 0
             ),
             "premise_lane_reservation": True,
             "broad_context_order": "corpus_ordinal" if broad else "selection",
