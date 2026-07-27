@@ -26,6 +26,7 @@ from answer_coverage import (
     EvidenceCoverageResult,
     EvidenceObligationFocus,
     EvidenceObligationScope,
+    MAX_ANSWER_UNITS,
     PremiseSourceScope,
     process_evidence_coverage,
 )
@@ -90,13 +91,13 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v12"
+RAG_POLICY_VERSION = "evidence-planned-v13"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v6"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v4"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v5"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
 MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
@@ -216,6 +217,10 @@ return an empty obligation_coverage list and empty obligation_links on every uni
 For broad output, mark a coarse requirement supported only when every supplied obligation
 dimension flagged as required for that requirement is supported. If some directly supported
 material is present but that completeness condition is not met, mark the requirement partial.
+The supplied ledger is bounded so one dedicated supported unit per listed obligation
+dimension, plus any premise-correction units, fits within answer_units. Never reference a
+unit_id that is absent from answer_units. Share a unit across obligation dimensions only
+when its one atomic claim genuinely realizes every linked dimension.
 """
 
 
@@ -1621,15 +1626,20 @@ def _coalesce_paragraph_ranges(
 
 def _bounded_obligation_ranges(
     final_chunks: Sequence[Mapping[str, object]],
+    *,
+    max_obligations: int = MAX_BROAD_EVIDENCE_OBLIGATIONS,
 ) -> tuple[tuple[tuple[int, int], ...], ...]:
     """Cover every retained source within the structured-output obligation cap."""
 
     raw_ranges = tuple(_paragraph_scope_ranges(chunk) for chunk in final_chunks)
-    if sum(len(ranges) for ranges in raw_ranges) <= MAX_BROAD_EVIDENCE_OBLIGATIONS:
+    obligation_limit = min(MAX_BROAD_EVIDENCE_OBLIGATIONS, max_obligations)
+    if obligation_limit < len(raw_ranges):
+        raise ValueError("obligation cap cannot preserve one scope per retained source")
+    if sum(len(ranges) for ranges in raw_ranges) <= obligation_limit:
         return raw_ranges
 
     group_counts = [1 for _ranges in raw_ranges]
-    remaining = MAX_BROAD_EVIDENCE_OBLIGATIONS - len(raw_ranges)
+    remaining = obligation_limit - len(raw_ranges)
     while remaining > 0:
         candidates = [
             index
@@ -1675,8 +1685,12 @@ def _evidence_obligation_scopes(
     facet_order = {
         facet.facet_id: index for index, facet in enumerate(plan.facets)
     }
-    ranges_by_source = _bounded_obligation_ranges(final_chunks)
+    ranges_by_source = _bounded_obligation_ranges(
+        final_chunks,
+        max_obligations=MAX_ANSWER_UNITS - len(plan.premises),
+    )
     scopes: list[EvidenceObligationScope] = []
+    dimension_offsets: defaultdict[EvidenceObligationFocus, int] = defaultdict(int)
 
     for source_number, paragraph_ranges in enumerate(ranges_by_source, start=1):
         stage_facets = tuple(
@@ -1718,7 +1732,12 @@ def _evidence_obligation_scopes(
         else:
             focus = EvidenceObligationFocus.CROSS_CUTTING
 
+        focus_dimensions = _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
         for paragraph_start, paragraph_end in paragraph_ranges:
+            dimension = focus_dimensions[
+                dimension_offsets[focus] % len(focus_dimensions)
+            ]
+            dimension_offsets[focus] += 1
             scopes.append(
                 EvidenceObligationScope(
                     obligation_id=f"O{len(scopes) + 1}",
@@ -1727,7 +1746,7 @@ def _evidence_obligation_scopes(
                     paragraph_end=paragraph_end,
                     allowed_requirement_ids=allowed_requirement_ids,
                     focus=focus,
-                    dimension_ids=_OBLIGATION_DIMENSIONS_BY_FOCUS[focus],
+                    dimension_ids=(dimension,),
                     required_for_requirement_status=bool(stage_facets),
                 )
             )

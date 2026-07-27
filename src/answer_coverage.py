@@ -33,6 +33,7 @@ __all__ = [
     "EVIDENCE_COVERAGE_RENDERER_VERSION",
     "EVIDENCE_COVERAGE_SCHEMA",
     "GENERATION_CONTRACT_FAILED_MESSAGE",
+    "MAX_ANSWER_UNITS",
     "NO_SOURCES_MESSAGE",
     "AnswerUnit",
     "AnswerUnitRole",
@@ -306,6 +307,9 @@ class CoverageValidationErrorCode(StrEnum):
     UNSUPPORTED_OBLIGATION_HAS_UNIT = "unsupported_obligation_has_unit"
     OBLIGATION_ROLE_MISMATCH = "obligation_role_mismatch"
     OBLIGATION_REQUIREMENT_STATUS_MISMATCH = "obligation_requirement_status_mismatch"
+    OBLIGATION_DIMENSION_CAPACITY_EXCEEDED = (
+        "obligation_dimension_capacity_exceeded"
+    )
     TEXT_LIMIT_EXCEEDED = "text_limit_exceeded"
 
 
@@ -1234,6 +1238,13 @@ def _validation_context(
         )
     except (TypeError, ValidationError):
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT) from None
+    obligation_dimension_count = sum(
+        len(scope.dimension_ids) for scope in context.obligation_scopes
+    )
+    if obligation_dimension_count + len(context.premise_ids) > MAX_ANSWER_UNITS:
+        raise CoverageContractError(
+            CoverageValidationErrorCode.OBLIGATION_DIMENSION_CAPACITY_EXCEEDED
+        )
     scope_ids = tuple(scope.premise_id for scope in context.premise_source_scopes)
     obligation_ids = tuple(
         scope.obligation_id for scope in context.obligation_scopes

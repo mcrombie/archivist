@@ -280,7 +280,7 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v4"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v5"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -360,12 +360,37 @@ def test_broad_obligation_scopes_cover_exact_paragraphs_and_safe_fallback_ranges
             scope.paragraph_end,
             scope.allowed_requirement_ids,
             scope.focus.value,
+            tuple(dimension.value for dimension in scope.dimension_ids),
         )
         for scope in scopes
     ] == [
-        ("O1", 1, 10, 10, ("R1",), "origin"),
-        ("O2", 1, 11, 11, ("R1",), "origin"),
-        ("O3", 2, 20, 22, ("R2",), "endpoint"),
+        (
+            "O1",
+            1,
+            10,
+            10,
+            ("R1",),
+            "origin",
+            ("stage_development",),
+        ),
+        (
+            "O2",
+            1,
+            11,
+            11,
+            ("R1",),
+            "origin",
+            ("cause_or_enabler",),
+        ),
+        (
+            "O3",
+            2,
+            20,
+            22,
+            ("R2",),
+            "endpoint",
+            ("consequence",),
+        ),
     ]
     assert all(scope.required_for_requirement_status for scope in scopes)
 
@@ -416,6 +441,8 @@ def test_broad_obligation_scope_cap_coalesces_without_omitting_any_source_range(
     )
 
     assert len(scopes) == rag_pipeline.MAX_BROAD_EVIDENCE_OBLIGATIONS
+    assert all(len(scope.dimension_ids) == 1 for scope in scopes)
+    assert sum(len(scope.dimension_ids) for scope in scopes) == len(scopes)
     for source_number, chunk in enumerate(chunks, start=1):
         source_scopes = [
             scope for scope in scopes if scope.source_number == source_number
@@ -426,6 +453,30 @@ def test_broad_obligation_scope_cap_coalesces_without_omitting_any_source_range(
             left.paragraph_end + 1 == right.paragraph_start
             for left, right in zip(source_scopes, source_scopes[1:])
         )
+
+
+def test_broad_obligation_range_cap_can_reserve_answer_units_for_premises():
+    chunks = [
+        {
+            **CHUNK,
+            "chunk_id": f"synthetic_{source_number}",
+            "paragraph_start": (source_number * 10) + 1,
+            "paragraph_end": (source_number * 10) + 10,
+            "text": "\n\n".join(
+                f"Synthetic paragraph {paragraph_number}."
+                for paragraph_number in range(1, 11)
+            ),
+        }
+        for source_number in range(1, 9)
+    ]
+
+    ranges = rag_pipeline._bounded_obligation_ranges(
+        chunks,
+        max_obligations=30,
+    )
+
+    assert sum(len(source_ranges) for source_ranges in ranges) == 30
+    assert all(source_ranges for source_ranges in ranges)
 
 
 def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch):

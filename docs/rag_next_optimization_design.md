@@ -1,7 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v12 implemented offline on 2026-07-27; focused live confirmation
-pending for citation repair, source-bounded broad-answer obligations, and canonical stage cores
+Status: evidence-planned-v13 implemented offline on 2026-07-27; the focused v12 gate confirmed
+G001 and G009, exposed a broad-ledger capacity defect on G007, and now awaits one G007-only
+live confirmation
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -315,11 +316,28 @@ budget:
 - retrieval trace schema 6 and evidence diagnostics schema 5 record only hashes, IDs, source and
   paragraph numbers, finite enums, mappings, and counts for these decisions.
 
-The complete offline suite passes 439 tests with one intentional skip; Ruff and whitespace checks
-pass. These checks establish deterministic contracts, trace privacy, stage-core stability under
-provider wording/hint/order variation, and paragraph-ledger validation. They do not establish
-live model adherence or improved historical answers. The next bounded gate is one clean focused
-confirmation of G001, G007, and G009 before any repeat of the unchanged ten-question cohort.
+The v12 offline suite passed 439 tests with one intentional skip; Ruff and whitespace checks
+passed. Those checks established deterministic contracts, trace privacy, stage-core stability
+under provider wording/hint/order variation, and paragraph-ledger validation, but did not establish
+live model adherence or improved historical answers.
+
+The clean focused G001/G007/G009 gate then spent an estimated `$0.49895119` in total with no retry.
+G001 validated after the exact redundant-terminator repair, and G009 validated as a bounded
+qualified near match. The first launcher stopped waiting after fourteen seconds even though the
+G001 API operation had completed; the response was recovered by its stored provider ID instead of
+being regenerated. G007 took 116.9 seconds and failed on `obligation_unit_mapping_mismatch`.
+
+The G007 failure was an application-owned capacity defect, not evidence that the model had ignored
+the ledger. V12 supplied 32 paragraph obligations containing 84 dimension slots while the answer
+schema allowed only 32 units. The generated structure attempted 61 unit IDs, including 29 IDs that
+could not exist in the bounded schema. `Evidence-planned-v13` assigns one rotating historical
+dimension to each paragraph obligation, reserves answer-unit capacity for any premise corrections,
+and rejects an over-capacity trusted context with
+`obligation_dimension_capacity_exceeded`. A zero-cost replay of the same G007 scopes reduces the
+ledger from 84 to 32 dimension slots while retaining all 32 source ranges and representation of all
+six historical-function dimensions. The v13 suite passes 441 tests with one intentional skip;
+Ruff and whitespace checks pass. The next bounded gate is G007 alone; G001 and G009 must not be
+regenerated.
 
 The implementation follows the bounded-call design in this document:
 

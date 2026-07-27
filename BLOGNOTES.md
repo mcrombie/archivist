@@ -1264,6 +1264,38 @@ powerful model or a larger context. One defect was a single redundant period, on
 accountability between selected paragraphs and answer claims, and one was provider wording
 deciding protected retrieval slots. Each needed a different contract.
 
+### 2026-07-27 - The focused v12 gate found an application capacity bug, not a retrieval miss
+
+- Ran the clean focused G001/G007/G009 confirmation without changing the manuscript, index,
+  questions, neutral settings, eight-source limit, or no-retry rule. Combined estimated API cost
+  was `$0.49895119`.
+- G001 confirmed the narrow citation repair and G009 confirmed the bounded qualified-near-match
+  path. Both validated against their returned sources. They do not need to be regenerated.
+- The first process launcher stopped waiting after fourteen seconds while G001's API call was
+  still completing. Its provider response ID had been recorded, so the already-paid result was
+  recovered read-only instead of making a duplicate generation call. This is a useful operational
+  lesson: a client-side timeout is not proof that a provider-side request failed.
+- G007 took 116.9 seconds and failed closed on `obligation_unit_mapping_mismatch`. A structural,
+  text-free diagnosis showed why: v12 supplied 32 paragraph obligations containing 84 historical
+  dimension slots, but the structured answer schema permits only 32 answer units. The generated
+  structure attempted 61 unit IDs; 29 of them were outside the possible `U1`-through-`U32` range.
+- Opened `evidence-planned-v13` as a narrow application-contract repair. Every paragraph scope now
+  receives exactly one rotating historical dimension, and broad ledgers reserve capacity for any
+  premise-correction units. A new validator error,
+  `obligation_dimension_capacity_exceeded`, prevents an impossible trusted ledger from being
+  blamed on generated output.
+- A zero-cost replay of the exact failed G007 scope structure reduced the ledger from 84 to 32
+  required dimension slots. It retained all 32 paragraph ranges and still represented stage
+  development, cause or enabler, mechanism, consequence, continuity or change, and qualification.
+- Offline verification now passes 441 tests with one intentional skip. Ruff and whitespace checks
+  pass. No API call was made for v13 implementation or replay. The next paid action is one
+  G007-only confirmation; the full ten-question evaluation remains gated on that result.
+
+Useful blog lesson: strict validation did its job, but it initially obscured who had broken the
+contract. The model's impossible source map was downstream of an impossible ledger supplied by the
+application. Counting the contract's requested slots against its output capacity turned a vague
+generation failure into a small, testable repair.
+
 ## Suggested demo sequence
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific

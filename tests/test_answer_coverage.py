@@ -1857,6 +1857,39 @@ def test_missing_premise_source_scope_fails_closed_as_invalid_context():
     assert result.diagnostics.premise_source_scopes == ()
 
 
+def test_obligation_dimensions_cannot_exceed_answer_unit_capacity():
+    scopes = tuple(
+        EvidenceObligationScope(
+            obligation_id=f"O{index}",
+            source_number=1,
+            paragraph_start=index,
+            paragraph_end=index,
+            allowed_requirement_ids=("R1",),
+            focus=EvidenceObligationFocus.MECHANISM,
+            dimension_ids=(
+                EvidenceDimension.CAUSE_OR_ENABLER,
+                EvidenceDimension.MECHANISM,
+            ),
+            required_for_requirement_status=True,
+        )
+        for index in range(1, 18)
+    )
+
+    result = process_evidence_coverage(
+        None,
+        requirement_ids=("R1",),
+        obligation_scopes=scopes,
+        source_count=1,
+        refused=True,
+    )
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert (
+        result.diagnostics.error_code
+        is CoverageValidationErrorCode.OBLIGATION_DIMENSION_CAPACITY_EXCEEDED
+    )
+
+
 def test_process_never_repairs_an_unsupported_requirement_with_a_factual_unit():
     unit = _unit(
         "U1",

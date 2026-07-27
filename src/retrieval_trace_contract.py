@@ -629,6 +629,7 @@ _COVERAGE_ERROR_CODES = frozenset(
         "missing_unit_requirement_id",
         "obligation_requirement_mismatch",
         "obligation_requirement_status_mismatch",
+        "obligation_dimension_capacity_exceeded",
         "obligation_role_mismatch",
         "obligation_source_mapping_mismatch",
         "obligation_source_mismatch",
@@ -887,6 +888,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v10",
             "evidence-planned-v11",
             "evidence-planned-v12",
+            "evidence-planned-v13",
         }
     ),
     "prompt_version": frozenset(
@@ -894,6 +896,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-v2",
             "evidence-coverage-v3",
             "evidence-coverage-v4",
+            "evidence-coverage-v5",
         }
     ),
     "reason": frozenset(
