@@ -1,232 +1,181 @@
-cd ..# Archivist
+# Archivist
 
-A domain-aware retrieval-augmented generation (RAG) system for historical research and manuscript analysis.
+Archivist is a source-grounded conversational interface for one book:
+*Cradle of the Empire: A Big History of Virginia*. It searches a private full-manuscript retrieval
+index, answers with inline `[Source N]` citations, remembers the open conversation, and lets a
+reader vary historiographical lens, voice, worldview, and visual presentation.
 
-Archivist ingests a large historical manuscript, builds a semantic search index, and provides two primary modes:
+It is not a manuscript-upload service or a general-purpose chatbot.
 
-- **Answer Mode**: grounded, source-cited responses to historical questions
-- **Index Mode**: assists in building a back-of-the-book index by identifying key passages and themes
+## Current product
 
----
+- one-page, conversational book interface;
+- contextual follow-up questions;
+- query decomposition, premise checks, absence handling, and source-bounded completeness checks;
+- neutral evidence-first answers by default;
+- separate Historiographical lens, Voice, and Worldview controls;
+- five visual vibes;
+- local OpenAI usage estimates and budget controls;
+- 481 retrieval-eligible chunks covering the complete substantive manuscript;
+- edition-qualified public citations for `Typeset PDF (July 6, 2026)`;
+- development and public-demo exposure profiles.
 
-## Overview
-
-Archivist was built to explore how AI can assist with:
-
-- navigating long-form historical writing
-- synthesizing arguments across chapters
-- identifying key references for indexing and editing
-
-The system is designed around a single manuscript corpus and emphasizes:
-
-- source transparency
-- structured retrieval
-- reproducible results
-
----
-
-## Features
-
-### 1. Answer Mode
-
-Ask natural language questions about the manuscript.
-
-Example:
-
-What role did Jamestown play as a corporate experiment?
-
-
-Archivist will:
-- retrieve relevant passages
-- construct a grounded answer
-- cite sources inline (`[Source X]`)
-- display the exact chunks used
-
----
-
-### 2. Index Assistant Mode
-
-Generate candidate index entries for a term or concept.
-
-Example:
-
-Virginia Company
-
-
-Archivist will:
-- locate relevant passages (exact + semantic retrieval)
-- summarize how the term is used
-- suggest key locations
-- propose subentries when appropriate
-
----
-
-### 3. Hybrid Retrieval Strategy
-
-Archivist uses multiple retrieval techniques:
-
-- semantic search through embeddings
-- exact text matching for index terms
-- neighbor chunk expansion for context continuity
-
----
-
-### 4. Source Transparency
-
-All answers are grounded in explicit source chunks:
-
-- chapter
-- paragraph range
-- chunk ID
-
-This allows full traceability of generated outputs.
-
----
+The printed Index, bibliography, table of contents, acknowledgments, illustration notes, and
+credits are not part of the answer corpus. The Introduction, geological formation, Prologue,
+Chapters 1–20, Epilogue, Afterword, and Appendices A–D are searchable.
 
 ## Architecture
 
-Manuscript (Markdown)
-↓
-Chunking (custom heuristics)
-↓
-Embeddings (OpenAI)
-↓
-ChromaDB (vector store)
-↓
-Retrieval Layer
-├── semantic search
-├── exact match (index mode)
-└── neighbor expansion
-↓
-Context Finalization
-↓
-LLM Generation (OpenAI)
+```text
+private manuscript chunks
+        |
+        v
+private Chroma embedding index (481 records)
+        |
+        v
+query planning and conversational resolution
+        |
+        v
+retrieval, premise checking, and evidence coverage
+        |
+        v
+GPT-5.6 Sol answer generation
+        |
+        v
+[Source N] validation and edition-locator mapping
+        |
+        +--> development: full diagnostic passages
+        |
+        `--> public_demo: page locators and bounded excerpts
+```
 
----
+The book is not sent to the answer model on every request. Archivist embeds the question, retrieves
+a bounded set of relevant private chunks, and supplies only that evidence to answer generation.
 
-## Project Structure
+## Local setup
 
-src/
-corpus.py # chunk loading and structure
-retrieval.py # retrieval + context logic
-filters.py # document filtering rules
-embed.py # embedding pipeline
-ask.py # answer mode
-index_mode.py # index assistant mode
-query.py # basic retrieval testing
+Requirements:
 
-output/
-chunks.json # processed manuscript chunks
+- Python 3.13;
+- Node.js and npm;
+- `uv`;
+- an OpenAI API key;
+- the private runtime corpus already present under `output/` and `chroma_db/`.
 
-chroma_db/
+Install dependencies and build the frontend:
 
-vector database (ignored in git)
+```powershell
+uv sync --frozen
+Set-Location frontend
+npm ci
+npm run build
+Set-Location ..
+```
 
-manuscript/
+Create `.env` in the repository root:
 
-raw manuscript (ignored in git)
+```text
+OPENAI_API_KEY=your_project_scoped_key
+```
 
----
+Run the local development application:
 
-## Setup
+```powershell
+uv run uvicorn web_api:app --app-dir src --reload
+```
 
+Then open `http://127.0.0.1:8000`.
 
-### 1. Install dependencies
+Development mode is the default. It preserves the full diagnostic source display and the local
+cost interface. Do not expose this profile to the public internet.
 
-pip install openai chromadb python-dotenv
+## Public-demo profile
 
+The public profile is selected only at server startup:
 
-### 2. Add API key
+```powershell
+$env:ARCHIVIST_EXPOSURE_PROFILE = "public_demo"
+$env:ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD = "5.00"
+uv run uvicorn web_api:app --app-dir src
+```
 
-Create a `.env` file in the project root:
+Public mode:
 
-OPENAI_API_KEY=your_api_key_here
+- fixes retrieval depth on the server;
+- removes upload, project, embedding, index, source-file, and cost-management routes;
+- hides full chunks, internal paths, diagnostics, and per-turn costs;
+- maps citations to a named edition;
+- limits excerpts to 280 characters each, three excerpts, and 700 characters total;
+- enforces request-size, per-client, global, concurrency, and monthly-spend limits;
+- disables API documentation and sanitizes errors.
 
-For clean spend attribution, use a project-scoped key from a dedicated OpenAI API project named
-`Archivist`. The web interface keeps a local per-call estimate and optional budget controls; see
-[`docs/cost_tracking.md`](docs/cost_tracking.md). OpenAI's Usage Dashboard remains the billing
-source of truth.
+See [`docs/public_demo_design.md`](docs/public_demo_design.md) for the disclosure design and
+[`docs/public_deployment.md`](docs/public_deployment.md) for the Render handoff.
 
+## Edition locators
 
-### 3. Build embeddings
+The committed locator fixture contains no book text:
 
-python src/embed.py
+```text
+fixtures/edition_locators/typeset_pdf_0706.json
+```
 
+Its 481 records are bound to the exact typeset PDF, chunks, and corpus-manifest hashes. These page
+numbers apply only to `Typeset PDF (July 6, 2026)`. Future paperback, hardcover, and ebook profiles
+can reuse stable chunk IDs without changing retrieval or re-embedding the manuscript.
 
-### 4. Run Answer Mode
+The private PDF is required only when deliberately rebuilding the locator artifact:
 
-python src/ask.py
+```powershell
+uv run python scripts/build_edition_locators.py `
+  "C:\path\to\Cradle_of_the_Empire_FINAL_PDF_revised_0706.pdf"
+```
 
+## Private runtime bundle
 
-### 5. Run Index Mode
+The public deployment receives its full retrieval corpus through a private, gitignored archive:
 
-python src/index_mode.py
+```powershell
+uv run python scripts/build_public_runtime_bundle.py
+```
 
+The archive contains the pruned Chroma collection and its matching chunks, but not the source DOCX
+or PDF. It remains private and must never be committed or attached to a public release.
 
----
+## Cost tracking
 
-## Design Decisions
+Archivist records local per-operation estimates for OpenAI Responses and embeddings. Use a
+project-scoped OpenAI key for clean attribution. The OpenAI Usage Dashboard remains the billing
+source of truth; local estimates are an operational guardrail.
 
-### Inline Footnotes
+See [`docs/cost_tracking.md`](docs/cost_tracking.md).
 
-Footnotes are embedded directly in text chunks to preserve context during retrieval.
+## Verification
 
-### Chunking Strategy
+Run backend checks:
 
-Chunks are based on paragraph groupings with heuristics to:
-- preserve rhetorical flow
-- keep quotes attached to analysis
-- allow slight overlap across chunks
+```powershell
+uv run ruff check src tests scripts
+uv run pytest
+```
 
-### Neighbor Expansion
+Run the production frontend build:
 
-Adjacent chunks are included during retrieval to:
-- prevent context fragmentation
-- improve answer coherence
+```powershell
+Set-Location frontend
+npm run build
+```
 
-### Filtering
+The owner-authored ten-question evaluation remains the principal RAG quality benchmark. Passing
+the public security boundary does not by itself mean every historical answer is correct.
 
-Structural documents (e.g., bibliography, table of contents) are excluded from retrieval to avoid noise.
+## Privacy
 
----
-
-## Limitations
-
-- Broad thematic questions may overweight a single section of the manuscript
-- No page-number mapping (pending final manuscript formatting)
-- The local web conversation history is not yet durable across page reloads
-- Retrieval tuning is heuristic, not learned
-
----
-
-## Future Improvements
-
-- Page-level citation mapping
-- Query-type-aware retrieval (broad vs. focused questions)
-- Improved thematic aggregation across chapters
-- UI for browsing results
-- Index export tooling
-
----
-
-## Why This Project
-
-Archivist demonstrates:
-
-- applied use of RAG systems on real-world long-form text
-- handling of historical and narrative data (not just structured documents)
-- tradeoffs between semantic retrieval and exact matching
-- building domain-specific AI tools beyond generic chat interfaces
-
----
+The repository intentionally ignores the manuscript, PDF, chunks, vector store, runtime bundles,
+usage databases, API keys, and generated frontend build. Public responses disclose only generated
+answers, source numbers, edition-qualified page locations, and tightly bounded excerpts.
 
 ## Author
 
 Michael Crombie  
 B.S. Computer Science & History, William & Mary
-
----
-
-## License
-
-MIT (or choose your preferred license)

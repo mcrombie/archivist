@@ -1,10 +1,33 @@
 # Archivist Public Demo and Edition Locator Design
 
-**Status:** pre-implementation design, 2026-07-27  
+**Status:** implemented and locally release-verified, 2026-07-27
 **Scope:** public source disclosure, edition-specific locators, and the safety gate before Cromblog
 integration  
-**Out of scope for this document:** retrieval tuning, answer-generation quality, deployment-provider
-selection, and implementation
+**Out of scope for this document:** retrieval tuning and the broader ten-question answer-quality
+evaluation
+
+## Implementation outcome
+
+The design is now represented in code:
+
+- a verified, text-free locator artifact covers all 481 retrieval-eligible chunks;
+- `development` and `public_demo` are startup-only server exposure profiles;
+- public source objects contain edition-qualified locations and bounded excerpts rather than
+  diagnostic chunks;
+- the public app exposes an explicit route allowlist, server-fixed retrieval depth, rate and
+  concurrency controls, a hard monthly OpenAI ceiling, safe errors, and security headers;
+- the private public-runtime archive has passed the same full corpus/store identity preflight as
+  the local application;
+- a Render Blueprint and an owner runbook prepare a paid single-instance service with an encrypted
+  persistent disk;
+- Cromblog can discover the final service URL through `NEXT_PUBLIC_ARCHIVIST_URL` without coupling
+  either repository to a guessed deployment address.
+
+The public smoke performed on July 27 used four paid turns: a focused opening question, a
+context-dependent follow-up, a broad tobacco/labor question, and a deliberate absence question.
+The three answerable turns succeeded; the absent fact produced `insufficient_evidence`. Measured
+latencies were 32.63, 16.27, 51.21, and 3.86 seconds. The isolated ledger estimated `$0.27691761`
+for the complete smoke.
 
 ## Product decision
 
@@ -70,24 +93,24 @@ at the Prologue:
 Every public page citation must name its edition. Use `Typeset PDF (July 6, 2026), p. 33` or
 `Typeset PDF (July 6, 2026), pp. 33-35`, never an unqualified `p. 33`.
 
-### Feasibility pilot
+### Production locator result
 
-A read-only alignment pilot normalized the active 481 chunks and the text extracted from all 594
-PDF pages, then sampled six 12-token anchors across each chunk. Every eligible chunk produced at
-least two exact anchors in the PDF:
+A deterministic alignment pass normalized the active 481 chunks and text extracted from all 594
+PDF pages, then combined six sampled 12-token anchors with dense boundary anchors and monotonic
+document-order checks. Every eligible chunk received an edition locator:
 
-| Preliminary mapped span | Chunks |
+| Verified mapped span | Chunks |
 |---|---:|
-| One physical page | 39 |
-| Two physical pages | 360 |
-| Three physical pages | 76 |
-| Four physical pages | 6 |
+| One typeset page | 31 |
+| Two typeset pages | 353 |
+| Three typeset pages | 97 |
 | Unmapped | 0 |
 
-This establishes that deterministic mapping is viable even though the DOCX and PDF are different
-file representations. It is not yet the production locator artifact. Production mapping must also
-verify monotonic order, resolve repeated phrases, bind every result to both source hashes, and
-visually inspect boundary cases.
+The artifact verifies input hashes, resolves repeated anchors without allowing document order to
+regress, binds results to the source and corpus identities, and records confidence and method
+without manuscript text. Stratified visual review covered the Introduction, the numbering
+transition, chapter openings, footnote-heavy and multi-page chunks, Epilogue, Afterword, and
+appendices. That review corrected Appendix B's endpoint from page 451 to pages 451–452.
 
 ## Edition-independent locator model
 
@@ -115,8 +138,8 @@ ChunkLocator
   method
 ```
 
-The first generated artifact should be
-`fixtures/edition_locators/typeset_pdf_0706.json`. It may be committed only if it contains chunk
+The first generated artifact is
+`fixtures/edition_locators/typeset_pdf_0706.json`. It contains chunk
 identifiers, edition metadata, page labels, hashes, confidence values, and no manuscript text. The
 PDF itself remains private and gitignored.
 
@@ -159,8 +182,8 @@ released. This is complementary to, not a substitute for, the source-payload lim
 
 ## Public API boundary
 
-The public deployment should expose an allowlisted API rather than attempting to hide local routes
-in the frontend. At minimum:
+The public deployment exposes an allowlisted API rather than attempting to hide local routes in
+the frontend:
 
 - allow the health check and the built-in manuscript question endpoint;
 - return a public source DTO with locators and bounded `excerpt`, never full `text` or merged
@@ -173,8 +196,11 @@ in the frontend. At minimum:
 - replace raw exception messages with public-safe errors;
 - keep the OpenAI key, chunks, Chroma store, source PDF, and manuscript files server-side.
 
-The public build must be tested from an anonymous browser against route enumeration, not merely
-through the intended UI.
+Direct anonymous HTTP checks verified the release boundary independently of the intended UI:
+documentation, management, source, embedding, cost, and custom-project routes return `404`;
+client-supplied tuning returns `422`; oversized input returns `413`; and the request gate returns
+`429` with `Retry-After`. Public responses also carry CSP, frame, referrer, and MIME-sniffing
+protections.
 
 ## Production mapping acceptance criteria
 
@@ -195,14 +221,15 @@ The first edition locator implementation is complete only when:
 
 ## Cromblog integration gate
 
-Cromblog integration remains straightforward but should wait until this public boundary exists.
-The eventual flow is:
+Cromblog's code integration is prepared, but its external live-demo link remains intentionally
+inactive until the owner creates the Render service and the deployed boundary passes the same
+checks. The flow is:
 
 1. deploy Archivist as a separate, long-running service with its private full-corpus artifact;
 2. verify public mode, page locators, excerpt limits, rate limits, cost limits, and long-answer
    behavior anonymously;
-3. turn Cromblog's existing Archivist feature panel into a live-demo link;
-4. add Archivist as a project entry with a clear explanation that it queries one published book;
+3. set Cromblog's `NEXT_PUBLIC_ARCHIVIST_URL` to the verified deployment;
+4. rebuild Cromblog so its existing feature panel and Archivist project entry expose the live link;
 5. add no Archivist blog post until the shareable version and its disclosed limitations are ready.
 
 ## Deferred edition work

@@ -60,13 +60,14 @@ from retrieval import (
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-PROJECTS_DIR = BASE_DIR / "projects"
-CHROMA_DIR = BASE_DIR / "chroma_db"
-LEGACY_CHUNKS_FILE = BASE_DIR / "output" / "chunks.json"
-LEGACY_MANUSCRIPT_DIR = BASE_DIR / "manuscript"
-EMBED_MODEL = "text-embedding-3-small"
-
 load_dotenv(BASE_DIR / ".env")
+
+DATA_ROOT = Path(os.getenv("ARCHIVIST_DATA_ROOT", str(BASE_DIR))).expanduser().resolve()
+PROJECTS_DIR = DATA_ROOT / "projects"
+CHROMA_DIR = DATA_ROOT / "chroma_db"
+LEGACY_CHUNKS_FILE = DATA_ROOT / "output" / "chunks.json"
+LEGACY_MANUSCRIPT_DIR = DATA_ROOT / "manuscript"
+EMBED_MODEL = "text-embedding-3-small"
 
 SUPPORTED_UPLOAD_SUFFIXES = SUPPORTED_DOCUMENT_SUFFIXES | {".zip"}
 INDEX_NAME_PATTERN = re.compile(r"(^|[_\-\s])index($|[_\-\s\.])", re.IGNORECASE)
@@ -406,6 +407,25 @@ def chroma_collection_count(project_id: str) -> int:
         return int(collection.count())
     except Exception:
         return 0
+
+
+def current_answer_corpus_integrity():
+    """Run the full local, text-free identity preflight used by Answer Mode."""
+
+    collection = chroma_client().get_collection(name=collection_name("current"))
+    chunks = load_project_chunks("current")
+    fixture_manifest = BASE_DIR / "fixtures" / "corpus_manifest.json"
+    if not fixture_manifest.is_file():
+        raise FileNotFoundError("The corpus manifest is unavailable.")
+    corpus_manifest = read_json(fixture_manifest, None)
+    corpus_manifest_sha256 = hashlib.sha256(fixture_manifest.read_bytes()).hexdigest()
+    return preflight_answer_corpus(
+        collection_handle=collection,
+        chunks=chunks,
+        corpus_manifest=corpus_manifest,
+        corpus_manifest_sha256=corpus_manifest_sha256,
+        require_store_identity=True,
+    )
 
 
 def embed_texts(client: OpenAI, texts: list[str]) -> list[list[float]]:

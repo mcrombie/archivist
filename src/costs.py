@@ -201,7 +201,12 @@ def usage_scope(
 
 def usage_db_path() -> Path:
     configured = os.getenv("ARCHIVIST_USAGE_DB", "").strip()
-    return Path(configured).expanduser() if configured else DEFAULT_USAGE_DB
+    if configured:
+        return Path(configured).expanduser()
+    data_root = os.getenv("ARCHIVIST_DATA_ROOT", "").strip()
+    if data_root:
+        return Path(data_root).expanduser() / "runtime" / "usage.sqlite3"
+    return DEFAULT_USAGE_DB
 
 
 def _value(value: object, name: str, default: Any = None) -> Any:

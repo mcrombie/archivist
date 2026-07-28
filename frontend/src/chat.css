@@ -1638,6 +1638,31 @@ body {
   border-top-color: var(--chat-border);
 }
 
+.archivist-response .public-source-card blockquote {
+  margin: 0;
+  border-left: 2px solid var(--chat-accent);
+  color: var(--chat-text);
+  padding: 11px 13px;
+  font-family: var(--chat-reading-font);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.archivist-response .public-source-card .public-edition-label {
+  border: 0;
+  padding-bottom: 3px;
+  color: var(--chat-accent-bright);
+  font-family: var(--chat-ui-font);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.archivist-response .public-source-card .public-source-location-only {
+  font-style: italic;
+}
+
 .archivist-response .copy-reference {
   min-height: 42px;
   border-color: var(--chat-border);

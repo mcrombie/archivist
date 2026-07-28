@@ -1494,8 +1494,8 @@ subject-specific, impersonal answer in the interface.
 - Do not imply conversation history survives a page reload; it currently lasts only for the open
   page.
 - Do not imply that typeset-PDF page numbers apply to the paperback, hardcover, or ebook.
-- Do not call the feasibility pilot a finished locator artifact until the production mapping and
-  visual boundary review pass.
+- Do not imply that the verified typeset-PDF locator profile also verifies paperback, hardcover,
+  or ebook pagination.
 
 ## Privacy and publishing guardrails
 
@@ -1523,9 +1523,108 @@ subject-specific, impersonal answer in the interface.
 - Baseline retrieval, citation, faithfulness, and abstention measurements with run-to-run spread.
 - Measurement-driven retrieval changes such as hybrid search, reranking, or query routing.
 - Durable saved conversations.
-- Production `typeset_pdf_0706` locator generation and visual boundary verification.
 - Paperback, hardcover, and ebook locator profiles after their pagination is supplied.
-- Public-demo response minimization, local-route removal, and manuscript-protection controls.
+- Hosted public-demo observation: real cold-start/latency behavior, memory headroom, abuse traffic,
+  and whether the initial monthly budget is appropriate.
+
+### 2026-07-27 - The typeset-PDF locator became a verified production artifact
+
+- Built a deterministic edition-locator generator bound to the exact hashes of the private July 6
+  typeset PDF, text-free corpus manifest, and private chunk file. It refuses to run if any of those
+  inputs change.
+- Generated edition-qualified page spans for all 481 retrieval-eligible chunks. The committed
+  fixture contains only chunk IDs, page labels, physical alignment positions, hashes, methods, and
+  confidence metadata; it contains no manuscript or PDF text.
+- The mapper uses six exact twelve-token anchors to identify each chunk's monotonic occurrence and
+  denser local anchors to recover page boundaries that sparse sampling can miss. Ten repeated-anchor
+  cases were resolved without allowing document order to regress.
+- Visual review covered the Introduction, the Roman-to-Arabic numbering transition, a chapter
+  opening, a footnote-heavy page, a multi-page span, the Epilogue, Afterword, and Appendices A, B,
+  and D. That review found a useful real defect: Appendix B continues onto typeset page 452 even
+  though its sparse anchors initially landed only on 451. Dense boundary refinement corrected the
+  public locator to `pp. 451-452`.
+- The final distribution is 31 one-page, 353 two-page, and 97 three-page chunk spans. This differs
+  from the earlier feasibility sample because the production pass deliberately maps complete
+  endpoints instead of reporting only the outermost sparse sample hits.
+- This locator profile applies only to `Typeset PDF (July 6, 2026)`. Paperback, hardcover, and
+  ebook addresses remain separate future profiles and must not inherit these page numbers.
+
+### 2026-07-27 - Public Archivist became a bounded product rather than a public copy of development
+
+- Added two startup-only exposure profiles over the same 481-chunk retrieval corpus. Local
+  `development` keeps the full diagnostic source display and owner cost tools. `public_demo`
+  cannot be selected by the browser and exposes only the conversation needed for the built-in
+  manuscript.
+- Kept the private and public products on one retrieval and answer path. The public boundary does
+  not weaken the RAG by searching a sample of the book; it limits what leaves the server after
+  generation.
+- Replaced public full-chunk source objects with a minimal, versioned DTO. Every cited source keeps
+  its model-assigned number and receives a chapter title plus a qualified
+  `Typeset PDF (July 6, 2026), p./pp.` location. At most three sources receive excerpts; one
+  excerpt is capped at 280 characters/two sentences and the complete source panel at 700 quoted
+  characters.
+- Added a second release guard that rejects an answer reproducing 45 or more contiguous manuscript
+  words. This is deliberately separate from excerpt truncation: source-card limits cannot protect
+  the book if the generated answer itself turns into a long quotation.
+- Removed the public attack surface instead of hiding controls. The public app allowlists
+  liveness, readiness, configuration, and the current-book question endpoint. Upload, project
+  creation, embedding, index, source-file, source-search, cost-management, OpenAPI, and arbitrary
+  project routes return `404`.
+- Removed browser control of retrieval depth and the budget override. The server fixes retrieval
+  depth, caps request size, permits one active model request, rate-limits each reader and the
+  single instance globally, and requires a positive monthly OpenAI ceiling before public mode can
+  start.
+- Added safe public failures and browser security headers. Public errors retain an internal
+  request ID for logs without returning exception messages, filenames, paths, diagnostics,
+  resolved queries, costs, or ledger state.
+- Kept liveness distinct from readiness. A new service can boot while its empty persistent disk is
+  being seeded, but readiness does not pass until all 481 Chroma records, private chunks, manifest,
+  and edition locators pass the full identity preflight.
+- Built a private, gitignored deployment archive containing only the pruned live Chroma collection,
+  matching chunks, and a text-free identity manifest. It is 3,274,947 bytes with SHA-256
+  `37642f9d495d93834829d0749d2c25389c069bd160caf438bbc34b6c2f4ad78f`.
+  Neither the source DOCX nor PDF is inside it, and the archive still must never be published.
+- Selected a paid, single-instance Render web service with a 1 GB encrypted persistent disk as the
+  first hosting shape. This matches the current native Python/FastAPI/Chroma application and its
+  in-memory concurrency gate. The Hobby workspace can remain free; the expected baseline host
+  charge is one Starter instance plus one GB of disk. Hosting is separate from OpenAI API usage.
+- Added a repository-root Render Blueprint with automatic deploys initially disabled and a
+  `$5.00` application-level monthly OpenAI ceiling. The OpenAI key remains an unsynchronized
+  dashboard secret. The manuscript bundle is transferred directly to `/var/data` only after the
+  service exists.
+- Ran a four-turn public-mode release smoke against an isolated ledger:
+  - focused Edwin Sandys opening: answered in 32.63 seconds;
+  - contextual self-government follow-up: answered in 16.27 seconds;
+  - broad tobacco/labor synthesis: answered in 51.21 seconds;
+  - absent cause of Sandys's death: correctly returned `insufficient_evidence` in 3.86 seconds.
+- The smoke cost an estimated `$0.27691761`: four answer-generation calls, one query-planning call,
+  one follow-up-resolution call, and four tiny query embeddings. The broad synthesis was both the
+  slowest and most expensive turn, which is an honest early public-performance constraint rather
+  than a reason to remove its completeness pass.
+- The broad answer returned eight edition locators but only three excerpts; its longest excerpt
+  was 277 characters. All public answers omitted costs, diagnostics, resolved queries, internal
+  paths, physical PDF positions, chunk IDs, and full text.
+- Direct anonymous abuse checks confirmed `404` for private/API-documentation routes, `422` for
+  client retrieval tuning, `413` for an oversized body, and `429` plus `Retry-After` after the
+  per-reader request limit. CSP, clickjacking, referrer, and MIME-sniffing headers were present.
+- Prepared Cromblog without inventing a production URL. Archivist now has a real Projects entry,
+  and the featured panel contains an English product explanation instead of placeholder Latin.
+  Before deployment it says `Deployment ready` and links to that entry. Once
+  `NEXT_PUBLIC_ARCHIVIST_URL` contains a verified HTTPS address, both surfaces expose the live
+  demo automatically. No Archivist blog post was added.
+- Wrote an owner deployment runbook covering account setup, Blueprint review, the private disk
+  transfer, exact hashes, restart/readiness checks, anonymous release checks, and the final
+  Cromblog environment variable. The remaining boundary is external and deliberate: create the
+  Render account and payment method, review the billable resources, and enter the API key without
+  sharing it.
+- Full local verification passed before the hosting handoff: 471 backend tests passed with one
+  intentional skip, Ruff passed, both frontend production builds passed, and the isolated private
+  runtime bundle returned ready with all 481 records.
+
+Useful blog lesson: deploying a RAG demo is not just putting its development server on the
+internet. The retrieval corpus, disclosure payload, cost authority, route surface, and readiness
+definition are separate design decisions. Cromblog can make the experience feel like one portfolio
+without forcing a static Next.js host to carry Python, native Chroma, or a private manuscript.
 
 ## Update convention
 

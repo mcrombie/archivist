@@ -21,7 +21,7 @@ export type Project = {
   is_builtin?: boolean;
 };
 
-export type SourceChunk = {
+export type DevelopmentSource = {
   source_number: number;
   citation_label: string;
   document: string;
@@ -33,10 +33,44 @@ export type SourceChunk = {
   text: string;
 };
 
+export type PublicSource = {
+  kind: "public_locator";
+  source_number: number;
+  citation_label: string;
+  title: string;
+  edition: {
+    id: string;
+    name: string;
+    locator_kind: "page" | "location" | "section";
+  };
+  locator: {
+    start: string;
+    end: string;
+    label: string;
+  };
+  excerpt?: string;
+};
+
+export type SourceReference = DevelopmentSource | PublicSource;
+export type SourceChunk = DevelopmentSource;
+
 export type DisplayGroup = {
   source_numbers: number[];
   text: string;
   citation_labels: string[];
+};
+
+export type ExposureProfile = "development" | "public_demo";
+
+export type AppConfig = {
+  exposure_profile: ExposureProfile;
+  project: Project;
+  features: {
+    cost_ledger: boolean;
+    full_source_text: boolean;
+    local_tools: boolean;
+    public_page_locators: boolean;
+  };
 };
 
 export type ConversationHistoryTurn = {
@@ -193,6 +227,10 @@ export async function listProjects(): Promise<Project[]> {
   return data.projects;
 }
 
+export async function getAppConfig(): Promise<AppConfig> {
+  return requestJson<AppConfig>("/api/config");
+}
+
 export async function createProject(input: {
   projectName: string;
   ignoreExistingIndex: boolean;
@@ -232,8 +270,22 @@ export async function askQuestion(
     conversationId: string;
     turnId: string;
     allowOverBudget?: boolean;
+    publicDemo?: boolean;
   }
 ) {
+  const body: Record<string, unknown> = {
+    question,
+    historiographical_lens: facets.historiographicalLens,
+    voice: facets.voice,
+    worldview: facets.worldview,
+    history,
+    conversation_id: options.conversationId,
+    turn_id: options.turnId
+  };
+  if (!options.publicDemo) {
+    body.n_results = nResults;
+    body.allow_over_budget = options.allowOverBudget ?? false;
+  }
   return requestJson<{
     answer: string;
     answer_status: string;
@@ -243,25 +295,16 @@ export async function askQuestion(
     historiographical_lens: HistoriographicalLens;
     voice: AnswerVoice;
     worldview: AnswerWorldview;
-    sources: SourceChunk[];
-    display_groups: DisplayGroup[];
-    costs: CostSummary | null;
+    source_schema?: "archivist.public_sources/1";
+    sources: SourceReference[];
+    display_groups?: DisplayGroup[];
+    costs?: CostSummary | null;
   }>(
     `/api/projects/${projectId}/question`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question,
-        n_results: nResults,
-        historiographical_lens: facets.historiographicalLens,
-        voice: facets.voice,
-        worldview: facets.worldview,
-        history,
-        conversation_id: options.conversationId,
-        turn_id: options.turnId,
-        allow_over_budget: options.allowOverBudget ?? false
-      })
+      body: JSON.stringify(body)
     }
   );
 }

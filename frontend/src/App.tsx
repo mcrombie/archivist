@@ -26,6 +26,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import {
+  AppConfig,
   ApiRequestError,
   AnswerFacets,
   AnswerVoice,
@@ -37,16 +38,18 @@ import {
   DisplayGroup,
   HistoriographicalLens,
   Project,
+  PublicSource,
   SourceChunk,
+  SourceReference,
   askQuestion,
   createProject,
   embedProject,
   generateIndexEntry,
   getCandidateTerms,
+  getAppConfig,
   getCostSettings,
   getCostSummary,
   getManuscriptSources,
-  listProjects,
   searchExistingIndex,
   updateCostSettings
 } from "./api";
@@ -332,13 +335,14 @@ const INDEX_SEARCH_STEPS = [
 
 function App() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [stage, setStage] = useState<AppStage>("loading");
   const [notice, setNotice] = useState<Notice>(null);
 
   useEffect(() => {
-    listProjects()
-      .then((nextProjects) => {
-        const builtInProject = nextProjects.find((project) => project.id === "current");
+    getAppConfig()
+      .then((config) => {
+        const builtInProject = config.project;
         const ready = builtInProject
           && builtInProject.stats.searchable_chunks > 0
           && builtInProject.embedded
@@ -354,6 +358,7 @@ function App() {
           return;
         }
 
+        setAppConfig(config);
         setActiveProject(builtInProject);
         setStage("question");
       })
@@ -395,8 +400,8 @@ function App() {
         </section>
       ) : null}
 
-      {stage === "question" && activeProject ? (
-        <QuestionMode project={activeProject} setNotice={setNotice} />
+      {stage === "question" && activeProject && appConfig ? (
+        <QuestionMode config={appConfig} project={activeProject} setNotice={setNotice} />
       ) : null}
     </main>
   );
@@ -815,7 +820,7 @@ type ChatTurn = {
   answer: string;
   answerStatus?: string;
   resolvedQuery?: string;
-  sources: SourceChunk[];
+  sources: SourceReference[];
   displayGroups: DisplayGroup[];
   error?: string;
   validationErrorCode?: string;
@@ -823,6 +828,10 @@ type ChatTurn = {
   budgetBlocked?: boolean;
   turnCostUsd?: number;
 };
+
+function isPublicSource(source: SourceReference): source is PublicSource {
+  return "kind" in source && source.kind === "public_locator";
+}
 
 function splitInterpretiveAnswer(turn: ChatTurn) {
   const framed = turn.answerStatus === "answered"
@@ -1470,19 +1479,22 @@ function NewConversationSummary({
 }
 
 function QuestionMode({
+  config,
   project,
   setNotice
 }: {
+  config: AppConfig;
   project: Project;
   setNotice: (notice: Notice) => void;
 }) {
+  const publicDemo = config.exposure_profile === "public_demo";
   const [question, setQuestion] = useState("");
   const [facets, setFacets] = useState<AnswerFacets>({ ...DEFAULT_ANSWER_FACETS });
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState(createConversationId);
   const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
-  const [costSummaryLoading, setCostSummaryLoading] = useState(true);
+  const [costSummaryLoading, setCostSummaryLoading] = useState(config.features.cost_ledger);
   const [costSummaryError, setCostSummaryError] = useState<string | null>(null);
   const [costDrawerOpen, setCostDrawerOpen] = useState(false);
   const conversationRef = useRef<HTMLElement>(null);
@@ -1491,6 +1503,12 @@ function QuestionMode({
   const chatStarted = turns.length > 0;
 
   useEffect(() => {
+    if (!config.features.cost_ledger) {
+      setCostSummary(null);
+      setCostSummaryLoading(false);
+      setCostSummaryError(null);
+      return;
+    }
     let cancelled = false;
     setCostSummaryLoading(true);
     setCostSummaryError(null);
@@ -1507,9 +1525,10 @@ function QuestionMode({
     return () => {
       cancelled = true;
     };
-  }, [conversationId, project.id]);
+  }, [config.features.cost_ledger, conversationId, project.id]);
 
   async function refreshCostSummary() {
+    if (!config.features.cost_ledger) return;
     setCostSummaryLoading(true);
     setCostSummaryError(null);
     try {
@@ -1551,11 +1570,12 @@ function QuestionMode({
         {
           conversationId,
           turnId,
-          allowOverBudget
+          allowOverBudget,
+          publicDemo
         }
       );
       if (result.costs) setCostSummary(result.costs);
-      else void refreshCostSummary();
+      else if (config.features.cost_ledger) void refreshCostSummary();
       const validationFailed = result.answer_status === "generation_contract_failed";
       const pipelineFailed = validationFailed || result.answer_status === "corpus_integrity_failed";
       setTurns((current) => current.map((turn) => turn.id === turnId ? {
@@ -1570,7 +1590,7 @@ function QuestionMode({
           worldview: result.worldview
         },
         sources: result.sources,
-        displayGroups: result.display_groups,
+        displayGroups: result.display_groups ?? [],
         error: validationFailed
           ? "Relevant passages were found, but the generated response did not pass Archivist's evidence checks. No answer was presented as manuscript-grounded."
           : pipelineFailed
@@ -1591,7 +1611,7 @@ function QuestionMode({
       } : turn));
       // A later call in the turn can fail after an earlier paid call succeeded.
       // Refresh on every failure so the ledger never looks artificially stale.
-      void refreshCostSummary();
+      if (config.features.cost_ledger) void refreshCostSummary();
     }
   }
 
@@ -1745,12 +1765,14 @@ function QuestionMode({
             </div>
             {!chatStarted ? (
               <div className="chat-header-actions">
-                <CostMeterButton
-                  summary={costSummary}
-                  loading={costSummaryLoading}
-                  open={costDrawerOpen}
-                  onOpen={() => setCostDrawerOpen(true)}
-                />
+                {config.features.cost_ledger ? (
+                  <CostMeterButton
+                    summary={costSummary}
+                    loading={costSummaryLoading}
+                    open={costDrawerOpen}
+                    onOpen={() => setCostDrawerOpen(true)}
+                  />
+                ) : null}
                 <VibeControl />
               </div>
             ) : (
@@ -1813,12 +1835,14 @@ function QuestionMode({
               </span>
             </a>
             <div className="conversation-actions">
-              <CostMeterButton
-                summary={costSummary}
-                loading={costSummaryLoading}
-                open={costDrawerOpen}
-                onOpen={() => setCostDrawerOpen(true)}
-              />
+              {config.features.cost_ledger ? (
+                <CostMeterButton
+                  summary={costSummary}
+                  loading={costSummaryLoading}
+                  open={costDrawerOpen}
+                  onOpen={() => setCostDrawerOpen(true)}
+                />
+              ) : null}
               <NewConversationButton pending={pending} onStart={startNewConversation} />
               <VibeControl compact />
             </div>
@@ -1834,6 +1858,7 @@ function QuestionMode({
                   onCopy={() => copyAnswer(turn)}
                   onRetry={() => retryTurn(turn.id)}
                   onApprove={() => approveTurn(turn.id)}
+                  publicDemo={publicDemo}
                 />
               </li>
             ))}
@@ -1854,14 +1879,16 @@ function QuestionMode({
         </section>
       ) : null}
 
-      <CostLedgerDrawer
-        open={costDrawerOpen}
-        summary={costSummary}
-        loading={costSummaryLoading}
-        error={costSummaryError}
-        onClose={() => setCostDrawerOpen(false)}
-        onRefresh={refreshCostSummary}
-      />
+      {config.features.cost_ledger ? (
+        <CostLedgerDrawer
+          open={costDrawerOpen}
+          summary={costSummary}
+          loading={costSummaryLoading}
+          error={costSummaryError}
+          onClose={() => setCostDrawerOpen(false)}
+          onRefresh={refreshCostSummary}
+        />
+      ) : null}
     </section>
   );
 }
@@ -2043,7 +2070,8 @@ function ConversationTurn({
   copied,
   onCopy,
   onRetry,
-  onApprove
+  onApprove,
+  publicDemo
 }: {
   turn: ChatTurn;
   turnNumber: number;
@@ -2051,10 +2079,16 @@ function ConversationTurn({
   onCopy: () => void;
   onRetry: () => void;
   onApprove: () => void;
+  publicDemo: boolean;
 }) {
   const headingId = `turn-${turn.id}-question`;
   const sourceScopeId = `turn-${turn.id}-sources`;
-  const sourceCount = turn.displayGroups.reduce((count, group) => count + group.source_numbers.length, 0);
+  const sourceCount = publicDemo
+    ? turn.sources.length
+    : turn.displayGroups.reduce(
+        (count, group) => count + group.source_numbers.length,
+        0
+      );
   const facetSummary = answerFacetSummary(turn.facets);
 
   return (
@@ -2099,7 +2133,7 @@ function ConversationTurn({
                     : "Archivist could not complete this answer."}
               </strong>
               <p>{turn.error}</p>
-              {turn.validationErrorCode || turn.turnCostUsd !== undefined ? (
+              {!publicDemo && (turn.validationErrorCode || turn.turnCostUsd !== undefined) ? (
                 <details className="turn-error-details">
                   <summary>Technical details</summary>
                   {turn.validationErrorCode ? (
@@ -2114,7 +2148,7 @@ function ConversationTurn({
                 </details>
               ) : null}
             </div>
-            {turn.budgetBlocked ? (
+            {turn.budgetBlocked && !publicDemo ? (
               <button type="button" onClick={onApprove}>
                 <CircleDollarSign size={15} />
                 Approve one request
@@ -2141,7 +2175,7 @@ function ConversationTurn({
               />
             </div>
             <div className="archivist-response-footer">
-              {turn.displayGroups.length ? (
+              {sourceCount ? (
                 <details className="turn-sources-disclosure">
                   <summary>
                     <span>
@@ -2151,11 +2185,18 @@ function ConversationTurn({
                     </span>
                     <ChevronDown size={15} aria-hidden="true" />
                   </summary>
-                  <DisplayGroups
-                    title="Manuscript sources"
-                    groups={turn.displayGroups}
-                    sourceScopeId={sourceScopeId}
-                  />
+                  {publicDemo ? (
+                    <PublicSources
+                      sources={turn.sources.filter(isPublicSource)}
+                      sourceScopeId={sourceScopeId}
+                    />
+                  ) : (
+                    <DisplayGroups
+                      title="Manuscript sources"
+                      groups={turn.displayGroups}
+                      sourceScopeId={sourceScopeId}
+                    />
+                  )}
                 </details>
               ) : null}
               <div className="turn-response-actions">
@@ -2363,7 +2404,7 @@ function OutputBlock({
   title: string;
   body: string;
   empty: string;
-  sources?: SourceChunk[];
+  sources?: SourceReference[];
   sourceScopeId?: string;
 }) {
   const paragraphs = body ? body.split(/\n{2,}/) : [];
@@ -2392,7 +2433,7 @@ function CitationText({
   sourceScopeId
 }: {
   body: string;
-  sources: SourceChunk[];
+  sources: SourceReference[];
   sourceScopeId?: string;
 }) {
   if (!sources.length) return <>{body}</>;
@@ -2408,9 +2449,13 @@ function CitationText({
         const citedSources = sourceNumbers.map((sourceNumber) => sourceByNumber.get(sourceNumber));
         if (citedSources.some((source) => !source)) return part;
 
-        const resolvedSources = citedSources as SourceChunk[];
+        const resolvedSources = citedSources as SourceReference[];
         const firstSource = resolvedSources[0];
-        const excerptText = firstSource.text.replace(/\s+/g, " ").trim();
+        const excerptText = (
+          isPublicSource(firstSource)
+            ? firstSource.excerpt ?? firstSource.citation_label
+            : firstSource.text
+        ).replace(/\s+/g, " ").trim();
         const excerpt = excerptText.slice(0, 220);
         const humanLabels = resolvedSources.map((source) => source.citation_label).join("; ");
         const controlledSourceId = sourceScopeId
@@ -2443,11 +2488,15 @@ function scopedSourceAnchor(scopeId: string, sourceNumber: number) {
   return `${scopeId}-source-${sourceNumber}`;
 }
 
-function openSource(source: SourceChunk, sourceScopeId?: string) {
+function openSource(source: SourceReference, sourceScopeId?: string) {
   const anchor = sourceScopeId
     ? document.getElementById(scopedSourceAnchor(sourceScopeId, source.source_number))
     : document.querySelector<HTMLElement>(`[data-source-numbers~="${source.source_number}"]`)
-      ?? document.getElementById(sourceAnchor(source));
+      ?? (
+        isPublicSource(source)
+          ? null
+          : document.getElementById(sourceAnchor(source))
+      );
   const details = anchor instanceof HTMLDetailsElement
     ? anchor
     : anchor?.closest<HTMLDetailsElement>("details");
@@ -2462,6 +2511,58 @@ function openSource(source: SourceChunk, sourceScopeId?: string) {
     ? "auto"
     : "smooth";
   details?.scrollIntoView({ behavior, block: "center" });
+}
+
+function PublicSources({
+  sources,
+  sourceScopeId
+}: {
+  sources: PublicSource[];
+  sourceScopeId: string;
+}) {
+  return (
+    <section className="sources-block public-sources-block" id={sourceScopeId}>
+      <div className="panel-title">
+        <h2>Edition references</h2>
+        <span>
+          Typeset PDF · {sources.length} {sources.length === 1 ? "source" : "sources"}
+        </span>
+      </div>
+      <div className="source-stack">
+        {sources.map((source) => (
+          <details
+            id={scopedSourceAnchor(sourceScopeId, source.source_number)}
+            key={source.source_number}
+            className="source-card public-source-card"
+            data-source-numbers={source.source_number}
+          >
+            <summary>
+              <strong>{source.title}</strong>
+              <span>Source {source.source_number} · {source.locator.label}</span>
+            </summary>
+            <div className="source-card-body">
+              <p className="public-edition-label">{source.edition.name}</p>
+              {source.excerpt ? (
+                <blockquote>{source.excerpt}</blockquote>
+              ) : (
+                <p className="public-source-location-only">
+                  This reference is shown by location without a quoted excerpt.
+                </p>
+              )}
+              <button
+                className="copy-reference"
+                type="button"
+                onClick={() => navigator.clipboard.writeText(source.citation_label)}
+              >
+                <Copy size={14} />
+                Copy edition reference
+              </button>
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function DisplayGroups({

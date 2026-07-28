@@ -9,6 +9,7 @@ dependencies = [
     "fastapi",
     "httpx",
     "openai",
+    "pypdf",
     "pydantic",
     "python-dotenv",
     "python-multipart",

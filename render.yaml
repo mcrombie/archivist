@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: archivist-cradle-of-the-empire
+    runtime: python
+    plan: starter
+    region: virginia
+    numInstances: 1
+    autoDeployTrigger: off
+    buildCommand: uv sync --frozen --no-dev && cd frontend && npm ci && npm run build
+    startCommand: uv run uvicorn web_api:app --app-dir src --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips "*"
+    healthCheckPath: /api/live
+    maxShutdownDelaySeconds: 120
+    disk:
+      name: archivist-private-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.13
+      - key: UV_VERSION
+        value: 0.11.7
+      - key: NODE_VERSION
+        value: 24.15.0
+      - key: ARCHIVIST_EXPOSURE_PROFILE
+        value: public_demo
+      - key: ARCHIVIST_DATA_ROOT
+        value: /var/data
+      - key: ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD
+        value: "5.00"
+      - key: ARCHIVIST_PUBLIC_REQUESTS_PER_MINUTE
+        value: "6"
+      - key: ARCHIVIST_PUBLIC_GLOBAL_REQUESTS_PER_MINUTE
+        value: "20"
+      - key: ARCHIVIST_PUBLIC_MAX_CONCURRENT_REQUESTS
+        value: "1"
+      - key: ARCHIVIST_PUBLIC_MAX_CONCURRENT_PER_CLIENT
+        value: "1"
+      - key: ARCHIVIST_PUBLIC_N_RESULTS
+        value: "5"
+      - key: OPENAI_API_KEY
+        sync: false
