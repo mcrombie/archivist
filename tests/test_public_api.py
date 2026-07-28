@@ -117,10 +117,13 @@ def test_public_app_exposes_only_the_allowlisted_api(monkeypatch):
     config = client.get("/api/config")
     assert config.status_code == 200
     assert config.json()["features"]["full_source_text"] is False
-    assert client.post(
+    question_response = client.post(
         "/api/projects/current/question",
         json={"question": "What happened?"},
-    ).status_code == 200
+    )
+    assert question_response.status_code == 200
+    assert question_response.json()["answer"] == "Synthetic answer."
+    assert "run_diagnostics" not in question_response.json()
 
     blocked = [
         ("GET", "/docs"),

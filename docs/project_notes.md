@@ -86,7 +86,8 @@ same judgment, and the voice shapes its expression.
 
 ## Public demo and edition locators
 
-The public demo will search the same complete 481-chunk substantive corpus as local development.
+The public demo at `https://archivist.mcrombie.com` searches the same complete 481-chunk
+substantive corpus as local development.
 The earlier representative-subset proposal is superseded. Manuscript protection moves to the
 response boundary: the full corpus and Chroma index remain private on the server, while public
 source cards expose edition-qualified locators and only brief, server-bounded quotations.
@@ -101,3 +102,14 @@ Locator metadata is edition-specific and keyed by stable chunk ID. The first pro
 embeddings or changing retrieval. Ebook profiles may use locations or sections rather than pages.
 See `docs/public_demo_design.md` for the source DTO, preliminary excerpt budget, mapping acceptance
 criteria, and Cromblog integration gate.
+
+The app is hosted as the Render service `archivist-cradle-of-the-empire`; its generated
+`onrender.com` address remains enabled as a fallback. Cloudflare supplies a DNS-only `archivist`
+CNAME, Render owns certificate issuance for the custom domain, and Cromblog's Vercel Production
+environment points `NEXT_PUBLIC_ARCHIVIST_URL` at the canonical address.
+
+The first live public-answer test found a boundary mismatch rather than a RAG failure. Public mode
+correctly omitted private `run_diagnostics`, but the frontend treated that object as required and
+crashed after the response arrived. Commit `1dd45aa` made the public-only response fields optional,
+guarded their reads, and moved the stored-vibe initializer into the CSP-compliant bundle. Public
+payload omission and frontend optional handling are now paired release checks.

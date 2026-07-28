@@ -1,6 +1,6 @@
 # Archivist Public Demo and Edition Locator Design
 
-**Status:** implemented and locally release-verified, 2026-07-27
+**Status:** implemented, deployed, and publicly verified, 2026-07-28
 **Scope:** public source disclosure, edition-specific locators, and the safety gate before Cromblog
 integration  
 **Out of scope for this document:** retrieval tuning and the broader ten-question answer-quality
@@ -20,8 +20,10 @@ The design is now represented in code:
   the local application;
 - a Render Blueprint and an owner runbook prepare a paid single-instance service with an encrypted
   persistent disk;
-- Cromblog can discover the final service URL through `NEXT_PUBLIC_ARCHIVIST_URL` without coupling
-  either repository to a guessed deployment address.
+- the canonical demo is `https://archivist.mcrombie.com`, with Render's generated subdomain kept
+  as an operational fallback;
+- Cromblog discovers that address through `NEXT_PUBLIC_ARCHIVIST_URL` without hard-coding hosting
+  details into either repository.
 
 The public smoke performed on July 27 used four paid turns: a focused opening question, a
 context-dependent follow-up, a broad tobacco/labor question, and a deliberate absence question.
@@ -219,18 +221,28 @@ The first edition locator implementation is complete only when:
    locally;
 9. retrieval, source ordering, `[Source N]` resolution, and evaluation results are unchanged.
 
-## Cromblog integration gate
+## Cromblog integration outcome
 
-Cromblog's code integration is prepared, but its external live-demo link remains intentionally
-inactive until the owner creates the Render service and the deployed boundary passes the same
-checks. The flow is:
+The integration gate passed on July 28, 2026:
 
-1. deploy Archivist as a separate, long-running service with its private full-corpus artifact;
-2. verify public mode, page locators, excerpt limits, rate limits, cost limits, and long-answer
-   behavior anonymously;
-3. set Cromblog's `NEXT_PUBLIC_ARCHIVIST_URL` to the verified deployment;
-4. rebuild Cromblog so its existing feature panel and Archivist project entry expose the live link;
-5. add no Archivist blog post until the shareable version and its disclosed limitations are ready.
+1. Archivist runs as a separate Render service with its private full-corpus artifact on the
+   persistent disk.
+2. Public mode, page locators, excerpt limits, rate limits, cost limits, and the disclosure
+   boundary passed anonymous checks.
+3. Cloudflare routes the DNS-only `archivist` CNAME to
+   `archivist-cradle-of-the-empire.onrender.com`; Render verified
+   `archivist.mcrombie.com` and issued its certificate.
+4. Cromblog's Vercel Production environment sets
+   `NEXT_PUBLIC_ARCHIVIST_URL=https://archivist.mcrombie.com`, and its featured panel and project
+   entry expose that live link.
+5. Render's generated address remains enabled as a fallback. The announcement blog post remains a
+   separate editorial step.
+
+The first live answer also exposed a useful contract defect: public payloads correctly omit
+private `run_diagnostics`, while the frontend had assumed the object was always present. Commit
+`1dd45aa` made those fields optional, guarded the UI diagnostic reads, and moved an inline
+startup script into the CSP-compliant bundle. The release check now treats a minimal public
+answer—with no private diagnostics—as the required frontend shape rather than an exceptional one.
 
 ## Deferred edition work
 

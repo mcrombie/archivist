@@ -1682,6 +1682,42 @@ demo to a sample. Code and the disclosure-safe interface deployed first, the com
 retrieval bundle crossed a separate authenticated channel, and readiness changed only after all
 481 records passed identity checks.
 
+### 2026-07-28 - The public boundary found one frontend assumption before launch closeout
+
+- The first live public answer reached the browser successfully, but the page turned blank while
+  rendering it. The API had behaved correctly: public mode deliberately omits
+  `run_diagnostics`, resolved queries, and other private implementation details.
+- The frontend still treated `run_diagnostics` as mandatory and read
+  `validation_error_code` from the missing object. That presentation-contract mismatch produced
+  the browser `TypeError`; it was not a retrieval, model, or manuscript-index failure.
+- Commit `1dd45aa` made public-only response fields optional in TypeScript and guarded diagnostic
+  reads. The same fix moved the stored-vibe initializer out of inline HTML and into the compiled
+  application bundle so the public Content Security Policy could remain strict.
+- The backend public-boundary test now explicitly checks the route's successful minimal response
+  without `run_diagnostics`, while the production frontend build type-checks every diagnostic read
+  against the optional contract. A live public question remains the final end-to-end release check.
+
+Useful blog lesson: privacy filtering changes an API's shape, not merely its contents. A frontend
+tested only against the richer development payload can fail precisely because the production
+server is withholding sensitive diagnostics as designed.
+
+### 2026-07-28 - Archivist received a canonical portfolio address
+
+- Registered `archivist.mcrombie.com` on the existing Render service. Render verified the domain
+  and issued its HTTPS certificate.
+- Added a Cloudflare **DNS-only** CNAME from `archivist` to
+  `archivist-cradle-of-the-empire.onrender.com`. The generated Render address remains enabled as
+  an operational fallback.
+- Updated Cromblog's Vercel Production `NEXT_PUBLIC_ARCHIVIST_URL` to
+  `https://archivist.mcrombie.com`, rebuilt the site, and verified that the custom-domain app and
+  the portfolio link both work.
+- This was an infrastructure and presentation change only. It did not move the corpus, rebuild the
+  private index, alter retrieval, or change the public disclosure boundary.
+
+Useful blog lesson: one portfolio can span several providers cleanly. Vercel serves Cromblog,
+Render runs the stateful Python/Chroma application, and Cloudflare supplies the small DNS bridge
+that gives the separate service a coherent `mcrombie.com` identity.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

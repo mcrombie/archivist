@@ -7,6 +7,8 @@ reader vary historiographical lens, voice, worldview, and visual presentation.
 
 It is not a manuscript-upload service or a general-purpose chatbot.
 
+Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
+
 ## Current product
 
 - one-page, conversational book interface;
@@ -110,7 +112,10 @@ Public mode:
 - disables API documentation and sanitizes errors.
 
 See [`docs/public_demo_design.md`](docs/public_demo_design.md) for the disclosure design and
-[`docs/public_deployment.md`](docs/public_deployment.md) for the Render handoff.
+[`docs/public_deployment.md`](docs/public_deployment.md) for the Render deployment and recovery
+runbook. The generated
+[`onrender.com`](https://archivist-cradle-of-the-empire.onrender.com) address remains enabled as
+an operational fallback, but `https://archivist.mcrombie.com` is the canonical reader-facing URL.
 
 ## Edition locators
 

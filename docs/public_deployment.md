@@ -2,7 +2,10 @@
 
 This runbook deploys Archivist as a single public Render web service while keeping the manuscript,
 typeset PDF, chunks, and Chroma index out of GitHub. Cromblog is the public doorway; the Archivist
-service runs separately and can later use a custom subdomain such as `archivist.cromblog.com`.
+service runs separately at the canonical public address
+`https://archivist.mcrombie.com`. Render's generated
+`https://archivist-cradle-of-the-empire.onrender.com` address remains enabled as an operational
+fallback.
 
 ## Prepared architecture
 
@@ -111,7 +114,7 @@ After restart:
 2. `GET /api/health` returns `200` with `{"status":"ready"}`.
 3. `GET /api/config` reports the `public_demo` profile, 481 searchable and embedded chunks,
    `full_source_text: false`, and `public_page_locators: true`.
-4. The opening page loads from the service's HTTPS `onrender.com` URL.
+4. The opening page loads from the service's HTTPS `onrender.com` fallback URL.
 5. One neutral question returns an answer with edition-qualified Typeset PDF page locators.
 6. Source cards expose no full chunk text, chunk IDs, physical PDF pages, or internal diagnostics.
 7. `/docs`, `/openapi.json`, project-management, embedding, source-file, and cost-setting routes
@@ -127,15 +130,49 @@ Do not connect Cromblog until all ten checks pass on the deployed URL.
 Cromblog is prepared to discover the demo URL at build time:
 
 ```text
-NEXT_PUBLIC_ARCHIVIST_URL=https://<render-service>.onrender.com
+NEXT_PUBLIC_ARCHIVIST_URL=https://archivist.mcrombie.com
 ```
 
 Set that value in Cromblog's existing hosting environment and rebuild Cromblog. Its featured
 Archivist panel and Projects entry will then expose an **Open live demo** link. Without the
 variable, the panel honestly links to the Archivist project record and says **Deployment ready**.
 
-The initial Render URL is sufficient. A custom `archivist.cromblog.com` domain is a later,
-optional DNS step and should be attempted only after the generated Render URL is stable.
+The production value is set in Vercel and the rebuilt Cromblog surfaces link to the canonical
+address.
+
+## Custom domain
+
+The canonical public address is `https://archivist.mcrombie.com`. It is configured in three
+places:
+
+1. Render's Archivist service registers `archivist.mcrombie.com` as a custom domain and issues its
+   TLS certificate.
+2. Cloudflare DNS contains a **DNS-only** CNAME named `archivist` targeting
+   `archivist-cradle-of-the-empire.onrender.com`.
+3. Cromblog's Vercel Production environment sets
+   `NEXT_PUBLIC_ARCHIVIST_URL=https://archivist.mcrombie.com`, followed by a production rebuild.
+
+Keep Render's generated subdomain enabled. It provides a direct recovery address if the custom
+DNS record is changed or temporarily unavailable. A custom-domain incident should not prompt a
+manuscript upload, index rebuild, or application redeploy: first verify the Cloudflare CNAME,
+Render's custom-domain verification and certificate status, and the Vercel environment variable.
+
+## Public-payload frontend regression
+
+Public responses intentionally omit private `run_diagnostics`, `resolved_query`, costs, and ledger
+state. On July 28, 2026, the first live-answer test exposed a presentation-contract mismatch: the
+public API correctly omitted `run_diagnostics`, but the frontend dereferenced it as a required
+object and crashed to a blank page. Commit `1dd45aa` made the public-only fields optional in the
+TypeScript response contract and guarded diagnostic reads. It also moved the stored-vibe
+initializer into the bundled application so the public CSP no longer blocks it as inline script.
+
+Treat both sides of this boundary as release checks:
+
+- `tests/test_public_api.py` verifies that public question responses omit private diagnostics;
+- `npm run build` type-checks the frontend against that optional public response shape.
+
+Before promoting a frontend change, submit one live public question and confirm that the answer
+renders even though no `run_diagnostics` object is returned.
 
 ## Operational limits
 
