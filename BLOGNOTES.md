@@ -1626,6 +1626,23 @@ internet. The retrieval corpus, disclosure payload, cost authority, route surfac
 definition are separate design decisions. Cromblog can make the experience feel like one portfolio
 without forcing a static Next.js host to carry Python, native Chroma, or a private manuscript.
 
+### 2026-07-28 - The first live Blueprint review caught a disk-specific Render constraint
+
+- Created the Render Hobby workspace, added billing, and pushed the prepared Archivist and
+  Cromblog commits to GitHub so the hosting handoff could begin.
+- Render successfully found the repository-root Blueprint, but rejected one optional lifecycle
+  setting: `maxShutdownDelaySeconds` is not supported on a service that also mounts a persistent
+  disk.
+- Removed that setting rather than weakening the one-instance persistent-disk architecture. The
+  application still handles ordinary process shutdown, while Render supplies its supported
+  disk-backed service lifecycle.
+- This was a configuration preflight failure only. No service or disk had been created and no
+  hosting deployment had begun when the correction was made.
+
+Useful blog lesson: a checked-in infrastructure file can be syntactically valid yet still violate
+a provider rule that depends on a combination of resources. Reviewing the provider's proposed
+resources before pressing Deploy caught the issue before it created a billable service.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
