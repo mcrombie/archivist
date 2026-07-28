@@ -1670,9 +1670,12 @@ resources before pressing Deploy caught the issue before it created a billable s
   oversized body returned `413`; and invalid no-model requests reached `429` with a
   `Retry-After` header.
 - GitHub deployment records confirmed that Cromblog's production environment is Vercel. Its
-  prepared integration now needs only `NEXT_PUBLIC_ARCHIVIST_URL` set to the verified Render URL
-  followed by a production rebuild; the URL remains deployment configuration rather than a
-  hard-coded source value.
+  prepared integration reads `NEXT_PUBLIC_ARCHIVIST_URL`, keeping the service address in
+  deployment configuration rather than hard-coded source.
+- Set that variable for Cromblog's Vercel Production environment and rebuilt the existing
+  `20aaeca` deployment. External checks confirmed `200` for the homepage and Projects page, a
+  live-demo label and verified Render link on both surfaces, and `200` from the final Archivist
+  target. No Archivist announcement post was added; that remains a separate editorial step.
 
 Useful blog lesson: keeping the corpus out of the repository did not require reducing the public
 demo to a sample. Code and the disclosure-safe interface deployed first, the complete private
