@@ -4,17 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Archivist</title>
-    <script>
-      (() => {
-        const validVibes = ["professional", "forest", "minimal", "whimsical", "codex", "ember", "ocean"];
-        try {
-          const storedVibe = window.localStorage.getItem("archivist:vibe");
-          document.documentElement.dataset.vibe = validVibes.includes(storedVibe) ? storedVibe : "codex";
-        } catch {
-          document.documentElement.dataset.vibe = "codex";
-        }
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

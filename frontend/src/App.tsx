@@ -1596,8 +1596,8 @@ function QuestionMode({
           : pipelineFailed
             ? result.answer
             : undefined,
-        validationErrorCode: result.run_diagnostics.validation_error_code ?? undefined,
-        stageTimingsMs: result.run_diagnostics.stage_timings_ms,
+        validationErrorCode: result.run_diagnostics?.validation_error_code ?? undefined,
+        stageTimingsMs: result.run_diagnostics?.stage_timings_ms,
         budgetBlocked: false,
         turnCostUsd: result.costs?.turn_usd
       } : turn));

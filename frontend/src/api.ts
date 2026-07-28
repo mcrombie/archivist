@@ -289,9 +289,9 @@ export async function askQuestion(
   return requestJson<{
     answer: string;
     answer_status: string;
-    evidence_decision: string;
-    run_diagnostics: AnswerRunDiagnostics;
-    resolved_query: string;
+    evidence_decision?: string;
+    run_diagnostics?: AnswerRunDiagnostics;
+    resolved_query?: string;
     historiographical_lens: HistoriographicalLens;
     voice: AnswerVoice;
     worldview: AnswerWorldview;
