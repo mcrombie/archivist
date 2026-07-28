@@ -1643,6 +1643,42 @@ Useful blog lesson: a checked-in infrastructure file can be syntactically valid 
 a provider rule that depends on a combination of resources. Reviewing the provider's proposed
 resources before pressing Deploy caught the issue before it created a billable service.
 
+### 2026-07-28 - Archivist went live with its private corpus outside GitHub
+
+- Deployed commit `b2a7ace` as the paid Starter service
+  `archivist-cradle-of-the-empire` in Render's Virginia region. The generated public address is
+  `https://archivist-cradle-of-the-empire.onrender.com`.
+- Confirmed that the process-only liveness probe returned `200` while readiness and public
+  configuration returned `503` before the corpus was installed. That distinction let the web
+  service deploy normally without pretending an empty disk could answer questions.
+- Authorized the development computer with a public SSH key and transferred the private
+  3,274,947-byte runtime archive directly to `/var/data`. The SHA-256 checksum on Render exactly
+  matched `37642f9d495d93834829d0749d2c25389c069bd160caf438bbc34b6c2f4ad78f`
+  before extraction.
+- The persistent disk contains the pruned Chroma collection, matching 481-chunk payload, and
+  text-free bundle manifest. The original manuscript DOCX and typeset PDF were not uploaded to
+  GitHub or included in the deployment archive.
+- After extraction, the already-running process passed readiness without a restart. Public
+  configuration reported `public_demo`, 481 searchable and embedded chunks, no cost ledger, no
+  local tools, no full source text, and enabled typeset-PDF page locators.
+- Ran one paid neutral live question: “Who was Edwin Sandys, and what did he do?” It completed in
+  about 41 seconds with `answered` status, six edition-qualified source locators, and excerpts on
+  only three of them. The response omitted internal paths, chunk IDs, retrieval diagnostics,
+  ledger data, and full manuscript blocks.
+- Anonymous boundary checks passed: the app shell returned `200`; API documentation, project
+  enumeration, and private routes returned `404`; a client retrieval override returned `422`; an
+  oversized body returned `413`; and invalid no-model requests reached `429` with a
+  `Retry-After` header.
+- GitHub deployment records confirmed that Cromblog's production environment is Vercel. Its
+  prepared integration now needs only `NEXT_PUBLIC_ARCHIVIST_URL` set to the verified Render URL
+  followed by a production rebuild; the URL remains deployment configuration rather than a
+  hard-coded source value.
+
+Useful blog lesson: keeping the corpus out of the repository did not require reducing the public
+demo to a sample. Code and the disclosure-safe interface deployed first, the complete private
+retrieval bundle crossed a separate authenticated channel, and readiness changed only after all
+481 records passed identity checks.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
