@@ -51,7 +51,7 @@ The web API needs:
   turn they support.
 - Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
   in both the conversation header and the top-of-page introduction.
-- Offers seven persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
+- Offers ten persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
 - Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
   combination is the unchanged, concise Neutral baseline. A non-default voice changes expression
   without automatically lengthening the answer. A non-Evidence-first lens or any worldview frames

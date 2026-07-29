@@ -36,6 +36,21 @@ export const VIBES = [
     id: "ocean",
     label: "Tidal Archive",
     description: "Deep ocean blue with sea-glass highlights."
+  },
+  {
+    id: "princess",
+    label: "Pretty Pink Princess",
+    description: "Blush parchment, pearl light, and a little royal sparkle."
+  },
+  {
+    id: "baron",
+    label: "Baleful Black Baron",
+    description: "Oxblood, iron, and a severe gothic reading chamber."
+  },
+  {
+    id: "rose",
+    label: "Rose & Ruin",
+    description: "Dusty rose and black velvet finished in champagne gold."
   }
 ] as const;
 
