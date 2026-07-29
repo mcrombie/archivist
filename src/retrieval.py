@@ -55,10 +55,10 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v8"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v9"
 BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
 BROAD_MECHANISM_CANDIDATE_LIMIT = 20
-BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-consensus-v1"
+BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v2"
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS_DIR"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
@@ -1129,6 +1129,58 @@ _BROAD_CANONICAL_ROLE_VOCABULARY = {
     "mechanism": "mechanism cause finance institution administration",
     "endpoint": "endpoint persistence transformation legacy",
 }
+_BROAD_STAGE_INTENT_GENERIC_TERMS = frozenset(
+    {
+        "development",
+        "developments",
+        "distinct",
+        "early",
+        "endpoint",
+        "function",
+        "historical",
+        "history",
+        "late",
+        "lineage",
+        "mechanism",
+        "middle",
+        "narrative",
+        "origin",
+        "period",
+        "provider",
+        "role",
+        "stage",
+        "trace",
+        "transition",
+        "wording",
+    }
+)
+_BROAD_STAGE_ROLE_SIGNAL_PATTERNS = {
+    "origin": re.compile(
+        r"\b(?:begin\w*|began|creat\w*|emerg\w*|establish\w*|first|"
+        r"form\w*|found\w*|initial\w*|origin\w*|precedent\w*|"
+        r"because|thereby|enable\w*|allow\w*)\b",
+        flags=re.IGNORECASE,
+    ),
+    "transition": re.compile(
+        r"\b(?:became|chang\w*|consolidat\w*|expand\w*|reorganiz\w*|"
+        r"replac\w*|shift\w*|transition\w*|transform\w*|because|"
+        r"thereby|enable\w*|allow\w*|lead\w*|led|result\w*|"
+        r"financ\w*|debt\w*|tax\w*|budget\w*|credit\w*)\b",
+        flags=re.IGNORECASE,
+    ),
+    "mechanism": re.compile(
+        r"\b(?:administ\w*|because|contract\w*|credit\w*|debt\w*|"
+        r"enable\w*|allow\w*|enforc\w*|financ\w*|implement\w*|"
+        r"institut\w*|require\w*|tax\w*|thereby|through|budget\w*)\b",
+        flags=re.IGNORECASE,
+    ),
+    "endpoint": re.compile(
+        r"\b(?:adapt\w*|aftermath\w*|consequen\w*|continu\w*|end\w*|"
+        r"legacy|normaliz\w*|permanent\w*|persist\w*|remain\w*|"
+        r"replac\w*|retain\w*|retire\w*|transform\w*|result\w*|led)\b",
+        flags=re.IGNORECASE,
+    ),
+}
 _NUMBERED_CHAPTER_ONE_PATTERN = re.compile(r"\bchapter\s+1\b")
 _NARRATIVE_ENDPOINT_PATTERN = re.compile(r"\b(?:conclusion|epilogue)\b")
 _SUPPLEMENTAL_BACK_MATTER_PATTERN = re.compile(
@@ -1471,17 +1523,104 @@ def _ranked_broad_supplemental_options(
     return options
 
 
+def _broad_stage_intent_query(
+    facet: object,
+    requirement_by_id: Mapping[str, object],
+) -> str:
+    """Return the planned historical function used to qualify a stage anchor."""
+
+    labels = [
+        str(_plan_value(requirement_by_id.get(requirement_id), "label", "")).strip()
+        for requirement_id in tuple(
+            _plan_value(facet, "requirement_ids", ()) or ()
+        )
+    ]
+    parts = [
+        *[label for label in labels if label],
+        str(_plan_value(facet, "search_query", "")).strip(),
+    ]
+    return " ".join(dict.fromkeys(part for part in parts if part))
+
+
+def _broad_stage_anchor_eligibility(
+    chunk: Mapping[str, Any] | None,
+    *,
+    original_query: str,
+    stage_intent_query: str,
+    role: str,
+) -> dict[str, Any]:
+    """Qualify an anchor by stage-specific intent before route consensus."""
+
+    intent_terms, distinctive_terms = _broad_stage_intent_terms(
+        original_query,
+        stage_intent_query,
+    )
+    chunk_terms = (
+        frozenset(_tokens(str(chunk.get("text") or "")))
+        if chunk is not None
+        else frozenset()
+    )
+    intent_match_count = len(intent_terms & chunk_terms)
+    distinctive_match_count = len(distinctive_terms & chunk_terms)
+    role_pattern = _BROAD_STAGE_ROLE_SIGNAL_PATTERNS.get(role)
+    role_signal_score = (
+        len(role_pattern.findall(str(chunk.get("text") or "")))
+        if chunk is not None and role_pattern is not None
+        else 0
+    )
+    required_intent_terms = distinctive_terms or intent_terms
+    required_intent_match_count = (
+        distinctive_match_count if distinctive_terms else intent_match_count
+    )
+
+    if chunk is None:
+        eligibility = "missing_chunk"
+    elif not required_intent_terms or required_intent_match_count <= 0:
+        eligibility = "no_stage_intent_match"
+    elif role_signal_score <= 0:
+        eligibility = "no_role_signal"
+    else:
+        eligibility = "eligible"
+
+    return {
+        "stage_anchor_eligible": eligibility == "eligible",
+        "stage_anchor_eligibility": eligibility,
+        "stage_intent_match_count": intent_match_count,
+        "stage_distinctive_intent_match_count": distinctive_match_count,
+        "stage_role_signal_score": role_signal_score,
+        "stage_intent_term_count": len(intent_terms),
+        "stage_distinctive_intent_term_count": len(distinctive_terms),
+    }
+
+
+def _broad_stage_intent_terms(
+    original_query: str,
+    stage_intent_query: str,
+) -> tuple[frozenset[str], frozenset[str]]:
+    intent_terms = frozenset(_query_terms(stage_intent_query))
+    original_terms = frozenset(_query_terms(original_query))
+    distinctive_terms = frozenset(
+        term
+        for term in intent_terms - original_terms
+        if term not in _BROAD_STAGE_INTENT_GENERIC_TERMS
+    )
+    return intent_terms, distinctive_terms
+
+
 def _ranked_broad_stage_anchor_candidates(
     lane: Mapping[str, Any],
     *,
     document_ordinal_by_id: Mapping[str, int],
+    chunk_by_id: Mapping[str, Mapping[str, Any]],
+    original_query: str,
+    stage_intent_query: str,
+    role: str,
 ) -> list[dict[str, Any]]:
-    """Rank one stage's protected anchor by agreement across three routes.
+    """Rank eligible protected anchors by agreement across three routes.
 
     Canonical, mechanism, and provider-relevance ranks are deliberately kept
-    as independent votes. Any candidate found by at least two routes outranks
-    every singleton. If the three routes do not agree on any candidate, the
-    application-owned canonical route remains the deterministic fallback.
+    as independent votes. Stage-intent and historical-role eligibility is an
+    earlier hard boundary: consensus can rank candidates only inside it.
     """
 
     candidate_pools = (
@@ -1533,9 +1672,16 @@ def _ranked_broad_stage_anchor_candidates(
         )
         fallback_pool_name = candidate_pools[fallback_pool_priority][0]
         fallback_rank = int(pool_ranks[fallback_pool_name])
+        eligibility = _broad_stage_anchor_eligibility(
+            chunk_by_id.get(chunk_id),
+            original_query=original_query,
+            stage_intent_query=stage_intent_query,
+            role=role,
+        )
         ranked.append(
             {
                 **candidate,
+                **eligibility,
                 "chunk_id": chunk_id,
                 "document": document,
                 "rrf_score": float(entry["rank_utility"]),
@@ -1554,6 +1700,7 @@ def _ranked_broad_stage_anchor_candidates(
 
     ranked.sort(
         key=lambda candidate: (
+            0 if bool(candidate["stage_anchor_eligible"]) else 1,
             0 if int(candidate["anchor_pool_hit_count"]) >= 2 else 1,
             (
                 -int(candidate["anchor_pool_hit_count"])
@@ -1761,6 +1908,12 @@ def retrieve_plan_from_collection(
         _plan_value(original_facets[0], "search_query", "")
     ).strip()
     requirements = tuple(_plan_value(plan, "requirements", ()) or ())
+    requirement_by_id = {
+        str(_plan_value(requirement, "requirement_id", "")): requirement
+        for requirement in requirements
+        if str(_plan_value(requirement, "requirement_id", ""))
+    }
+    lookup = build_chunk_lookup(chunks)
     broad_stage_positions = (
         _broad_stage_positions(facets, requirements) if broad else {}
     )
@@ -1819,6 +1972,19 @@ def retrieve_plan_from_collection(
         raw_hints = _plan_value(facet, "document_hints", ())
         document_hints = tuple(str(value) for value in (raw_hints or ()))
         stage_position = broad_stage_positions.get(facet_id)
+        stage_intent_query = (
+            _broad_stage_intent_query(facet, requirement_by_id)
+            if broad and role in _BROAD_STAGE_ROLES
+            else ""
+        )
+        stage_intent_terms, stage_distinctive_intent_terms = (
+            _broad_stage_intent_terms(
+                original_query,
+                stage_intent_query,
+            )
+            if stage_intent_query
+            else (frozenset(), frozenset())
+        )
         (
             stage_scope,
             chronology_band,
@@ -1992,6 +2158,11 @@ def retrieve_plan_from_collection(
             "chronology_min_document_ordinal": chronology_min_document_ordinal,
             "chronology_max_document_ordinal": chronology_max_document_ordinal,
             "stage_position": stage_position,
+            "stage_intent_query": stage_intent_query,
+            "stage_intent_term_count": len(stage_intent_terms),
+            "stage_distinctive_intent_term_count": len(
+                stage_distinctive_intent_terms
+            ),
             "candidates": primary_candidates,
             "mechanism_candidates": mechanism_candidates,
             "mechanism_queries": mechanism_queries,
@@ -2003,14 +2174,24 @@ def retrieve_plan_from_collection(
             "endpoint_anchor_candidates": endpoint_anchor_candidates,
             "trace": lane_trace,
         }
-        lane["stage_anchor_candidates"] = (
+        ranked_stage_anchor_candidates = (
             _ranked_broad_stage_anchor_candidates(
                 lane,
                 document_ordinal_by_id=document_ordinal_by_id,
+                chunk_by_id=lookup,
+                original_query=original_query,
+                stage_intent_query=stage_intent_query,
+                role=role,
             )
             if broad and role in _BROAD_STAGE_ROLES
             else []
         )
+        lane["stage_anchor_diagnostics"] = ranked_stage_anchor_candidates
+        lane["stage_anchor_candidates"] = [
+            candidate
+            for candidate in ranked_stage_anchor_candidates
+            if bool(candidate.get("stage_anchor_eligible"))
+        ]
         lanes.append(lane)
 
     ordered_lanes = sorted(lanes, key=lambda lane: _facet_priority(lane["facet"]))
@@ -2023,8 +2204,6 @@ def retrieve_plan_from_collection(
     stage_anchor_selected_by_facet: dict[str, list[str]] = {
         str(lane["facet_id"]): [] for lane in lanes
     }
-    lookup = build_chunk_lookup(chunks)
-
     def accept(candidate: Mapping[str, Any], facet_id: str) -> bool:
         chunk_id = str(candidate.get("chunk_id") or "")
         if not chunk_id:
@@ -2069,9 +2248,9 @@ def retrieve_plan_from_collection(
                 str(lane["facet_id"]),
             ),
         )
-        # Protect one candidate for every narrative stage. Agreement between
-        # canonical, mechanism, and provider-relevance routes takes precedence;
-        # a disjoint vote falls back to the application-owned canonical route.
+        # Protect one role-eligible candidate for every narrative stage, then
+        # rank only those candidates by cross-route agreement. No ineligible
+        # fallback may silently stand in for a missing historical function.
         for lane in stage_lanes:
             if len(selected_chunks) >= max_final_sources:
                 break
@@ -2236,7 +2415,9 @@ def retrieve_plan_from_collection(
     stage_coverage_satisfied_count = sum(
         any(
             chunk_id in source_number_by_id
-            for chunk_id in selected_by_facet[str(lane["facet_id"])]
+            for chunk_id in stage_anchor_selected_by_facet[
+                str(lane["facet_id"])
+            ]
         )
         for lane in stage_lanes
     )
@@ -2315,6 +2496,18 @@ def retrieve_plan_from_collection(
                 ),
                 **(
                     {
+                        "stage_intent_query_sha256": hashlib.sha256(
+                            lane["stage_intent_query"].encode("utf-8")
+                        ).hexdigest(),
+                        "stage_intent_query_char_count": len(
+                            lane["stage_intent_query"]
+                        ),
+                        "stage_intent_term_count": lane[
+                            "stage_intent_term_count"
+                        ],
+                        "stage_distinctive_intent_term_count": lane[
+                            "stage_distinctive_intent_term_count"
+                        ],
                         "canonical_query_sha256": hashlib.sha256(
                             lane["canonical_query"].encode("utf-8")
                         ).hexdigest(),
@@ -2343,6 +2536,33 @@ def retrieve_plan_from_collection(
                                 "chunk_id": str(
                                     candidate.get("chunk_id") or ""
                                 ),
+                                "eligible": bool(
+                                    candidate.get("stage_anchor_eligible")
+                                ),
+                                "eligibility": str(
+                                    candidate.get(
+                                        "stage_anchor_eligibility",
+                                        "missing_chunk",
+                                    )
+                                ),
+                                "intent_match_count": int(
+                                    candidate.get(
+                                        "stage_intent_match_count",
+                                        0,
+                                    )
+                                ),
+                                "distinctive_intent_match_count": int(
+                                    candidate.get(
+                                        "stage_distinctive_intent_match_count",
+                                        0,
+                                    )
+                                ),
+                                "role_signal_score": int(
+                                    candidate.get(
+                                        "stage_role_signal_score",
+                                        0,
+                                    )
+                                ),
                                 "pool_names": list(
                                     candidate.get("anchor_pool_names") or ()
                                 ),
@@ -2353,7 +2573,7 @@ def retrieve_plan_from_collection(
                                     candidate.get("anchor_pool_hit_count") or 0
                                 ),
                             }
-                            for candidate in lane["stage_anchor_candidates"]
+                            for candidate in lane["stage_anchor_diagnostics"]
                             if str(candidate.get("chunk_id") or "")
                         ],
                     }

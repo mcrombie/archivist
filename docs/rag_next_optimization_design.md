@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v14 implemented and verified offline on 2026-07-28; the unchanged
-G006/G007 paid gate completed but did not clear the full ten-question rerun
+Status: evidence-planned-v15 implemented and verified offline on 2026-07-28; its focused paid
+confirmation has not yet run
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -397,6 +397,38 @@ stage query remains the wrong anchor. The next bounded repair must make stage in
 anchor relevance and require the generated synthesis to state the causal or institutional link
 between surviving stages. The full ten-question rerun remains held because the focused gate missed
 its strict-claim and target-group thresholds.
+
+`Evidence-planned-v15` implements that repair as two explicit fail-closed contracts:
+
+- `faceted-hybrid-rrf-v9` derives each stage's intended historical function from its dedicated
+  requirement label and search facet. Before consensus ranking, a candidate must match the
+  distinctive stage intent and a corpus-agnostic, role-appropriate historical signal: formation or
+  enabling for origins; change, consolidation, or financing for transitions; implementation or
+  institutional mechanism for mechanism stages; and persistence, transformation, or consequence
+  for endpoints.
+- Consensus still ranks canonical, mechanism, and provider routes, but only inside that eligible
+  set. An ineligible three-route agreement cannot defeat an eligible lower-consensus passage, and
+  no canonical or provider fallback can conceal an empty eligible set. A missing eligible anchor is
+  recorded as a stage shortfall and creates no synthesis obligation.
+- The trace records only hashes, term counts, match counts, role-signal counts, finite eligibility
+  codes, and chunk IDs. It does not persist requirement labels, facet queries, or manuscript text.
+- Each pair of surviving consecutive stage anchors creates a required
+  `adjacent_stage_link` obligation in addition to its ordinary stage obligations. The link carries
+  the two ordered requirement IDs and names the predecessor source for orientation, but the claim
+  is bound to the later-stage source.
+- A link can be supported only by one atomic cause-or-mechanism unit that maps to both requirements
+  and whose later source explicitly states a causal or institutional continuation,
+  transformation, or departure. Independent truth at the two stages is not enough. If the later
+  source does not state the relationship, the model must mark the link unsupported; both affected
+  requirements are then prevented from claiming complete support.
+
+This opens retrieval trace schema `archivist.retrieval_trace/8`, answer request
+`archivist.answer_request/4`, evidence coverage `archivist.evidence_coverage/4`, and diagnostics
+`archivist.evidence_coverage_diagnostics/6`. It keeps `query-planner-v6`, the pinned models, the
+same eight final sources, one batched embedding operation, one answer-generation operation, no
+retry, and no second critic or verifier. The complete offline suite passes 483 tests with one
+intentional skip; focused Ruff checks pass. No OpenAI request was made while implementing or
+verifying v15.
 
 The implementation follows the bounded-call design in this document:
 
@@ -1024,6 +1056,10 @@ All first-pass tests are local and synthetic. They must not include manuscript o
 - premise lanes reserved without displacing the original lane;
 - broad proposals require dedicated requirements/facets and their protected sources survive
   direct-anchor promotion under the eight-source cap;
+- protected broad anchors must pass stage-intent and historical-role eligibility before consensus,
+  and an empty eligible set must remain an observable shortfall;
+- adjacent surviving stages create source-bounded link obligations that cannot be satisfied by
+  juxtaposing independently true passages;
 - no neighbor displaces a selected facet anchor;
 - eight-source cap and chronological ordering;
 - planner failure falls back without a paid retry;

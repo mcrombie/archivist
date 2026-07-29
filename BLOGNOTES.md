@@ -1790,6 +1790,40 @@ Useful blog lesson: agreement among retrieval methods is evidence of ranking con
 that the stage itself was framed correctly. A small paid gate can save both money and interpretive
 confusion when a technically valid answer still misses the argument the reader asked for.
 
+### 2026-07-28 - V15 turned historical role and connective argument into contracts
+
+- Implemented `evidence-planned-v15`, `faceted-hybrid-rrf-v9`, and
+  `broad-stage-role-eligibility-v2` after the v14 focused gate showed that agreement among retrieval
+  routes could still select the wrong kind of passage for a stage.
+- Every protected broad-stage candidate now has to match both the stage's distinctive planned
+  intent and a general historical signal appropriate to its role before canonical, mechanism, and
+  provider consensus can rank it. Three-route agreement no longer excuses a role mismatch.
+- Removed the silent ineligible fallback. If no passage qualifies, the trace reports a genuine
+  stage shortfall and generation receives no protected obligation for that stage. Supplemental
+  passages may still be inspected, but they cannot masquerade as the missing argumentative anchor.
+- Added a required `adjacent_stage_link` obligation for each surviving consecutive pair. It asks
+  for one explicit causal or institutional connection, maps to both ordered stage requirements,
+  and can cite only the later anchor that directly states the relationship. Merely placing two
+  accurate historical facts next to each other is now insufficient.
+- When that relationship is absent from the later source, the link remains unsupported and both
+  affected requirements are downgraded from complete support. This makes gaps in the manuscript
+  evidence visible instead of encouraging invented connective tissue.
+- Kept the manuscript, private index, pinned model settings, eight-source limit, one batched
+  embedding operation, one generation operation, and no-retry policy unchanged. The repair added
+  no critic, verifier, or second answer call.
+- Versioned the affected contracts as retrieval trace 8, answer request 4, evidence coverage 4,
+  coverage prompt 7, and evidence diagnostics 6. Text-free traces expose only hashes, counts,
+  finite eligibility codes, and IDs.
+- The focused regression set passed 200 tests. The complete offline suite then passed 483 tests
+  with one intentional skip, and Ruff passed on every changed Python and test file. No OpenAI call
+  was made; answer-quality improvement remains a measurement question for a separately authorized
+  focused gate.
+
+Useful blog lesson: retrieval confidence and historical function are different properties, and a
+chronology becomes an argument only when the evidence itself supports the links between its stages.
+Encoding both distinctions as fail-closed contracts gives the model less room to sound complete
+when the source chain is not.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

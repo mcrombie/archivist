@@ -24,6 +24,7 @@ from pydantic import (
     ValidationError,
     ValidationInfo,
     field_validator,
+    model_validator,
 )
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "EvidenceDimensionCoverage",
     "EvidenceObligationCoverage",
     "EvidenceObligationFocus",
+    "EvidenceObligationKind",
     "EvidenceObligationScope",
     "EvidenceCoverageAnswer",
     "EvidenceCoverageResult",
@@ -73,11 +75,11 @@ __all__ = [
 ]
 
 
-EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/3"
+EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/4"
 INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = (
     "archivist.interpretive_evidence_coverage/2"
 )
-EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/5"
+EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/6"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
 EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/5"
 
@@ -234,6 +236,11 @@ class EvidenceObligationFocus(StrEnum):
     CROSS_CUTTING = "cross_cutting"
 
 
+class EvidenceObligationKind(StrEnum):
+    STAGE = "stage"
+    ADJACENT_STAGE_LINK = "adjacent_stage_link"
+
+
 class EvidenceDimension(StrEnum):
     STAGE_DEVELOPMENT = "stage_development"
     CAUSE_OR_ENABLER = "cause_or_enabler"
@@ -241,6 +248,7 @@ class EvidenceDimension(StrEnum):
     CONSEQUENCE = "consequence"
     CONTINUITY_OR_CHANGE = "continuity_or_change"
     QUALIFICATION = "qualification"
+    ADJACENT_STAGE_LINK = "adjacent_stage_link"
 
 
 _DIMENSION_COMPATIBLE_ROLES = {
@@ -284,6 +292,12 @@ _DIMENSION_COMPATIBLE_ROLES = {
         {
             AnswerUnitRole.COUNTERARGUMENT,
             AnswerUnitRole.QUALIFICATION,
+        }
+    ),
+    EvidenceDimension.ADJACENT_STAGE_LINK: frozenset(
+        {
+            AnswerUnitRole.CAUSE,
+            AnswerUnitRole.MECHANISM,
         }
     ),
 }
@@ -448,7 +462,7 @@ class EvidenceObligationCoverage(_ContractModel):
 
 
 class EvidenceCoverageAnswer(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage/3"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage/4"] = Field(alias="schema")
     premise_decisions: tuple[PremiseDecision, ...] = Field(max_length=MAX_PREMISES)
     coverage: tuple[RequirementCoverage, ...] = Field(
         min_length=1,
@@ -521,7 +535,9 @@ class EvidenceObligationScope(_ContractModel):
     """Trusted paragraph-level source provenance for a broad-answer obligation."""
 
     obligation_id: Identifier
+    kind: EvidenceObligationKind = EvidenceObligationKind.STAGE
     source_number: SourceNumber
+    predecessor_source_number: SourceNumber | None = None
     paragraph_start: Annotated[int, Field(strict=True, ge=1)]
     paragraph_end: Annotated[int, Field(strict=True, ge=1)]
     allowed_requirement_ids: tuple[Identifier, ...] = Field(
@@ -553,6 +569,31 @@ class EvidenceObligationScope(_ContractModel):
         if len(values) != len(set(values)):
             raise ValueError("obligation scope values must be unique")
         return values
+
+    @model_validator(mode="after")
+    def obligation_kind_is_coherent(self) -> "EvidenceObligationScope":
+        if self.kind is EvidenceObligationKind.STAGE:
+            if (
+                self.predecessor_source_number is not None
+                or EvidenceDimension.ADJACENT_STAGE_LINK in self.dimension_ids
+            ):
+                raise ValueError(
+                    "stage obligations cannot carry adjacent-stage link metadata"
+                )
+            return self
+
+        if (
+            len(self.allowed_requirement_ids) != 2
+            or self.dimension_ids
+            != (EvidenceDimension.ADJACENT_STAGE_LINK,)
+            or self.predecessor_source_number is None
+            or not self.required_for_requirement_status
+        ):
+            raise ValueError(
+                "adjacent-stage link obligations require two requirements, "
+                "one link dimension, ordered source context, and required status"
+            )
+        return self
 
 
 class CoverageValidationContext(_ContractModel):
@@ -615,7 +656,7 @@ class PremiseStatusCounts(_ContractModel):
 
 
 class CoverageDiagnosticSummary(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage_diagnostics/5"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage_diagnostics/6"] = Field(alias="schema")
     renderer_version: Literal["evidence-coverage-renderer/1"]
     validation_result: DiagnosticValidationResult
     error_code: CoverageValidationErrorCode | None
@@ -862,11 +903,21 @@ def validate_evidence_coverage(
                     CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH
                 )
             if any(
-                not set(unit.requirement_ids)
-                <= set(
-                    obligation_scopes_by_id[
+                (
+                    tuple(unit.requirement_ids)
+                    != obligation_scopes_by_id[
                         link.obligation_id
                     ].allowed_requirement_ids
+                    if obligation_scopes_by_id[
+                        link.obligation_id
+                    ].kind
+                    is EvidenceObligationKind.ADJACENT_STAGE_LINK
+                    else not set(unit.requirement_ids)
+                    <= set(
+                        obligation_scopes_by_id[
+                            link.obligation_id
+                        ].allowed_requirement_ids
+                    )
                 )
                 for link in unit.obligation_links
             ):
@@ -1433,14 +1484,57 @@ def _validation_context(
     obligation_ids = tuple(
         scope.obligation_id for scope in context.obligation_scopes
     )
+    requirement_order = {
+        requirement_id: index
+        for index, requirement_id in enumerate(context.requirement_ids)
+    }
+    stage_scope_by_requirement = {
+        scope.allowed_requirement_ids[0]: scope
+        for scope in context.obligation_scopes
+        if scope.kind is EvidenceObligationKind.STAGE
+        and len(scope.allowed_requirement_ids) == 1
+    }
+
+    def adjacent_link_scope_is_valid(scope: EvidenceObligationScope) -> bool:
+        if any(
+            requirement_id not in requirement_order
+            for requirement_id in scope.allowed_requirement_ids
+        ):
+            return False
+        predecessor_requirement_id, current_requirement_id = (
+            scope.allowed_requirement_ids
+        )
+        return (
+            requirement_order[current_requirement_id]
+            == requirement_order[predecessor_requirement_id] + 1
+            and predecessor_requirement_id in stage_scope_by_requirement
+            and current_requirement_id in stage_scope_by_requirement
+            and scope.predecessor_source_number
+            == stage_scope_by_requirement[
+                predecessor_requirement_id
+            ].source_number
+            and scope.source_number
+            == stage_scope_by_requirement[current_requirement_id].source_number
+        )
+
+    adjacent_link_scopes_valid = all(
+        adjacent_link_scope_is_valid(scope)
+        for scope in context.obligation_scopes
+        if scope.kind is EvidenceObligationKind.ADJACENT_STAGE_LINK
+    )
     if (
         _has_duplicates(context.requirement_ids)
         or _has_duplicates(context.premise_ids)
         or scope_ids != context.premise_ids
         or _has_duplicates(obligation_ids)
+        or not adjacent_link_scopes_valid
         or any(
             not set(scope.allowed_requirement_ids) <= set(context.requirement_ids)
             or scope.source_number > context.source_count
+            or (
+                scope.predecessor_source_number is not None
+                and scope.predecessor_source_number > context.source_count
+            )
             for scope in context.obligation_scopes
         )
         or any(

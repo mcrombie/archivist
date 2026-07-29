@@ -25,6 +25,7 @@ from answer_coverage import (
     EvidenceCoverageAnswer,
     EvidenceObligationCoverage,
     EvidenceObligationFocus,
+    EvidenceObligationKind,
     EvidenceObligationScope,
     GapReason,
     InterpretiveEvidenceCoverageAnswer,
@@ -110,6 +111,119 @@ def _obligation_scope(
         focus=EvidenceObligationFocus.MECHANISM,
         dimension_ids=dimensions,
         required_for_requirement_status=True,
+    )
+
+
+def _adjacent_link_scopes() -> tuple[EvidenceObligationScope, ...]:
+    return (
+        EvidenceObligationScope(
+            obligation_id="O1",
+            source_number=1,
+            paragraph_start=1,
+            paragraph_end=1,
+            allowed_requirement_ids=("R1",),
+            focus=EvidenceObligationFocus.ORIGIN,
+            dimension_ids=(EvidenceDimension.STAGE_DEVELOPMENT,),
+            required_for_requirement_status=False,
+        ),
+        EvidenceObligationScope(
+            obligation_id="O2",
+            source_number=2,
+            paragraph_start=1,
+            paragraph_end=1,
+            allowed_requirement_ids=("R2",),
+            focus=EvidenceObligationFocus.TRANSITION,
+            dimension_ids=(EvidenceDimension.STAGE_DEVELOPMENT,),
+            required_for_requirement_status=False,
+        ),
+        EvidenceObligationScope(
+            obligation_id="O3",
+            kind=EvidenceObligationKind.ADJACENT_STAGE_LINK,
+            source_number=2,
+            predecessor_source_number=1,
+            paragraph_start=1,
+            paragraph_end=1,
+            allowed_requirement_ids=("R1", "R2"),
+            focus=EvidenceObligationFocus.TRANSITION,
+            dimension_ids=(EvidenceDimension.ADJACENT_STAGE_LINK,),
+            required_for_requirement_status=True,
+        ),
+    )
+
+
+def _adjacent_link_answer() -> EvidenceCoverageAnswer:
+    unit = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1", "R2"),
+        role=AnswerUnitRole.CAUSE,
+        text="The later institution explicitly continued the earlier one [Source 2].",
+        source_numbers=(2,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O3",
+                dimension=EvidenceDimension.ADJACENT_STAGE_LINK,
+            ),
+        ),
+    )
+    return EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (2,),
+                GapReason.NONE,
+            ),
+            _coverage(
+                "R2",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (2,),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=(
+            EvidenceObligationCoverage(
+                obligation_id="O1",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.STAGE_DEVELOPMENT,
+                        status=RequirementStatus.UNSUPPORTED,
+                        unit_ids=(),
+                        source_numbers=(),
+                        gap_reason=GapReason.NO_DIRECT_SUPPORT,
+                    ),
+                ),
+            ),
+            EvidenceObligationCoverage(
+                obligation_id="O2",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.STAGE_DEVELOPMENT,
+                        status=RequirementStatus.UNSUPPORTED,
+                        unit_ids=(),
+                        source_numbers=(),
+                        gap_reason=GapReason.NO_DIRECT_SUPPORT,
+                    ),
+                ),
+            ),
+            EvidenceObligationCoverage(
+                obligation_id="O3",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.ADJACENT_STAGE_LINK,
+                        status=RequirementStatus.SUPPORTED,
+                        unit_ids=("U1",),
+                        source_numbers=(2,),
+                        gap_reason=GapReason.NONE,
+                    ),
+                ),
+            ),
+        ),
+        answer_units=(unit,),
     )
 
 
@@ -1011,6 +1125,95 @@ def test_broad_obligation_ledger_validates_exact_source_dimension_and_role():
     assert validated.answer.answer_units[0].obligation_links[0].obligation_id == "O1"
 
 
+def test_adjacent_stage_link_requires_a_later_source_bounded_causal_unit():
+    validated = validate_evidence_coverage(
+        _adjacent_link_answer(),
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=_adjacent_link_scopes(),
+        source_count=2,
+    )
+
+    link_unit = validated.answer.answer_units[0]
+    assert link_unit.requirement_ids == ("R1", "R2")
+    assert link_unit.source_numbers == (2,)
+    assert link_unit.role is AnswerUnitRole.CAUSE
+
+
+def test_adjacent_stage_link_rejects_a_single_stage_requirement_mapping():
+    answer = _adjacent_link_answer()
+    bad_unit = answer.answer_units[0].model_copy(
+        update={"requirement_ids": ("R2",)}
+    )
+    answer = answer.model_copy(update={"answer_units": (bad_unit,)})
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            answer,
+            requirement_ids=("R1", "R2"),
+            obligation_scopes=_adjacent_link_scopes(),
+            source_count=2,
+        )
+
+    assert (
+        captured.value.code
+        is CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
+    )
+
+
+@pytest.mark.parametrize(
+    ("update", "expected_code"),
+    (
+        (
+            {"role": AnswerUnitRole.EVENT},
+            CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH,
+        ),
+        (
+            {
+                "text": "The later institution continued the earlier one [Source 1].",
+                "source_numbers": (1,),
+            },
+            CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH,
+        ),
+    ),
+)
+def test_adjacent_stage_link_rejects_wrong_role_or_source(update, expected_code):
+    answer = _adjacent_link_answer()
+    bad_unit = answer.answer_units[0].model_copy(update=update)
+    link_dimension = answer.obligation_coverage[2].dimensions[0].model_copy(
+        update={
+            "source_numbers": bad_unit.source_numbers,
+        }
+    )
+    link_record = answer.obligation_coverage[2].model_copy(
+        update={"dimensions": (link_dimension,)}
+    )
+    answer = answer.model_copy(
+        update={
+            "answer_units": (bad_unit,),
+            "obligation_coverage": (
+                *answer.obligation_coverage[:2],
+                link_record,
+            ),
+            "coverage": tuple(
+                record.model_copy(
+                    update={"source_numbers": bad_unit.source_numbers}
+                )
+                for record in answer.coverage
+            ),
+        }
+    )
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            answer,
+            requirement_ids=("R1", "R2"),
+            obligation_scopes=_adjacent_link_scopes(),
+            source_count=2,
+        )
+
+    assert captured.value.code is expected_code
+
+
 def test_broad_obligation_role_mismatch_fails_closed():
     scope = _obligation_scope()
     unit = AnswerUnit(
@@ -1224,6 +1427,62 @@ def test_incomplete_required_obligation_dimensions_downgrade_supported_to_partia
     )
     assert result.diagnostics.obligation_count == 1
     assert result.diagnostics.obligation_scopes == (scope,)
+
+
+def test_unsupported_adjacent_link_downgrades_both_stage_requirements():
+    scopes = _adjacent_link_scopes()
+    units = (
+        _unit("U1", ("R1",), "The first stage is supported [Source 1].", (1,)),
+        _unit("U2", ("R2",), "The second stage is supported [Source 2].", (2,)),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+            _coverage(
+                "R2",
+                RequirementStatus.SUPPORTED,
+                ("U2",),
+                (2,),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=tuple(
+            EvidenceObligationCoverage(
+                obligation_id=scope.obligation_id,
+                dimensions=tuple(
+                    EvidenceDimensionCoverage(
+                        dimension=dimension,
+                        status=RequirementStatus.UNSUPPORTED,
+                        unit_ids=(),
+                        source_numbers=(),
+                        gap_reason=GapReason.NO_DIRECT_SUPPORT,
+                    )
+                    for dimension in scope.dimension_ids
+                ),
+            )
+            for scope in scopes
+        ),
+        answer_units=units,
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=scopes,
+        source_count=2,
+    )
+
+    assert tuple(
+        record.status for record in result.diagnostics.coverage
+    ) == (RequirementStatus.PARTIAL, RequirementStatus.PARTIAL)
 
 
 def test_broad_supplemental_unit_may_be_cited_without_synthesis_link():

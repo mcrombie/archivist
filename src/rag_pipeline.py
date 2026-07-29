@@ -25,6 +25,7 @@ from answer_coverage import (
     EvidenceCoverageAnswer,
     EvidenceCoverageResult,
     EvidenceObligationFocus,
+    EvidenceObligationKind,
     EvidenceObligationScope,
     InterpretiveEvidenceCoverageAnswer,
     InterpretiveMove,
@@ -97,13 +98,13 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v14"
+RAG_POLICY_VERSION = "evidence-planned-v15"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v6"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v6"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v7"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
 MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
@@ -295,7 +296,13 @@ that the answer must explicitly attempt to reconstruct. Return every obligation_
 dimension_id exactly once and in the supplied order. This is a source-bounded completeness
 pass, not permission to add claims.
 
-For each obligation dimension:
+An obligation with kind stage describes one protected historical stage. An obligation with
+kind adjacent_stage_link describes the required connection from the immediately preceding
+stage to the current one. Its predecessor_source_number identifies the prior stage only for
+orientation; the link claim remains bound to the obligation's source_number, which is the
+later-stage anchor.
+
+For each stage obligation dimension:
 - mark it supported only when an atomic answer unit states material directly supported by
   that obligation's one source scope;
 - otherwise use partial, unsupported, or conflicting honestly and keep unsupported
@@ -306,10 +313,22 @@ For each obligation dimension:
   similar; and
 - use only the obligation's allowed requirement IDs on that unit.
 
+For each adjacent_stage_link obligation:
+- attempt one atomic sentence that explicitly states a causal or institutional continuation,
+  transformation, or departure connecting the two ordered requirements to the user's question;
+- use exactly both allowed requirement IDs, in their supplied order, and role cause or mechanism;
+- cite only source_number, never predecessor_source_number, because the later source must itself
+  state the connection;
+- do not infer a link merely because the predecessor and current stages are independently true;
+  and
+- when the later source does not directly state the relationship, mark the link unsupported
+  with no unit or source mapping rather than inventing connective tissue.
+
 Role compatibility is exact: stage_development uses definition, identity, event, or
 chronology; cause_or_enabler and mechanism use cause or mechanism; consequence uses event,
 mechanism, consequence, or chronology; continuity_or_change uses mechanism, consequence,
-chronology, or qualification; qualification uses counterargument or qualification. A unit
+chronology, or qualification; qualification uses counterargument or qualification; and
+adjacent_stage_link uses cause or mechanism. A unit
 may realize several dimensions of the same source scope when its one claim genuinely does
 so. Premise corrections have no obligation links. When no synthesis_obligations are listed,
 return an empty obligation_coverage list and empty obligation_links on every unit.
@@ -1925,8 +1944,18 @@ def _evidence_obligation_scopes(
         return ()
 
     stage_records: list[
-        tuple[int, tuple[str, ...], EvidenceObligationFocus, tuple[int, int]]
+        tuple[
+            int,
+            int,
+            tuple[str, ...],
+            EvidenceObligationFocus,
+            tuple[int, int],
+        ]
     ] = []
+    requirement_order = {
+        requirement.requirement_id: requirement.order
+        for requirement in plan.requirements
+    }
     for facet in plan.facets:
         if facet.role not in _OBLIGATION_FOCUS_BY_FACET_ROLE:
             continue
@@ -1940,27 +1969,46 @@ def _evidence_obligation_scopes(
         allowed_requirement_ids = _ordered_facet_requirement_ids(plan, (facet,))
         if not allowed_requirement_ids:
             continue
+        stage_order = min(
+            requirement_order[requirement_id]
+            for requirement_id in allowed_requirement_ids
+        )
         paragraph_ranges = _paragraph_scope_ranges(
             final_chunks[source_number - 1]
         )
         stage_records.append(
             (
+                stage_order,
                 source_number,
                 allowed_requirement_ids,
                 _OBLIGATION_FOCUS_BY_FACET_ROLE[facet.role],
                 (paragraph_ranges[0][0], paragraph_ranges[-1][1]),
             )
         )
+    stage_records.sort(key=lambda record: (record[0], record[1]))
+    adjacent_stage_pairs = [
+        (predecessor, current)
+        for predecessor, current in zip(
+            stage_records,
+            stage_records[1:],
+            strict=False,
+        )
+        if current[0] == predecessor[0] + 1
+    ]
 
     capacity = MAX_ANSWER_UNITS - len(plan.premises)
-    if len(stage_records) > capacity:
-        raise ValueError("answer-unit capacity cannot preserve one dimension per stage")
+    required_slots = len(stage_records) + len(adjacent_stage_pairs)
+    if required_slots > capacity:
+        raise ValueError(
+            "answer-unit capacity cannot preserve stages and adjacent links"
+        )
 
     selected_dimensions: list[list[EvidenceDimension]] = [
         [_OBLIGATION_DIMENSIONS_BY_FOCUS[focus][0]]
-        for _source_number, _requirement_ids, focus, _paragraph_range in stage_records
+        for _stage_order, _source_number, _requirement_ids, focus, _paragraph_range
+        in stage_records
     ]
-    remaining_capacity = capacity - len(stage_records)
+    remaining_capacity = capacity - required_slots
     dimension_priority = (
         EvidenceDimension.MECHANISM,
         EvidenceDimension.CAUSE_OR_ENABLER,
@@ -1970,9 +2018,13 @@ def _evidence_obligation_scopes(
         EvidenceDimension.QUALIFICATION,
     )
     for dimension in dimension_priority:
-        for index, (_source_number, _requirement_ids, focus, _paragraph_range) in enumerate(
-            stage_records
-        ):
+        for index, (
+            _stage_order,
+            _source_number,
+            _requirement_ids,
+            focus,
+            _paragraph_range,
+        ) in enumerate(stage_records):
             if remaining_capacity <= 0:
                 break
             desired = _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
@@ -1985,6 +2037,7 @@ def _evidence_obligation_scopes(
 
     scopes: list[EvidenceObligationScope] = []
     for index, (
+        _stage_order,
         source_number,
         allowed_requirement_ids,
         focus,
@@ -1999,12 +2052,45 @@ def _evidence_obligation_scopes(
         scopes.append(
             EvidenceObligationScope(
                 obligation_id=f"O{len(scopes) + 1}",
+                kind=EvidenceObligationKind.STAGE,
                 source_number=source_number,
                 paragraph_start=paragraph_range[0],
                 paragraph_end=paragraph_range[1],
                 allowed_requirement_ids=allowed_requirement_ids,
                 focus=focus,
                 dimension_ids=dimension_ids,
+                required_for_requirement_status=True,
+            )
+        )
+    for predecessor, current in adjacent_stage_pairs:
+        (
+            _predecessor_order,
+            predecessor_source_number,
+            predecessor_requirement_ids,
+            _predecessor_focus,
+            _predecessor_paragraph_range,
+        ) = predecessor
+        (
+            _current_order,
+            current_source_number,
+            current_requirement_ids,
+            current_focus,
+            current_paragraph_range,
+        ) = current
+        scopes.append(
+            EvidenceObligationScope(
+                obligation_id=f"O{len(scopes) + 1}",
+                kind=EvidenceObligationKind.ADJACENT_STAGE_LINK,
+                source_number=current_source_number,
+                predecessor_source_number=predecessor_source_number,
+                paragraph_start=current_paragraph_range[0],
+                paragraph_end=current_paragraph_range[1],
+                allowed_requirement_ids=(
+                    predecessor_requirement_ids[0],
+                    current_requirement_ids[0],
+                ),
+                focus=current_focus,
+                dimension_ids=(EvidenceDimension.ADJACENT_STAGE_LINK,),
                 required_for_requirement_status=True,
             )
         )
@@ -2046,7 +2132,7 @@ def build_coverage_input(
         plan,
     )
     control = {
-        "schema": "archivist.answer_request/3",
+        "schema": "archivist.answer_request/4",
         "question": resolved_turn.standalone_question,
         "conversation_context": {
             "entities": list(resolved_turn.entities),
@@ -2082,7 +2168,9 @@ def build_coverage_input(
         "synthesis_obligations": [
             {
                 "obligation_id": scope.obligation_id,
+                "kind": scope.kind.value,
                 "source_number": scope.source_number,
+                "predecessor_source_number": scope.predecessor_source_number,
                 "paragraph_start": scope.paragraph_start,
                 "paragraph_end": scope.paragraph_end,
                 "allowed_requirement_ids": list(scope.allowed_requirement_ids),
@@ -2167,7 +2255,7 @@ def _generation_trace(
 ) -> dict[str, Any]:
     contract = {
         "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
-        "request_schema": "archivist.answer_request/3",
+        "request_schema": "archivist.answer_request/4",
         "instructions_sha256": hashlib.sha256(
             EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")
         ).hexdigest(),

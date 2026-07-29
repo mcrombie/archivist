@@ -211,9 +211,12 @@ def test_broad_stage_lanes_use_document_terciles_and_fill_new_documents_first(
 ):
     chunks = [
         chunk(
-            f"stage_{index:03}",
-            f"document-{index}.md",
-            f"stage evidence {index}",
+                f"stage_{index:03}",
+                f"document-{index}.md",
+                (
+                    f"stage history evidence {index} began because finance "
+                    "transformed institutions and persisted"
+                ),
             1,
         )
         for index in range(9)
@@ -318,9 +321,12 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     ]
     chunks = [
         chunk(
-            f"narrative_{index:03}",
-            document,
-            f"central power war stage {index}",
+                f"narrative_{index:03}",
+                document,
+                (
+                    f"central power war stage {index} began because finance "
+                    "transformed institutions and persisted"
+                ),
             1,
         )
         for index, document in enumerate(document_names)
@@ -435,9 +441,9 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-stage-consensus-v1"
+        == "broad-stage-role-eligibility-v2"
     )
-    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v8"
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v9"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"
@@ -679,7 +685,7 @@ def test_broad_stage_consensus_uses_provider_agreement_deterministically(
         validate_text_free_retrieval_trace(outcome.trace)
 
 
-def test_origin_consensus_prefers_candidate_found_by_all_three_routes(
+def test_origin_anchor_rejects_three_route_consensus_without_role_signal(
     monkeypatch,
 ):
     generic = chunk(
@@ -733,18 +739,25 @@ def test_origin_consensus_prefers_candidate_found_by_all_three_routes(
         lane for lane in outcome.trace["lanes"] if lane["facet_id"] == "F1"
     )
 
-    assert origin_lane["stage_anchor_selected_chunk_ids"] == ["generic_001"]
+    assert origin_lane["stage_anchor_selected_chunk_ids"] == ["mechanism_001"]
     diagnostics = origin_lane["stage_anchor_consensus_candidates"]
     assert diagnostics[0] == {
-        "chunk_id": "generic_001",
-        "pool_names": ["canonical", "mechanism", "provider"],
-        "pool_ranks": {"canonical": 2, "mechanism": 2, "provider": 1},
-        "pool_hit_count": 3,
+        "chunk_id": "mechanism_001",
+        "eligible": True,
+        "eligibility": "eligible",
+        "intent_match_count": 1,
+        "distinctive_intent_match_count": 0,
+        "role_signal_score": 4,
+        "pool_names": ["canonical", "mechanism"],
+        "pool_ranks": {"canonical": 1, "mechanism": 1},
+        "pool_hit_count": 2,
     }
-    assert diagnostics[1]["chunk_id"] == "mechanism_001"
-    assert diagnostics[1]["pool_hit_count"] == 2
+    assert diagnostics[1]["chunk_id"] == "generic_001"
+    assert diagnostics[1]["eligible"] is False
+    assert diagnostics[1]["eligibility"] == "no_role_signal"
+    assert diagnostics[1]["pool_hit_count"] == 3
     assert [item["chunk_id"] for item in outcome.final_chunks] == [
-        "generic_001"
+        "mechanism_001"
     ]
 
 
@@ -805,12 +818,131 @@ def test_broad_stage_anchor_prefers_two_pool_consensus_over_canonical_singleton(
             "candidates": [consensus],
         },
         document_ordinal_by_id={"early.md": 1, "middle.md": 2},
+        chunk_by_id={
+            "canonical_001": {"text": "The stage was established as a precedent."},
+            "consensus_001": {"text": "The stage was established as a precedent."},
+        },
+        original_query="stage",
+        stage_intent_query="stage precedent",
+        role="origin",
     )
 
     assert ranked[0]["chunk_id"] == "consensus_001"
     assert ranked[0]["anchor_pool_names"] == ("mechanism", "provider")
     assert ranked[0]["anchor_pool_hit_count"] == 2
     assert ranked[1]["chunk_id"] == "canonical_001"
+
+
+def test_stage_intent_eligibility_beats_higher_consensus_for_wrong_subproblem():
+    wrong_consensus = {
+        "chunk_id": "wrong_001",
+        "document": "middle.md",
+        "rrf_score": 10.0,
+    }
+    intended_singleton = {
+        "chunk_id": "intended_001",
+        "document": "later.md",
+        "rrf_score": 0.01,
+    }
+
+    ranked = retrieval._ranked_broad_stage_anchor_candidates(
+        {
+            "canonical_core_candidates": [
+                wrong_consensus,
+                intended_singleton,
+            ],
+            "mechanism_candidates": [wrong_consensus],
+            "candidates": [wrong_consensus],
+        },
+        document_ordinal_by_id={"middle.md": 1, "later.md": 2},
+        chunk_by_id={
+            "wrong_001": {
+                "text": (
+                    "Colonial authority changed because trade financed "
+                    "an administrative institution."
+                )
+            },
+            "intended_001": {
+                "text": (
+                    "Federal corporate consolidation changed authority "
+                    "because debt financed institutions."
+                )
+            },
+        },
+        original_query="war and central power",
+        stage_intent_query="federal corporate consolidation",
+        role="transition",
+    )
+
+    assert ranked[0]["chunk_id"] == "intended_001"
+    assert ranked[0]["stage_anchor_eligible"] is True
+    assert ranked[0]["anchor_pool_hit_count"] == 1
+    assert ranked[1]["chunk_id"] == "wrong_001"
+    assert ranked[1]["stage_anchor_eligible"] is False
+    assert (
+        ranked[1]["stage_anchor_eligibility"]
+        == "no_stage_intent_match"
+    )
+    assert ranked[1]["anchor_pool_hit_count"] == 3
+
+
+def test_no_role_eligible_stage_anchor_leaves_an_observable_shortfall(
+    monkeypatch,
+):
+    wrong = chunk(
+        "wrong_001",
+        "middle.md",
+        (
+            "Colonial authority changed because trade financed an "
+            "administrative institution."
+        ),
+        1,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: [
+            [float(index)] for index in range(len(queries))
+        ],
+    )
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return 1
+
+        def query(self, **request):
+            return semantic_results([wrong])
+
+    outcome = retrieve_plan_from_collection(
+        plan(
+            facet("F0", "original", "war and central power"),
+            facet(
+                "F1",
+                "transition",
+                "federal corporate consolidation",
+            ),
+            traits=("broad_synthesis",),
+        ),
+        Collection(),
+        [wrong],
+        max_final_sources=1,
+    )
+
+    lane = next(
+        item for item in outcome.trace["lanes"] if item["facet_id"] == "F1"
+    )
+    assert lane["stage_anchor_selected_chunk_ids"] == []
+    assert lane["stage_anchor_consensus_candidates"][0]["eligible"] is False
+    assert (
+        lane["stage_anchor_consensus_candidates"][0]["eligibility"]
+        == "no_stage_intent_match"
+    )
+    assert outcome.broad_stage_anchor_chunk_ids == {}
+    assert outcome.trace["selection"]["stage_coverage_satisfied_count"] == 0
+    assert outcome.trace["selection"]["stage_coverage_shortfall_count"] == 1
+    validate_text_free_retrieval_trace(outcome.trace)
 
 
 def test_broad_stage_anchor_prefers_three_way_over_two_way_consensus():
@@ -831,6 +963,13 @@ def test_broad_stage_anchor_prefers_three_way_over_two_way_consensus():
             "candidates": [three_way],
         },
         document_ordinal_by_id={"earlier.md": 1, "later.md": 2},
+        chunk_by_id={
+            "three_way_001": {"text": "The stage was established as a precedent."},
+            "two_way_001": {"text": "The stage was established as a precedent."},
+        },
+        original_query="stage",
+        stage_intent_query="stage precedent",
+        role="origin",
     )
 
     assert ranked[0]["chunk_id"] == "three_way_001"
@@ -870,6 +1009,14 @@ def test_broad_stage_anchor_uses_canonical_fallback_when_pools_disagree():
             "middle.md": 2,
             "later.md": 3,
         },
+        chunk_by_id={
+            "canonical_001": {"text": "The stage was established as a precedent."},
+            "mechanism_001": {"text": "The stage was established as a precedent."},
+            "provider_001": {"text": "The stage was established as a precedent."},
+        },
+        original_query="stage",
+        stage_intent_query="stage precedent",
+        role="origin",
     )
 
     assert [candidate["chunk_id"] for candidate in ranked] == [
@@ -1149,7 +1296,7 @@ def test_immediate_neighbor_still_fills_a_slot_left_after_all_primaries(
 def test_trace_contract_accepts_text_free_evidence_obligation_diagnostics():
     trace = {
         "generation_contract": {
-            "schema": "archivist.evidence_coverage_diagnostics/5",
+            "schema": "archivist.evidence_coverage_diagnostics/6",
             "normalizer_version": "evidence-coverage-normalizer/5",
             "prompt_version": "evidence-coverage-v4",
             "citation_locality_failure": {

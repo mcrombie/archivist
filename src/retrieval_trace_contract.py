@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/7"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/8"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -253,14 +253,23 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "semantic_fallback_used",
             "stage_anchor_consensus_candidates",
             "stage_anchor_selected_chunk_ids",
+            "stage_distinctive_intent_term_count",
+            "stage_intent_query_char_count",
+            "stage_intent_query_sha256",
+            "stage_intent_term_count",
         }
     ),
     ("lanes", "[]", "stage_anchor_consensus_candidates", "[]"): frozenset(
         {
             "chunk_id",
+            "distinctive_intent_match_count",
+            "eligibility",
+            "eligible",
+            "intent_match_count",
             "pool_hit_count",
             "pool_names",
             "pool_ranks",
+            "role_signal_score",
         }
     ),
     (
@@ -430,9 +439,11 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "allowed_requirement_ids",
             "dimension_ids",
             "focus",
+            "kind",
             "obligation_id",
             "paragraph_end",
             "paragraph_start",
+            "predecessor_source_number",
             "required_for_requirement_status",
             "source_number",
         }
@@ -795,6 +806,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "broad-canonical-core-v1",
             "broad-stage-consensus-v1",
+            "broad-stage-role-eligibility-v2",
             "not_applicable",
         }
     ),
@@ -815,6 +827,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     ),
     "dimension": frozenset(
         {
+            "adjacent_stage_link",
             "cause_or_enabler",
             "consequence",
             "continuity_or_change",
@@ -825,6 +838,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     ),
     "dimension_ids": frozenset(
         {
+            "adjacent_stage_link",
             "cause_or_enabler",
             "consequence",
             "continuity_or_change",
@@ -834,6 +848,14 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         }
     ),
     "error_code": _COVERAGE_ERROR_CODES,
+    "eligibility": frozenset(
+        {
+            "eligible",
+            "missing_chunk",
+            "no_role_signal",
+            "no_stage_intent_match",
+        }
+    ),
     "exception_code": _EXCEPTION_CODES,
     "facet_embedding": frozenset({"single_batched_request"}),
     "failure_code": frozenset(
@@ -870,6 +892,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "generator_reasoning_effort": frozenset({"high", "low", "max", "medium", "none", "xhigh"}),
     "generator_verbosity": frozenset({"high", "low", "medium"}),
     "hnsw_space": frozenset({"", "cosine", "ip", "l2"}),
+    "kind": frozenset({"adjacent_stage_link", "stage"}),
     "lane": frozenset({"analogue", "broader_related", "direct", "generic_semantic"}),
     "lane_selection": frozenset(
         {
@@ -942,6 +965,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v12",
             "evidence-planned-v13",
             "evidence-planned-v14",
+            "evidence-planned-v15",
         }
     ),
     "prompt_version": frozenset(
@@ -951,10 +975,16 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-v4",
             "evidence-coverage-v5",
             "evidence-coverage-v6",
+            "evidence-coverage-v7",
         }
     ),
     "pool_names": frozenset({"canonical", "mechanism", "provider"}),
-    "request_schema": frozenset({"archivist.answer_request/3"}),
+    "request_schema": frozenset(
+        {
+            "archivist.answer_request/3",
+            "archivist.answer_request/4",
+        }
+    ),
     "reason": frozenset(
         {
             "distance_threshold",
@@ -975,6 +1005,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v6",
             "faceted-hybrid-rrf-v7",
             "faceted-hybrid-rrf-v8",
+            "faceted-hybrid-rrf-v9",
             "hybrid-bm25-rrf-v1",
         }
     ),
@@ -1010,6 +1041,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.evidence_coverage_diagnostics/3",
             "archivist.evidence_coverage_diagnostics/4",
             "archivist.evidence_coverage_diagnostics/5",
+            "archivist.evidence_coverage_diagnostics/6",
             "archivist.evidence_policy_diagnostics/1",
             "archivist.planner_call_diagnostics/1",
             "archivist.planner_call_diagnostics/2",

@@ -239,6 +239,7 @@ def supported_obligation_answer(
         EvidenceDimension.CONSEQUENCE: AnswerUnitRole.CONSEQUENCE,
         EvidenceDimension.CONTINUITY_OR_CHANGE: AnswerUnitRole.CHRONOLOGY,
         EvidenceDimension.QUALIFICATION: AnswerUnitRole.QUALIFICATION,
+        EvidenceDimension.ADJACENT_STAGE_LINK: AnswerUnitRole.CAUSE,
     }
     units: list[AnswerUnit] = []
     obligation_coverage: list[EvidenceObligationCoverage] = []
@@ -326,7 +327,7 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v6"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v7"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -341,6 +342,8 @@ def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     assert "Inspect every inspection passage in order" in instructions
     assert "do not create an answer unit merely to prove" in instructions
     assert "cite only that obligation's single source" in instructions
+    assert "do not infer a link merely because" in instructions
+    assert "cite only source_number, never predecessor_source_number" in instructions
     assert "required for that requirement is supported" in instructions
 
 
@@ -444,7 +447,9 @@ def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
     assert [
         (
             scope.obligation_id,
+            scope.kind.value,
             scope.source_number,
+            scope.predecessor_source_number,
             scope.paragraph_start,
             scope.paragraph_end,
             scope.allowed_requirement_ids,
@@ -455,7 +460,9 @@ def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
     ] == [
         (
             "O1",
+            "stage",
             1,
+            None,
             10,
             11,
             ("R1",),
@@ -464,12 +471,25 @@ def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
         ),
         (
             "O2",
+            "stage",
             2,
+            None,
             20,
             22,
             ("R2",),
             "endpoint",
             ("continuity_or_change", "consequence", "qualification"),
+        ),
+        (
+            "O3",
+            "adjacent_stage_link",
+            2,
+            1,
+            20,
+            22,
+            ("R1", "R2"),
+            "endpoint",
+            ("adjacent_stage_link",),
         ),
     ]
     assert all(
@@ -945,7 +965,7 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     } == QUERY_PLANNER_SETTINGS.responses_create_kwargs()
     assert calls[0]["text_format"] is PlannerQuestionPlan
     assert calls[0]["max_output_tokens"] == 4_000
-    assert '"schema": "archivist.answer_request/3"' in calls[1]["input"]
+    assert '"schema": "archivist.answer_request/4"' in calls[1]["input"]
     assert '"inspection_passages"' in calls[1]["input"]
     assert '"synthesis_obligations"' in calls[1]["input"]
     assert '"evidence_obligations"' not in calls[1]["input"]
@@ -953,7 +973,7 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     assert result.plan.facets[0].facet_id == "F0"
     assert result.status == "answered"
     assert result.diagnostics["generation"]["inspection_scope_count"] == 1
-    assert result.diagnostics["generation"]["obligation_count"] == 5
+    assert result.diagnostics["generation"]["obligation_count"] == 9
 
 
 def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
