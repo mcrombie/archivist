@@ -2412,6 +2412,101 @@ what kinds of historical work each document performs. That resembles crafting an
 window at a second level: first orient the model with a compact map, then reserve the scarce source
 slots for passages that can actually support the answer.
 
+### 2026-07-29 - V20 fixed the lost answer and improved the lineage, but its fallback lost the war question
+
+- Froze V20 at clean commit `f13534a` and ran the owner's unchanged G006/G007 pair once with no
+  model or API retries. The 15-claim rubric subset, manuscript and index hashes, neutral settings,
+  GPT-5.6 Sol model, and eight-source ceiling were unchanged. Persistent redirected logs ensured
+  that a long first response could not be mistaken for a failed run and accidentally repeated.
+- The pair used two planner calls, two batched embeddings, and two answer generations: 53,277
+  priced tokens and an estimated **`$0.53731947`**, below the authorized `$0.90` ceiling. G006
+  took 108.555 seconds, G007 took 65.173 seconds, and combined item latency was 173.728 seconds.
+- V20 materially improved G006. It returned a valid reader answer, rose from 0/8 to **3/8 strict
+  claims**, and covered **6/8 target document groups** rather than V19's 3/8. The answer captured
+  the chartered-company blueprint, the Company-to-Crown transfer, and Ashburn's physical cloud
+  endpoint. It still read more like a sequence than a proven institutional succession and omitted
+  several middle and late mechanisms.
+- The text-free G006 trace explains the gain. The accepted plan contained all eight required
+  stages, filled all eight canonical stage slots, and supported four of seven adjacent
+  transitions—twice V19's two. The bounded document-role map improved orientation without sending
+  more manuscript prose to the planner.
+- V20 also resolved V19's operational failure: both generated coverage objects validated and both
+  answers reached the reader. The paid sample did not exercise the new empty-mapping downgrade,
+  because the provider did not repeat that malformed output; its deterministic offline tests
+  remain the evidence for that branch.
+- The complete pair gate nevertheless failed on G007. The origin validator correctly rejected
+  the live plan as `broad_origin_not_preserved`, but the zero-retry generic fallback then discarded
+  the structured broad plan, satisfied only one of five canonical stages, and covered **3/5**
+  frozen target groups. Its valid answer earned **0/7 strict composite claims**. Detecting a bad
+  origin was correct; replacing the whole plan with a weaker fallback was not.
+- Aggregate quality rose from V19's 0/15 claims, 7/13 groups, and one valid reader answer to
+  **3/15 claims, 9/13 groups, and two valid reader answers**. Estimated cost rose 14.2 percent
+  because the bounded role catalog enlarged planner input, while combined latency fell 52.6
+  percent in this one directional sample.
+- Held the complete ten-question rerun because the predeclared G007 threshold remains 2/7 claims
+  and 5/5 groups. The next repair is narrow: preserve a broad plan that fails only the origin guard,
+  replace or insert the locally eligible early origin, and revalidate it. If salvage cannot pass,
+  the deterministic fallback must itself satisfy the broad stage and origin contracts rather than
+  silently collapsing to one canonical stage.
+
+Useful blog lesson: validation is only as good as the path it activates. V20 learned to recognize
+that a proposed history began too late, but then threw away the useful remainder of the plan.
+An elegant context window needs a graceful repair path as well as a strict gate.
+
+### 2026-07-29 - Turned the drafted resume claims into an evidence plan
+
+- Audited the draft resume language against the repository rather than filling its blanks from
+  development anecdotes. The full-manuscript hybrid RAG and Render deployment are real, but the
+  repository does not yet contain a formal vector-only versus hybrid retrieval benchmark or a
+  current production latency cohort that supports the proposed numbers.
+- Classified the repeatedly used ten-question practical set as development/calibration evidence.
+  It remains the near-term V20 regression gate, but it cannot honestly serve as a held-out proof of
+  improvement after guiding multiple repairs.
+- Added a roadmap sequence that first stabilizes and deploys one candidate, then freezes the
+  owner's untouched 34–46 question gold set, runs a retrieval-only paired comparison, publishes
+  text-free reproducibility artifacts, and measures production behavior on that same candidate.
+- Kept the formal metric contract honest. It currently defines Recall@k and context recall, not
+  Precision@k. Precision can be added only before results and only if the owner supplies exhaustive
+  relevance judgments; otherwise the resume should report Recall@5/context recall.
+- Specified the missing observability bridge: persist privacy-safe success and failure correlation,
+  HTTP outcome, total and per-stage duration, cohort/model, tokens, and cost; then report p50, p95,
+  and error rate over 30–50 warm production-like first turns. Historical V11 latency and the
+  two-item V20 diagnostic pair remain development observations, not production claims.
+- Removed the stale roadmap statement that hybrid retrieval was deferred. Dense/BM25 reciprocal-
+  rank fusion exists; what remains is the controlled vector-only comparison that can demonstrate
+  whether it helped.
+
+Useful blog lesson: a credible resume number is itself a small published research result. The
+system, corpus, labels, comparator, denominator, and production cohort all need identities before a
+percentage point or latency figure means anything.
+
+### 2026-07-29 - V21 repairs one bad anchor without throwing away the map
+
+- Opened `evidence-planned-v21` for the single defect exposed by V20's G007 result. V20 correctly
+  recognized that the proposed history began too late, but then discarded all five useful
+  structured stages and substituted a generic fallback.
+- Shared the validator's corpus-derived early-origin calculation with a bounded local repair.
+  When the only failure is `broad_origin_not_preserved`, the repair changes the unique origin
+  facet's primary document hint, preserves the rejected hint as secondary when capacity permits,
+  and leaves every requirement, query, premise, and later facet unchanged.
+- Sent the repaired proposal through the complete validator again. An origin that cannot satisfy
+  both the causal-origin and historical-role contracts still fails closed. The change adds no
+  planner retry, critic call, source slot, manuscript-specific rule, gold location, or expected
+  answer.
+- Versioned the behavior as V21 while retaining planner prompt v10, coverage prompt v9,
+  normalizer v7, retrieval trace 12, the eight-source ceiling, and the zero-retry boundary.
+- Added synthetic plan and pipeline regressions proving one planner invocation, preservation of
+  all five stages, isolation of the origin-hint change, and fail-closed behavior. The complete
+  offline suite passed **511 tests with one intentional skip**, and Ruff passed. No API call or
+  spend occurred.
+- The code is ready to freeze as an exact release candidate, but offline success is not reader
+  evidence. One unchanged no-retry G007 run must still reach the predeclared 2/7 strict claims and
+  5/5 target groups before the unchanged ten-question development evaluation proceeds.
+
+Useful blog lesson: strict validation should not erase good structure merely because one anchor is
+wrong. A carefully engineered context window can repair the one faulty coordinate and then prove
+the entire map still satisfies its contract.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

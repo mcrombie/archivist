@@ -45,6 +45,21 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] Correct origin rejection discarded an otherwise useful broad plan
+Phase/Brief: Phase 1 evidence-planned-v20 focused G006/G007 confirmation
+Symptom: G007's live five-stage plan failed `broad_origin_not_preserved`; the zero-retry path then
+discarded the complete structured plan, satisfied only one canonical stage, covered 3/5 frozen
+target groups, and realized 0/7 strict claims.
+Cause: model error in the fallback boundary - all planner-validation failures shared one lossy
+fallback even when local validation had isolated a single repairable document hint.
+Resolution and verification: resolved offline in `evidence-planned-v21`. Only the isolated
+origin failure activates local salvage; the unique origin hint is replaced using the validator's
+same corpus-derived early-driver rule, the remaining plan is preserved, and the complete proposal
+is revalidated. Unrepairable plans still fail closed. Synthetic plan and pipeline tests prove
+stage preservation, repair isolation, one planner call, and zero retries. The complete offline
+suite passed 511 tests with one intentional skip and Ruff passed. The unchanged paid G007
+confirmation remains the reader-level gate.
+
 ## [2026-07-29] Empty supported-status mapping discarded a paid G006 answer
 Phase/Brief: Phase 1 evidence-planned-v19 focused G006/G007 confirmation
 Symptom: G006 completed one planner call, one embedding call, and one answer-generation call, but

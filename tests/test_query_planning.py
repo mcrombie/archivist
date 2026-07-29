@@ -1056,7 +1056,9 @@ def test_profiled_long_lineage_rejects_a_document_without_the_stage_role():
     }
 
 
-def test_book_spanning_causal_origin_must_use_an_early_driver_document():
+def test_book_spanning_causal_origin_repairs_only_the_late_origin_hint(
+    monkeypatch,
+):
     catalog = tuple(
         DocumentCatalogEntry(
             document_id=f"{index:02}_Chapter {index}.md",
@@ -1130,8 +1132,47 @@ def test_book_spanning_causal_origin_must_use_an_early_driver_document():
         validation_diagnostics=diagnostics,
     )
 
-    assert result.planner_used is False
-    assert diagnostics == {
+    assert result.planner_used is True
+    assert result.fallback_reason is None
+    assert diagnostics == {"planner_validation_code": None}
+    assert tuple(requirement.label for requirement in result.requirements) == tuple(
+        requirement.label for requirement in requirements
+    )
+    stage_facets = result.facets[1:]
+    assert tuple(facet.facet_id for facet in stage_facets) == (
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+    )
+    assert stage_facets[0].document_hints == (
+        "01_Chapter 1.md",
+        "05_Chapter 5.md",
+    )
+    assert tuple(facet.document_hints for facet in stage_facets[1:]) == (
+        ("02_Chapter 2.md",),
+        ("03_Chapter 3.md",),
+        ("04_Chapter 4.md",),
+        ("06_Chapter 6.md",),
+    )
+
+    monkeypatch.setattr(
+        query_planning,
+        "_repair_broad_origin_plan",
+        lambda *_args, **_kwargs: None,
+    )
+    failed_repair_diagnostics = {}
+    fallback = build_question_plan(
+        "How does the book treat conflict as an engine of central power?",
+        proposal,
+        catalog,
+        validation_diagnostics=failed_repair_diagnostics,
+    )
+
+    assert fallback.planner_used is False
+    assert fallback.fallback_reason == "invalid_planner_output"
+    assert failed_repair_diagnostics == {
         "planner_validation_code": "broad_origin_not_preserved"
     }
 

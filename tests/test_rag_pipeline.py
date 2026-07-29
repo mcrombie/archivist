@@ -29,6 +29,7 @@ from answer_coverage import (
 from perspectives import AnswerVoice, HistoriographicalLens, Worldview
 from query_planning import (
     AnswerRequirement,
+    DocumentCatalogEntry,
     FacetRole,
     InstitutionalHandoff,
     PlannerAnswerRequirement,
@@ -1316,6 +1317,113 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     assert result.status == "answered"
     assert result.diagnostics["generation"]["inspection_scope_count"] == 1
     assert result.diagnostics["generation"]["obligation_count"] == 5
+
+
+def test_late_causal_origin_is_repaired_after_one_planner_call(monkeypatch):
+    turn = ResolvedTurn(
+        standalone_question=(
+            "How does the book treat conflict as an engine of central power?"
+        ),
+    )
+    catalog = tuple(
+        DocumentCatalogEntry(
+            document_id=f"{index:02}_Chapter {index}.md",
+            chapter_title=f"Chapter {index}",
+            corpus_ordinal=index,
+            role_terms=(
+                "conflict",
+                (
+                    "charter"
+                    if index == 1
+                    else "taxation"
+                    if index == 2
+                    else "mobilization"
+                    if index == 3
+                    else "procurement"
+                    if index == 4
+                    else "centralization"
+                    if index == 5
+                    else "endpoint"
+                ),
+            ),
+        )
+        for index in range(1, 7)
+    )
+    labels = (
+        "Conflict and centralization",
+        "Conflict taxation",
+        "Conflict mobilization",
+        "Conflict procurement",
+        "Conflict endpoint",
+    )
+    roles = (
+        FacetRole.ORIGIN,
+        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.TRANSITION,
+        FacetRole.ENDPOINT,
+    )
+    hints = (5, 2, 3, 4, 6)
+    proposal = PlannerQuestionPlan(
+        requirements=tuple(
+            PlannerAnswerRequirement(
+                requirement_id=f"R{index}",
+                label=label,
+            )
+            for index, label in enumerate(labels, start=1)
+        ),
+        facets=tuple(
+            PlannerSearchFacet(
+                facet_id=f"F{index}",
+                requirement_ids=(f"R{index}",),
+                role=role,
+                search_query=labels[index - 1],
+                document_hints=(f"{hint:02}_Chapter {hint}.md",),
+            )
+            for index, (role, hint) in enumerate(
+                zip(roles, hints, strict=True),
+                start=1,
+            )
+        ),
+    )
+    calls: list[str] = []
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        return SimpleNamespace(output_parsed=proposal, output=())
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+    diagnostics = {}
+
+    plan = rag_pipeline.plan_question(
+        object(),
+        turn,
+        catalog,
+        planner_diagnostics=diagnostics,
+    )
+
+    assert calls == ["query_planning"]
+    assert plan.planner_used is True
+    assert plan.fallback_reason is None
+    assert len(plan.requirements) == 5
+    assert plan.facets[1].document_hints == (
+        "01_Chapter 1.md",
+        "05_Chapter 5.md",
+    )
+    assert tuple(facet.document_hints for facet in plan.facets[2:]) == (
+        ("02_Chapter 2.md",),
+        ("03_Chapter 3.md",),
+        ("04_Chapter 4.md",),
+        ("06_Chapter 6.md",),
+    )
+    assert diagnostics == {
+        "schema": "archivist.planner_call_diagnostics/2",
+        "status": "succeeded",
+        "failure_code": None,
+        "planner_validation_code": None,
+        "exception_class": None,
+        "exception_code": None,
+    }
 
 
 def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generation(

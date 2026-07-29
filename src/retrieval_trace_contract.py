@@ -1073,6 +1073,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v18",
             "evidence-planned-v19",
             "evidence-planned-v20",
+            "evidence-planned-v21",
         }
     ),
     "prompt_version": frozenset(

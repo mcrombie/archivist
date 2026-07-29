@@ -970,7 +970,7 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["resolved_query"] == "Standalone question?"
     run_diagnostics = dict(response["run_diagnostics"])
     cohort = run_diagnostics.pop("cohort")
-    assert cohort["rag_policy_version"] == "evidence-planned-v20"
+    assert cohort["rag_policy_version"] == "evidence-planned-v21"
     assert cohort["query_planner_prompt_version"] == "query-planner-v10"
     assert cohort["coverage_prompt_version"] == "evidence-coverage-v9"
     assert cohort["normalizer_version"] == "evidence-coverage-normalizer/7"

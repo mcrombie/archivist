@@ -1,7 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v20 document-role and normalization repair implemented and verified
-offline; unchanged paid G006/G007 confirmation requires a fresh capped authorization
+Status: evidence-planned-v21 implemented and verified offline; its exact release-candidate
+revision still requires the predeclared unchanged G007 reader confirmation before the practical
+ten-question rerun
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1740,3 +1741,95 @@ unchanged, no-retry G006/G007 pair using persistent file redirection. Because V1
 `$0.47055541` and the role catalog increases planner input, that run requires a fresh explicit
 dollar ceiling. Only a pair that clears the existing thresholds licenses the unchanged full
 ten-question rerun.
+
+## V20 focused paid result: G006 cleared, G007 did not
+
+The unchanged G006/G007 pair ran once from clean commit
+`f13534a85d410a1889cb035b2ce7dac20fe42872`. It retained the frozen
+15-claim rubric subset, corpus and index identity, neutral interpretation, GPT-5.6 Sol runtime
+model, eight-source ceiling, and zero-retry rule. The two questions cost an estimated
+`$0.53731947` across two planner calls, two batched embeddings, and two answer generations. Both
+answers and both closed text-free traces completed through a persistent file-backed runner.
+
+The predeclared gate required G006 to reach at least 2/8 strict claims and 5/8 target groups, and
+G007 to reach at least 2/7 claims and 5/5 groups. V20 reached:
+
+| Item | Strict claims | Target groups | Reader result |
+|---|---:|---:|---|
+| G006 | 3/8 | 6/8 | valid, materially improved but incomplete |
+| G007 | 0/7 | 3/5 | valid fallback, materially incomplete |
+
+The aggregate moved from V19's 0/15 strict claims, 7/13 target groups, and one valid reader answer
+to 3/15, 9/13, and two valid reader answers. Cost rose 14.2 percent, while combined item latency
+fell from 366.293 to 173.728 seconds in this one nondeterministic comparison. The complete pair
+gate still failed, so V20 does not license the full unchanged ten-question evaluation.
+
+### G006: role grounding supplied useful orientation
+
+G006's provider plan passed local validation with all eight required stages. Retrieval filled all
+eight canonical stage slots and supported four of seven adjacent transitions, up from V19's two.
+The final context covered six frozen target groups instead of three. The generated answer
+explicitly realized the chartered-company blueprint, the Company-to-Crown transfer, and Ashburn's
+physical cloud-infrastructure endpoint.
+
+The answer remained incomplete. It did not connect Hamiltonian debt to the Potomac capital,
+include the Federal Reserve and FTC stage, or fully realize the Pentagon, permanent-mobilization,
+iron-triangle, NATO, and modern political-economy links. The remaining G006 issue is now the
+precision of middle and late role selection and handoff evidence rather than total lineage
+cardinality.
+
+### G007: correct rejection activated an incorrect fallback
+
+G007's provider planner output failed local validation with
+`broad_origin_not_preserved`. That proves the V20 origin guard recognized the intended failure
+shape. Because automatic retries are forbidden, the pipeline then used its existing generic
+fallback. That fallback discarded the still-useful structured broad stages, satisfied only one of
+five canonical stages and none of four adjacent transitions, and began with Pontiac's War rather
+than the manuscript's Jamestown origin. Its final context covered only three frozen target groups.
+
+The next defect is therefore narrower than broad planning in general. A plan that fails only the
+origin guard should remain recoverable structured input. Local code should replace or insert the
+origin from the already identified earliest eligible driver-bearing document and then revalidate
+the full plan under the same stage-count, chronology, document-role, transition, and source-
+capacity rules. If that bounded salvage fails, the deterministic fallback must itself satisfy the
+broad-route origin and stage contracts. It must not silently collapse to a one-of-five canonical
+core.
+
+This repair must not add a provider retry, critic call, source slot, gold location, expected-answer
+text, or manuscript-specific institution. After offline regressions pass, one unchanged no-retry
+G007 confirmation is sufficient to test the isolated failure. The full ten-question run remains
+held until G007 reaches the existing 2/7 plus 5/5 threshold.
+
+## V21 implementation: preserve the plan and repair only its origin
+
+V21 implements the bounded salvage described above. When, and only when, an ordinary broad
+synthesis plan fails with `broad_origin_not_preserved`, local code retains the complete provider
+plan and identifies the same earliest eligible driver-bearing documents used by the validator.
+It replaces the unique origin facet's primary document hint with the earliest candidate that also
+satisfies that facet's historical-role terms. The rejected primary hint is retained as a
+nonduplicate secondary hint within the existing two-hint limit.
+
+No requirement, query, premise, later stage, source capacity, provider-call count, or retry rule
+changes. The repaired proposal traverses the complete existing validation path again. If the
+origin cannot be repaired without violating stage count, chronology, role match, transition, or
+capacity constraints, the system fails closed to the existing deterministic fallback.
+
+The cohort identifiers are:
+
+- policy `evidence-planned-v21`;
+- planner prompt unchanged at `query-planner-v10`;
+- coverage prompt unchanged at `evidence-coverage-v9`;
+- normalizer unchanged at `evidence-coverage-normalizer/7`;
+- retrieval trace unchanged at `archivist.retrieval_trace/12`; and
+- document-role profile unchanged at `document-role-profile-v1`.
+
+Corpus-agnostic tests prove that all five structured stages survive a successful repair, only the
+origin hint changes, an unrepairable proposal still fails closed, and the pipeline makes exactly
+one planner call with no retry. The complete offline suite passed 511 tests with one intentional
+skip, and Ruff passed across source, tests, and scripts. No OpenAI call was made.
+
+This is a frozen-code candidate, not reader-level evidence. The next paid action is one unchanged
+no-retry G007 confirmation against the exact clean V21 commit. The gate remains 2/7 frozen strict
+claims plus 5/5 frozen target groups. Only a passing confirmation licenses the unchanged
+ten-question development evaluation; neither development set may become part of the genuinely
+held-out final gold set.

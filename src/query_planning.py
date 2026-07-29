@@ -1307,6 +1307,33 @@ def _causal_driver_tokens(question: str) -> frozenset[str]:
     )
 
 
+def _early_causal_origin_entries(
+    turn: ResolvedTurn,
+    catalog: Sequence[DocumentCatalogEntry],
+) -> tuple[DocumentCatalogEntry, ...]:
+    """Return the validator's bounded earliest driver-bearing documents."""
+
+    driver_tokens = _causal_driver_tokens(turn.standalone_question)
+    profiled_catalog = tuple(entry for entry in catalog if entry.role_terms)
+    if not driver_tokens or not profiled_catalog:
+        return ()
+    narrative_catalog = tuple(
+        entry
+        for entry in profiled_catalog
+        if _NUMBERED_NARRATIVE_DOCUMENT_PATTERN.search(
+            f"{entry.document_id} {entry.chapter_title}"
+        )
+    )
+    return tuple(
+        entry
+        for entry in sorted(
+            narrative_catalog or profiled_catalog,
+            key=lambda item: item.corpus_ordinal,
+        )
+        if _role_token_overlap(driver_tokens, _document_role_tokens(entry))
+    )[:_MAX_EARLY_ORIGIN_ROLE_MATCHES]
+
+
 def _validate_broad_document_roles(
     turn: ResolvedTurn,
     catalog: Sequence[DocumentCatalogEntry],
@@ -1350,31 +1377,14 @@ def _validate_broad_document_roles(
                 "proposed actor, institution, mechanism, or period role",
             )
 
-    driver_tokens = _causal_driver_tokens(turn.standalone_question)
-    if not driver_tokens:
-        return
-    narrative_catalog = tuple(
-        entry
-        for entry in profiled_catalog
-        if _NUMBERED_NARRATIVE_DOCUMENT_PATTERN.search(
-            f"{entry.document_id} {entry.chapter_title}"
-        )
+    early_origin_entries = _early_causal_origin_entries(
+        turn,
+        profiled_catalog,
     )
-    matching_origin_entries = tuple(
-        entry
-        for entry in sorted(
-            narrative_catalog or profiled_catalog,
-            key=lambda item: item.corpus_ordinal,
-        )
-        if _role_token_overlap(driver_tokens, _document_role_tokens(entry))
-    )
-    if not matching_origin_entries:
+    if not early_origin_entries:
         return
     early_origin_ids = {
-        entry.document_id
-        for entry in matching_origin_entries[
-            :_MAX_EARLY_ORIGIN_ROLE_MATCHES
-        ]
+        entry.document_id for entry in early_origin_entries
     }
     if ordered_facets[0].document_hints[0] not in early_origin_ids:
         raise PlanValidationError(
@@ -1382,6 +1392,100 @@ def _validate_broad_document_roles(
             "a book-spanning causal sequence must ground its origin in the "
             "earliest corpus documents that contain the named driver",
         )
+
+
+def _repair_broad_origin_plan(
+    plan: QuestionPlan | Mapping[str, Any],
+    resolved_turn: str | ResolvedTurn,
+    document_catalog: CatalogInput,
+) -> QuestionPlan | None:
+    """Replace only a rejected broad plan's late origin hint.
+
+    The initial validator reaches ``broad_origin_not_preserved`` only after the
+    plan's structure, query provenance, requirement mapping, stage roles, and
+    document-role matches have passed.  This bounded repair therefore preserves
+    every requirement and query, promotes one locally profiled early
+    driver-bearing document into the existing origin facet, and leaves the
+    complete validator to accept or reject the result.
+    """
+
+    parsed = _coerce_plan(plan)
+    turn = _coerce_resolved_turn(resolved_turn)
+    deterministic_traits = set(route_question(turn))
+    if (
+        RouteTrait.BROAD_SYNTHESIS not in deterministic_traits
+        or RouteTrait.LONG_INSTITUTIONAL_LINEAGE in deterministic_traits
+    ):
+        return None
+
+    profiled_catalog = tuple(
+        entry for entry in _coerce_catalog(document_catalog) if entry.role_terms
+    )
+    if not profiled_catalog:
+        return None
+
+    ordered_requirements = sorted(
+        parsed.requirements,
+        key=lambda requirement: requirement.order,
+    )
+    if not ordered_requirements:
+        return None
+    first_requirement = ordered_requirements[0]
+    origin_facets = tuple(
+        facet
+        for facet in parsed.facets
+        if facet.role is FacetRole.ORIGIN
+        and facet.requirement_ids == (first_requirement.requirement_id,)
+    )
+    if len(origin_facets) != 1:
+        return None
+    origin_facet = origin_facets[0]
+
+    matching_origins = _early_causal_origin_entries(
+        turn,
+        profiled_catalog,
+    )
+    stage_tokens = _stage_role_tokens(first_requirement, origin_facet)
+    replacement = next(
+        (
+            entry
+            for entry in matching_origins
+            if _role_token_overlap(
+                stage_tokens,
+                _document_role_tokens(entry),
+            )
+        ),
+        None,
+    )
+    if replacement is None:
+        return None
+
+    repaired_hints = (
+        replacement.document_id,
+        *(
+            hint
+            for hint in origin_facet.document_hints
+            if hint != replacement.document_id
+        ),
+    )[:MAX_DOCUMENT_HINTS_PER_FACET]
+    if repaired_hints == origin_facet.document_hints:
+        return None
+
+    repaired_origin = SearchFacet.model_validate(
+        {
+            **origin_facet.model_dump(),
+            "document_hints": repaired_hints,
+        }
+    )
+    return QuestionPlan.model_validate(
+        {
+            **parsed.model_dump(),
+            "facets": tuple(
+                repaired_origin if facet.facet_id == origin_facet.facet_id else facet
+                for facet in parsed.facets
+            ),
+        }
+    )
 
 
 def _validate_long_lineage_stage_roles(
@@ -1773,17 +1877,10 @@ def validate_question_plan(
     return finalized
 
 
-def validate_planner_question_plan(
+def _materialize_planner_question_plan(
     proposal: PlannerQuestionPlan | Mapping[str, Any],
-    resolved_turn: str | ResolvedTurn,
-    document_catalog: CatalogInput = (),
 ) -> QuestionPlan:
-    """Materialize and semantically validate one provider proposal.
-
-    The provider controls search labels, facets, and premise hypotheses.  The
-    application derives requirement order and owns routing traits, trusted
-    targets, F0, execution status, and fallback state.
-    """
+    """Materialize the provider-owned shape before local semantic validation."""
 
     parsed = (
         PlannerQuestionPlan.model_validate(proposal.model_dump())
@@ -1822,7 +1919,26 @@ def validate_planner_question_plan(
             for premise in parsed.premises
         ),
     )
-    return validate_question_plan(plan, resolved_turn, document_catalog)
+    return plan
+
+
+def validate_planner_question_plan(
+    proposal: PlannerQuestionPlan | Mapping[str, Any],
+    resolved_turn: str | ResolvedTurn,
+    document_catalog: CatalogInput = (),
+) -> QuestionPlan:
+    """Materialize and semantically validate one provider proposal.
+
+    The provider controls search labels, facets, and premise hypotheses.  The
+    application derives requirement order and owns routing traits, trusted
+    targets, F0, execution status, and fallback state.
+    """
+
+    return validate_question_plan(
+        _materialize_planner_question_plan(proposal),
+        resolved_turn,
+        document_catalog,
+    )
 
 
 _START_END_PATTERN = re.compile(
@@ -2389,13 +2505,14 @@ def build_question_plan(
         return deterministic_fallback_plan(turn, fallback_reason=reason)
 
     try:
-        if isinstance(planner_output, PlannerQuestionPlan) or (
+        planner_shape = isinstance(planner_output, PlannerQuestionPlan) or (
             isinstance(planner_output, Mapping)
             and (
                 planner_output.get("schema") == PLANNER_QUESTION_PLAN_SCHEMA
                 or planner_output.get("schema_") == PLANNER_QUESTION_PLAN_SCHEMA
             )
-        ):
+        )
+        if planner_shape:
             return validate_planner_question_plan(
                 planner_output,
                 turn,
@@ -2403,6 +2520,31 @@ def build_question_plan(
             )
         return validate_question_plan(planner_output, turn, document_catalog)
     except PlanValidationError as error:
+        if error.code == "broad_origin_not_preserved":
+            try:
+                raw_plan = (
+                    _materialize_planner_question_plan(planner_output)
+                    if planner_shape
+                    else _coerce_plan(planner_output)
+                )
+                repaired = _repair_broad_origin_plan(
+                    raw_plan,
+                    turn,
+                    document_catalog,
+                )
+                if repaired is not None:
+                    finalized = validate_question_plan(
+                        repaired,
+                        turn,
+                        document_catalog,
+                    )
+                    _record_planner_validation_code(
+                        validation_diagnostics,
+                        None,
+                    )
+                    return finalized
+            except (PlanValidationError, ValidationError, ValueError):
+                pass
         _record_planner_validation_code(
             validation_diagnostics,
             error.code,
