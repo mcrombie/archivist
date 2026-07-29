@@ -55,10 +55,11 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v9"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v10"
 BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
 BROAD_MECHANISM_CANDIDATE_LIMIT = 20
-BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v2"
+BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v3"
+BROAD_TRANSITION_LANE_VERSION = "adjacent-pair-transition-v1"
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS_DIR"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
@@ -220,6 +221,9 @@ class PlannedContext:
     trace: dict[str, Any]
     lane_by_chunk_id: dict[str, tuple[str, ...]]
     broad_stage_anchor_chunk_ids: dict[str, str] = field(default_factory=dict)
+    broad_transition_chunk_ids: dict[tuple[str, str], str] = field(
+        default_factory=dict
+    )
 
 
 class FileTraceSink:
@@ -1181,6 +1185,20 @@ _BROAD_STAGE_ROLE_SIGNAL_PATTERNS = {
         flags=re.IGNORECASE,
     ),
 }
+_BROAD_TRANSITION_SIGNAL_PATTERN = re.compile(
+    r"\b(?:"
+    r"because|thereby|therefore|thus|enable\w*|allow\w*|lead\w*\s+to|led\s+to|"
+    r"result\w*\s+(?:in|from)|gave\s+rise\s+to|grew\s+into|evolv\w*\s+into|"
+    r"became|chang\w*\s+into|consolidat\w*|continu\w*|depart\w*\s+from|"
+    r"develop\w*\s+into|institutionali[sz]\w*|reorganiz\w*|replac\w*|"
+    r"shift\w*\s+(?:into|toward|to)|transform\w*|absorb\w*|carry\w*\s+(?:on|forward)"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+_BROAD_TRANSITION_QUERY_VOCABULARY = (
+    "causal institutional connection transition continuity transformation "
+    "replacement consolidation led resulted enabled"
+)
 _NUMBERED_CHAPTER_ONE_PATTERN = re.compile(r"\bchapter\s+1\b")
 _NARRATIVE_ENDPOINT_PATTERN = re.compile(r"\b(?:conclusion|epilogue)\b")
 _SUPPLEMENTAL_BACK_MATTER_PATTERN = re.compile(
@@ -1568,15 +1586,16 @@ def _broad_stage_anchor_eligibility(
         if chunk is not None and role_pattern is not None
         else 0
     )
-    required_intent_terms = distinctive_terms or intent_terms
-    required_intent_match_count = (
-        distinctive_match_count if distinctive_terms else intent_match_count
+    required_distinctive_match_count = (
+        min(2, len(distinctive_terms)) if distinctive_terms else 0
     )
 
     if chunk is None:
         eligibility = "missing_chunk"
-    elif not required_intent_terms or required_intent_match_count <= 0:
-        eligibility = "no_stage_intent_match"
+    elif not distinctive_terms:
+        eligibility = "no_distinctive_stage_anchor"
+    elif distinctive_match_count < required_distinctive_match_count:
+        eligibility = "insufficient_distinctive_stage_anchor_match"
     elif role_signal_score <= 0:
         eligibility = "no_role_signal"
     else:
@@ -1590,6 +1609,9 @@ def _broad_stage_anchor_eligibility(
         "stage_role_signal_score": role_signal_score,
         "stage_intent_term_count": len(intent_terms),
         "stage_distinctive_intent_term_count": len(distinctive_terms),
+        "stage_required_distinctive_intent_match_count": (
+            required_distinctive_match_count
+        ),
     }
 
 
@@ -1605,6 +1627,100 @@ def _broad_stage_intent_terms(
         if term not in _BROAD_STAGE_INTENT_GENERIC_TERMS
     )
     return intent_terms, distinctive_terms
+
+
+def _broad_transition_query(
+    predecessor_intent_query: str,
+    successor_intent_query: str,
+) -> str:
+    """Build a neutral adjacent-stage query without asserting a connection."""
+
+    return " ".join(
+        part
+        for part in (
+            predecessor_intent_query.strip(),
+            successor_intent_query.strip(),
+            _BROAD_TRANSITION_QUERY_VOCABULARY,
+        )
+        if part
+    )
+
+
+def _ranked_broad_transition_candidates(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    chunk_by_id: Mapping[str, Mapping[str, Any]],
+    original_query: str,
+    predecessor_intent_query: str,
+    successor_intent_query: str,
+) -> list[dict[str, Any]]:
+    """Require both adjacent stage intents and an explicit transition signal."""
+
+    predecessor_intent, predecessor_distinctive = _broad_stage_intent_terms(
+        original_query,
+        predecessor_intent_query,
+    )
+    successor_intent, successor_distinctive = _broad_stage_intent_terms(
+        original_query,
+        successor_intent_query,
+    )
+    predecessor_terms = predecessor_distinctive or predecessor_intent
+    successor_terms = successor_distinctive or successor_intent
+    ranked: list[dict[str, Any]] = []
+    for candidate in candidates:
+        chunk_id = str(candidate.get("chunk_id") or "")
+        chunk = chunk_by_id.get(chunk_id)
+        chunk_text = str(chunk.get("text") or "") if chunk is not None else ""
+        chunk_terms = frozenset(_tokens(chunk_text))
+        predecessor_match_count = len(predecessor_terms & chunk_terms)
+        successor_match_count = len(successor_terms & chunk_terms)
+        transition_signal_score = len(
+            _BROAD_TRANSITION_SIGNAL_PATTERN.findall(chunk_text)
+        )
+        if chunk is None:
+            eligibility = "missing_chunk"
+        elif not predecessor_terms:
+            eligibility = "no_predecessor_stage_intent"
+        elif not successor_terms:
+            eligibility = "no_successor_stage_intent"
+        elif predecessor_match_count <= 0:
+            eligibility = "no_predecessor_stage_intent_match"
+        elif successor_match_count <= 0:
+            eligibility = "no_successor_stage_intent_match"
+        elif transition_signal_score <= 0:
+            eligibility = "no_transition_signal"
+        else:
+            eligibility = "eligible"
+        ranked.append(
+            {
+                **candidate,
+                "chunk_id": chunk_id,
+                "transition_eligible": eligibility == "eligible",
+                "transition_eligibility": eligibility,
+                "predecessor_intent_match_count": predecessor_match_count,
+                "successor_intent_match_count": successor_match_count,
+                "transition_signal_score": transition_signal_score,
+            }
+        )
+
+    ranked.sort(
+        key=lambda candidate: (
+            0 if bool(candidate["transition_eligible"]) else 1,
+            -min(
+                int(candidate["predecessor_intent_match_count"]),
+                int(candidate["successor_intent_match_count"]),
+            ),
+            -(
+                int(candidate["predecessor_intent_match_count"])
+                + int(candidate["successor_intent_match_count"])
+            ),
+            -int(candidate["transition_signal_score"]),
+            -float(candidate.get("rrf_score") or 0.0),
+            int(candidate.get("rank") or 10**9),
+            str(candidate["chunk_id"]),
+        )
+    )
+    return ranked
 
 
 def _ranked_broad_stage_anchor_candidates(
@@ -1917,13 +2033,29 @@ def retrieve_plan_from_collection(
     broad_stage_positions = (
         _broad_stage_positions(facets, requirements) if broad else {}
     )
+    broad_stage_facets = (
+        sorted(
+            (
+                facet
+                for facet in facets
+                if str(_plan_value(facet, "role", "")) in _BROAD_STAGE_ROLES
+            ),
+            key=lambda facet: (
+                broad_stage_positions.get(
+                    str(_plan_value(facet, "facet_id", "")),
+                    (10**9, 10**9),
+                )[0],
+                str(_plan_value(facet, "facet_id", "")),
+            ),
+        )
+        if broad
+        else []
+    )
     canonical_query_specs: list[tuple[str, str]] = []
     if broad:
-        for facet in facets:
+        for facet in broad_stage_facets:
             facet_id = str(_plan_value(facet, "facet_id", ""))
             role = str(_plan_value(facet, "role", ""))
-            if role not in _BROAD_STAGE_ROLES:
-                continue
             canonical_query_specs.append(
                 (
                     facet_id,
@@ -1934,9 +2066,54 @@ def retrieve_plan_from_collection(
                     ),
                 )
             )
+    transition_query_specs: list[
+        tuple[str, str, str, str, str]
+    ] = []
+    if broad:
+        for predecessor, successor in zip(
+            broad_stage_facets,
+            broad_stage_facets[1:],
+            strict=False,
+        ):
+            predecessor_facet_id = str(
+                _plan_value(predecessor, "facet_id", "")
+            )
+            successor_facet_id = str(
+                _plan_value(successor, "facet_id", "")
+            )
+            predecessor_intent_query = _broad_stage_intent_query(
+                predecessor,
+                requirement_by_id,
+            )
+            successor_intent_query = _broad_stage_intent_query(
+                successor,
+                requirement_by_id,
+            )
+            transition_query_specs.append(
+                (
+                    predecessor_facet_id,
+                    successor_facet_id,
+                    predecessor_intent_query,
+                    successor_intent_query,
+                    _broad_transition_query(
+                        predecessor_intent_query,
+                        successor_intent_query,
+                    ),
+                )
+            )
     batched_queries = [
         *queries,
         *(query for _facet_id, query in canonical_query_specs),
+        *(
+            query
+            for (
+                _predecessor_facet_id,
+                _successor_facet_id,
+                _predecessor_intent_query,
+                _successor_intent_query,
+                query,
+            ) in transition_query_specs
+        ),
     ]
     batched_embeddings = embed_queries(
         batched_queries,
@@ -1947,11 +2124,29 @@ def retrieve_plan_from_collection(
         facet_id: embedding
         for (facet_id, _query), embedding in zip(
             canonical_query_specs,
-            batched_embeddings[len(queries) :],
+            batched_embeddings[
+                len(queries) : len(queries) + len(canonical_query_specs)
+            ],
             strict=True,
         )
     }
     canonical_query_by_facet = dict(canonical_query_specs)
+    transition_embedding_by_pair = {
+        (predecessor_facet_id, successor_facet_id): embedding
+        for (
+            predecessor_facet_id,
+            successor_facet_id,
+            _predecessor_intent_query,
+            _successor_intent_query,
+            _query,
+        ), embedding in zip(
+            transition_query_specs,
+            batched_embeddings[
+                len(queries) + len(canonical_query_specs) :
+            ],
+            strict=True,
+        )
+    }
     collection_count = int(collection_handle.count())
     lane_primary_limit = (
         max_final_sources
@@ -2154,6 +2349,7 @@ def retrieve_plan_from_collection(
             "role": role,
             "query": query,
             "document_hints": document_hints,
+            "stage_scope": stage_scope,
             "chronology_band": chronology_band,
             "chronology_min_document_ordinal": chronology_min_document_ordinal,
             "chronology_max_document_ordinal": chronology_max_document_ordinal,
@@ -2194,6 +2390,84 @@ def retrieve_plan_from_collection(
         ]
         lanes.append(lane)
 
+    lane_by_facet_id = {
+        str(lane["facet_id"]): lane for lane in lanes
+    }
+    transition_lanes: list[dict[str, Any]] = []
+    for (
+        predecessor_facet_id,
+        successor_facet_id,
+        predecessor_intent_query,
+        successor_intent_query,
+        transition_query,
+    ) in transition_query_specs:
+        predecessor_lane = lane_by_facet_id[predecessor_facet_id]
+        successor_lane = lane_by_facet_id[successor_facet_id]
+        transition_document_scope = tuple(
+            document
+            for document in document_order
+            if document
+            in {
+                *predecessor_lane["stage_scope"],
+                *successor_lane["stage_scope"],
+            }
+        )
+        transition_chunks = [
+            chunk
+            for chunk in chunks
+            if str(chunk.get("document") or "") in transition_document_scope
+        ]
+        transition_candidates: list[dict[str, Any]] = []
+        if transition_chunks:
+            transition_semantic_results = _semantic_lane_query(
+                collection_handle,
+                transition_embedding_by_pair[
+                    (predecessor_facet_id, successor_facet_id)
+                ],
+                candidate_count=candidate_count,
+                document_hints=transition_document_scope,
+            )
+            transition_results = build_hybrid_results(
+                transition_query,
+                transition_semantic_results,
+                transition_chunks,
+                n_results=lane_primary_limit,
+                corpus=corpus_trace,
+                allow_semantic_fallback=False,
+                retrieval_mode_override="broad_synthesis",
+                broad_max_per_document=1,
+            )
+            transition_hybrid = transition_results.get("hybrid")
+            transition_primary_candidates = (
+                list(transition_hybrid.get("primary_candidates", []))
+                if isinstance(transition_hybrid, Mapping)
+                else []
+            )
+            transition_candidates = _ranked_broad_transition_candidates(
+                transition_primary_candidates,
+                chunk_by_id=lookup,
+                original_query=original_query,
+                predecessor_intent_query=predecessor_intent_query,
+                successor_intent_query=successor_intent_query,
+            )
+        transition_lane = {
+            "transition_id": (
+                f"{predecessor_facet_id}_{successor_facet_id}"
+            ),
+            "predecessor_facet_id": predecessor_facet_id,
+            "successor_facet_id": successor_facet_id,
+            "query": transition_query,
+            "document_scope": transition_document_scope,
+            "candidates": transition_candidates,
+            "eligible_candidates": [
+                candidate
+                for candidate in transition_candidates
+                if bool(candidate.get("transition_eligible"))
+            ],
+        }
+        transition_lanes.append(transition_lane)
+        successor_lane["incoming_transition"] = transition_lane
+
     ordered_lanes = sorted(lanes, key=lambda lane: _facet_priority(lane["facet"]))
     selected_ids: set[str] = set()
     selected_documents: set[str] = set()
@@ -2203,6 +2477,13 @@ def retrieve_plan_from_collection(
     }
     stage_anchor_selected_by_facet: dict[str, list[str]] = {
         str(lane["facet_id"]): [] for lane in lanes
+    }
+    transition_selected_by_pair: dict[tuple[str, str], list[str]] = {
+        (
+            str(lane["predecessor_facet_id"]),
+            str(lane["successor_facet_id"]),
+        ): []
+        for lane in transition_lanes
     }
     def accept(candidate: Mapping[str, Any], facet_id: str) -> bool:
         chunk_id = str(candidate.get("chunk_id") or "")
@@ -2298,6 +2579,57 @@ def retrieve_plan_from_collection(
             )
             if candidate is not None:
                 accept(candidate, str(lane["facet_id"]))
+
+        # An adjacent-pair lane may earn a source only when one passage names
+        # both stage intents and states an explicit causal or institutional
+        # transition. Rank these lanes globally so facet order cannot consume
+        # the remaining context slots.
+        transition_options = sorted(
+            (
+                {
+                    "lane": transition_lane,
+                    "candidate": candidate,
+                }
+                for transition_lane in transition_lanes
+                for candidate in transition_lane["eligible_candidates"]
+            ),
+            key=lambda option: (
+                -min(
+                    int(
+                        option["candidate"][
+                            "predecessor_intent_match_count"
+                        ]
+                    ),
+                    int(
+                        option["candidate"][
+                            "successor_intent_match_count"
+                        ]
+                    ),
+                ),
+                -int(option["candidate"]["transition_signal_score"]),
+                -float(option["candidate"].get("rrf_score") or 0.0),
+                str(option["lane"]["transition_id"]),
+                str(option["candidate"]["chunk_id"]),
+            ),
+        )
+        for option in transition_options:
+            transition_lane = option["lane"]
+            pair = (
+                str(transition_lane["predecessor_facet_id"]),
+                str(transition_lane["successor_facet_id"]),
+            )
+            if transition_selected_by_pair[pair]:
+                continue
+            candidate = option["candidate"]
+            chunk_id = str(candidate.get("chunk_id") or "")
+            if (
+                chunk_id not in selected_ids
+                and len(selected_chunks) >= max_final_sources
+            ):
+                continue
+            accept_for_facets(candidate, pair)
+            if chunk_id in selected_ids:
+                transition_selected_by_pair[pair].append(chunk_id)
 
         # Aggregate candidate ranks globally. This replaces the old facet-order
         # refill in which the earliest stage always consumed the spare slot.
@@ -2435,6 +2767,23 @@ def retrieve_plan_from_collection(
         if broad
         else 0
     )
+    transition_coverage_required_count = len(transition_lanes) if broad else 0
+    transition_coverage_satisfied_count = (
+        sum(
+            any(
+                chunk_id in source_number_by_id
+                for chunk_id in transition_selected_by_pair[
+                    (
+                        str(lane["predecessor_facet_id"]),
+                        str(lane["successor_facet_id"]),
+                    )
+                ]
+            )
+            for lane in transition_lanes
+        )
+        if broad
+        else 0
+    )
 
     safe_lane_trace = []
     for lane in lanes:
@@ -2508,6 +2857,16 @@ def retrieve_plan_from_collection(
                         "stage_distinctive_intent_term_count": lane[
                             "stage_distinctive_intent_term_count"
                         ],
+                        "stage_required_distinctive_intent_match_count": (
+                            min(
+                                2,
+                                int(
+                                    lane[
+                                        "stage_distinctive_intent_term_count"
+                                    ]
+                                ),
+                            )
+                        ),
                         "canonical_query_sha256": hashlib.sha256(
                             lane["canonical_query"].encode("utf-8")
                         ).hexdigest(),
@@ -2557,6 +2916,12 @@ def retrieve_plan_from_collection(
                                         0,
                                     )
                                 ),
+                                "required_distinctive_intent_match_count": int(
+                                    candidate.get(
+                                        "stage_required_distinctive_intent_match_count",
+                                        0,
+                                    )
+                                ),
                                 "role_signal_score": int(
                                     candidate.get(
                                         "stage_role_signal_score",
@@ -2578,6 +2943,93 @@ def retrieve_plan_from_collection(
                         ],
                     }
                     if lane["canonical_query"] is not None
+                    else {}
+                ),
+                **(
+                    {
+                        "transition_id": lane["incoming_transition"][
+                            "transition_id"
+                        ],
+                        "transition_predecessor_facet_id": lane[
+                            "incoming_transition"
+                        ]["predecessor_facet_id"],
+                        "transition_query_sha256": hashlib.sha256(
+                            lane["incoming_transition"]["query"].encode(
+                                "utf-8"
+                            )
+                        ).hexdigest(),
+                        "transition_query_char_count": len(
+                            lane["incoming_transition"]["query"]
+                        ),
+                        "transition_document_scope_sha256s": [
+                            document_identifier_sha256(document)
+                            for document in lane["incoming_transition"][
+                                "document_scope"
+                            ]
+                        ],
+                        "transition_candidate_chunk_ids": [
+                            str(candidate.get("chunk_id") or "")
+                            for candidate in lane["incoming_transition"][
+                                "candidates"
+                            ]
+                            if str(candidate.get("chunk_id") or "")
+                        ],
+                        "transition_selected_chunk_ids": (
+                            transition_selected_by_pair[
+                                (
+                                    str(
+                                        lane["incoming_transition"][
+                                            "predecessor_facet_id"
+                                        ]
+                                    ),
+                                    str(
+                                        lane["incoming_transition"][
+                                            "successor_facet_id"
+                                        ]
+                                    ),
+                                )
+                            ]
+                        ),
+                        "transition_candidates": [
+                            {
+                                "chunk_id": str(
+                                    candidate.get("chunk_id") or ""
+                                ),
+                                "eligible": bool(
+                                    candidate.get("transition_eligible")
+                                ),
+                                "eligibility": str(
+                                    candidate.get(
+                                        "transition_eligibility",
+                                        "missing_chunk",
+                                    )
+                                ),
+                                "predecessor_intent_match_count": int(
+                                    candidate.get(
+                                        "predecessor_intent_match_count",
+                                        0,
+                                    )
+                                ),
+                                "successor_intent_match_count": int(
+                                    candidate.get(
+                                        "successor_intent_match_count",
+                                        0,
+                                    )
+                                ),
+                                "transition_signal_score": int(
+                                    candidate.get(
+                                        "transition_signal_score",
+                                        0,
+                                    )
+                                ),
+                            }
+                            for candidate in lane["incoming_transition"][
+                                "candidates"
+                            ]
+                            if str(candidate.get("chunk_id") or "")
+                        ],
+                    }
+                    if "incoming_transition" in lane
                     else {}
                 ),
                 "selected_chunk_ids": selected_by_facet[str(lane["facet_id"])],
@@ -2610,7 +3062,7 @@ def retrieve_plan_from_collection(
             "lane_primary_limit": lane_primary_limit,
             "facet_embedding": "single_batched_request",
             "lane_selection": (
-                "consensus_stage_anchor_then_global_supplement"
+                "consensus_stage_anchor_then_transition_then_global_supplement"
                 if broad
                 else "one_each_then_round_robin"
             ),
@@ -2624,6 +3076,11 @@ def retrieve_plan_from_collection(
             ),
             "broad_mechanism_candidate_limit": (
                 BROAD_MECHANISM_CANDIDATE_LIMIT if broad else 0
+            ),
+            "broad_transition_lane_version": (
+                BROAD_TRANSITION_LANE_VERSION
+                if broad
+                else "not_applicable"
             ),
             "premise_lane_reservation": True,
             "broad_context_order": "corpus_ordinal" if broad else "selection",
@@ -2652,6 +3109,16 @@ def retrieve_plan_from_collection(
             "canonical_core_satisfied_count": canonical_core_satisfied_count,
             "canonical_core_shortfall_count": (
                 canonical_core_required_count - canonical_core_satisfied_count
+            ),
+            "transition_coverage_required_count": (
+                transition_coverage_required_count
+            ),
+            "transition_coverage_satisfied_count": (
+                transition_coverage_satisfied_count
+            ),
+            "transition_coverage_shortfall_count": (
+                transition_coverage_required_count
+                - transition_coverage_satisfied_count
             ),
             "discarded": [],
             "document_distribution": {
@@ -2692,6 +3159,12 @@ def retrieve_plan_from_collection(
         broad_stage_anchor_chunk_ids={
             facet_id: chunk_id
             for facet_id, chunk_ids in stage_anchor_selected_by_facet.items()
+            for chunk_id in chunk_ids
+            if chunk_id in source_number_by_id
+        },
+        broad_transition_chunk_ids={
+            pair: chunk_id
+            for pair, chunk_ids in transition_selected_by_pair.items()
             for chunk_id in chunk_ids
             if chunk_id in source_number_by_id
         },

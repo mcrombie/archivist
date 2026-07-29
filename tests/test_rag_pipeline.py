@@ -240,6 +240,14 @@ def supported_obligation_answer(
         EvidenceDimension.CONTINUITY_OR_CHANGE: AnswerUnitRole.CHRONOLOGY,
         EvidenceDimension.QUALIFICATION: AnswerUnitRole.QUALIFICATION,
         EvidenceDimension.ADJACENT_STAGE_LINK: AnswerUnitRole.CAUSE,
+        EvidenceDimension.SUBJECT_OR_DEFINITION: AnswerUnitRole.IDENTITY,
+        EvidenceDimension.ACTION_OR_MECHANISM: AnswerUnitRole.MECHANISM,
+        EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE: (
+            AnswerUnitRole.CONSEQUENCE
+        ),
+        EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT: (
+            AnswerUnitRole.QUALIFICATION
+        ),
     }
     units: list[AnswerUnit] = []
     obligation_coverage: list[EvidenceObligationCoverage] = []
@@ -327,7 +335,7 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v7"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v8"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -344,6 +352,8 @@ def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     assert "cite only that obligation's single source" in instructions
     assert "do not infer a link merely because" in instructions
     assert "cite only source_number, never predecessor_source_number" in instructions
+    assert "requirement_component" in instructions
+    assert "dedicated transition passage" in instructions
     assert "required for that requirement is supported" in instructions
 
 
@@ -443,6 +453,7 @@ def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
         plan,
         chunks,
         {"F1": 1, "F2": 2},
+        {("F1", "F2"): 2},
     )
     assert [
         (
@@ -495,6 +506,188 @@ def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
     assert all(
         scope.required_for_requirement_status for scope in obligation_scopes
     )
+
+
+def test_focused_material_components_bind_distinct_answer_layers_to_sources():
+    plan = QuestionPlan(
+        requirements=(
+            AnswerRequirement(
+                requirement_id="R1",
+                label="Project Lumen",
+                order=0,
+            ),
+        ),
+        facets=(
+            SearchFacet(
+                facet_id="F0",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGINAL,
+                search_query="What was Project Lumen and what did it do?",
+            ),
+        ),
+    )
+    chunks = [
+        {
+            **CHUNK,
+            "chunk_id": "identity_001",
+            "paragraph_start": 1,
+            "paragraph_end": 1,
+            "text": "Project Lumen was a synthetic civic network.",
+        },
+        {
+            **CHUNK,
+            "chunk_id": "action_002",
+            "paragraph_start": 2,
+            "paragraph_end": 2,
+            "text": "Project Lumen organized local synthetic councils.",
+        },
+        {
+            **CHUNK,
+            "chunk_id": "significance_003",
+            "paragraph_start": 3,
+            "paragraph_end": 3,
+            "text": "Project Lumen thereby expanded synthetic civic capacity.",
+        },
+        {
+            **CHUNK,
+            "chunk_id": "qualification_004",
+            "paragraph_start": 4,
+            "paragraph_end": 4,
+            "text": "However, Project Lumen did not reach every district.",
+        },
+    ]
+
+    scopes = rag_pipeline._focused_requirement_component_scopes(
+        plan,
+        chunks,
+        {"F0": (1, 2, 3, 4)},
+    )
+
+    assert [
+        (
+            scope.kind.value,
+            scope.source_number,
+            scope.allowed_requirement_ids,
+            tuple(dimension.value for dimension in scope.dimension_ids),
+        )
+        for scope in scopes
+    ] == [
+        ("requirement_component", 1, ("R1",), ("subject_or_definition",)),
+        ("requirement_component", 2, ("R1",), ("action_or_mechanism",)),
+        (
+            "requirement_component",
+            3,
+            ("R1",),
+            ("significance_or_consequence",),
+        ),
+        (
+            "requirement_component",
+            4,
+            ("R1",),
+            ("qualification_or_counterargument",),
+        ),
+    ]
+
+
+def test_focused_component_pass_does_not_expand_a_single_detected_layer():
+    plan = QuestionPlan(
+        requirements=(
+            AnswerRequirement(
+                requirement_id="R1",
+                label="Project Lumen",
+                order=0,
+            ),
+        ),
+        facets=(
+            SearchFacet(
+                facet_id="F0",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGINAL,
+                search_query="What was Project Lumen?",
+            ),
+        ),
+    )
+
+    scopes = rag_pipeline._focused_requirement_component_scopes(
+        plan,
+        [
+            {
+                **CHUNK,
+                "text": "Project Lumen was a synthetic civic network.",
+            }
+        ],
+        {"F0": (1,)},
+    )
+
+    assert scopes == ()
+
+
+def test_adjacent_obligation_uses_the_dedicated_transition_source():
+    plan = QuestionPlan(
+        traits=(RouteTrait.BROAD_SYNTHESIS,),
+        requirements=(
+            AnswerRequirement(requirement_id="R1", label="Origin", order=0),
+            AnswerRequirement(requirement_id="R2", label="Endpoint", order=1),
+        ),
+        facets=(
+            SearchFacet(
+                facet_id="F0",
+                requirement_ids=("R1", "R2"),
+                role=FacetRole.ORIGINAL,
+                search_query="Trace a synthetic development.",
+            ),
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGIN,
+                search_query="charter foundation",
+            ),
+            SearchFacet(
+                facet_id="F2",
+                requirement_ids=("R2",),
+                role=FacetRole.ENDPOINT,
+                search_query="assembly government",
+            ),
+        ),
+    )
+    chunks = [
+        {
+            **CHUNK,
+            "chunk_id": "origin_001",
+            "paragraph_start": 1,
+            "paragraph_end": 1,
+        },
+        {
+            **CHUNK,
+            "chunk_id": "endpoint_002",
+            "paragraph_start": 2,
+            "paragraph_end": 2,
+        },
+        {
+            **CHUNK,
+            "chunk_id": "transition_003",
+            "paragraph_start": 30,
+            "paragraph_end": 31,
+            "text": "Synthetic transition paragraph one.\n\nParagraph two.",
+        },
+    ]
+
+    scopes = rag_pipeline._evidence_obligation_scopes(
+        plan,
+        chunks,
+        {"F1": 1, "F2": 2},
+        {("F1", "F2"): 3},
+    )
+    link = next(
+        scope
+        for scope in scopes
+        if scope.kind.value == "adjacent_stage_link"
+    )
+
+    assert link.source_number == 3
+    assert link.predecessor_source_number == 1
+    assert (link.paragraph_start, link.paragraph_end) == (30, 31)
+    assert link.allowed_requirement_ids == ("R1", "R2")
 
 
 def test_broad_inspection_scope_cap_coalesces_without_omitting_any_source_range():
@@ -965,7 +1158,7 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     } == QUERY_PLANNER_SETTINGS.responses_create_kwargs()
     assert calls[0]["text_format"] is PlannerQuestionPlan
     assert calls[0]["max_output_tokens"] == 4_000
-    assert '"schema": "archivist.answer_request/4"' in calls[1]["input"]
+    assert '"schema": "archivist.answer_request/5"' in calls[1]["input"]
     assert '"inspection_passages"' in calls[1]["input"]
     assert '"synthesis_obligations"' in calls[1]["input"]
     assert '"evidence_obligations"' not in calls[1]["input"]
@@ -973,7 +1166,7 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     assert result.plan.facets[0].facet_id == "F0"
     assert result.status == "answered"
     assert result.diagnostics["generation"]["inspection_scope_count"] == 1
-    assert result.diagnostics["generation"]["obligation_count"] == 9
+    assert result.diagnostics["generation"]["obligation_count"] == 5
 
 
 def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
@@ -1902,6 +2095,7 @@ def test_anchor_promotion_preserves_every_broad_requirement_lane():
         _old_to_new,
         _remapped_facets,
         remapped_stage_anchors,
+        remapped_transition_sources,
     ) = rag_pipeline._filter_context(planned, tuple(range(1, 9)))
     assert remapped_stage_anchors == {
         "F1": 1,
@@ -1909,6 +2103,7 @@ def test_anchor_promotion_preserves_every_broad_requirement_lane():
         "F3": 3,
         "F4": 4,
     }
+    assert remapped_transition_sources == {}
     assert planned.trace["selection"]["anchor_requested_count"] == 4
     assert planned.trace["selection"]["protected_source_count"] == 4
     assert planned.trace["selection"]["protected_source_shortfall_count"] == 0

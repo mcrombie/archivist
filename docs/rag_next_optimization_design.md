@@ -1210,3 +1210,87 @@ must remain free of their expected documents and claims.
 - Index Mode changes.
 
 Each deferred item should be reconsidered only if the measured version-1 failure points to it.
+
+## V16 implementation: material components and adjacent-pair evidence
+
+The full v15 ten-question run showed two distinct completeness failures: some focused answers
+retrieved the intended source groups but omitted material layers already present in them, while
+broad answers still lacked passages that explicitly connected adjacent historical stages. V16
+addresses both without increasing the eight-source ceiling or adding model calls.
+
+### Focused material-component pass
+
+For an ordinary focused question, application code now inspects only the already admitted sources
+mapped to each requirement. It recognizes four bounded, source-visible component types:
+
+- subject or definition;
+- action or mechanism;
+- significance or consequence; and
+- qualification or counterargument.
+
+A component becomes an evidence obligation only when its source contains both question/requirement
+vocabulary and a finite lexical signal for that component. No component obligation is created
+unless at least two distinct component types are detected for the same requirement. This threshold
+prevents a simple one-fact question from being inflated merely because a passage contains a copular
+verb. Premise-sensitive, absence-sensitive, and broad-synthesis routes retain their existing
+specialized contracts and do not use this pass.
+
+Each activated component is bound to one strongest admitted source and one requirement. The
+structured answer must attempt it, map it to the compatible answer-unit role, and cite only that
+source. A requirement cannot be marked fully supported while a required detected component is
+missing. The detector does not assert a fact or use gold-answer language; it only turns visible
+source structure into a completeness obligation.
+
+### Stronger broad-stage anchors
+
+Protected stage anchors now require distinctive stage content, not merely topic overlap plus a
+generic origin/transition/mechanism/endpoint signal. The planner is explicitly instructed to name
+the stage's distinctive institution, actor, event, or mechanism. When two or more distinctive
+terms are available, an anchor must match at least two; when one is available, it must match that
+one. A stage with no distinctive terms fails closed and produces an observable trace shortfall.
+Only eligible candidates proceed to canonical/mechanism/provider consensus ranking.
+
+### Dedicated adjacent-pair transition lane
+
+Each adjacent planned stage pair now receives one neutral transition query combining both stage
+intents with causal and institutional transition vocabulary. All facet, canonical-stage, and
+transition queries remain in the same single batched embedding operation. The transition search is
+restricted to the union of the two chronological stage scopes.
+
+A transition candidate is eligible only when one passage:
+
+1. matches the predecessor stage's intent;
+2. matches the successor stage's intent; and
+3. contains an explicit causal, institutional, continuity, replacement, or transformation signal.
+
+Eligible transition candidates compete globally for the context slots remaining after protected
+stage anchors, non-stage verification lanes, and the structural narrative endpoint. This preserves
+the eight-source limit while preventing early facet order from automatically consuming spare
+capacity. The text-free trace records required, satisfied, and shortfall counts plus hashes, IDs,
+match counts, and finite eligibility codes.
+
+An `adjacent_stage_link` obligation is now created only when a selected dedicated transition
+passage survives evidence gating and source renumbering. The link cites that transition passage,
+not the later stage anchor. If no passage directly states the connection, no later-stage source is
+silently repurposed as connective evidence.
+
+### Version and measurement boundary
+
+The implementation cohort is:
+
+- `evidence-planned-v16`;
+- `faceted-hybrid-rrf-v10`;
+- `broad-stage-role-eligibility-v3`;
+- `adjacent-pair-transition-v1`;
+- query planner prompt v7;
+- evidence coverage prompt v8;
+- answer request 5;
+- evidence coverage 5 / interpretive coverage 3;
+- evidence diagnostics 7 and normalizer 6; and
+- retrieval trace 9.
+
+Offline verification passed 489 tests with one intentional skip, and Ruff passed across `src` and
+`tests`. No OpenAI call was made. These checks establish contract behavior, not answer-quality
+improvement. The next quality measurement should be the owner's unchanged ten-question evaluation
+under a fresh v16 cohort, with the same manuscript/index identity, model settings, neutral
+interpretation, source ceiling, and no-retry policy used for the v15 comparison.

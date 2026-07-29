@@ -1139,6 +1139,88 @@ def test_adjacent_stage_link_requires_a_later_source_bounded_causal_unit():
     assert link_unit.role is AnswerUnitRole.CAUSE
 
 
+def test_requirement_component_requires_its_source_bounded_material_layer():
+    scope = EvidenceObligationScope(
+        obligation_id="O1",
+        kind=EvidenceObligationKind.REQUIREMENT_COMPONENT,
+        source_number=1,
+        paragraph_start=1,
+        paragraph_end=1,
+        allowed_requirement_ids=("R1",),
+        focus=EvidenceObligationFocus.CROSS_CUTTING,
+        dimension_ids=(EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE,),
+        required_for_requirement_status=True,
+    )
+    unit = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.CONSEQUENCE,
+        text="The synthetic reform expanded civic capacity [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O1",
+                dimension=EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE,
+            ),
+        ),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=(
+            EvidenceObligationCoverage(
+                obligation_id="O1",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=(
+                            EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE
+                        ),
+                        status=RequirementStatus.SUPPORTED,
+                        unit_ids=("U1",),
+                        source_numbers=(1,),
+                        gap_reason=GapReason.NONE,
+                    ),
+                ),
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    validated = validate_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=1,
+    )
+
+    assert validated.answer.answer_units[0].role is AnswerUnitRole.CONSEQUENCE
+
+
+def test_requirement_component_rejects_multiple_requirements():
+    with pytest.raises(ValidationError):
+        EvidenceObligationScope(
+            obligation_id="O1",
+            kind=EvidenceObligationKind.REQUIREMENT_COMPONENT,
+            source_number=1,
+            paragraph_start=1,
+            paragraph_end=1,
+            allowed_requirement_ids=("R1", "R2"),
+            focus=EvidenceObligationFocus.CROSS_CUTTING,
+            dimension_ids=(EvidenceDimension.ACTION_OR_MECHANISM,),
+            required_for_requirement_status=True,
+        )
+
+
 def test_adjacent_stage_link_rejects_a_single_stage_requirement_mapping():
     answer = _adjacent_link_answer()
     bad_unit = answer.answer_units[0].model_copy(

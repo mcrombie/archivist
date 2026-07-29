@@ -1893,6 +1893,48 @@ Useful blog lesson: a narrow gate is useful for diagnosing one subsystem, but on
 evaluation shows whether the product is becoming more useful. Reliable citations and graceful
 failure can improve while substantive answer coverage stays flat.
 
+### 2026-07-29 - V16 made focused completeness and historical transitions source-visible
+
+- Implemented the repair identified by the complete v15 evaluation rather than running another
+  narrow paid gate. The new cohort is `evidence-planned-v16` with
+  `faceted-hybrid-rrf-v10`, planner prompt v7, coverage prompt v8, answer request 5, and retrieval
+  trace 9.
+- Added a deterministic material-component pass for focused questions. When already admitted
+  passages visibly contain at least two distinct layers--identity/definition, action/mechanism,
+  significance/consequence, or qualification/counterargument--those layers become required,
+  source-bounded coverage obligations. This directly targets the v15 cases that found the expected
+  document groups but produced thin answers.
+- Kept the trigger conservative. A lone detected layer does not expand a simple answer, and the
+  pass does not run on broad, premise-sensitive, or absence-sensitive routes. It uses no gold
+  answers and asserts no facts of its own.
+- Tightened broad-stage eligibility so a protected anchor must match the stage's distinctive
+  institution, actor, event, or mechanism. Generic topical relevance plus role vocabulary is no
+  longer enough; missing distinctive content remains an explicit shortfall.
+- Added a dedicated retrieval lane for each adjacent stage pair. One passage must match both stage
+  intents and state an explicit causal, institutional, continuity, replacement, or transformation
+  link before it can be selected as transition evidence.
+- Batched the transition queries with the existing facet and canonical queries, preserving one
+  embedding operation. Transition passages compete globally only for context capacity remaining
+  after protected stage anchors, verification lanes, and the narrative endpoint, so the public
+  eight-source ceiling remains unchanged.
+- Rebound `adjacent_stage_link` obligations to the selected transition passage itself. The later
+  stage anchor is no longer assumed to contain the connection merely because it follows the prior
+  stage chronologically.
+- Preserved one answer-generation call, zero automatic retries, the private manuscript/index
+  boundary, and the existing cost-accounting path. This implementation verification made no
+  OpenAI calls and incurred no API cost.
+- Added synthetic regressions for component activation, single-layer nonactivation, component-role
+  validation, two-stage transition eligibility, transition shortfalls, trace privacy, and
+  post-gate transition source mapping. The full offline suite passed 489 tests with one intentional
+  skip; Ruff passed across all source and test files.
+- This is an engineering repair, not yet a quality claim. The next paid measurement should be the
+  unchanged ten-question gold evaluation under a fresh v16 cohort, rather than another two-question
+  detour.
+
+Useful blog lesson: completeness can be made more concrete without asking a second model to judge
+the answer. The application can identify visible layers and connective passages in the evidence,
+then require the single generation call either to use them honestly or disclose the gap.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

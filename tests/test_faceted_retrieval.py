@@ -214,8 +214,9 @@ def test_broad_stage_lanes_use_document_terciles_and_fill_new_documents_first(
                 f"stage_{index:03}",
                 f"document-{index}.md",
                 (
-                    f"stage history evidence {index} began because finance "
-                    "transformed institutions and persisted"
+                    "whole history charter foundation assembly reform legacy "
+                    f"persistence evidence {index} began because finance "
+                    "transformed institutions"
                 ),
             1,
         )
@@ -251,9 +252,9 @@ def test_broad_stage_lanes_use_document_terciles_and_fill_new_documents_first(
     outcome = retrieve_plan_from_collection(
         plan(
             facet("F0", "original", "whole history"),
-            facet("F1", "origin", "early history"),
-            facet("F2", "transition", "middle history"),
-            facet("F3", "endpoint", "late history"),
+            facet("F1", "origin", "charter foundation"),
+            facet("F2", "transition", "assembly reform"),
+            facet("F3", "endpoint", "legacy persistence"),
             traits=("broad_synthesis",),
         ),
         Collection(),
@@ -263,12 +264,16 @@ def test_broad_stage_lanes_use_document_terciles_and_fill_new_documents_first(
 
     assert embedded[0][:4] == [
         "whole history",
-        "early history",
-        "middle history",
-        "late history",
+        "charter foundation",
+        "assembly reform",
+        "legacy persistence",
     ]
-    assert len(embedded[0]) == 7
-    assert all(query.startswith("whole history ") for query in embedded[0][4:])
+    assert len(embedded[0]) == 9
+    assert all(query.startswith("whole history ") for query in embedded[0][4:7])
+    assert "charter foundation" in embedded[0][7]
+    assert "assembly reform" in embedded[0][7]
+    assert "assembly reform" in embedded[0][8]
+    assert "legacy persistence" in embedded[0][8]
     assert requests[0].get("where") is None
     assert [
         set(request["where"]["document"]["$in"])
@@ -308,6 +313,148 @@ def test_broad_stage_lanes_use_document_terciles_and_fill_new_documents_first(
     validate_text_free_retrieval_trace(outcome.trace)
 
 
+def test_adjacent_pair_lane_selects_only_an_explicit_two_stage_transition(
+    monkeypatch,
+):
+    origin = chunk(
+        "origin_001",
+        "01_Chapter 1.md",
+        "A charter foundation established the synthetic institution.",
+        1,
+    )
+    disconnected = chunk(
+        "disconnected_002",
+        "02_Chapter 2.md",
+        "The charter foundation and assembly government are both named.",
+        1,
+    )
+    transition = chunk(
+        "transition_003",
+        "03_Chapter 3.md",
+        "The charter foundation led to an assembly government.",
+        2,
+    )
+    endpoint = chunk(
+        "endpoint_004",
+        "04_Epilogue.md",
+        "The assembly government persisted as a legacy institution.",
+        1,
+    )
+    chunks = [origin, disconnected, transition, endpoint]
+    embedded: list[list[str]] = []
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: (
+            embedded.append(list(queries))
+            or [[float(index)] for index in range(len(queries))]
+        ),
+    )
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            value = int(request["query_embeddings"][0][0])
+            selected = (
+                origin
+                if value in {1, 3}
+                else endpoint
+                if value in {2, 4}
+                else transition
+            )
+            where = request.get("where")
+            if where is not None:
+                document_filter = where["document"]
+                allowed = (
+                    set(document_filter["$in"])
+                    if isinstance(document_filter, dict)
+                    else {document_filter}
+                )
+                if selected["document"] not in allowed:
+                    selected = next(
+                        item
+                        for item in chunks
+                        if item["document"] in allowed
+                    )
+            return semantic_results([selected])
+
+    requirements = (
+        SimpleNamespace(
+            requirement_id="R1",
+            order=0,
+            label="charter foundation",
+        ),
+        SimpleNamespace(
+            requirement_id="R2",
+            order=1,
+            label="assembly government",
+        ),
+    )
+    broad_plan = SimpleNamespace(
+        schema="archivist.question_plan/1",
+        traits=("broad_synthesis",),
+        facets=(
+            facet(
+                "F0",
+                "original",
+                "synthetic institutional history",
+                requirement_ids=("R1", "R2"),
+            ),
+            facet(
+                "F1",
+                "origin",
+                "charter foundation",
+                requirement_ids=("R1",),
+            ),
+            facet(
+                "F2",
+                "endpoint",
+                "assembly government",
+                requirement_ids=("R2",),
+            ),
+        ),
+        requirements=requirements,
+        planner_used=True,
+        fallback_reason=None,
+    )
+
+    outcome = retrieve_plan_from_collection(
+        broad_plan,
+        Collection(),
+        chunks,
+        max_final_sources=3,
+    )
+
+    assert len(embedded[0]) == 6
+    assert outcome.broad_transition_chunk_ids == {
+        ("F1", "F2"): "transition_003"
+    }
+    assert outcome.trace["selection"]["transition_coverage_required_count"] == 1
+    assert outcome.trace["selection"]["transition_coverage_satisfied_count"] == 1
+    assert outcome.trace["selection"]["transition_coverage_shortfall_count"] == 0
+    successor_lane = next(
+        lane
+        for lane in outcome.trace["lanes"]
+        if lane["facet_id"] == "F2"
+    )
+    candidates = {
+        item["chunk_id"]: item
+        for item in successor_lane["transition_candidates"]
+    }
+    assert candidates["transition_003"]["eligible"] is True
+    assert candidates["transition_003"]["transition_signal_score"] > 0
+    assert candidates["disconnected_002"]["eligible"] is False
+    assert candidates["disconnected_002"]["eligibility"] == "no_transition_signal"
+    assert successor_lane["transition_selected_chunk_ids"] == [
+        "transition_003"
+    ]
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
 def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     monkeypatch,
 ):
@@ -323,10 +470,12 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
         chunk(
                 f"narrative_{index:03}",
                 document,
-                (
-                    f"central power war stage {index} began because finance "
-                    "transformed institutions and persisted"
-                ),
+                    (
+                        "central power war charter foundation assembly franchise "
+                        "fiscal consolidation bureaucracy administration security "
+                        "alliance legacy persistence began because finance transformed "
+                        f"institutions and persisted stage {index}"
+                    ),
             1,
         )
         for index, document in enumerate(document_names)
@@ -361,8 +510,19 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
                 [item for item in chunks if item["document"] in documents]
             )
 
+    stage_labels = (
+        "charter foundation",
+        "assembly franchise",
+        "fiscal consolidation",
+        "bureaucracy administration",
+        "security alliance legacy",
+    )
     requirements = tuple(
-        SimpleNamespace(requirement_id=f"R{index}", order=index - 1)
+        SimpleNamespace(
+            requirement_id=f"R{index}",
+            order=index - 1,
+            label=stage_labels[index - 1],
+        )
         for index in range(1, 6)
     )
     facets = (
@@ -383,7 +543,7 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
                     if index == 5
                     else "mechanism"
                 ),
-                search_query=f"war central power stage {index}",
+                search_query=stage_labels[index - 1],
                 document_hints=(),
                 requirement_ids=(f"R{index}",),
             )
@@ -437,13 +597,13 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     }
     assert (
         outcome.trace["parameters"]["lane_selection"]
-        == "consensus_stage_anchor_then_global_supplement"
+        == "consensus_stage_anchor_then_transition_then_global_supplement"
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-stage-role-eligibility-v2"
+        == "broad-stage-role-eligibility-v3"
     )
-    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v9"
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v10"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"
@@ -586,8 +746,13 @@ def test_broad_stage_consensus_uses_provider_agreement_deterministically(
         deterministic_core_candidates,
     )
 
+    stage_markers = tuple(core_by_position)
     requirements = tuple(
-        SimpleNamespace(requirement_id=f"R{index}", order=index - 1)
+        SimpleNamespace(
+            requirement_id=f"R{index}",
+            order=index - 1,
+            label=stage_markers[index - 1],
+        )
         for index in range(1, 6)
     )
     roles = ("origin", "transition", "mechanism", "transition", "endpoint")
@@ -691,7 +856,7 @@ def test_origin_anchor_rejects_three_route_consensus_without_role_signal(
     generic = chunk(
         "generic_001",
         "01_Chapter 1.md",
-        "Conflict expanded authority across the region.",
+        "Charter compact conflict expanded authority across the region.",
         1,
     )
     mechanism = chunk(
@@ -699,7 +864,8 @@ def test_origin_anchor_rejects_three_route_consensus_without_role_signal(
         "01_Chapter 1.md",
         (
             "Conflict expanded authority because finance enabled an "
-            "administrative institution and established a precedent."
+            "administrative institution, established a charter compact, "
+            "and created a precedent."
         ),
         2,
     )
@@ -727,7 +893,7 @@ def test_origin_anchor_rejects_three_route_consensus_without_role_signal(
             facet(
                 "F1",
                 "origin",
-                "provider wording about conflict",
+                "charter compact conflict",
             ),
             traits=("broad_synthesis",),
         ),
@@ -741,17 +907,13 @@ def test_origin_anchor_rejects_three_route_consensus_without_role_signal(
 
     assert origin_lane["stage_anchor_selected_chunk_ids"] == ["mechanism_001"]
     diagnostics = origin_lane["stage_anchor_consensus_candidates"]
-    assert diagnostics[0] == {
-        "chunk_id": "mechanism_001",
-        "eligible": True,
-        "eligibility": "eligible",
-        "intent_match_count": 1,
-        "distinctive_intent_match_count": 0,
-        "role_signal_score": 4,
-        "pool_names": ["canonical", "mechanism"],
-        "pool_ranks": {"canonical": 1, "mechanism": 1},
-        "pool_hit_count": 2,
-    }
+    assert diagnostics[0]["chunk_id"] == "mechanism_001"
+    assert diagnostics[0]["eligible"] is True
+    assert diagnostics[0]["eligibility"] == "eligible"
+    assert diagnostics[0]["distinctive_intent_match_count"] == 2
+    assert diagnostics[0]["required_distinctive_intent_match_count"] == 2
+    assert diagnostics[0]["pool_names"] == ["canonical", "mechanism"]
+    assert diagnostics[0]["pool_hit_count"] == 2
     assert diagnostics[1]["chunk_id"] == "generic_001"
     assert diagnostics[1]["eligible"] is False
     assert diagnostics[1]["eligibility"] == "no_role_signal"
@@ -881,7 +1043,7 @@ def test_stage_intent_eligibility_beats_higher_consensus_for_wrong_subproblem():
     assert ranked[1]["stage_anchor_eligible"] is False
     assert (
         ranked[1]["stage_anchor_eligibility"]
-        == "no_stage_intent_match"
+        == "insufficient_distinctive_stage_anchor_match"
     )
     assert ranked[1]["anchor_pool_hit_count"] == 3
 
@@ -937,7 +1099,7 @@ def test_no_role_eligible_stage_anchor_leaves_an_observable_shortfall(
     assert lane["stage_anchor_consensus_candidates"][0]["eligible"] is False
     assert (
         lane["stage_anchor_consensus_candidates"][0]["eligibility"]
-        == "no_stage_intent_match"
+        == "insufficient_distinctive_stage_anchor_match"
     )
     assert outcome.broad_stage_anchor_chunk_ids == {}
     assert outcome.trace["selection"]["stage_coverage_satisfied_count"] == 0

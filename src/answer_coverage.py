@@ -75,13 +75,13 @@ __all__ = [
 ]
 
 
-EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/4"
+EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/5"
 INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = (
-    "archivist.interpretive_evidence_coverage/2"
+    "archivist.interpretive_evidence_coverage/3"
 )
-EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/6"
+EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/7"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
-EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/5"
+EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/6"
 
 MAX_REQUIREMENTS = 8
 MAX_PREMISES = 2
@@ -239,6 +239,7 @@ class EvidenceObligationFocus(StrEnum):
 class EvidenceObligationKind(StrEnum):
     STAGE = "stage"
     ADJACENT_STAGE_LINK = "adjacent_stage_link"
+    REQUIREMENT_COMPONENT = "requirement_component"
 
 
 class EvidenceDimension(StrEnum):
@@ -249,6 +250,10 @@ class EvidenceDimension(StrEnum):
     CONTINUITY_OR_CHANGE = "continuity_or_change"
     QUALIFICATION = "qualification"
     ADJACENT_STAGE_LINK = "adjacent_stage_link"
+    SUBJECT_OR_DEFINITION = "subject_or_definition"
+    ACTION_OR_MECHANISM = "action_or_mechanism"
+    SIGNIFICANCE_OR_CONSEQUENCE = "significance_or_consequence"
+    QUALIFICATION_OR_COUNTERARGUMENT = "qualification_or_counterargument"
 
 
 _DIMENSION_COMPATIBLE_ROLES = {
@@ -298,6 +303,35 @@ _DIMENSION_COMPATIBLE_ROLES = {
         {
             AnswerUnitRole.CAUSE,
             AnswerUnitRole.MECHANISM,
+        }
+    ),
+    EvidenceDimension.SUBJECT_OR_DEFINITION: frozenset(
+        {
+            AnswerUnitRole.DEFINITION,
+            AnswerUnitRole.IDENTITY,
+            AnswerUnitRole.EVENT,
+            AnswerUnitRole.CHRONOLOGY,
+        }
+    ),
+    EvidenceDimension.ACTION_OR_MECHANISM: frozenset(
+        {
+            AnswerUnitRole.CAUSE,
+            AnswerUnitRole.MECHANISM,
+            AnswerUnitRole.EVENT,
+        }
+    ),
+    EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE: frozenset(
+        {
+            AnswerUnitRole.EVENT,
+            AnswerUnitRole.MECHANISM,
+            AnswerUnitRole.CONSEQUENCE,
+            AnswerUnitRole.CHRONOLOGY,
+        }
+    ),
+    EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT: frozenset(
+        {
+            AnswerUnitRole.COUNTERARGUMENT,
+            AnswerUnitRole.QUALIFICATION,
         }
     ),
 }
@@ -462,7 +496,7 @@ class EvidenceObligationCoverage(_ContractModel):
 
 
 class EvidenceCoverageAnswer(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage/4"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage/5"] = Field(alias="schema")
     premise_decisions: tuple[PremiseDecision, ...] = Field(max_length=MAX_PREMISES)
     coverage: tuple[RequirementCoverage, ...] = Field(
         min_length=1,
@@ -482,7 +516,7 @@ class EvidenceCoverageAnswer(_ContractModel):
 class InterpretiveEvidenceCoverageAnswer(EvidenceCoverageAnswer):
     """Evidence coverage framed by explicitly subjective, uncited prose."""
 
-    schema_version: Literal["archivist.interpretive_evidence_coverage/2"] = (
+    schema_version: Literal["archivist.interpretive_evidence_coverage/3"] = (
         Field(alias="schema")
     )
     interpretive_moves: tuple[InterpretiveMove, ...] = Field(
@@ -582,16 +616,37 @@ class EvidenceObligationScope(_ContractModel):
                 )
             return self
 
+        if self.kind is EvidenceObligationKind.ADJACENT_STAGE_LINK:
+            if (
+                len(self.allowed_requirement_ids) != 2
+                or self.dimension_ids
+                != (EvidenceDimension.ADJACENT_STAGE_LINK,)
+                or self.predecessor_source_number is None
+                or not self.required_for_requirement_status
+            ):
+                raise ValueError(
+                    "adjacent-stage link obligations require two requirements, "
+                    "one link dimension, ordered source context, and required status"
+                )
+            return self
+
+        component_dimensions = {
+            EvidenceDimension.SUBJECT_OR_DEFINITION,
+            EvidenceDimension.ACTION_OR_MECHANISM,
+            EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE,
+            EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT,
+        }
         if (
-            len(self.allowed_requirement_ids) != 2
-            or self.dimension_ids
-            != (EvidenceDimension.ADJACENT_STAGE_LINK,)
-            or self.predecessor_source_number is None
+            len(self.allowed_requirement_ids) != 1
+            or len(self.dimension_ids) != 1
+            or self.dimension_ids[0] not in component_dimensions
+            or self.predecessor_source_number is not None
+            or self.focus is not EvidenceObligationFocus.CROSS_CUTTING
             or not self.required_for_requirement_status
         ):
             raise ValueError(
-                "adjacent-stage link obligations require two requirements, "
-                "one link dimension, ordered source context, and required status"
+                "requirement-component obligations require one requirement, "
+                "one component dimension, cross-cutting focus, and required status"
             )
         return self
 
@@ -656,7 +711,7 @@ class PremiseStatusCounts(_ContractModel):
 
 
 class CoverageDiagnosticSummary(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage_diagnostics/6"] = Field(alias="schema")
+    schema_version: Literal["archivist.evidence_coverage_diagnostics/7"] = Field(alias="schema")
     renderer_version: Literal["evidence-coverage-renderer/1"]
     validation_result: DiagnosticValidationResult
     error_code: CoverageValidationErrorCode | None

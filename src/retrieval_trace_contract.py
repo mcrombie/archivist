@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/8"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/9"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -122,6 +122,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "broad_execution_version",
             "broad_mechanism_candidate_limit",
             "broad_mechanism_lexical_version",
+            "broad_transition_lane_version",
             "broad_context_order",
             "diversity_min_score_ratio",
             "facet_embedding",
@@ -181,6 +182,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "stage_coverage_required_count",
             "stage_coverage_satisfied_count",
             "stage_coverage_shortfall_count",
+            "transition_coverage_required_count",
+            "transition_coverage_satisfied_count",
+            "transition_coverage_shortfall_count",
         }
     ),
     ("selection", "discarded", "[]"): _CHUNK_FIELDS
@@ -257,6 +261,15 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "stage_intent_query_char_count",
             "stage_intent_query_sha256",
             "stage_intent_term_count",
+            "stage_required_distinctive_intent_match_count",
+            "transition_candidate_chunk_ids",
+            "transition_candidates",
+            "transition_document_scope_sha256s",
+            "transition_id",
+            "transition_predecessor_facet_id",
+            "transition_query_char_count",
+            "transition_query_sha256",
+            "transition_selected_chunk_ids",
         }
     ),
     ("lanes", "[]", "stage_anchor_consensus_candidates", "[]"): frozenset(
@@ -269,6 +282,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "pool_hit_count",
             "pool_names",
             "pool_ranks",
+            "required_distinctive_intent_match_count",
             "role_signal_score",
         }
     ),
@@ -279,6 +293,16 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
         "[]",
         "pool_ranks",
     ): frozenset({"canonical", "mechanism", "provider"}),
+    ("lanes", "[]", "transition_candidates", "[]"): frozenset(
+        {
+            "chunk_id",
+            "eligibility",
+            "eligible",
+            "predecessor_intent_match_count",
+            "successor_intent_match_count",
+            "transition_signal_score",
+        }
+    ),
     ("evidence",): frozenset(
         {
             "anchor_normalizer_version",
@@ -602,6 +626,10 @@ _ARRAY_PATHS = frozenset(
             "pool_names",
         ),
         ("lanes", "[]", "stage_anchor_selected_chunk_ids"),
+        ("lanes", "[]", "transition_candidate_chunk_ids"),
+        ("lanes", "[]", "transition_candidates"),
+        ("lanes", "[]", "transition_document_scope_sha256s"),
+        ("lanes", "[]", "transition_selected_chunk_ids"),
         ("plan", "traits"),
         ("selection", "anchor_source_number_remap"),
         ("selection", "context"),
@@ -647,6 +675,8 @@ _IDENTIFIER_FIELDS = frozenset(
         "project_id",
         "requirement_id",
         "target_id",
+        "transition_id",
+        "transition_predecessor_facet_id",
         "turn_id",
         "unit_id",
     }
@@ -807,6 +837,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "broad-canonical-core-v1",
             "broad-stage-consensus-v1",
             "broad-stage-role-eligibility-v2",
+            "broad-stage-role-eligibility-v3",
             "not_applicable",
         }
     ),
@@ -828,23 +859,31 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "dimension": frozenset(
         {
             "adjacent_stage_link",
+            "action_or_mechanism",
             "cause_or_enabler",
             "consequence",
             "continuity_or_change",
             "mechanism",
             "qualification",
+            "qualification_or_counterargument",
+            "significance_or_consequence",
             "stage_development",
+            "subject_or_definition",
         }
     ),
     "dimension_ids": frozenset(
         {
             "adjacent_stage_link",
+            "action_or_mechanism",
             "cause_or_enabler",
             "consequence",
             "continuity_or_change",
             "mechanism",
             "qualification",
+            "qualification_or_counterargument",
+            "significance_or_consequence",
             "stage_development",
+            "subject_or_definition",
         }
     ),
     "error_code": _COVERAGE_ERROR_CODES,
@@ -852,8 +891,15 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "eligible",
             "missing_chunk",
+            "insufficient_distinctive_stage_anchor_match",
+            "no_distinctive_stage_anchor",
+            "no_predecessor_stage_intent",
+            "no_predecessor_stage_intent_match",
             "no_role_signal",
             "no_stage_intent_match",
+            "no_successor_stage_intent",
+            "no_successor_stage_intent_match",
+            "no_transition_signal",
         }
     ),
     "exception_code": _EXCEPTION_CODES,
@@ -892,19 +938,25 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "generator_reasoning_effort": frozenset({"high", "low", "max", "medium", "none", "xhigh"}),
     "generator_verbosity": frozenset({"high", "low", "medium"}),
     "hnsw_space": frozenset({"", "cosine", "ip", "l2"}),
-    "kind": frozenset({"adjacent_stage_link", "stage"}),
+    "kind": frozenset(
+        {"adjacent_stage_link", "requirement_component", "stage"}
+    ),
     "lane": frozenset({"analogue", "broader_related", "direct", "generic_semantic"}),
     "lane_selection": frozenset(
         {
             "one_each_then_round_robin",
             "canonical_stage_core_then_global_supplement",
             "consensus_stage_anchor_then_global_supplement",
+            "consensus_stage_anchor_then_transition_then_global_supplement",
             "stage_coverage_then_document_diversity",
             "stage_mechanism_coverage_then_document_diversity",
         }
     ),
     "broad_mechanism_lexical_version": frozenset(
         {"not_applicable", "role-scoped-mechanism-lexical-v1"}
+    ),
+    "broad_transition_lane_version": frozenset(
+        {"adjacent-pair-transition-v1", "not_applicable"}
     ),
     "lexical_scoring_version": frozenset({"bm25-nfkd-word-v1"}),
     "mode": frozenset({"broad_synthesis", "planned", "standard"}),
@@ -916,6 +968,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-normalizer/3",
             "evidence-coverage-normalizer/4",
             "evidence-coverage-normalizer/5",
+            "evidence-coverage-normalizer/6",
         }
     ),
     "origin": frozenset({"corpus_anchor", "neighbor", "primary", "retrieval"}),
@@ -926,6 +979,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "query-planner-v4",
             "query-planner-v5",
             "query-planner-v6",
+            "query-planner-v7",
         }
     ),
     "planner_validation_code": frozenset(
@@ -966,6 +1020,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v13",
             "evidence-planned-v14",
             "evidence-planned-v15",
+            "evidence-planned-v16",
         }
     ),
     "prompt_version": frozenset(
@@ -976,6 +1031,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-v5",
             "evidence-coverage-v6",
             "evidence-coverage-v7",
+            "evidence-coverage-v8",
         }
     ),
     "pool_names": frozenset({"canonical", "mechanism", "provider"}),
@@ -983,6 +1039,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "archivist.answer_request/3",
             "archivist.answer_request/4",
+            "archivist.answer_request/5",
         }
     ),
     "reason": frozenset(
@@ -1006,6 +1063,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v7",
             "faceted-hybrid-rrf-v8",
             "faceted-hybrid-rrf-v9",
+            "faceted-hybrid-rrf-v10",
             "hybrid-bm25-rrf-v1",
         }
     ),
@@ -1042,6 +1100,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.evidence_coverage_diagnostics/4",
             "archivist.evidence_coverage_diagnostics/5",
             "archivist.evidence_coverage_diagnostics/6",
+            "archivist.evidence_coverage_diagnostics/7",
             "archivist.evidence_policy_diagnostics/1",
             "archivist.planner_call_diagnostics/1",
             "archivist.planner_call_diagnostics/2",
@@ -1102,6 +1161,8 @@ _CHUNK_ID_ARRAY_FIELDS = frozenset(
         "relationship_chunk_ids",
         "selected_chunk_ids",
         "stage_anchor_selected_chunk_ids",
+        "transition_candidate_chunk_ids",
+        "transition_selected_chunk_ids",
     }
 )
 

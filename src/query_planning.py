@@ -1700,7 +1700,8 @@ Give every requirement exactly one dedicated narrative-stage facet: first an ori
 at least three transition or mechanism facets for distinct developments in the argument, and
 finally an endpoint facet. Do not use generic early/middle/late labels: make each requirement and
 query identify the distinct function or development it must find while staying neutral about the
-answer.
+answer. Each stage label and query must name the stage's distinctive institution, actor, event,
+or mechanism; generic topic words shared by the whole question are not a sufficient stage anchor.
 Do not merge or omit independently requested parts merely to stay under four.
 Keep labels and search queries terse and copy document hints only as exact catalog IDs.
 For relational questions, search each named concept plus evidence that explicitly links them.
