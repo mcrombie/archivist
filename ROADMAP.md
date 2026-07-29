@@ -19,8 +19,8 @@ Maps the sequence of briefs for Archivist, a retrieval-augmented QA system over 
 Archivist is already beyond the original implementation outline in several respects. Answer Mode
 uses versioned dense/BM25 reciprocal-rank fusion over the complete eligible manuscript, the public
 demo is live with bounded source disclosure, and per-answer stage timing and token/cost records
-exist. Development is currently on the V21 release-candidate cohort while the public deployment
-remains on V13.
+exist. V21 is now a frozen, measured candidate that failed its reader-level release gate; the
+public deployment remains on V13 while the next bounded development repair is designed.
 Those are real engineering accomplishments, but they do not yet support the drafted numerical
 resume claims.
 
@@ -31,17 +31,22 @@ finishing the current RAG cohort.
 
 The next evidence-producing sequence is:
 
-1. **Stabilize the candidate release.** The narrow V21 repair for V20's lossy G007 fallback is
-   frozen at `bf424c880bca4728a8d13225f85978e27a8d8dcf` and passes the full offline suite. Run the
-   predeclared unchanged no-retry G007 reader confirmation, then confirm the unchanged
-   ten-question practical set and deploy that same candidate. Do not collect resume numbers from
-   a different local or public cohort.
+1. **Stabilize the candidate release.** The narrow V21 repair is frozen and reproducible at
+   `bf424c880bca4728a8d13225f85978e27a8d8dcf`, but its unchanged no-retry G007 confirmation
+   reached only 1/7 strict claims and 3/5 target groups against a 2/7 plus 5/5 gate. The reader
+   answer and closed trace were valid, but the provider plan passed without invoking V21 salvage,
+   used an Introduction overview as its origin, and omitted the Civil War group. Keep V21 frozen
+   as a failed measured candidate; make the next repair offline and general, then freeze a new
+   exact candidate before another focused confirmation. The unchanged ten-question practical
+   run and deployment remain blocked until that focused gate passes.
 2. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
    development-question registry, leakage and quotation audits, provenance binding, location
    carry-over check, and Git freeze validator are implemented. The owner must now supply the
    34–46 questions and exact relevance/support labels required by Brief 3 without running those
    items through Archivist. The existing practical, Brief 1, opening-screen, smoke, and known
-   manual questions remain development data.
+   manual questions remain development data. Private authoring may proceed while development
+   uses only that registered development set, but the final provenance sidecar must be rebound to
+   the next passing frozen candidate before the gold set is ingested or scored.
 3. **Run a retrieval-only controlled comparison.** Compare vector-only retrieval with the current
    dense/BM25 reciprocal-rank-fusion path using the same corpus, eligibility rules, question text,
    query embedding, and values of `k`. Generation is excluded.

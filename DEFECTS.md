@@ -45,6 +45,25 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] A valid broad plan used an overview as historical origin
+Phase/Brief: Phase 1 evidence-planned-v21 unchanged G007 confirmation
+Symptom: the one no-retry G007 confirmation returned a valid eight-source reader answer and a
+closed valid trace, but realized only 1/7 frozen strict claims and 3/5 target document groups
+against the predeclared 2/7 plus 5/5 gate. It omitted the Chapter 4/5 origin and Chapter 14 Civil
+War groups. An Epilogue passage was returned but its required recent-shock chain was not used.
+Cause: spec gap in the brief and model error - the provider proposal passed local validation, so
+V21's rejected-origin salvage path did not run. The accepted origin lane then promoted an
+Introduction overview as an eligible early driver-bearing anchor. The ordinary broad-stage
+contract also allowed the middle chronology to skip the Civil War, and returned endpoint evidence
+did not have to become a supported answer obligation.
+Resolution and verification: unresolved. The exact frozen V21 commit
+`bf424c880bca4728a8d13225f85978e27a8d8dcf` was measured once with one planner, one batched
+embedding, one generation, no retry, and `$0.29870543` estimated spend under the `$0.40` cap.
+The next repair must remain corpus-agnostic: make overview/front-matter documents ineligible as
+historical origins when body-chapter causal episodes exist, enforce broad chronological
+cardinality, and preserve explicit unanswered obligations through generation. The failed gate
+does not license the unchanged ten-question run.
+
 ## [2026-07-29] Final gold workflow had no mechanical holdout or carry-over boundary
 Phase/Brief: Phase 1, Briefs 2–3
 Symptom: the repository could validate a completed gold JSON schema, but could not prove that its
@@ -73,7 +92,8 @@ same corpus-derived early-driver rule, the remaining plan is preserved, and the 
 is revalidated. Unrepairable plans still fail closed. Synthetic plan and pipeline tests prove
 stage preservation, repair isolation, one planner call, and zero retries. The complete offline
 suite passed 511 tests with one intentional skip and Ruff passed. The unchanged paid G007
-confirmation remains the reader-level gate.
+confirmation subsequently showed that this path was not invoked because the new provider plan
+passed validation directly; the separate valid-plan origin defect above remains open.
 
 ## [2026-07-29] Empty supported-status mapping discarded a paid G006 answer
 Phase/Brief: Phase 1 evidence-planned-v19 focused G006/G007 confirmation

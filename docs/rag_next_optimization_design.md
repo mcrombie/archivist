@@ -1,8 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v21 implemented and verified offline; its exact release-candidate
-revision still requires the predeclared unchanged G007 reader confirmation before the practical
-ten-question rerun
+Status: evidence-planned-v21 implemented, frozen, and measured; its unchanged G007 confirmation
+failed the predeclared reader gate, so the practical ten-question rerun remains blocked
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1828,8 +1827,42 @@ origin hint changes, an unrepairable proposal still fails closed, and the pipeli
 one planner call with no retry. The complete offline suite passed 511 tests with one intentional
 skip, and Ruff passed across source, tests, and scripts. No OpenAI call was made.
 
-This is a frozen-code candidate, not reader-level evidence. The next paid action is one unchanged
-no-retry G007 confirmation against the exact clean V21 commit. The gate remains 2/7 frozen strict
-claims plus 5/5 frozen target groups. Only a passing confirmation licenses the unchanged
-ten-question development evaluation; neither development set may become part of the genuinely
-held-out final gold set.
+At freeze, this was a code candidate rather than reader-level evidence. Its predeclared next
+action was one unchanged no-retry G007 confirmation against the exact clean V21 commit, with a
+gate of 2/7 frozen strict claims plus 5/5 frozen target groups. Only a passing confirmation could
+license the unchanged ten-question development evaluation; neither development set could become
+part of the genuinely held-out final gold set.
+
+## V21 reader confirmation: valid output, failed coverage gate
+
+The exact clean candidate
+`bf424c880bca4728a8d13225f85978e27a8d8dcf` received one unchanged, no-retry G007
+confirmation on 2026-07-29. It used the frozen corpus and practical rubric, neutral settings,
+GPT-5.6 Sol, eight final sources, one planner call, one batched embedding call, and one answer
+generation. The run completed in 104.985 seconds for an estimated `$0.29870543`, below the
+owner-authorized `$0.40` ceiling. There were no errors, unpriced events, retries, or judge calls.
+
+The answer was reader-valid, directly answered, and had 15 well-formed resolvable citation tokens.
+Its text-free retrieval trace passed schema 12. Frozen manual grading credited 1/7 strict claims
+and 3/5 target document groups, so it failed both substantive thresholds and does not license the
+unchanged ten-question run.
+
+The diagnostic boundary differs from V20. The provider plan passed local validation and therefore
+did not activate V21's bounded salvage (`repair_applied=false`). Its origin lane selected the
+Introduction overview rather than a body-chapter causal episode, and the selected chronology
+skipped the Civil War target group. An Epilogue passage reached the eight-source context but its
+required recent-shock chain did not reach the answer.
+
+The next cohort should not widen the source cap or add another model call. Its bounded offline
+targets are:
+
+1. exclude overview and front-matter documents from historical-origin anchors when eligible
+   body-chapter causal episodes exist;
+2. require the ordinary broad route to preserve its intended historical stage cardinality across
+   the chronology rather than merely five formally valid roles; and
+3. carry explicit unsupported stage obligations into generation so a retrieved endpoint cannot
+   silently disappear from the answer.
+
+These rules must be derived from document structure, chronology, and role evidence—not the G007
+gold locations or expected answer. After offline regressions pass, freeze a new exact candidate
+and repeat only the unchanged G007 gate before considering the ten-question development run.

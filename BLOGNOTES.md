@@ -2545,6 +2545,38 @@ like constructing a clean room. The interesting engineering is in proving what t
 not see, what corpus the answers refer to, and that the measuring apparatus changed without the
 measured system moving underneath it.
 
+### 2026-07-29 - The frozen candidate failed usefully
+
+- Ran the exact frozen V21 candidate
+  `bf424c880bca4728a8d13225f85978e27a8d8dcf` once on the unchanged G007 question: “How does the
+  book treat war as an engine of federal and central power?” The clean preflight rechecked the
+  question, seven-claim rubric, corpus and chunk hashes, 481-passage index, eight-source limit,
+  GPT-5.6 Sol settings, empty isolated ledger, and zero-retry rule.
+- Launched the long request through a hidden file-backed process so the previous closed-stdout
+  failure could not recur. It made exactly one planner call, one batched embedding call, and one
+  generation call. The result took 104.985 seconds and cost an estimated **$0.29870543**, safely
+  below the authorized `$0.40`; stderr stayed empty.
+- The mechanics were healthy: a direct reader answer, valid local generation contract, closed
+  text-free trace, eight sources, and 15 well-formed resolvable citation tokens. Strict content
+  grading nevertheless reached only **1/7 claims and 3/5 target document groups**, below the
+  predeclared 2/7 plus 5/5 gate. The ten-question development rerun therefore remains blocked.
+- V21's narrow repair did not fail; it never ran. This time the provider produced a formally valid
+  plan, so there was no `broad_origin_not_preserved` rejection to salvage. Retrieval then treated
+  the Introduction's overview as the historical origin and skipped the Civil War group. An
+  Epilogue passage was present in context but its required modern causal chain never appeared in
+  the answer.
+- Kept V21 frozen as a measured failed candidate rather than moving the goalposts after seeing the
+  answer. The next work is again bounded and offline: exclude overview/front matter from origin
+  anchors when body-chapter episodes exist, require the intended chronological stage cardinality,
+  and preserve explicit unanswered obligations through generation. No extra retry, critic call,
+  source slot, or gold-derived chapter rule is justified by this result.
+- The held-out authoring room remains useful, but its final provenance must bind the next passing
+  candidate rather than V21 before any held-out item is ingested or scored.
+
+Useful blog lesson: freezing before testing makes a disappointing result valuable. Because the
+question, corpus, rubric, code, cost boundary, and retry count could not move, the failure exposed
+a new contract boundary instead of becoming another prompt-tuning anecdote.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
