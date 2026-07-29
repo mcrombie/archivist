@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
 Status: evidence-planned-v14 implemented and verified offline on 2026-07-28; the unchanged
-G006/G007 focused confirmation remains the paid content gate
+G006/G007 paid gate completed but did not clear the full ten-question rerun
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -381,8 +381,22 @@ model configuration, eight-source ceiling, or one-generation-call boundary:
 
 The closed trace contract is now `archivist.retrieval_trace/7`, and the answer request is
 `archivist.answer_request/3`. The full offline suite passes 476 tests with one intentional skip.
-No paid inference result is claimed from this implementation yet; G006 and G007 must clear the
-focused gate before another unchanged ten-question cohort is justified.
+
+The subsequent unchanged G006/G007 gate ran once at clean commit
+`8becb2193303f79814c5f080db532541b539b789`, with no retry, for an estimated `$0.40612293`.
+Both answers validated, used eight sources, and emitted 33 well-formed, resolvable citation tokens.
+The inspection/synthesis split reduced v13's forced output, but strict content grading did not
+improve: G006 scored 0/8 claims and 4/8 target groups; G007 scored 1/7 claims and 4/5 target groups.
+G006 gained Chapter 20 while losing another modern target, and G007 gained the Civil War target
+while losing the Jamestown origin target.
+
+The result rejects consensus rank as a sufficient relevance test. Every protected stage anchor
+survived, and several had agreement from all three pools, but G006's middle stage still settled in
+Chapter 15 and G007's origin stage settled in Chapter 2. A high-confidence answer to an imprecise
+stage query remains the wrong anchor. The next bounded repair must make stage intent constrain
+anchor relevance and require the generated synthesis to state the causal or institutional link
+between surviving stages. The full ten-question rerun remains held because the focused gate missed
+its strict-claim and target-group thresholds.
 
 The implementation follows the bounded-call design in this document:
 

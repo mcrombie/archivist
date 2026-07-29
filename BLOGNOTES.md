@@ -1754,6 +1754,42 @@ Useful blog lesson: forcing a model to mention every retrieved paragraph can imp
 while making the historical argument worse. A useful completeness pass distinguishes evidence the
 model must inspect from the smaller set of mechanisms it must actually reconstruct.
 
+### 2026-07-28 - A clean focused gate prevented an uninformative full rerun
+
+- Froze the v14 implementation in commit `8becb21` before spending on evaluation. The unchanged
+  G006/G007 runner required that exact clean commit, the same owner test-set and practical-rubric
+  hashes, the same 481 embedded passages, an isolated empty cost ledger, eight final sources, and
+  zero automatic retries.
+- Both questions completed exactly once. The run made two planning calls, two batched-embedding
+  calls, and two answer-generation calls, consuming 32,784 priced tokens for an estimated
+  `$0.40612293`. There were no unpriced calls or retries.
+- The application mechanics passed: both responses were visible direct answers, all protected
+  stage anchors survived to the final context, both structured outputs validated, and all 33
+  citation tokens were well formed and resolved to one of eight returned sources.
+- The answer-quality gate did not pass. Under the same strict composite-claim grading, G006 scored
+  0/8 claims and 4/8 target document groups; G007 scored 1/7 claims and 4/5 groups. The required
+  thresholds were 2/8 plus 5/8 for G006 and 2/7 plus 5/5 for G007.
+- Consensus selection changed the omissions rather than widening the historical span. G006 reached
+  Chapter 20 but lost another needed modern institution; G007 recovered the Civil War group but
+  lost the Jamestown origin. A stage anchor could have two- or three-pool agreement and still be
+  highly relevant to an imprecisely framed subproblem rather than the role that the complete answer
+  needed it to play.
+- Separating inspection from synthesis cut forced citation output from the v13 pair's 58 citation
+  tokens to 33 and reduced estimated cost by 18.2 percent. That was a useful efficiency result, but
+  it did not make the connective argument explicit. G006 still read as a chronology of examples
+  rather than an institutional lineage.
+- Total question latency rose from 172.324 seconds in the comparable v13 pair to 196.971 seconds,
+  driven by a 125.252-second G007 generation. Lower output and lower cost therefore did not imply a
+  faster response in this single nondeterministic sample.
+- Held the full ten-question evaluation instead of spending on eight more questions after the
+  predeclared broad-question gate failed. The next bounded repair is narrower: constrain anchor
+  relevance with the intended historical role, then require causal or institutional links between
+  the surviving stages without adding a critic call, retry, larger context, or gold-answer hints.
+
+Useful blog lesson: agreement among retrieval methods is evidence of ranking confidence, not proof
+that the stage itself was framed correctly. A small paid gate can save both money and interpretive
+confusion when a technically valid answer still misses the argument the reader asked for.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
