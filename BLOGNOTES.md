@@ -1824,6 +1824,43 @@ chronology becomes an argument only when the evidence itself supports the links 
 Encoding both distinctions as fail-closed contracts gives the model less room to sound complete
 when the source chain is not.
 
+### 2026-07-29 - The v15 gate distinguished honest gaps from useful synthesis
+
+- Committed the role-aware broad-synthesis repair as `5b37e72`, then ran the unchanged G006/G007
+  focused gate from that exact clean commit. The owner question file, practical rubric, corpus,
+  private index, GPT-5.6 Sol settings, neutral interpretation, eight-source limit, and no-retry
+  policy all matched v14.
+- Both questions completed exactly once. Two planning calls, two batched-embedding calls, and two
+  answer-generation calls consumed 39,224 priced tokens for an estimated `$0.54793856`, below the
+  `$0.65` operational ceiling. G006 took 107.072 seconds and G007 116.683 seconds.
+- The application mechanics passed. Both structured responses validated, all eight sources were
+  retained per answer, and all 39 citation tokens were well formed and resolved. There were no
+  unpriced operations, API errors, or retries.
+- The answer-quality gate failed. Under the unchanged strict composite rubric, G006 scored 1/8
+  claims and 3/8 target document groups; G007 scored 0/7 claims and 4/5 groups. The required
+  thresholds remain 2/8 plus 5/8 for G006 and 2/7 plus 5/5 for G007.
+- Compared with v14, the pair stayed at one strict claim in aggregate and fell from eight to seven
+  covered target groups. Cost rose 34.9 percent, citation tokens rose from 33 to 39, and combined
+  latency rose 13.6 percent in this single directional sample.
+- The link contract did something important even though the answers remained incomplete. G006
+  supported only one of three adjacent-stage links and G007 one of four; every other link was
+  recorded as `no_direct_support`, and the affected requirements were downgraded rather than
+  supplied with invented connective tissue.
+- The remaining retrieval defect is now sharper. General role vocabulary can identify a plausible
+  origin, transition, mechanism, or endpoint without identifying the specific institution, event,
+  actor, or mechanism required by that stage. G007 satisfied all five canonical stages but again
+  missed its Jamestown origin; G006 reported one stage shortfall and reached only three of eight
+  frozen target groups.
+- Held the full ten-question rerun. The next bounded experiment should make distinctive
+  requirement content a hard eligibility condition before role and consensus scoring, then retrieve
+  transition evidence through an adjacent-pair lane instead of assuming that the later anchor
+  contains the relationship. It should keep the same one batched embedding, eight-source limit,
+  one generation, and no-retry architecture.
+
+Useful blog lesson: fail-closed behavior can be a real engineering success without being a product
+quality success. V15 stopped the model from inventing historical connections, but the test exposed
+that trustworthy incompleteness and a useful answer are separate milestones.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

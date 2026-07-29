@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v15 implemented and verified offline on 2026-07-28; its focused paid
-confirmation has not yet run
+Status: evidence-planned-v15 implemented, verified offline, and measured in a focused paid
+G006/G007 gate on 2026-07-29; the gate did not clear the next ten-question rerun
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -429,6 +429,35 @@ same eight final sources, one batched embedding operation, one answer-generation
 retry, and no second critic or verifier. The complete offline suite passes 483 tests with one
 intentional skip; focused Ruff checks pass. No OpenAI request was made while implementing or
 verifying v15.
+
+The unchanged v15 G006/G007 gate then ran once at clean commit
+`5b37e72bdf8069dd59db6c2b8a6c31e14f6dd3e9`, with no retry, for an estimated
+`$0.54793856`. The owner test-set, practical rubric, corpus, private index, model settings,
+neutral interpretation, eight-source limit, and operation count matched the v14 gate. Both answers
+validated, and all 39 citation tokens resolved to returned sources.
+
+The quality gate did not clear. Strict grading found G006 at 1/8 claims and 3/8 target groups, and
+G007 at 0/7 claims and 4/5 target groups. Relative to v14, the pair remained at one strict claim in
+aggregate and fell from eight to seven covered target groups. The full ten-question rerun therefore
+remains held.
+
+The result separates two effects:
+
+- the adjacent-link contract behaved correctly as an absence boundary. G006 supported one of
+  three required links and G007 one of four; every other link was recorded as
+  `no_direct_support`, and the affected requirements were downgraded rather than completed with
+  invented connective tissue;
+- role eligibility remained too generic to guarantee requirement relevance. G006 reported one
+  canonical-stage shortfall but still reached only three frozen target groups. G007 satisfied all
+  five canonical stages while admitting a Chapter 2 imperial-war passage for the origin stage and
+  missing the required Jamestown group.
+
+An origin-like, transition-like, or endpoint-like vocabulary is therefore not enough. The next
+bounded repair should require an eligible anchor to cover the planned stage's distinctive named
+institution, actor, event, or mechanism before role and consensus ranking apply. Cross-stage
+evidence should be retrieved through a dedicated transition lane scoped to each adjacent
+requirement pair, rather than presumed to occur in the later stage anchor. That design can retain
+one batched embedding request, eight final sources, one answer generation, and no retry.
 
 The implementation follows the bounded-call design in this document:
 
