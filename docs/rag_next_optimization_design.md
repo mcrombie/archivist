@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v15 implemented, verified offline, and measured in a focused paid
-G006/G007 gate on 2026-07-29; the gate did not clear the next ten-question rerun
+Status: evidence-planned-v15 implemented, verified offline, and measured in both a focused paid
+G006/G007 gate and the complete unchanged ten-question cohort on 2026-07-29
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -438,8 +438,8 @@ validated, and all 39 citation tokens resolved to returned sources.
 
 The quality gate did not clear. Strict grading found G006 at 1/8 claims and 3/8 target groups, and
 G007 at 0/7 claims and 4/5 target groups. Relative to v14, the pair remained at one strict claim in
-aggregate and fell from eight to seven covered target groups. The full ten-question rerun therefore
-remains held.
+aggregate and fell from eight to seven covered target groups. This result originally held the full
+ten-question rerun while the next repair was being designed.
 
 The result separates two effects:
 
@@ -458,6 +458,31 @@ institution, actor, event, or mechanism before role and consensus ranking apply.
 evidence should be retrieved through a dedicated transition lane scoped to each adjacent
 requirement pair, rather than presumed to occur in the later stage anchor. That design can retain
 one batched embedding request, eight final sources, one answer generation, and no retry.
+
+The owner subsequently chose to measure the whole system before another repair. The unchanged
+ten-question v15 cohort ran once at clean commit
+`ad3017daad4d8efd0a9b7d96b310393ef433b6ad`, with the same frozen questions, 58-claim practical
+rubric, corpus and index hashes, neutral interpretation, eight-source limit, pinned models, and
+no-retry policy. All ten items completed exactly once. Eight planning calls, ten batched-embedding
+calls, and nine answer-generation calls consumed 106,703 priced tokens for an estimated
+`$1.11784972`; the clean absence case skipped generation. There were no unpriced events, API
+errors, or retries.
+
+Application mechanics passed across the cohort: all eight eligible plans succeeded, all nine
+generated answers validated, all 85 citation tokens were well formed and resolvable, and all ten
+high-level expected behaviors passed. Strict answer quality did not improve. V15 realized 18/58
+essential claims and covered 21/26 target document groups, compared with 19/58 and 21/26 in the
+clean v13 sample. Four of 25 listed failure modes were present and no frozen claim was contradicted.
+Estimated cost fell 9.0 percent and generation tokens 2.5 percent, while total latency rose 8.0
+percent in this single nondeterministic comparison.
+
+The full profile changes the optimization priority. G006/G007 together remained at 2/15 strict
+claims and 8/13 target groups, merely redistributing coverage relative to v13. But focused G002
+and G005 also reached their expected document groups while realizing zero and one composite claims.
+The next repair therefore needs both requirement-specific broad anchors with an adjacent-pair
+transition lane and a stronger material-component completeness contract for focused answers.
+Future focused smoke tests may verify mechanics, but should not indefinitely replace the unchanged
+ten-question measurement.
 
 The implementation follows the bounded-call design in this document:
 

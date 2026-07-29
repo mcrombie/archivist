@@ -1861,6 +1861,38 @@ Useful blog lesson: fail-closed behavior can be a real engineering success witho
 quality success. V15 stopped the model from inventing historical connections, but the test exposed
 that trustworthy incompleteness and a useful answer are separate milestones.
 
+### 2026-07-29 - The complete ten-question run replaced a narrow gate with a product profile
+
+- Ran the owner's unchanged ten-question cohort once from clean commit `ad3017d`, using the same
+  frozen question and rubric hashes, private manuscript/index identity, neutral interpretation,
+  GPT-5.6 Sol settings, eight-source ceiling, and no-retry policy as the earlier comparison.
+- All ten questions completed exactly once. Eight planning calls, ten batched-embedding calls, and
+  nine answer-generation calls consumed 106,703 priced tokens for an estimated `$1.11784972`.
+  The clean absence case skipped generation. There were no API errors, retries, or unpriced events.
+- The product-level mechanics were reliable: every eligible plan succeeded, all nine generated
+  answers validated, all 85 citations resolved to returned sources, and all ten high-level
+  behaviors passed, including abstention, bounded near-match handling, and premise correction.
+- Strict completeness remained poor. The cohort realized 18 of 58 essential claims, covered 21 of
+  26 target document groups, triggered four of 25 listed failure modes, and contradicted no frozen
+  claim. The clean v13 sample had realized 19 claims with the same 21 target groups.
+- Cost fell 9.0 percent and generation tokens fell 2.5 percent relative to v13, but total latency
+  rose 8.0 percent. A single model sample is directional, so these shifts are not a noise study.
+- The full run revealed what the G006/G007 gate could not. The application is mechanically sound
+  across question types, while answer completeness is weak in both broad synthesis and some
+  focused questions. G002 and G005 reached their expected document groups but realized zero and
+  one strict composite claims, so another broad-retrieval-only repair would be too narrow.
+- Across the two broad questions, v13 and this full v15 run both produced two of fifteen strict
+  claims and covered eight of thirteen target groups. V15 redistributed which stages appeared
+  rather than improving the combined historical argument.
+- The next repair should preserve requirement-specific broad anchors and add a dedicated
+  adjacent-pair transition lane, while also carrying the material components of focused
+  relationships into the completeness ledger. A small smoke may verify mechanics, but it should
+  not become another reason to postpone the next unchanged ten-question measurement.
+
+Useful blog lesson: a narrow gate is useful for diagnosing one subsystem, but only the complete
+evaluation shows whether the product is becoming more useful. Reliable citations and graceful
+failure can improve while substantive answer coverage stays flat.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
