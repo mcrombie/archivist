@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/10"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/11"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -851,6 +851,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "broad-stage-role-eligibility-v2",
             "broad-stage-role-eligibility-v3",
             "broad-stage-role-eligibility-v4",
+            "broad-stage-role-eligibility-v5",
             "not_applicable",
         }
     ),
@@ -876,6 +877,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "cause_or_enabler",
             "consequence",
             "continuity_or_change",
+            "institutional_handoff",
             "mechanism",
             "qualification",
             "qualification_or_counterargument",
@@ -891,6 +893,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "cause_or_enabler",
             "consequence",
             "continuity_or_change",
+            "institutional_handoff",
             "mechanism",
             "qualification",
             "qualification_or_counterargument",
@@ -906,6 +909,9 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "missing_chunk",
             "insufficient_distinctive_stage_anchor_match",
             "no_distinctive_stage_anchor",
+            "no_handoff_capacity_match",
+            "no_institutional_bearer_match",
+            "no_institutional_handoff_match",
             "no_predecessor_stage_intent",
             "no_predecessor_stage_intent_match",
             "no_role_signal",
@@ -972,11 +978,16 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "adjacent-pair-transition-v1",
             "adjacent-pair-transition-v2",
+            "adjacent-pair-transition-v3",
             "not_applicable",
         }
     ),
     "lineage_stage_contract_version": frozenset(
-        {"long-institutional-lineage-v1", "not_applicable"}
+        {
+            "long-institutional-lineage-v1",
+            "long-institutional-lineage-v2",
+            "not_applicable",
+        }
     ),
     "lineage_transition_capacity_policy": frozenset(
         {
@@ -1007,6 +1018,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "query-planner-v6",
             "query-planner-v7",
             "query-planner-v8",
+            "query-planner-v9",
         }
     ),
     "planner_validation_code": frozenset(
@@ -1019,6 +1031,8 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "original_query_changed",
             "original_query_too_long",
             "lineage_stage_cardinality_mismatch",
+            "lineage_handoff_invalid",
+            "lineage_handoff_route_mismatch",
             "lineage_stage_role_invalid",
             "plan_structure_invalid",
             "planner_owned_original",
@@ -1052,6 +1066,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v16",
             "evidence-planned-v17",
             "evidence-planned-v18",
+            "evidence-planned-v19",
         }
     ),
     "prompt_version": frozenset(
@@ -1063,6 +1078,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-v6",
             "evidence-coverage-v7",
             "evidence-coverage-v8",
+            "evidence-coverage-v9",
         }
     ),
     "pool_names": frozenset({"canonical", "mechanism", "provider"}),
@@ -1071,6 +1087,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.answer_request/3",
             "archivist.answer_request/4",
             "archivist.answer_request/5",
+            "archivist.answer_request/6",
         }
     ),
     "reason": frozenset(
@@ -1096,6 +1113,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v9",
             "faceted-hybrid-rrf-v10",
             "faceted-hybrid-rrf-v11",
+            "faceted-hybrid-rrf-v12",
             "hybrid-bm25-rrf-v1",
         }
     ),
@@ -1138,6 +1156,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.planner_call_diagnostics/2",
             "archivist.question_plan/1",
             "archivist.question_plan/2",
+            "archivist.question_plan/3",
         }
     ),
     "stage": frozenset({"context", "fusion", "primary_resolution", "semantic"}),

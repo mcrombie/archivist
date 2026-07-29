@@ -54,10 +54,17 @@ governing and economic regimes rather than the institutional succession requeste
 Cause: spec gap in the brief - the v18 validator proves cardinality, advancing document hints,
 and vocabulary-distinct roles, but it does not require a named institutional capacity to pass
 from one bearer to the next or bind each role to both endpoints of the question.
-Resolution and verification: unresolved. The next bounded repair must give every long-lineage
-stage a bearer, inherited capacity, transfer-or-transformation mechanism, and outgoing capacity;
-adjacent stages must share a verifiable handoff. Stage evidence must support that declared role.
-The contract must remain corpus-agnostic and may not receive gold claims or target locations.
+Resolution and verification: repaired offline in `evidence-planned-v19`; paid quality measurement
+is pending. Every long-lineage stage now declares a distinct bearer, inherited capacity,
+transfer-or-transformation mechanism, and outgoing capacity. Each outgoing capacity must exactly
+become the next stage's inherited capacity, explicit question endpoints bind the first and last
+bearers, and generic-only handoff fields are rejected. Protected anchors must match both the bearer
+and a concrete handoff term; adjacent transitions must match both stages, their shared capacity,
+and an explicit transition signal. The generation ledger receives one source-bounded
+`institutional_handoff` obligation per stage, while planner fields are marked as non-evidence
+orientation. Corpus-agnostic regressions and the full offline suite passed (505 tests, one
+intentional skip); Ruff and `git diff --check` passed. No paid calls were made, so the unchanged
+G006 result remains the quality gate.
 
 ## [2026-07-29] Target-bearing broad context remained outside answer obligations
 Phase/Brief: Phase 1 evidence-planned-v18 unchanged ten-question evaluation

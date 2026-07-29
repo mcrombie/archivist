@@ -100,13 +100,13 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v18"
+RAG_POLICY_VERSION = "evidence-planned-v19"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
-QUERY_PLANNER_PROMPT_VERSION = "query-planner-v8"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v8"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v9"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v9"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
 MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
@@ -306,6 +306,16 @@ requirement_component identifies one material layer already detected in a focuse
 candidate sources: subject or definition, action or mechanism, significance or consequence,
 or qualification or counterargument.
 
+For a long institutional-lineage stage, the institutional_handoff dimension carries an
+orientation_only object with four planner-proposed search fields: bearer, inherited_capacity,
+transfer_mechanism, and outgoing_capacity. That object is not manuscript evidence and must never
+be copied or asserted merely because it appears in the request. Test all four fields against the
+obligation's one source scope. When the source supports them, write one coherent atomic sentence
+that names the bearer, says what capacity it inherited, states how that capacity was transferred
+or transformed, and identifies what capacity passed to the next stage. When the source does not
+support that complete handoff, mark institutional_handoff partial, unsupported, or conflicting
+without filling gaps from chronology or planner language.
+
 For each stage obligation dimension:
 - mark it supported only when an atomic answer unit states material directly supported by
   that obligation's one source scope;
@@ -340,8 +350,9 @@ Role compatibility is exact: stage_development uses definition, identity, event,
 chronology; cause_or_enabler and mechanism use cause or mechanism; consequence uses event,
 mechanism, consequence, or chronology; continuity_or_change uses mechanism, consequence,
 chronology, or qualification; qualification uses counterargument or qualification; and
-adjacent_stage_link uses cause or mechanism. Subject_or_definition uses definition, identity,
-event, or chronology; action_or_mechanism uses cause, mechanism, or event;
+adjacent_stage_link uses cause or mechanism. Institutional_handoff uses cause, mechanism, event,
+or chronology. Subject_or_definition uses definition, identity, event, or chronology;
+action_or_mechanism uses cause, mechanism, or event;
 significance_or_consequence uses event, mechanism, consequence, or chronology; and
 qualification_or_counterargument uses counterargument or qualification. A unit
 may realize several dimensions of the same source scope when its one claim genuinely does
@@ -2253,8 +2264,15 @@ def _evidence_obligation_scopes(
             "answer-unit capacity cannot preserve stages and adjacent links"
         )
 
+    long_lineage = (
+        RouteTrait.LONG_INSTITUTIONAL_LINEAGE in plan.traits
+    )
     selected_dimensions: list[list[EvidenceDimension]] = [
-        [_OBLIGATION_DIMENSIONS_BY_FOCUS[focus][0]]
+        (
+            [EvidenceDimension.INSTITUTIONAL_HANDOFF]
+            if long_lineage
+            else [_OBLIGATION_DIMENSIONS_BY_FOCUS[focus][0]]
+        )
         for (
             _stage_order,
             _facet_id,
@@ -2274,24 +2292,28 @@ def _evidence_obligation_scopes(
         EvidenceDimension.CONTINUITY_OR_CHANGE,
         EvidenceDimension.QUALIFICATION,
     )
-    for dimension in dimension_priority:
-        for index, (
-            _stage_order,
-            _facet_id,
-            _source_number,
-            _requirement_ids,
-            focus,
-            _paragraph_range,
-        ) in enumerate(stage_records):
+    if not long_lineage:
+        for dimension in dimension_priority:
+            for index, (
+                _stage_order,
+                _facet_id,
+                _source_number,
+                _requirement_ids,
+                focus,
+                _paragraph_range,
+            ) in enumerate(stage_records):
+                if remaining_capacity <= 0:
+                    break
+                desired = _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
+                if (
+                    dimension not in desired
+                    or dimension in selected_dimensions[index]
+                ):
+                    continue
+                selected_dimensions[index].append(dimension)
+                remaining_capacity -= 1
             if remaining_capacity <= 0:
                 break
-            desired = _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
-            if dimension not in desired or dimension in selected_dimensions[index]:
-                continue
-            selected_dimensions[index].append(dimension)
-            remaining_capacity -= 1
-        if remaining_capacity <= 0:
-            break
 
     scopes: list[EvidenceObligationScope] = []
     for index, (
@@ -2303,10 +2325,14 @@ def _evidence_obligation_scopes(
         paragraph_range,
     ) in enumerate(stage_records):
         selected = set(selected_dimensions[index])
-        dimension_ids = tuple(
-            dimension
-            for dimension in _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
-            if dimension in selected
+        dimension_ids = (
+            (EvidenceDimension.INSTITUTIONAL_HANDOFF,)
+            if long_lineage
+            else tuple(
+                dimension
+                for dimension in _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
+                if dimension in selected
+            )
         )
         scopes.append(
             EvidenceObligationScope(
@@ -2378,6 +2404,10 @@ def build_coverage_input(
     worldview: Worldview | str,
 ) -> str:
     requirement_sources = _requirement_source_map(plan, facet_source_numbers)
+    requirement_by_id = {
+        requirement.requirement_id: requirement
+        for requirement in plan.requirements
+    }
     premise_by_id = {premise.premise_id: premise for premise in plan.premises}
     premise_sources = [
         {
@@ -2397,8 +2427,50 @@ def build_coverage_input(
         resolved_turn,
         plan,
     )
+    synthesis_obligations: list[dict[str, Any]] = []
+    for scope in obligation_scopes:
+        obligation_payload: dict[str, Any] = {
+            "obligation_id": scope.obligation_id,
+            "kind": scope.kind.value,
+            "source_number": scope.source_number,
+            "predecessor_source_number": scope.predecessor_source_number,
+            "paragraph_start": scope.paragraph_start,
+            "paragraph_end": scope.paragraph_end,
+            "allowed_requirement_ids": list(
+                scope.allowed_requirement_ids
+            ),
+            "focus": scope.focus.value,
+            "dimension_ids": [
+                dimension.value for dimension in scope.dimension_ids
+            ],
+            "required_for_requirement_status": (
+                scope.required_for_requirement_status
+            ),
+        }
+        if (
+            EvidenceDimension.INSTITUTIONAL_HANDOFF
+            in scope.dimension_ids
+            and len(scope.allowed_requirement_ids) == 1
+        ):
+            requirement = requirement_by_id[
+                scope.allowed_requirement_ids[0]
+            ]
+            handoff = requirement.institutional_handoff
+            if handoff is not None:
+                obligation_payload["orientation_only"] = {
+                    "bearer": handoff.bearer,
+                    "inherited_capacity": handoff.inherited_capacity,
+                    "transfer_mechanism": handoff.transfer_mechanism,
+                    "outgoing_capacity": handoff.outgoing_capacity,
+                    "evidence_status": (
+                        "planner search orientation only; verify every field "
+                        "against the scoped manuscript source"
+                    ),
+                }
+        synthesis_obligations.append(obligation_payload)
+
     control = {
-        "schema": "archivist.answer_request/5",
+        "schema": "archivist.answer_request/6",
         "question": resolved_turn.standalone_question,
         "conversation_context": {
             "entities": list(resolved_turn.entities),
@@ -2431,25 +2503,7 @@ def build_coverage_input(
             }
             for scope in inspection_scopes
         ],
-        "synthesis_obligations": [
-            {
-                "obligation_id": scope.obligation_id,
-                "kind": scope.kind.value,
-                "source_number": scope.source_number,
-                "predecessor_source_number": scope.predecessor_source_number,
-                "paragraph_start": scope.paragraph_start,
-                "paragraph_end": scope.paragraph_end,
-                "allowed_requirement_ids": list(scope.allowed_requirement_ids),
-                "focus": scope.focus.value,
-                "dimension_ids": [
-                    dimension.value for dimension in scope.dimension_ids
-                ],
-                "required_for_requirement_status": (
-                    scope.required_for_requirement_status
-                ),
-            }
-            for scope in obligation_scopes
-        ],
+        "synthesis_obligations": synthesis_obligations,
         "evidence_boundary": {
             "decision": gate.decision.value,
             "certified_direct_absence": gate.certified_direct_absence,
@@ -2522,7 +2576,7 @@ def _generation_trace(
 ) -> dict[str, Any]:
     contract = {
         "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
-        "request_schema": "archivist.answer_request/5",
+        "request_schema": "archivist.answer_request/6",
         "instructions_sha256": hashlib.sha256(
             EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")
         ).hexdigest(),

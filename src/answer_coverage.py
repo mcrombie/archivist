@@ -251,6 +251,7 @@ class EvidenceDimension(StrEnum):
     CONTINUITY_OR_CHANGE = "continuity_or_change"
     QUALIFICATION = "qualification"
     ADJACENT_STAGE_LINK = "adjacent_stage_link"
+    INSTITUTIONAL_HANDOFF = "institutional_handoff"
     SUBJECT_OR_DEFINITION = "subject_or_definition"
     ACTION_OR_MECHANISM = "action_or_mechanism"
     SIGNIFICANCE_OR_CONSEQUENCE = "significance_or_consequence"
@@ -304,6 +305,14 @@ _DIMENSION_COMPATIBLE_ROLES = {
         {
             AnswerUnitRole.CAUSE,
             AnswerUnitRole.MECHANISM,
+        }
+    ),
+    EvidenceDimension.INSTITUTIONAL_HANDOFF: frozenset(
+        {
+            AnswerUnitRole.CAUSE,
+            AnswerUnitRole.MECHANISM,
+            AnswerUnitRole.EVENT,
+            AnswerUnitRole.CHRONOLOGY,
         }
     ),
     EvidenceDimension.SUBJECT_OR_DEFINITION: frozenset(

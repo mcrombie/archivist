@@ -29,6 +29,7 @@ from perspectives import AnswerVoice, HistoriographicalLens, Worldview
 from query_planning import (
     AnswerRequirement,
     FacetRole,
+    InstitutionalHandoff,
     PlannerAnswerRequirement,
     PlannerQuestionPlan,
     PlannerSearchFacet,
@@ -333,6 +334,7 @@ def supported_obligation_answer(
         EvidenceDimension.CONTINUITY_OR_CHANGE: AnswerUnitRole.CHRONOLOGY,
         EvidenceDimension.QUALIFICATION: AnswerUnitRole.QUALIFICATION,
         EvidenceDimension.ADJACENT_STAGE_LINK: AnswerUnitRole.CAUSE,
+        EvidenceDimension.INSTITUTIONAL_HANDOFF: AnswerUnitRole.MECHANISM,
         EvidenceDimension.SUBJECT_OR_DEFINITION: AnswerUnitRole.IDENTITY,
         EvidenceDimension.ACTION_OR_MECHANISM: AnswerUnitRole.MECHANISM,
         EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE: (
@@ -428,7 +430,7 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v8"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v9"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -447,6 +449,9 @@ def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     assert "cite only source_number, never predecessor_source_number" in instructions
     assert "requirement_component" in instructions
     assert "dedicated transition passage" in instructions
+    assert "orientation_only" in instructions
+    assert "not manuscript evidence" in instructions
+    assert "institutional_handoff" in instructions
     assert "required for that requirement is supported" in instructions
 
 
@@ -1251,7 +1256,7 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     } == QUERY_PLANNER_SETTINGS.responses_create_kwargs()
     assert calls[0]["text_format"] is PlannerQuestionPlan
     assert calls[0]["max_output_tokens"] == 4_000
-    assert '"schema": "archivist.answer_request/5"' in calls[1]["input"]
+    assert '"schema": "archivist.answer_request/6"' in calls[1]["input"]
     assert '"inspection_passages"' in calls[1]["input"]
     assert '"synthesis_obligations"' in calls[1]["input"]
     assert '"evidence_obligations"' not in calls[1]["input"]
@@ -1269,14 +1274,58 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
         "Trace the institutional lineage from Alpha Consortium to Omega Network."
     )
     stage_specs = (
-        ("Chartered venture", FacetRole.ORIGIN, "chartered venture"),
-        ("Provincial council", FacetRole.TRANSITION, "provincial council"),
-        ("Assembly taxation", FacetRole.MECHANISM, "assembly taxation"),
-        ("Commonwealth office", FacetRole.TRANSITION, "commonwealth office"),
-        ("National treasury", FacetRole.MECHANISM, "national treasury"),
-        ("Federal procurement", FacetRole.MECHANISM, "federal procurement"),
-        ("Contractor command", FacetRole.TRANSITION, "contractor command"),
-        ("Data center", FacetRole.ENDPOINT, "data center"),
+        (
+            "Chartered venture",
+            FacetRole.ORIGIN,
+            "chartered venture",
+            "Alpha Consortium",
+        ),
+        (
+            "Provincial council",
+            FacetRole.TRANSITION,
+            "provincial council",
+            "Provincial Council",
+        ),
+        (
+            "Assembly taxation",
+            FacetRole.MECHANISM,
+            "assembly taxation",
+            "Assembly Tax Authority",
+        ),
+        (
+            "Commonwealth office",
+            FacetRole.TRANSITION,
+            "commonwealth office",
+            "Commonwealth Office",
+        ),
+        (
+            "National treasury",
+            FacetRole.MECHANISM,
+            "national treasury",
+            "National Treasury",
+        ),
+        (
+            "Federal procurement",
+            FacetRole.MECHANISM,
+            "federal procurement",
+            "Federal Procurement Bureau",
+        ),
+        (
+            "Contractor command",
+            FacetRole.TRANSITION,
+            "contractor command",
+            "Contractor Command",
+        ),
+        (
+            "Data center",
+            FacetRole.ENDPOINT,
+            "data center",
+            "Omega Network",
+        ),
+    )
+    capacities = tuple(
+        f"synthetic capacity {index}"
+        for index in range(1, 10)
     )
     chunks = [
         {
@@ -1291,7 +1340,7 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
                 "stage, which established and transformed synthetic authority."
             ),
         }
-        for index, (label, _role, query) in enumerate(
+        for index, (label, _role, query, _bearer) in enumerate(
             stage_specs,
             start=1,
         )
@@ -1301,8 +1350,16 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
             PlannerAnswerRequirement(
                 requirement_id=f"R{index}",
                 label=label,
+                institutional_handoff=InstitutionalHandoff(
+                    bearer=bearer,
+                    inherited_capacity=capacities[index - 1],
+                    transfer_mechanism=(
+                        f"{bearer} transforms synthetic capacity"
+                    ),
+                    outgoing_capacity=capacities[index],
+                ),
             )
-            for index, (label, _role, _query) in enumerate(
+            for index, (label, _role, _query, bearer) in enumerate(
                 stage_specs,
                 start=1,
             )
@@ -1318,7 +1375,7 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
                 ),
                 document_hints=(f"lineage-{index}.md",),
             )
-            for index, (_label, role, query) in enumerate(
+            for index, (_label, role, query, _bearer) in enumerate(
                 stage_specs,
                 start=1,
             )
@@ -1371,6 +1428,12 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
 
     def fake_parse(_client, *, operation, **_request):
         calls.append(operation)
+        if operation == "answer_generation":
+            assert '"orientation_only"' in _request["input"]
+            assert '"bearer": "Alpha Consortium"' in _request["input"]
+            assert (
+                "planner search orientation only" in _request["input"]
+            )
         parsed = (
             proposal
             if operation == "query_planning"

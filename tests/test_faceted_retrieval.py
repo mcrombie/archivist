@@ -636,7 +636,7 @@ def test_long_lineage_reserves_eight_stage_slots_and_reports_transition_capacity
         "endpoint",
     )
     lineage_plan = SimpleNamespace(
-        schema="archivist.question_plan/2",
+        schema="archivist.question_plan/3",
         traits=("broad_synthesis", "long_institutional_lineage"),
         facets=(
             facet(
@@ -696,7 +696,7 @@ def test_long_lineage_reserves_eight_stage_slots_and_reports_transition_capacity
     ] == 8
     assert outcome.trace["parameters"][
         "lineage_stage_contract_version"
-    ] == "long-institutional-lineage-v1"
+    ] == "long-institutional-lineage-v2"
     assert outcome.trace["parameters"][
         "lineage_transition_capacity_policy"
     ] == "reuse-selected-stage-source-before-extra-source"
@@ -859,9 +859,9 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-stage-role-eligibility-v4"
+        == "broad-stage-role-eligibility-v5"
     )
-    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v11"
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v12"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"
@@ -1304,6 +1304,113 @@ def test_stage_intent_eligibility_beats_higher_consensus_for_wrong_subproblem():
         == "insufficient_distinctive_stage_anchor_match"
     )
     assert ranked[1]["anchor_pool_hit_count"] == 3
+
+
+def test_lineage_stage_anchor_must_support_bearer_and_handoff_role():
+    correct = {
+        "chunk_id": "correct_001",
+        "document": "procurement.md",
+        "rrf_score": 0.1,
+    }
+    generic = {
+        "chunk_id": "generic_001",
+        "document": "procurement.md",
+        "rrf_score": 10.0,
+    }
+    handoff = SimpleNamespace(
+        bearer="Federal Procurement Bureau",
+        inherited_capacity="national fiscal capacity",
+        transfer_mechanism="contracts transform fiscal power",
+        outgoing_capacity="contractor command capacity",
+    )
+
+    ranked = retrieval._ranked_broad_stage_anchor_candidates(
+        {
+            "canonical_core_candidates": [generic, correct],
+            "mechanism_candidates": [generic, correct],
+            "candidates": [generic, correct],
+            "institutional_handoff": handoff,
+        },
+        document_ordinal_by_id={"procurement.md": 1},
+        chunk_by_id={
+            "generic_001": {
+                "text": (
+                    "Authority changed through an administrative institution."
+                )
+            },
+            "correct_001": {
+                "text": (
+                    "The Federal Procurement Bureau inherited national fiscal "
+                    "capacity and transformed it through contracts into "
+                    "contractor command capacity."
+                )
+            },
+        },
+        original_query="trace institutional lineage",
+        stage_intent_query=(
+            "Federal Procurement Bureau national fiscal capacity contracts "
+            "contractor command capacity"
+        ),
+        role="mechanism",
+    )
+
+    assert ranked[0]["chunk_id"] == "correct_001"
+    assert ranked[0]["stage_anchor_eligible"] is True
+    assert ranked[1]["chunk_id"] == "generic_001"
+    assert ranked[1]["stage_anchor_eligible"] is False
+    assert ranked[1]["stage_anchor_eligibility"] in {
+        "insufficient_distinctive_stage_anchor_match",
+        "no_institutional_bearer_match",
+    }
+
+
+def test_lineage_transition_requires_both_bearers_and_shared_capacity():
+    candidates = (
+        {
+            "chunk_id": "generic_001",
+            "document": "handoff.md",
+            "rrf_score": 10.0,
+            "rank": 1,
+        },
+        {
+            "chunk_id": "linked_002",
+            "document": "handoff.md",
+            "rrf_score": 0.1,
+            "rank": 2,
+        },
+    )
+    ranked = retrieval._ranked_broad_transition_candidates(
+        candidates,
+        chunk_by_id={
+            "generic_001": {
+                "text": (
+                    "Federal procurement authority transformed into a later "
+                    "administrative capacity."
+                )
+            },
+            "linked_002": {
+                "text": (
+                    "The National Treasury transferred federal procurement "
+                    "authority to the Federal Procurement Bureau, which thereby "
+                    "converted it into contractor command capacity."
+                )
+            },
+        },
+        original_query="trace institutional lineage from Alpha to Omega",
+        predecessor_intent_query=(
+            "National Treasury national fiscal capacity transfers federal "
+            "procurement authority"
+        ),
+        successor_intent_query=(
+            "Federal Procurement Bureau inherits federal procurement authority "
+            "through contracts into contractor command capacity"
+        ),
+    )
+
+    assert ranked[0]["chunk_id"] == "linked_002"
+    assert ranked[0]["transition_eligible"] is True
+    assert ranked[1]["chunk_id"] == "generic_001"
+    assert ranked[1]["transition_eligible"] is False
 
 
 def test_no_role_eligible_stage_anchor_leaves_an_observable_shortfall(

@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v18 measured on the complete unchanged ten-question set; the next
-bounded repair is institutional-handoff binding and answer realization
+Status: evidence-planned-v19 institutional-handoff repair implemented and verified offline;
+unchanged paid G006/G007 confirmation remains pending
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1525,3 +1525,76 @@ This design may not receive gold claims, target-document groups, or manuscript-s
 It must preserve the one-planner, one-generation, zero-retry, eight-source public boundary. The
 V18 run is a complete measurement; the next cohort should be opened only after these mechanics
 have a synthetic corpus-agnostic contract.
+
+## V19 implementation: explicit institutional handoffs
+
+V19 implements the bounded G006 repair without changing the private corpus, embeddings, model,
+source ceiling, retry policy, or cost-accounting path. It versions the RAG policy as
+`evidence-planned-v19`, the planner prompt as `query-planner-v9`, the coverage prompt as
+`evidence-coverage-v9`, faceted retrieval as `faceted-hybrid-rrf-v12`, and the retrieval trace as
+`archivist.retrieval_trace/11`.
+
+### Planner-owned orientation contract
+
+Every requirement on the application-owned `long_institutional_lineage` route must now provide a
+four-field `institutional_handoff`:
+
+1. `bearer`: the distinct institution or organization carrying the stage;
+2. `inherited_capacity`: the concrete authority or capability received by that bearer;
+3. `transfer_mechanism`: the process by which that capacity is transferred or transformed; and
+4. `outgoing_capacity`: the concrete authority or capability passed toward the next stage.
+
+The outgoing capacity of stage N must match the inherited capacity of stage N+1 after local
+normalization. Bearers must be distinct, and generic placeholders such as "authority,"
+"capacity," or "transfer" cannot satisfy the concrete-function check by themselves. When a
+question states an explicit "from X to Y" span, the first and last bearers must overlap those
+endpoints. Handoff metadata on any other route is rejected. These are structural invariants, not
+historical claims.
+
+The deterministic fallback follows the same eight-stage, contiguous-capacity contract. Provider
+and fallback plans therefore enter retrieval through one schema instead of receiving different
+standards.
+
+### Source qualification and transition binding
+
+The protected anchor for each lineage stage must now match:
+
+- the stage's distinctive historical intent;
+- at least one term identifying its declared bearer;
+- at least one concrete handoff, capacity, or transfer term; and
+- the historical-role signal already required by V18.
+
+An adjacent transition candidate must match predecessor-exclusive terms, successor-exclusive
+terms, the shared carried capacity when one is present, and an explicit transition signal. A
+passage that merely names a generic chronological topic can no longer count as the institutional
+bridge.
+
+### Evidence boundary and answer realization
+
+Each selected long-lineage stage becomes one `institutional_handoff` answer obligation. The
+planner's four fields accompany that obligation only as `orientation_only`; the generation prompt
+states that they are not manuscript evidence and cannot be copied into the answer. The scoped
+source must independently support the bearer, inherited capacity, transfer mechanism, and
+outgoing capacity. If it does not, the unit must be marked partial, unsupported, or conflicting.
+Supported adjacent-stage links remain separate obligations.
+
+This preserves the public capacity boundary: at most eight stage-handoff obligations and seven
+adjacent-link obligations fit inside the existing 32-unit ledger, with no critic call, retry, or
+additional source. It also preserves the distinction between planning and evidence: the planner
+may propose what retrieval should seek, but only manuscript passages authorize what the answer
+may assert.
+
+### Offline verification and remaining boundary
+
+Synthetic regressions cover missing handoffs, broken capacity continuity, duplicate bearers,
+endpoint mismatch, route mismatch, bearer-and-role anchor qualification, shared-capacity
+transition qualification, and preservation of orientation through the generation request. The
+full offline suite passed 505 tests with one intentional skip; Ruff and `git diff --check` passed.
+No OpenAI calls were made.
+
+This verification proves the V19 contract, not answer-quality improvement. The first paid gate
+should be one unchanged, no-retry G006/G007 pair. G006 measures the intended lineage repair; G007
+is a guardrail for the ordinary five-stage broad route. V19 does not claim to resolve G007's
+separate problem in which target-bearing broad context can remain outside the generated answer's
+obligations. If the pair provides useful directional signal, the next measurement is the complete
+unchanged ten-question set rather than a succession of additional narrow gates.

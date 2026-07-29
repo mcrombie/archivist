@@ -56,12 +56,12 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v11"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v12"
 BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
 BROAD_MECHANISM_CANDIDATE_LIMIT = 20
-BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v4"
-BROAD_TRANSITION_LANE_VERSION = "adjacent-pair-transition-v2"
-LONG_LINEAGE_CONTRACT_VERSION = "long-institutional-lineage-v1"
+BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v5"
+BROAD_TRANSITION_LANE_VERSION = "adjacent-pair-transition-v3"
+LONG_LINEAGE_CONTRACT_VERSION = "long-institutional-lineage-v2"
 LONG_LINEAGE_TRANSITION_CAPACITY_POLICY = (
     "reuse-selected-stage-source-before-extra-source"
 )
@@ -1163,6 +1163,24 @@ _BROAD_STAGE_INTENT_GENERIC_TERMS = frozenset(
         "wording",
     }
 )
+_LINEAGE_HANDOFF_STRUCTURAL_TERMS = frozenset(
+    {
+        "capacity",
+        "handoff",
+        "inherited",
+        "inherits",
+        "institution",
+        "institutional",
+        "mechanism",
+        "outgoing",
+        "power",
+        "powers",
+        "authority",
+        "stage",
+        "transfer",
+        "transfers",
+    }
+)
 _BROAD_STAGE_ROLE_SIGNAL_PATTERNS = {
     "origin": re.compile(
         r"\b(?:begin\w*|began|creat\w*|emerg\w*|establish\w*|first|"
@@ -1552,17 +1570,69 @@ def _broad_stage_intent_query(
 ) -> str:
     """Return the planned historical function used to qualify a stage anchor."""
 
-    labels = [
-        str(_plan_value(requirement_by_id.get(requirement_id), "label", "")).strip()
+    requirements = [
+        requirement_by_id.get(requirement_id)
         for requirement_id in tuple(
             _plan_value(facet, "requirement_ids", ()) or ()
         )
     ]
+    labels = [
+        str(_plan_value(requirement, "label", "")).strip()
+        for requirement in requirements
+    ]
+    handoff_parts: list[str] = []
+    for requirement in requirements:
+        handoff = _plan_value(
+            requirement,
+            "institutional_handoff",
+            None,
+        )
+        if handoff is None:
+            continue
+        handoff_parts.extend(
+            str(_plan_value(handoff, field, "")).strip()
+            for field in (
+                "bearer",
+                "inherited_capacity",
+                "transfer_mechanism",
+                "outgoing_capacity",
+            )
+        )
     parts = [
         *[label for label in labels if label],
+        *[part for part in handoff_parts if part],
         str(_plan_value(facet, "search_query", "")).strip(),
     ]
     return " ".join(dict.fromkeys(part for part in parts if part))
+
+
+def _lineage_handoff_term_groups(
+    handoff: object | None,
+) -> tuple[frozenset[str], frozenset[str]]:
+    if handoff is None:
+        return frozenset(), frozenset()
+    bearer_terms = frozenset(
+        term
+        for term in _query_terms(
+            str(_plan_value(handoff, "bearer", ""))
+        )
+        if term not in _LINEAGE_HANDOFF_STRUCTURAL_TERMS
+    )
+    handoff_terms = frozenset(
+        term
+        for term in _query_terms(
+            " ".join(
+                str(_plan_value(handoff, field, ""))
+                for field in (
+                    "inherited_capacity",
+                    "transfer_mechanism",
+                    "outgoing_capacity",
+                )
+            )
+        )
+        if term not in _LINEAGE_HANDOFF_STRUCTURAL_TERMS
+    )
+    return bearer_terms, handoff_terms
 
 
 def _broad_stage_anchor_eligibility(
@@ -1571,6 +1641,7 @@ def _broad_stage_anchor_eligibility(
     original_query: str,
     stage_intent_query: str,
     role: str,
+    institutional_handoff: object | None = None,
 ) -> dict[str, Any]:
     """Qualify an anchor by stage-specific intent before route consensus."""
 
@@ -1594,6 +1665,11 @@ def _broad_stage_anchor_eligibility(
     required_distinctive_match_count = (
         min(2, len(distinctive_terms)) if distinctive_terms else 0
     )
+    bearer_terms, handoff_terms = _lineage_handoff_term_groups(
+        institutional_handoff
+    )
+    bearer_match_count = len(bearer_terms & chunk_terms)
+    handoff_match_count = len(handoff_terms & chunk_terms)
 
     if chunk is None:
         eligibility = "missing_chunk"
@@ -1601,6 +1677,10 @@ def _broad_stage_anchor_eligibility(
         eligibility = "no_distinctive_stage_anchor"
     elif distinctive_match_count < required_distinctive_match_count:
         eligibility = "insufficient_distinctive_stage_anchor_match"
+    elif institutional_handoff is not None and bearer_match_count <= 0:
+        eligibility = "no_institutional_bearer_match"
+    elif institutional_handoff is not None and handoff_match_count <= 0:
+        eligibility = "no_institutional_handoff_match"
     elif role_signal_score <= 0:
         eligibility = "no_role_signal"
     else:
@@ -1669,8 +1749,23 @@ def _ranked_broad_transition_candidates(
         original_query,
         successor_intent_query,
     )
-    predecessor_terms = predecessor_distinctive or predecessor_intent
-    successor_terms = successor_distinctive or successor_intent
+    predecessor_base_terms = predecessor_distinctive or predecessor_intent
+    successor_base_terms = successor_distinctive or successor_intent
+    predecessor_exclusive_terms = (
+        predecessor_base_terms - successor_base_terms
+    )
+    successor_exclusive_terms = (
+        successor_base_terms - predecessor_base_terms
+    )
+    predecessor_terms = (
+        predecessor_exclusive_terms or predecessor_base_terms
+    )
+    successor_terms = successor_exclusive_terms or successor_base_terms
+    shared_handoff_terms = frozenset(
+        term
+        for term in predecessor_base_terms & successor_base_terms
+        if term not in _LINEAGE_HANDOFF_STRUCTURAL_TERMS
+    )
     ranked: list[dict[str, Any]] = []
     for candidate in candidates:
         chunk_id = str(candidate.get("chunk_id") or "")
@@ -1679,6 +1774,9 @@ def _ranked_broad_transition_candidates(
         chunk_terms = frozenset(_tokens(chunk_text))
         predecessor_match_count = len(predecessor_terms & chunk_terms)
         successor_match_count = len(successor_terms & chunk_terms)
+        shared_handoff_match_count = len(
+            shared_handoff_terms & chunk_terms
+        )
         transition_signal_score = len(
             _BROAD_TRANSITION_SIGNAL_PATTERN.findall(chunk_text)
         )
@@ -1692,6 +1790,8 @@ def _ranked_broad_transition_candidates(
             eligibility = "no_predecessor_stage_intent_match"
         elif successor_match_count <= 0:
             eligibility = "no_successor_stage_intent_match"
+        elif shared_handoff_terms and shared_handoff_match_count <= 0:
+            eligibility = "no_handoff_capacity_match"
         elif transition_signal_score <= 0:
             eligibility = "no_transition_signal"
         else:
@@ -1798,6 +1898,7 @@ def _ranked_broad_stage_anchor_candidates(
             original_query=original_query,
             stage_intent_query=stage_intent_query,
             role=role,
+            institutional_handoff=lane.get("institutional_handoff"),
         )
         ranked.append(
             {
@@ -2173,6 +2274,21 @@ def retrieve_plan_from_collection(
         raw_hints = _plan_value(facet, "document_hints", ())
         document_hints = tuple(str(value) for value in (raw_hints or ()))
         stage_position = broad_stage_positions.get(facet_id)
+        facet_requirement_ids = tuple(
+            str(value)
+            for value in (
+                _plan_value(facet, "requirement_ids", ()) or ()
+            )
+        )
+        institutional_handoff = (
+            _plan_value(
+                requirement_by_id.get(facet_requirement_ids[0]),
+                "institutional_handoff",
+                None,
+            )
+            if len(facet_requirement_ids) == 1
+            else None
+        )
         stage_intent_query = (
             _broad_stage_intent_query(facet, requirement_by_id)
             if broad and role in _BROAD_STAGE_ROLES
@@ -2382,6 +2498,7 @@ def retrieve_plan_from_collection(
             "chronology_min_document_ordinal": chronology_min_document_ordinal,
             "chronology_max_document_ordinal": chronology_max_document_ordinal,
             "stage_position": stage_position,
+            "institutional_handoff": institutional_handoff,
             "stage_intent_query": stage_intent_query,
             "stage_intent_term_count": len(stage_intent_terms),
             "stage_distinctive_intent_term_count": len(

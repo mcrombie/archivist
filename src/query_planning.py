@@ -25,8 +25,8 @@ from pydantic import (
 )
 
 
-QUESTION_PLAN_SCHEMA = "archivist.question_plan/2"
-PLANNER_QUESTION_PLAN_SCHEMA = "archivist.planner_question_plan/2"
+QUESTION_PLAN_SCHEMA = "archivist.question_plan/3"
+PLANNER_QUESTION_PLAN_SCHEMA = "archivist.planner_question_plan/3"
 RESOLVED_TURN_SCHEMA = "archivist.resolved_turn/1"
 F0_FACET_ID = "F0"
 
@@ -39,6 +39,7 @@ MAX_DOCUMENT_HINTS_PER_FACET = 2
 MAX_SEARCH_QUERY_CHARS = 240
 MAX_ORIGINAL_QUERY_CHARS = 4_000
 MAX_ADDED_QUERY_CHARS = 1_200
+MAX_INSTITUTIONAL_HANDOFF_CHARS = 160
 MAX_PLANNER_REQUIREMENTS = MAX_ANSWER_REQUIREMENTS
 MAX_PLANNER_FACETS = MAX_ADDED_SEARCH_FACETS
 MIN_BROAD_STAGE_REQUIREMENTS = 5
@@ -53,6 +54,8 @@ PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
         "missing_requirement_mapping",
         "original_query_changed",
         "original_query_too_long",
+        "lineage_handoff_invalid",
+        "lineage_handoff_route_mismatch",
         "lineage_stage_cardinality_mismatch",
         "lineage_stage_role_invalid",
         "planner_owned_original",
@@ -161,11 +164,38 @@ class DocumentCatalogEntry(_ContractModel):
     corpus_ordinal: int = Field(ge=0)
 
 
+class InstitutionalHandoff(_ContractModel):
+    """Planner orientation for one institutional-lineage stage.
+
+    These fields are search intent, never evidence.  Local validation requires
+    adjacent stages to name the same carried capacity so a chronological list
+    cannot masquerade as an institutional lineage.
+    """
+
+    bearer: str = Field(
+        min_length=2,
+        max_length=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+    )
+    inherited_capacity: str = Field(
+        min_length=2,
+        max_length=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+    )
+    transfer_mechanism: str = Field(
+        min_length=2,
+        max_length=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+    )
+    outgoing_capacity: str = Field(
+        min_length=2,
+        max_length=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+    )
+
+
 class AnswerRequirement(_ContractModel):
     requirement_id: str = Field(pattern=_SAFE_ID_PATTERN)
     label: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
     order: int = Field(ge=0)
     required: bool = True
+    institutional_handoff: InstitutionalHandoff | None = None
 
 
 class SearchFacet(_ContractModel):
@@ -225,7 +255,7 @@ class QuestionPlan(_ContractModel):
     the first position.
     """
 
-    schema_: Literal["archivist.question_plan/2"] = Field(
+    schema_: Literal["archivist.question_plan/3"] = Field(
         default=QUESTION_PLAN_SCHEMA,
         alias="schema",
     )
@@ -247,7 +277,7 @@ class QuestionPlan(_ContractModel):
     fallback_reason: str | None = Field(default=None, max_length=240)
 
     @property
-    def schema(self) -> Literal["archivist.question_plan/2"]:
+    def schema(self) -> Literal["archivist.question_plan/3"]:
         return self.schema_
 
     @model_validator(mode="after")
@@ -344,6 +374,7 @@ class PlannerAnswerRequirement(_ContractModel):
 
     requirement_id: SafePlanId
     label: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
+    institutional_handoff: InstitutionalHandoff | None = None
 
 
 class PlannerSearchFacet(_ContractModel):
@@ -382,7 +413,7 @@ class PlannerQuestionPlan(_ContractModel):
     semantic rejection as an SDK parse failure.
     """
 
-    schema_: Literal["archivist.planner_question_plan/2"] = Field(
+    schema_: Literal["archivist.planner_question_plan/3"] = Field(
         default=PLANNER_QUESTION_PLAN_SCHEMA,
         alias="schema",
     )
@@ -400,7 +431,7 @@ class PlannerQuestionPlan(_ContractModel):
     )
 
     @property
-    def schema(self) -> Literal["archivist.planner_question_plan/2"]:
+    def schema(self) -> Literal["archivist.planner_question_plan/3"]:
         return self.schema_
 
 
@@ -539,6 +570,30 @@ _LINEAGE_STAGE_ROLE_GENERIC_TOKENS = frozenset(
         "transition",
         "transformation",
     }
+)
+_LINEAGE_HANDOFF_GENERIC_TOKENS = (
+    _LINEAGE_STAGE_ROLE_GENERIC_TOKENS
+    | frozenset(
+        {
+            "authority",
+            "capacity",
+            "carried",
+            "carry",
+            "handoff",
+            "inherit",
+            "inherited",
+            "inherits",
+            "outgoing",
+            "pass",
+            "passed",
+            "passes",
+            "power",
+            "powers",
+            "transfer",
+            "transferred",
+            "transfers",
+        }
+    )
 )
 _LONG_INSTITUTIONAL_LINEAGE_PATTERNS = (
     re.compile(
@@ -1078,12 +1133,34 @@ def _lineage_stage_role_signature(
     """Return the stage-specific vocabulary that distinguishes one lineage role."""
 
     question_tokens = meaningful_query_tokens(question)
+    handoff = requirement.institutional_handoff
+    handoff_text = (
+        " ".join(
+            (
+                handoff.bearer,
+                handoff.inherited_capacity,
+                handoff.transfer_mechanism,
+                handoff.outgoing_capacity,
+            )
+        )
+        if handoff is not None
+        else ""
+    )
     stage_tokens = meaningful_query_tokens(
-        f"{requirement.label} {facet.search_query}"
+        f"{requirement.label} {facet.search_query} {handoff_text}"
     )
     return frozenset(
         token
         for token in stage_tokens - question_tokens
+        if token not in _LINEAGE_STAGE_ROLE_GENERIC_TOKENS
+        and not token.isdigit()
+    )
+
+
+def _lineage_endpoint_tokens(value: str) -> frozenset[str]:
+    return frozenset(
+        token
+        for token in meaningful_query_tokens(value)
         if token not in _LINEAGE_STAGE_ROLE_GENERIC_TOKENS
         and not token.isdigit()
     )
@@ -1096,12 +1173,93 @@ def _validate_long_lineage_stage_roles(
     ordered_requirements: Sequence[AnswerRequirement],
     dedicated_stage_facets_by_requirement: Mapping[str, Sequence[SearchFacet]],
 ) -> None:
-    """Enforce distinct historical bearers and chronological catalog anchors."""
+    """Enforce endpoint-bound bearers, carried capacity, and catalog order."""
 
     ordered_facets = [
         dedicated_stage_facets_by_requirement[requirement.requirement_id][0]
         for requirement in ordered_requirements
     ]
+    handoffs = [
+        requirement.institutional_handoff
+        for requirement in ordered_requirements
+    ]
+    if any(handoff is None for handoff in handoffs):
+        raise PlanValidationError(
+            "lineage_handoff_invalid",
+            "every institutional-lineage stage must declare its bearer, "
+            "inherited capacity, transfer mechanism, and outgoing capacity",
+        )
+    typed_handoffs = [
+        handoff
+        for handoff in handoffs
+        if handoff is not None
+    ]
+    normalized_bearers = [
+        normalize_search_query(handoff.bearer)
+        for handoff in typed_handoffs
+    ]
+    if len(normalized_bearers) != len(set(normalized_bearers)):
+        raise PlanValidationError(
+            "lineage_handoff_invalid",
+            "each institutional-lineage stage requires a distinct bearer",
+        )
+    for handoff in typed_handoffs:
+        for field_value in (
+            handoff.inherited_capacity,
+            handoff.transfer_mechanism,
+            handoff.outgoing_capacity,
+        ):
+            if not {
+                token
+                for token in meaningful_query_tokens(field_value)
+                if token not in _LINEAGE_HANDOFF_GENERIC_TOKENS
+                and not token.isdigit()
+            }:
+                raise PlanValidationError(
+                    "lineage_handoff_invalid",
+                    "institutional capacities and transfer mechanisms must "
+                    "name concrete, non-generic historical functions",
+                )
+    for predecessor, successor in zip(
+        typed_handoffs,
+        typed_handoffs[1:],
+        strict=False,
+    ):
+        if normalize_search_query(
+            predecessor.outgoing_capacity
+        ) != normalize_search_query(successor.inherited_capacity):
+            raise PlanValidationError(
+                "lineage_handoff_invalid",
+                "each stage's outgoing capacity must exactly become the next "
+                "stage's inherited capacity",
+            )
+
+    endpoint_match = _START_END_PATTERN.search(turn.standalone_question)
+    if endpoint_match is not None:
+        origin_tokens = _lineage_endpoint_tokens(
+            endpoint_match.group("start")
+        )
+        endpoint_tokens = _lineage_endpoint_tokens(
+            endpoint_match.group("end")
+        )
+        first_bearer_tokens = _lineage_endpoint_tokens(
+            typed_handoffs[0].bearer
+        )
+        last_bearer_tokens = _lineage_endpoint_tokens(
+            typed_handoffs[-1].bearer
+        )
+        if (
+            not origin_tokens
+            or not endpoint_tokens
+            or not origin_tokens.intersection(first_bearer_tokens)
+            or not endpoint_tokens.intersection(last_bearer_tokens)
+        ):
+            raise PlanValidationError(
+                "lineage_handoff_invalid",
+                "the first and last institutional bearers must bind to the "
+                "question's stated origin and endpoint",
+            )
+
     signatures = [
         _lineage_stage_role_signature(
             turn.standalone_question,
@@ -1175,6 +1333,18 @@ def validate_question_plan(
     turn = _coerce_resolved_turn(resolved_turn)
     catalog = _coerce_catalog(document_catalog)
     deterministic_traits = set(route_question(turn))
+    long_lineage = (
+        RouteTrait.LONG_INSTITUTIONAL_LINEAGE in deterministic_traits
+    )
+    if not long_lineage and any(
+        requirement.institutional_handoff is not None
+        for requirement in parsed.requirements
+    ):
+        raise PlanValidationError(
+            "lineage_handoff_route_mismatch",
+            "institutional handoff metadata is allowed only for the "
+            "application-owned long-lineage route",
+        )
 
     if parsed.premises and RouteTrait.PREMISE_SENSITIVE not in deterministic_traits:
         raise PlanValidationError(
@@ -1313,9 +1483,6 @@ def validate_question_plan(
                 for role in ordered_stage_roles[1:-1]
             )
         )
-        long_lineage = (
-            RouteTrait.LONG_INSTITUTIONAL_LINEAGE in deterministic_traits
-        )
         if long_lineage and (
             len(parsed.requirements)
             != LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS
@@ -1396,6 +1563,7 @@ def validate_planner_question_plan(
                 label=requirement.label,
                 order=order,
                 required=True,
+                institutional_handoff=requirement.institutional_handoff,
             )
             for order, requirement in enumerate(parsed.requirements)
         ),
@@ -1468,12 +1636,15 @@ def _bounded_text(value: str, limit: int = MAX_SEARCH_QUERY_CHARS) -> str:
 def _fallback_requirement(
     index: int,
     label: str,
+    *,
+    institutional_handoff: InstitutionalHandoff | None = None,
 ) -> AnswerRequirement:
     return AnswerRequirement(
         requirement_id=f"R{index}",
         label=_bounded_text(label),
         order=index - 1,
         required=True,
+        institutional_handoff=institutional_handoff,
     )
 
 
@@ -1602,47 +1773,76 @@ def _long_lineage_fallback_stages(
 
     start_label = start or "the earliest institutional bearer"
     end_label = end or "the latest institutional system"
-    labels_and_queries = (
+    labels_roles_queries_bearers = (
         (
             f"Founding mandate at {start_label}",
             FacetRole.ORIGIN,
             f"founding charter mandate {start_label}",
+            start_label,
         ),
         (
             f"First successor after {start_label}",
             FacetRole.TRANSITION,
             f"successor compact inheritance {start_label}",
+            f"first successor institution after {start_label}",
         ),
         (
             "Transfer of authority into a new bearer",
             FacetRole.MECHANISM,
             f"authority transfer replacement {start_label} {end_label}",
+            "successor public authority",
         ),
         (
             "Fiscal machinery that consolidated the lineage",
             FacetRole.MECHANISM,
             f"fiscal finance revenue machinery {start_label} {end_label}",
+            "fiscal administrative institution",
         ),
         (
             "Intermediate political order carrying the inherited powers",
             FacetRole.TRANSITION,
             f"political order inherited powers {start_label} {end_label}",
+            "intermediate political order",
         ),
         (
             "Later reorganization of public authority",
             FacetRole.MECHANISM,
             f"public authority reorganization bureaucracy {end_label}",
+            "later public administrative body",
         ),
         (
             f"Public-private integration toward {end_label}",
             FacetRole.TRANSITION,
             f"public private integration contracts {end_label}",
+            f"public-private predecessor of {end_label}",
         ),
         (
             f"Mature operating structure at {end_label}",
             FacetRole.ENDPOINT,
             f"operating structure persistence legacy {end_label}",
+            end_label,
         ),
+    )
+    capacities = (
+        f"founding mandate associated with {start_label}",
+        "chartered governing authority",
+        "successor public authority",
+        "delegated fiscal authority",
+        "centralized administrative capacity",
+        "reorganized public authority",
+        "public-private contracting capacity",
+        f"mature operating capacity associated with {end_label}",
+        f"continuing institutional capacity at {end_label}",
+    )
+    transfer_mechanisms = (
+        "founding or charter creates the first institutional mandate",
+        "succession transfers the founding mandate to a new bearer",
+        "legal transfer converts succession into public authority",
+        "fiscal machinery consolidates delegated authority",
+        "political reorganization centralizes administrative capacity",
+        "bureaucratic reorganization preserves authority in a later body",
+        "contracting integrates public authority with private operators",
+        "the endpoint system consolidates the inherited operating capacity",
     )
     compact_question = (
         ""
@@ -1650,9 +1850,30 @@ def _long_lineage_fallback_stages(
         else _bounded_text(question, limit=48)
     )
     requirements = tuple(
-        _fallback_requirement(index, label)
-        for index, (label, _role, _query) in enumerate(
-            labels_and_queries,
+        _fallback_requirement(
+            index,
+            label,
+            institutional_handoff=InstitutionalHandoff(
+                bearer=_bounded_text(
+                    bearer,
+                    limit=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+                ),
+                inherited_capacity=_bounded_text(
+                    capacities[index - 1],
+                    limit=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+                ),
+                transfer_mechanism=_bounded_text(
+                    transfer_mechanisms[index - 1],
+                    limit=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+                ),
+                outgoing_capacity=_bounded_text(
+                    capacities[index],
+                    limit=MAX_INSTITUTIONAL_HANDOFF_CHARS,
+                ),
+            ),
+        )
+        for index, (label, _role, _query, bearer) in enumerate(
+            labels_roles_queries_bearers,
             start=1,
         )
     )
@@ -1663,8 +1884,8 @@ def _long_lineage_fallback_stages(
             role,
             " ".join(part for part in (query, compact_question) if part),
         )
-        for index, (_label, role, query) in enumerate(
-            labels_and_queries,
+        for index, (_label, role, query, _bearer) in enumerate(
+            labels_roles_queries_bearers,
             start=1,
         )
     )
@@ -1981,8 +2202,14 @@ requirements and exactly eight dedicated stage facets. The eight stages consume 
 stage-source capacity; do not add a ninth transition facet. Give every requirement exactly one
 dedicated narrative-stage facet: first an origin facet, then transition or mechanism facets for
 distinct developments in the argument, and finally an endpoint facet. For a long institutional
-lineage, each stage must name a different historical bearer, authority transfer, governing
-regime, fiscal or administrative mechanism, public-private arrangement, or endpoint system.
+lineage, populate institutional_handoff on every requirement. Name a distinct historical bearer,
+the capacity it inherits, the mechanism that transfers or transforms that capacity, and the
+capacity it passes onward. Copy each stage's outgoing_capacity exactly into the next stage's
+inherited_capacity. Bind the first bearer to the origin named after "from" in the question and
+the last bearer to the endpoint named after "to". The eight stages must form one carried
+institutional chain, not eight merely chronological topics. A stage may describe a governing
+regime, fiscal or administrative mechanism, public-private arrangement, or endpoint system only
+when it also states that explicit handoff.
 Give each long-lineage stage at least one exact eligible-document hint, and make those primary
 hints advance in strict catalog order. Do not use generic early/middle/late labels: make each
 requirement and query identify the distinct function or development it must find while staying
@@ -1998,7 +2225,7 @@ alternative chronology, origin, identity, or causal frame if the premise fails; 
 alternative in the plan.
 Document hints must exactly match the supplied eligible catalog.
 Do not state conclusions, cite sources, invent aliases, or use prior assistant answers as evidence.
-Respect the version-2 limits encoded in the response schema.
+Respect the version-3 limits encoded in the response schema.
 """
 
 
@@ -2021,11 +2248,13 @@ __all__ = [
     "EvidenceTargetRole",
     "F0_FACET_ID",
     "FacetRole",
+    "InstitutionalHandoff",
     "MAX_ADDED_QUERY_CHARS",
     "MAX_ADDED_SEARCH_FACETS",
     "LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS",
     "MIN_BROAD_STAGE_REQUIREMENTS",
     "MAX_ORIGINAL_QUERY_CHARS",
+    "MAX_INSTITUTIONAL_HANDOFF_CHARS",
     "MAX_PLANNER_FACETS",
     "MAX_PLANNER_REQUIREMENTS",
     "MAX_ANSWER_REQUIREMENTS",

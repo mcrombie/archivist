@@ -2289,6 +2289,44 @@ useful. V18 replaced a false green light with an honest instrument panel. The ne
 making the plan describe the reader's causal object rather than merely a tidy sequence through
 time.
 
+### 2026-07-29 - V19 turned a chronology into an explicit institutional handoff
+
+- Implemented the bounded repair suggested by V18's G006 failure. An eight-stage plan is no
+  longer sufficient merely because its topics advance through time and use different historical
+  vocabulary.
+- Every long-lineage stage now declares a distinct institutional bearer, the concrete capacity it
+  inherits, the mechanism that transfers or transforms that capacity, and the capacity it passes
+  onward. Each outgoing capacity must become the next stage's inherited capacity, and explicit
+  "from X to Y" questions bind the first and last bearers to those endpoints.
+- Tightened protected-stage retrieval. A passage must match the intended bearer and a concrete
+  handoff function in addition to the existing distinctive-stage and historical-role checks.
+- Tightened adjacent-stage retrieval. A transition passage must connect terms distinctive to both
+  bearers, match their shared carried capacity, and state an explicit transition signal. Merely
+  mentioning a topic common to both periods is no longer enough.
+- Replaced generic long-lineage stage-development obligations with explicit
+  `institutional_handoff` obligations. The planner's proposed bearer and capacity fields are sent
+  to generation only as search orientation, clearly marked as non-evidence. The answer must verify
+  all four fields against the one scoped manuscript passage or report that the handoff is only
+  partial, unsupported, or conflicting.
+- Preserved the user-visible constraints: eight final manuscript passages, one planner call, one
+  answer call, no automatic retry, no critic model, and no manuscript-specific or gold-set hints
+  in production code.
+- Versioned the new cohort as `evidence-planned-v19`, planner prompt v9, coverage prompt v9,
+  faceted retrieval v12, answer request 6, and retrieval trace 11.
+- Added corpus-agnostic regressions for missing or discontinuous handoffs, duplicate bearers,
+  endpoint mismatch, misuse on a non-lineage route, source-role qualification, and shared-capacity
+  transition evidence. The full offline suite passed 505 tests with one intentional skip; Ruff
+  and the diff integrity check passed. No OpenAI calls were made.
+- This is not yet a quality claim. The next paid checkpoint should run the unchanged G006 and
+  G007 questions once with no retries. G006 tests the new contract; G007 protects the ordinary
+  broad route. V19 deliberately does not claim to fix G007's separate problem of retrieved broad
+  evidence remaining unused in the answer. If that checkpoint is directionally sound, return to
+  the complete unchanged ten-question evaluation rather than adding more narrow detours.
+
+Useful blog lesson: an elegant context window is not just a pile of relevant passages. It is an
+argument-shaped contract: who carries a capability, how it changes hands, which source supports
+each link, and which planning suggestions must remain outside the evidence boundary.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

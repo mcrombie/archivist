@@ -10,6 +10,7 @@ from query_planning import (
     EvidenceTarget,
     EvidenceTargetRole,
     FacetRole,
+    InstitutionalHandoff,
     PlanValidationError,
     PlannerAnswerRequirement,
     PlannerPremiseHypothesis,
@@ -218,50 +219,77 @@ def valid_lineage_proposal() -> PlannerQuestionPlan:
             "Chartered Alpha Consortium",
             FacetRole.ORIGIN,
             "Alpha Consortium chartered venture",
+            "Alpha Consortium",
         ),
         (
             "Provincial council succession",
             FacetRole.TRANSITION,
             "Alpha Consortium provincial council",
+            "Provincial Council",
         ),
         (
             "Assembly tax authority",
             FacetRole.MECHANISM,
             "Alpha Consortium assembly taxation",
+            "Assembly Tax Authority",
         ),
         (
             "Commonwealth administrative office",
             FacetRole.TRANSITION,
             "Alpha Consortium commonwealth office",
+            "Commonwealth Office",
         ),
         (
             "National treasury integration",
             FacetRole.MECHANISM,
             "Omega Network national treasury",
+            "National Treasury",
         ),
         (
             "Federal procurement bureau",
             FacetRole.MECHANISM,
             "Omega Network federal procurement",
+            "Federal Procurement Bureau",
         ),
         (
-            "Contractor command network",
+            "Contractor logistics command",
             FacetRole.TRANSITION,
-            "Omega Network contractor command",
+            "Omega Network contractor logistics command",
+            "Contractor Logistics Command",
         ),
         (
             "Data-centered Omega Network",
             FacetRole.ENDPOINT,
             "Omega Network data center",
+            "Omega Network",
         ),
+    )
+    capacities = (
+        "chartered territorial mandate",
+        "delegated provincial authority",
+        "representative taxing authority",
+        "commonwealth administrative capacity",
+        "national fiscal capacity",
+        "federal procurement authority",
+        "contractor command capacity",
+        "data-centered operating capacity",
+        "networked institutional capacity",
     )
     return PlannerQuestionPlan(
         requirements=tuple(
             PlannerAnswerRequirement(
                 requirement_id=f"R{index}",
                 label=label,
+                institutional_handoff=InstitutionalHandoff(
+                    bearer=bearer,
+                    inherited_capacity=capacities[index - 1],
+                    transfer_mechanism=(
+                        f"{bearer} transforms the inherited capacity"
+                    ),
+                    outgoing_capacity=capacities[index],
+                ),
             )
-            for index, (label, _role, _query) in enumerate(
+            for index, (label, _role, _query, bearer) in enumerate(
                 stages,
                 start=1,
             )
@@ -274,7 +302,7 @@ def valid_lineage_proposal() -> PlannerQuestionPlan:
                 search_query=query,
                 document_hints=(f"lineage-{index}.md",),
             )
-            for index, (_label, role, query) in enumerate(
+            for index, (_label, role, query, _bearer) in enumerate(
                 stages,
                 start=1,
             )
@@ -670,7 +698,7 @@ def test_valid_plan_gets_trusted_traits_targets_and_unchanged_f0():
 
     result = validate_question_plan(valid_planner_plan(), question, CATALOG)
 
-    assert result.schema == "archivist.question_plan/2"
+    assert result.schema == "archivist.question_plan/3"
     assert result.planner_used is True
     assert result.fallback_reason is None
     assert result.facets[0] == SearchFacet(
@@ -976,6 +1004,145 @@ def test_long_institutional_lineage_accepts_eight_distinct_ordered_roles():
     assert [facet.document_hints[0] for facet in result.facets[1:]] == [
         f"lineage-{index}.md" for index in range(1, 9)
     ]
+    assert all(
+        requirement.institutional_handoff is not None
+        for requirement in result.requirements
+    )
+    assert all(
+        predecessor.institutional_handoff.outgoing_capacity
+        == successor.institutional_handoff.inherited_capacity
+        for predecessor, successor in zip(
+            result.requirements,
+            result.requirements[1:],
+            strict=False,
+        )
+    )
+
+
+def test_long_lineage_requires_complete_contiguous_handoffs():
+    proposal = valid_lineage_proposal()
+    missing = proposal.model_copy(
+        update={
+            "requirements": (
+                proposal.requirements[0].model_copy(
+                    update={"institutional_handoff": None}
+                ),
+                *proposal.requirements[1:],
+            )
+        }
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        missing,
+        LINEAGE_CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "lineage_handoff_invalid"
+    }
+
+    broken_handoff = proposal.requirements[2].model_copy(
+        update={
+            "institutional_handoff": (
+                proposal.requirements[2].institutional_handoff.model_copy(
+                    update={
+                        "inherited_capacity": "unrelated orbital capacity"
+                    }
+                )
+            )
+        }
+    )
+    diagnostics = {}
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        proposal.model_copy(
+            update={
+                "requirements": (
+                    *proposal.requirements[:2],
+                    broken_handoff,
+                    *proposal.requirements[3:],
+                )
+            }
+        ),
+        LINEAGE_CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "lineage_handoff_invalid"
+    }
+
+
+def test_long_lineage_binds_first_and_last_bearers_to_question_endpoints():
+    proposal = valid_lineage_proposal()
+    wrong_endpoint = proposal.requirements[-1].model_copy(
+        update={
+            "institutional_handoff": (
+                proposal.requirements[-1].institutional_handoff.model_copy(
+                    update={"bearer": "Unrelated Terminal Bureau"}
+                )
+            )
+        }
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        proposal.model_copy(
+            update={
+                "requirements": (
+                    *proposal.requirements[:-1],
+                    wrong_endpoint,
+                )
+            }
+        ),
+        LINEAGE_CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "lineage_handoff_invalid"
+    }
+
+
+def test_non_lineage_route_rejects_planner_handoff_metadata():
+    proposal = valid_planner_proposal()
+    first_requirement = proposal.requirements[0].model_copy(
+        update={
+            "institutional_handoff": InstitutionalHandoff(
+                bearer="Harbor Council",
+                inherited_capacity="local mandate",
+                transfer_mechanism="council succession",
+                outgoing_capacity="regional mandate",
+            )
+        }
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        "Trace the Harbor Network from formation to closure.",
+        proposal.model_copy(
+            update={
+                "requirements": (
+                    first_requirement,
+                    *proposal.requirements[1:],
+                )
+            }
+        ),
+        CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "lineage_handoff_route_mismatch"
+    }
 
 
 def test_short_lineage_proposal_falls_back_to_eight_capacity_aware_stages():
@@ -1003,7 +1170,7 @@ def test_short_lineage_proposal_falls_back_to_eight_capacity_aware_stages():
     }
 
 
-def test_long_lineage_rejects_repeated_thematic_roles_and_nonadvancing_hints():
+def test_long_lineage_rejects_repeated_bearers_and_nonadvancing_hints():
     proposal = valid_lineage_proposal()
     repeated_role = proposal.facets[1].model_copy(
         update={
@@ -1011,7 +1178,14 @@ def test_long_lineage_rejects_repeated_thematic_roles_and_nonadvancing_hints():
         }
     )
     repeated_requirement = proposal.requirements[1].model_copy(
-        update={"label": "Later chartered Alpha Consortium"},
+        update={
+            "label": "Later chartered Alpha Consortium",
+            "institutional_handoff": (
+                proposal.requirements[1].institutional_handoff.model_copy(
+                    update={"bearer": "Alpha Consortium"}
+                )
+            ),
+        },
     )
     repeated = proposal.model_copy(
         update={
@@ -1038,7 +1212,7 @@ def test_long_lineage_rejects_repeated_thematic_roles_and_nonadvancing_hints():
 
     assert result.planner_used is False
     assert diagnostics == {
-        "planner_validation_code": "lineage_stage_role_invalid"
+        "planner_validation_code": "lineage_handoff_invalid"
     }
 
     reversed_hint = proposal.facets[1].model_copy(
@@ -1445,7 +1619,9 @@ def test_invalid_planner_output_falls_back_once_without_retry(monkeypatch):
 def test_planner_proposal_schema_exposes_only_model_owned_fields():
     schema = query_planning.planner_question_plan_json_schema()
 
-    assert schema["properties"]["schema"]["const"] == ("archivist.planner_question_plan/2")
+    assert schema["properties"]["schema"]["const"] == (
+        "archivist.planner_question_plan/3"
+    )
     assert schema["additionalProperties"] is False
     assert set(schema["properties"]) == {
         "schema",
@@ -1511,7 +1687,7 @@ def test_planner_proposal_preserves_multi_part_contract_capacity():
 def test_finalized_question_plan_schema_remains_distinct_from_provider_proposal():
     schema = query_planning.question_plan_json_schema()
 
-    assert schema["properties"]["schema"]["const"] == "archivist.question_plan/2"
+    assert schema["properties"]["schema"]["const"] == "archivist.question_plan/3"
     assert {
         "traits",
         "targets",
