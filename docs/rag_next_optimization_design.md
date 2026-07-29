@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v15 implemented, verified offline, and measured in both a focused paid
-G006/G007 gate and the complete unchanged ten-question cohort on 2026-07-29
+Status: evidence-planned-v18 implemented and verified offline; v16 remains the latest complete
+unchanged ten-question measurement
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1363,3 +1363,123 @@ The first V17 repair is consequently bounded:
 After this validator repair and the stage-cardinality contract pass offline verification, the next
 quality measurement should again be the complete unchanged ten-question evaluation. A small local
 fixture may prove mechanics, but it should not become another reason to defer the gold-set run.
+
+## V17 implementation: transition-source contract alignment
+
+V17 implements the first bounded repair identified by the v16 integrated evaluation. It changes
+trusted-context validation and orchestration only. Retrieval, prompts, model snapshots, answer
+schemas, the final eight-source limit, and the private corpus/index identity are unchanged.
+
+### Dedicated transition sources are valid evidence
+
+An `adjacent_stage_link` no longer has to use the successor stage anchor as its source. Its
+`source_number` may identify the dedicated transition passage selected by the adjacent-pair lane.
+The validator continues to require all of the structural facts it can prove locally:
+
+1. both requirement IDs exist;
+2. the successor requirement immediately follows the predecessor requirement;
+3. exactly one surviving stage scope exists for each endpoint;
+4. `predecessor_source_number` equals the protected predecessor stage anchor; and
+5. the predecessor and transition source numbers are inside the final generation context.
+
+The trusted transition source remains responsible for the actual connective claim. Answer units
+that realize the link must cite that source and use a causal or mechanism role under the existing
+obligation contract.
+
+### Trusted context now fails before generation
+
+`validate_evidence_coverage_context` is now the single public authority for trusted requirement,
+premise, obligation, and source-bound inputs. The answer validator and both neutral and
+interpretive processing paths use it. The RAG orchestrator also invokes it after post-gate source
+renumbering and obligation construction but before building the answer request and before calling
+the generator.
+
+If the context is invalid, the pipeline returns the existing fail-closed
+`generation_contract_failed` result, records `invalid_context`, emits a text-free trace, and marks
+`structured_generation_called=false`. It does not make an answer-generation call. Valid contexts
+still make at most one answer-generation call and undergo the same validation again after parsing.
+
+### Regression boundary and cohort
+
+Synthetic coverage now exercises three distinct passages: a predecessor anchor, a successor
+anchor, and a dedicated transition passage. An end-to-end pipeline test proves that this shape
+validates and reaches one answer-generation call. A paired invalid fixture removes the successor
+stage scope and proves that no generation call occurs. Additional unit regressions preserve the
+predecessor-anchor equality and source-bound invariants, and the pre-generation failure trace
+passes the closed text-free trace schema.
+
+The cohort is `evidence-planned-v17`; the trace contract recognizes that policy version. Full
+offline verification passed 494 tests with one intentional skip, and Ruff passed across `src` and
+`tests`. The verification made no OpenAI calls.
+
+V17 resolves the deterministic G007 integration failure but does not address the separate G006
+planning weakness. The next repair remains an explicit, corpus-agnostic stage-cardinality and
+historical-role contract that prevents a short thematic plan from claiming completeness over a
+long institutional lineage while making the eight-source capacity tradeoff explicit.
+
+## V18 implementation: capacity-aware institutional lineage
+
+V18 implements the G006 stage-cardinality repair without changing the private corpus, index,
+model snapshot, one-generation-call rule, zero-retry policy, or final eight-source limit. It
+versions the RAG policy as `evidence-planned-v18`, the planner prompt as `query-planner-v8`, the
+question and provider plan schemas as version 2, faceted retrieval as v11, and the retrieval trace
+as version 10.
+
+### Route boundary
+
+`long_institutional_lineage` is an application-owned route trait, not a provider-selected label.
+It activates only when a question is already broad synthesis and explicitly asks for
+institutional lineage, succession, continuity, evolution, or transformation across a long span.
+This keeps the expanded contract narrow. Ordinary broad synthesis continues to require exactly
+five stages; focused, premise-sensitive, and absence-sensitive routes are unchanged.
+
+### Eight-stage cardinality and historical-role contract
+
+A long institutional-lineage proposal must contain exactly eight ordered answer requirements and
+eight corresponding added search facets. Together with the original-question facet, the final
+plan contains nine facets. The application rejects a shorter or longer proposal and substitutes a
+deterministic eight-stage fallback rather than letting an undersized plan claim full coverage.
+
+Cardinality is necessary but insufficient. Each stage must carry vocabulary identifying a
+historical bearer, institutional form, transfer mechanism, or governance role that is distinctive
+after shared question language and generic stage words are removed. Two differently dated facets
+cannot satisfy the contract by repeating the same thematic role.
+
+When a document catalog is supplied, every stage also requires at least one exact document hint.
+The primary hint ordinal must advance strictly from stage to stage. During retrieval, those exact
+hints become the stage scope. This binds an anchor to its intended historical role and period
+instead of allowing a generally relevant passage from elsewhere in the arc to satisfy it.
+
+### Capacity and transition policy
+
+The final source cap remains eight. An eight-stage lineage consequently reserves all eight slots
+for distinct protected stage anchors. The transition lane still searches each adjacent pair, but
+selection prefers a candidate already admitted as one of those stage anchors. A transition may
+consume a new source only when capacity remains; the system does not silently widen the public
+context or displace a required stage.
+
+Retrieval trace 10 records the tradeoff explicitly:
+
+- required, planned, and source-capacity stage counts;
+- stage-capacity shortfall;
+- extra source capacity available to transitions;
+- transitions satisfied by reusing a selected stage source;
+- transitions satisfied by adding a source; and
+- transition capacity, candidate, and selection shortfalls.
+
+These counters distinguish “the plan omitted a stage,” “no connective passage was found,” and
+“connective evidence existed but could not fit.” None may be reported as complete merely because
+all of a smaller plan's internal obligations were satisfied.
+
+### Offline proof and measurement boundary
+
+Synthetic tests cover route precision, exactly eight stages, distinct role signatures, advancing
+catalog hints, deterministic fallback, unchanged five-stage behavior for ordinary broad
+questions, all-eight-anchor retrieval under the source cap, reuse-first transition selection,
+capacity-shortfall trace fields, trace privacy, and end-to-end preservation of all eight
+requirements through generation.
+
+The complete offline suite passed 500 tests with one intentional skip, and Ruff passed across
+`src` and `tests`. Verification made no OpenAI calls. This proves the V18 mechanics and contract,
+not improved historical-answer quality. The next quality measurement is the complete unchanged
+ten-question evaluation under a clean v18 cohort.

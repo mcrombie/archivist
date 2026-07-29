@@ -18,6 +18,7 @@ from time import perf_counter_ns
 from typing import Any
 
 from answer_coverage import (
+    CoverageContractError,
     CoverageValidationErrorCode,
     DiagnosticValidationResult,
     EVIDENCE_COVERAGE_NORMALIZER_VERSION,
@@ -33,6 +34,7 @@ from answer_coverage import (
     PremiseSourceScope,
     process_evidence_coverage,
     process_interpretive_evidence_coverage,
+    validate_evidence_coverage_context,
 )
 from costs import (
     CostLimitExceeded,
@@ -98,12 +100,12 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v16"
+RAG_POLICY_VERSION = "evidence-planned-v18"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
-QUERY_PLANNER_PROMPT_VERSION = "query-planner-v7"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v8"
 EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v8"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
@@ -2516,6 +2518,7 @@ def _generation_trace(
     inspection_scopes: Sequence[EvidenceInspectionScope] = (),
     style_prompt_sha256: str | None = None,
     response_format: type[EvidenceCoverageAnswer] = EvidenceCoverageAnswer,
+    structured_generation_called: bool | None = None,
 ) -> dict[str, Any]:
     contract = {
         "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
@@ -2552,13 +2555,17 @@ def _generation_trace(
         return {
             **contract,
             "status": status,
-            "structured_generation_called": False,
+            "structured_generation_called": bool(structured_generation_called),
         }
     diagnostics = coverage.diagnostics.model_dump(mode="json", by_alias=True)
     return {
         **contract,
         "status": coverage.status.value,
-        "structured_generation_called": True,
+        "structured_generation_called": (
+            True
+            if structured_generation_called is None
+            else structured_generation_called
+        ),
         **diagnostics,
     }
 
@@ -2794,19 +2801,6 @@ def run_evidence_planned_answer(
             ),
         )
 
-    coverage_input = build_coverage_input(
-        resolved_turn,
-        plan,
-        final_chunks,
-        remapped_facets,
-        premise_source_scopes,
-        inspection_scopes,
-        obligation_scopes,
-        gate,
-        historiographical_lens=historiographical_lens,
-        voice=voice,
-        worldview=worldview,
-    )
     style_block = build_interpretive_prompt_block(
         historiographical_lens,
         voice,
@@ -2828,6 +2822,63 @@ def run_evidence_planned_answer(
     )
     style_prompt_sha256 = (
         hashlib.sha256(style_block.encode("utf-8")).hexdigest() if style_block else None
+    )
+    context_validation_started_ns = perf_counter_ns()
+    try:
+        validate_evidence_coverage_context(
+            requirement_ids=requirement_ids,
+            premise_ids=premise_ids,
+            premise_source_scopes=premise_source_scopes,
+            obligation_scopes=obligation_scopes,
+            source_count=len(final_chunks),
+        )
+    except CoverageContractError:
+        coverage = process_evidence_coverage(
+            None,
+            requirement_ids=requirement_ids,
+            premise_ids=premise_ids,
+            premise_source_scopes=premise_source_scopes,
+            obligation_scopes=obligation_scopes,
+            source_count=len(final_chunks),
+            requirement_labels=requirement_labels,
+        )
+        stage_timings_ms["answer_validation"] = _elapsed_ms(
+            context_validation_started_ns
+        )
+        planned.trace["generation_contract"] = _generation_trace(
+            coverage,
+            status=coverage.status.value,
+            inspection_scopes=inspection_scopes,
+            style_prompt_sha256=style_prompt_sha256,
+            response_format=response_format,
+            structured_generation_called=False,
+        )
+        emit_retrieval_trace(planned.trace)
+        return AnswerModeResult(
+            answer=coverage.answer,
+            final_chunks=final_chunks,
+            status=coverage.status.value,
+            plan=plan,
+            evidence_decision=gate.decision.value,
+            diagnostics=result_diagnostics(
+                gate_diagnostics,
+                planned.trace["generation_contract"],
+            ),
+        )
+    context_validation_ms = _elapsed_ms(context_validation_started_ns)
+
+    coverage_input = build_coverage_input(
+        resolved_turn,
+        plan,
+        final_chunks,
+        remapped_facets,
+        premise_source_scopes,
+        inspection_scopes,
+        obligation_scopes,
+        gate,
+        historiographical_lens=historiographical_lens,
+        voice=voice,
+        worldview=worldview,
     )
     generation_started_ns = perf_counter_ns()
     try:
@@ -2874,7 +2925,10 @@ def run_evidence_planned_answer(
             requirement_labels=requirement_labels,
             refused=refused,
         )
-    stage_timings_ms["answer_validation"] = _elapsed_ms(validation_started_ns)
+    stage_timings_ms["answer_validation"] = round(
+        context_validation_ms + _elapsed_ms(validation_started_ns),
+        3,
+    )
     planned.trace["generation_contract"] = _generation_trace(
         coverage,
         status=coverage.status.value,

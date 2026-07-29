@@ -72,6 +72,7 @@ __all__ = [
     "process_interpretive_evidence_coverage",
     "render_evidence_coverage",
     "validate_evidence_coverage",
+    "validate_evidence_coverage_context",
 ]
 
 
@@ -809,7 +810,7 @@ def validate_evidence_coverage(
     :func:`process_evidence_coverage` for a stable fail-closed result.
     """
 
-    context = _validation_context(
+    context = validate_evidence_coverage_context(
         requirement_ids,
         premise_ids,
         premise_source_scopes,
@@ -1311,7 +1312,7 @@ def process_evidence_coverage(
     """
 
     try:
-        context = _validation_context(
+        context = validate_evidence_coverage_context(
             requirement_ids,
             premise_ids,
             premise_source_scopes,
@@ -1407,7 +1408,7 @@ def process_interpretive_evidence_coverage(
     """
 
     try:
-        context = _validation_context(
+        context = validate_evidence_coverage_context(
             requirement_ids,
             premise_ids,
             premise_source_scopes,
@@ -1488,6 +1489,28 @@ def process_interpretive_evidence_coverage(
     )
 
 
+def validate_evidence_coverage_context(
+    requirement_ids: Sequence[str],
+    premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[
+        PremiseSourceScope | Mapping[str, Any]
+    ] = (),
+    obligation_scopes: Sequence[
+        EvidenceObligationScope | Mapping[str, Any]
+    ] = (),
+    source_count: int = 0,
+) -> CoverageValidationContext:
+    """Validate trusted coverage inputs before generation is attempted."""
+
+    return _validation_context(
+        requirement_ids,
+        premise_ids,
+        premise_source_scopes,
+        obligation_scopes,
+        source_count,
+    )
+
+
 def _validation_context(
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str],
@@ -1543,12 +1566,16 @@ def _validation_context(
         requirement_id: index
         for index, requirement_id in enumerate(context.requirement_ids)
     }
-    stage_scope_by_requirement = {
-        scope.allowed_requirement_ids[0]: scope
-        for scope in context.obligation_scopes
-        if scope.kind is EvidenceObligationKind.STAGE
-        and len(scope.allowed_requirement_ids) == 1
-    }
+    stage_scopes_by_requirement: dict[str, list[EvidenceObligationScope]] = {}
+    for scope in context.obligation_scopes:
+        if (
+            scope.kind is EvidenceObligationKind.STAGE
+            and len(scope.allowed_requirement_ids) == 1
+        ):
+            stage_scopes_by_requirement.setdefault(
+                scope.allowed_requirement_ids[0],
+                [],
+            ).append(scope)
 
     def adjacent_link_scope_is_valid(scope: EvidenceObligationScope) -> bool:
         if any(
@@ -1559,17 +1586,21 @@ def _validation_context(
         predecessor_requirement_id, current_requirement_id = (
             scope.allowed_requirement_ids
         )
+        predecessor_scopes = stage_scopes_by_requirement.get(
+            predecessor_requirement_id,
+            (),
+        )
+        current_scopes = stage_scopes_by_requirement.get(
+            current_requirement_id,
+            (),
+        )
         return (
             requirement_order[current_requirement_id]
             == requirement_order[predecessor_requirement_id] + 1
-            and predecessor_requirement_id in stage_scope_by_requirement
-            and current_requirement_id in stage_scope_by_requirement
+            and len(predecessor_scopes) == 1
+            and len(current_scopes) == 1
             and scope.predecessor_source_number
-            == stage_scope_by_requirement[
-                predecessor_requirement_id
-            ].source_number
-            and scope.source_number
-            == stage_scope_by_requirement[current_requirement_id].source_number
+            == predecessor_scopes[0].source_number
         )
 
     adjacent_link_scopes_valid = all(

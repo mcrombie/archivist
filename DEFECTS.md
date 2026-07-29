@@ -45,6 +45,25 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] A five-stage plan falsely satisfied a longer institutional lineage
+Phase/Brief: Phase 1 evidence-planned-v16 unchanged ten-question evaluation
+Symptom: G006 asked for a long institutional lineage spanning eight expected historical roles.
+The accepted plan contained only five stages, yet retrieval reported five of five stage anchors
+and four of four transitions satisfied. The green counters overstated completeness, and the
+answer realized none of the frozen strict claims.
+Cause: spec gap in the brief - broad synthesis had a minimum-stage rule but no separate contract
+for explicit institutional-lineage questions, no role-distinctness test, and no accounting for
+the competition between stage anchors and transition passages under the eight-source ceiling.
+Resolution and verification: resolved in `evidence-planned-v18`. An application-owned route trait
+now requires exactly eight ordered, role-distinct stages for explicit long institutional
+lineages, plus advancing exact document hints when a catalog is available. Ordinary broad
+questions remain five-stage. Retrieval reserves the eight final source slots for the eight stage
+anchors, prefers already selected stage sources for transition evidence, and reports stage and
+transition capacity shortfalls separately in retrieval trace 10. Synthetic end-to-end coverage
+retains all eight roles through generation. The full offline suite passed 500 tests with one
+intentional skip, and Ruff passed across `src` and `tests`. No paid calls were made; gold-set
+quality remains to be measured in the unchanged ten-question evaluation.
+
 ## [2026-07-29] Dedicated transition evidence was rejected by the older validation context
 Phase/Brief: Phase 1 evidence-planned-v16 unchanged ten-question evaluation
 Symptom: G007's final returned context covered all five expected target document groups, and its
@@ -56,11 +75,14 @@ Cause: contract edited and spec gap in the brief - the v16 obligation builder co
 validation-context check still requires that link's source number to equal the successor stage
 anchor's source number. Builder and validator tests exercised their own assumptions separately;
 no end-to-end fixture used a transition source distinct from both stage anchors.
-Resolution and verification: unresolved. The next repair must accept a distinct in-range
-transition source while still requiring consecutive requirements, surviving predecessor and
-successor scopes, and the correct predecessor anchor. Complete trusted-context validation must run
-before paid generation, and an end-to-end regression must cover both a valid distinct transition
-passage and a genuine stage shortfall.
+Resolution and verification: resolved in `evidence-planned-v17`. The validator now accepts the
+dedicated transition passage as the link source while still requiring consecutive requirements,
+exactly one surviving stage scope at each endpoint, the correct predecessor anchor, and in-range
+source numbers. The same public trusted-context validator runs before answer generation and after
+parsing, so an invalid local context fails with `structured_generation_called=false` before a paid
+answer call. End-to-end synthetic regressions prove that distinct predecessor, successor, and
+transition passages validate, while a missing successor stage fails before generation. The full
+offline suite passed 494 tests with one intentional skip, and Ruff passed across `src` and `tests`.
 
 ## [2026-07-26] Valid source selections were discarded by citation-locality validation
 Phase/Brief: Phase 1 evidence-planned-v11 directional ten-question evaluation

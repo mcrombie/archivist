@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/9"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/10"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -135,6 +135,8 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "lexical_coverage_multiplier",
             "lexical_scoring_version",
             "lexical_weight",
+            "lineage_stage_contract_version",
+            "lineage_transition_capacity_policy",
             "max_primary_per_document",
             "neighbor_expansion",
             "premise_lane_reservation",
@@ -182,9 +184,16 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "stage_coverage_required_count",
             "stage_coverage_satisfied_count",
             "stage_coverage_shortfall_count",
+            "stage_capacity_shortfall_count",
+            "transition_candidate_shortfall_count",
+            "transition_capacity_limited_count",
             "transition_coverage_required_count",
             "transition_coverage_satisfied_count",
             "transition_coverage_shortfall_count",
+            "transition_extra_source_capacity_count",
+            "transition_new_source_satisfied_count",
+            "transition_reuse_satisfied_count",
+            "transition_selection_shortfall_count",
         }
     ),
     ("selection", "discarded", "[]"): _CHUNK_FIELDS
@@ -220,6 +229,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "requirement_count",
             "schema",
             "traits",
+            "lineage_stage_planned_count",
+            "lineage_stage_required_count",
+            "lineage_stage_source_capacity_count",
         }
     ),
     ("plan", "planner_call"): frozenset(
@@ -838,6 +850,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "broad-stage-consensus-v1",
             "broad-stage-role-eligibility-v2",
             "broad-stage-role-eligibility-v3",
+            "broad-stage-role-eligibility-v4",
             "not_applicable",
         }
     ),
@@ -956,7 +969,20 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {"not_applicable", "role-scoped-mechanism-lexical-v1"}
     ),
     "broad_transition_lane_version": frozenset(
-        {"adjacent-pair-transition-v1", "not_applicable"}
+        {
+            "adjacent-pair-transition-v1",
+            "adjacent-pair-transition-v2",
+            "not_applicable",
+        }
+    ),
+    "lineage_stage_contract_version": frozenset(
+        {"long-institutional-lineage-v1", "not_applicable"}
+    ),
+    "lineage_transition_capacity_policy": frozenset(
+        {
+            "not_applicable",
+            "reuse-selected-stage-source-before-extra-source",
+        }
     ),
     "lexical_scoring_version": frozenset({"bm25-nfkd-word-v1"}),
     "mode": frozenset({"broad_synthesis", "planned", "standard"}),
@@ -980,6 +1006,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "query-planner-v5",
             "query-planner-v6",
             "query-planner-v7",
+            "query-planner-v8",
         }
     ),
     "planner_validation_code": frozenset(
@@ -991,6 +1018,8 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "missing_requirement_mapping",
             "original_query_changed",
             "original_query_too_long",
+            "lineage_stage_cardinality_mismatch",
+            "lineage_stage_role_invalid",
             "plan_structure_invalid",
             "planner_owned_original",
             "premise_route_mismatch",
@@ -1021,6 +1050,8 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v14",
             "evidence-planned-v15",
             "evidence-planned-v16",
+            "evidence-planned-v17",
+            "evidence-planned-v18",
         }
     ),
     "prompt_version": frozenset(
@@ -1064,6 +1095,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v8",
             "faceted-hybrid-rrf-v9",
             "faceted-hybrid-rrf-v10",
+            "faceted-hybrid-rrf-v11",
             "hybrid-bm25-rrf-v1",
         }
     ),
@@ -1105,6 +1137,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.planner_call_diagnostics/1",
             "archivist.planner_call_diagnostics/2",
             "archivist.question_plan/1",
+            "archivist.question_plan/2",
         }
     ),
     "stage": frozenset({"context", "fusion", "primary_resolution", "semantic"}),
@@ -1134,6 +1167,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "absence_sensitive",
             "broad_synthesis",
+            "long_institutional_lineage",
             "multi_part",
             "premise_sensitive",
             "relationship",

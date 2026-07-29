@@ -455,6 +455,264 @@ def test_adjacent_pair_lane_selects_only_an_explicit_two_stage_transition(
     validate_text_free_retrieval_trace(outcome.trace)
 
 
+def test_long_lineage_reserves_eight_stage_slots_and_reports_transition_capacity(
+    monkeypatch,
+):
+    stage_terms = (
+        "charter alpha",
+        "council beta",
+        "assembly gamma",
+        "treasury delta",
+        "bureau epsilon",
+        "agency zeta",
+        "contractor eta",
+        "network theta",
+    )
+    stage_chunks = [
+        chunk(
+            f"stage_{index:03}",
+            f"{index:02}_Chapter {index}.md",
+            (
+                f"{stage_terms[index - 1]} established authority and "
+                "transformed the synthetic institution."
+            ),
+            1,
+        )
+        for index in range(1, 9)
+    ]
+    bridge_chunks = [
+        chunk(
+            f"bridge_{index:03}",
+            stage_chunks[index]["document"],
+            (
+                f"{stage_terms[index - 1]} led to {stage_terms[index]} "
+                "through an explicit institutional transfer."
+            ),
+            2,
+        )
+        for index in range(1, 8)
+    ]
+    chunks = [
+        item
+        for pair in zip(stage_chunks, [None, *bridge_chunks], strict=True)
+        for item in pair
+        if item is not None
+    ]
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: [
+            [float(index)] for index in range(len(queries))
+        ],
+    )
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            where = request.get("where")
+            if where is None:
+                selected = chunks
+            else:
+                document_filter = where["document"]
+                allowed = (
+                    set(document_filter["$in"])
+                    if isinstance(document_filter, dict)
+                    else {document_filter}
+                )
+                selected = [
+                    item
+                    for item in chunks
+                    if item["document"] in allowed
+                ]
+            return semantic_results(selected)
+
+    def fixed_stage_anchors(
+        lane,
+        *,
+        document_ordinal_by_id,
+        chunk_by_id,
+        original_query,
+        stage_intent_query,
+        role,
+    ):
+        del (
+            document_ordinal_by_id,
+            chunk_by_id,
+            original_query,
+            stage_intent_query,
+            role,
+        )
+        stage_index = int(str(lane["facet_id"]).removeprefix("F")) - 1
+        selected = stage_chunks[stage_index]
+        return [
+            {
+                "chunk_id": selected["chunk_id"],
+                "document": selected["document"],
+                "rrf_score": 1.0,
+                "stage_anchor_eligible": True,
+                "stage_anchor_eligibility": "eligible",
+                "stage_intent_match_count": 2,
+                "stage_distinctive_intent_match_count": 2,
+                "stage_required_distinctive_intent_match_count": 2,
+                "stage_role_signal_score": 1,
+                "anchor_pool_names": ("canonical", "provider"),
+                "anchor_pool_ranks": {"canonical": 1, "provider": 1},
+                "anchor_pool_hit_count": 2,
+            }
+        ]
+
+    def fixed_transition_candidates(
+        candidates,
+        *,
+        chunk_by_id,
+        original_query,
+        predecessor_intent_query,
+        successor_intent_query,
+    ):
+        del chunk_by_id, original_query, predecessor_intent_query
+        successor_index = next(
+            index
+            for index, term in enumerate(stage_terms[1:], start=1)
+            if term in successor_intent_query
+        )
+        selected = (
+            stage_chunks[1]
+            if successor_index == 1
+            else bridge_chunks[successor_index - 1]
+        )
+        base = next(
+            (
+                dict(candidate)
+                for candidate in candidates
+                if candidate.get("chunk_id") == selected["chunk_id"]
+            ),
+            {
+                "chunk_id": selected["chunk_id"],
+                "document": selected["document"],
+                "rrf_score": 1.0,
+            },
+        )
+        return [
+            {
+                **base,
+                "transition_eligible": True,
+                "transition_eligibility": "eligible",
+                "predecessor_intent_match_count": 1,
+                "successor_intent_match_count": 1,
+                "transition_signal_score": 1,
+            }
+        ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_ranked_broad_stage_anchor_candidates",
+        fixed_stage_anchors,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "_ranked_broad_transition_candidates",
+        fixed_transition_candidates,
+    )
+    requirements = tuple(
+        SimpleNamespace(
+            requirement_id=f"R{index}",
+            order=index - 1,
+            label=stage_terms[index - 1],
+        )
+        for index in range(1, 9)
+    )
+    roles = (
+        "origin",
+        "transition",
+        "mechanism",
+        "transition",
+        "mechanism",
+        "transition",
+        "mechanism",
+        "endpoint",
+    )
+    lineage_plan = SimpleNamespace(
+        schema="archivist.question_plan/2",
+        traits=("broad_synthesis", "long_institutional_lineage"),
+        facets=(
+            facet(
+                "F0",
+                "original",
+                "synthetic institutional lineage",
+                requirement_ids=tuple(f"R{index}" for index in range(1, 9)),
+            ),
+            *(
+                facet(
+                    f"F{index}",
+                    roles[index - 1],
+                    stage_terms[index - 1],
+                    document_hints=(stage_chunks[index - 1]["document"],),
+                    requirement_ids=(f"R{index}",),
+                )
+                for index in range(1, 9)
+            ),
+        ),
+        requirements=requirements,
+        planner_used=True,
+        fallback_reason=None,
+    )
+
+    outcome = retrieve_plan_from_collection(
+        lineage_plan,
+        Collection(),
+        chunks,
+        max_final_sources=8,
+    )
+
+    selection = outcome.trace["selection"]
+    assert len(outcome.final_chunks) == 8
+    assert set(outcome.broad_stage_anchor_chunk_ids) == {
+        f"F{index}" for index in range(1, 9)
+    }
+    assert selection["stage_coverage_required_count"] == 8
+    assert selection["stage_coverage_satisfied_count"] == 8
+    assert selection["stage_capacity_shortfall_count"] == 0
+    assert selection["transition_coverage_required_count"] == 7
+    assert selection["transition_coverage_satisfied_count"] == 1
+    assert selection["transition_coverage_shortfall_count"] == 6
+    assert selection["transition_extra_source_capacity_count"] == 0
+    assert selection["transition_reuse_satisfied_count"] == 1
+    assert selection["transition_new_source_satisfied_count"] == 0
+    assert selection["transition_capacity_limited_count"] == 6
+    assert selection["transition_candidate_shortfall_count"] == 0
+    assert selection["transition_selection_shortfall_count"] == 0
+    assert outcome.trace["plan"][
+        "lineage_stage_required_count"
+    ] == 8
+    assert outcome.trace["plan"][
+        "lineage_stage_planned_count"
+    ] == 8
+    assert outcome.trace["plan"][
+        "lineage_stage_source_capacity_count"
+    ] == 8
+    assert outcome.trace["parameters"][
+        "lineage_stage_contract_version"
+    ] == "long-institutional-lineage-v1"
+    assert outcome.trace["parameters"][
+        "lineage_transition_capacity_policy"
+    ] == "reuse-selected-stage-source-before-extra-source"
+    lanes = {
+        lane["facet_id"]: lane for lane in outcome.trace["lanes"]
+    }
+    assert [
+        (
+            lanes[f"F{index}"]["chronology_min_document_ordinal"],
+            lanes[f"F{index}"]["chronology_max_document_ordinal"],
+        )
+        for index in range(1, 9)
+    ] == [(index - 1, index - 1) for index in range(1, 9)]
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
 def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     monkeypatch,
 ):
@@ -601,9 +859,9 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-stage-role-eligibility-v3"
+        == "broad-stage-role-eligibility-v4"
     )
-    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v10"
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v11"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"

@@ -27,6 +27,7 @@ from corpus import (
 )
 from costs import current_usage_context, tracked_embeddings_create
 from filters import should_skip_document
+from query_planning import LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS
 from retrieval_trace_contract import (
     RETRIEVAL_TRACE_SCHEMA,
     document_identifier_sha256,
@@ -55,11 +56,15 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v10"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v11"
 BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
 BROAD_MECHANISM_CANDIDATE_LIMIT = 20
-BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v3"
-BROAD_TRANSITION_LANE_VERSION = "adjacent-pair-transition-v1"
+BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v4"
+BROAD_TRANSITION_LANE_VERSION = "adjacent-pair-transition-v2"
+LONG_LINEAGE_CONTRACT_VERSION = "long-institutional-lineage-v1"
+LONG_LINEAGE_TRANSITION_CAPACITY_POLICY = (
+    "reuse-selected-stage-source-before-extra-source"
+)
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS_DIR"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
@@ -2015,6 +2020,7 @@ def retrieve_plan_from_collection(
         for value in (raw_traits or ())
     )
     broad = "broad_synthesis" in traits
+    long_lineage = "long_institutional_lineage" in traits
     absence_sensitive = "absence_sensitive" in traits
     document_order, document_ordinal_by_id = _eligible_document_ordinals(chunks)
     queries = [str(_plan_value(facet, "search_query", "")).strip() for facet in facets]
@@ -2203,6 +2209,24 @@ def retrieve_plan_from_collection(
             if broad
             else ((), "none", None, None)
         )
+        if (
+            long_lineage
+            and role in _BROAD_STAGE_ROLES
+            and document_hints
+        ):
+            hinted_stage_scope = tuple(
+                document
+                for document in document_order
+                if document in set(document_hints)
+            )
+            if hinted_stage_scope:
+                stage_scope = hinted_stage_scope
+                hinted_ordinals = [
+                    document_ordinal_by_id[document]
+                    for document in hinted_stage_scope
+                ]
+                chronology_min_document_ordinal = min(hinted_ordinals)
+                chronology_max_document_ordinal = max(hinted_ordinals)
         document_scope = stage_scope or document_hints
         lane_chunks = [
             chunk
@@ -2314,7 +2338,11 @@ def retrieve_plan_from_collection(
             and stage_position[0] == stage_position[1] - 1
             and narrative_documents
         ):
-            endpoint_scope = (narrative_documents[-1],)
+            endpoint_scope = (
+                stage_scope
+                if long_lineage and document_hints and stage_scope
+                else (narrative_documents[-1],)
+            )
             endpoint_chunks = [
                 chunk
                 for chunk in chunks
@@ -2485,6 +2513,14 @@ def retrieve_plan_from_collection(
         ): []
         for lane in transition_lanes
     }
+    pre_transition_selected_ids: set[str] = set()
+    transition_extra_source_capacity_count = 0
+    transition_reuse_satisfied_count = 0
+    transition_new_source_satisfied_count = 0
+    transition_capacity_limited_count = 0
+    transition_candidate_shortfall_count = 0
+    transition_selection_shortfall_count = 0
+
     def accept(candidate: Mapping[str, Any], facet_id: str) -> bool:
         chunk_id = str(candidate.get("chunk_id") or "")
         if not chunk_id:
@@ -2584,6 +2620,11 @@ def retrieve_plan_from_collection(
         # both stage intents and states an explicit causal or institutional
         # transition. Rank these lanes globally so facet order cannot consume
         # the remaining context slots.
+        pre_transition_selected_ids = set(selected_ids)
+        transition_extra_source_capacity_count = max(
+            0,
+            max_final_sources - len(selected_chunks),
+        )
         transition_options = sorted(
             (
                 {
@@ -2594,6 +2635,12 @@ def retrieve_plan_from_collection(
                 for candidate in transition_lane["eligible_candidates"]
             ),
             key=lambda option: (
+                (
+                    0
+                    if str(option["candidate"].get("chunk_id") or "")
+                    in pre_transition_selected_ids
+                    else 1
+                ),
                 -min(
                     int(
                         option["candidate"][
@@ -2630,6 +2677,41 @@ def retrieve_plan_from_collection(
             accept_for_facets(candidate, pair)
             if chunk_id in selected_ids:
                 transition_selected_by_pair[pair].append(chunk_id)
+
+        transition_reuse_satisfied_count = sum(
+            bool(chunk_ids)
+            and chunk_ids[0] in pre_transition_selected_ids
+            for chunk_ids in transition_selected_by_pair.values()
+        )
+        transition_new_source_satisfied_count = sum(
+            bool(chunk_ids)
+            and chunk_ids[0] not in pre_transition_selected_ids
+            for chunk_ids in transition_selected_by_pair.values()
+        )
+        for transition_lane in transition_lanes:
+            pair = (
+                str(transition_lane["predecessor_facet_id"]),
+                str(transition_lane["successor_facet_id"]),
+            )
+            if transition_selected_by_pair[pair]:
+                continue
+            eligible_chunk_ids = tuple(
+                str(candidate.get("chunk_id") or "")
+                for candidate in transition_lane["eligible_candidates"]
+                if str(candidate.get("chunk_id") or "")
+            )
+            if not eligible_chunk_ids:
+                transition_candidate_shortfall_count += 1
+            elif (
+                not any(
+                    chunk_id in selected_ids
+                    for chunk_id in eligible_chunk_ids
+                )
+                and len(selected_chunks) >= max_final_sources
+            ):
+                transition_capacity_limited_count += 1
+            else:
+                transition_selection_shortfall_count += 1
 
         # Aggregate candidate ranks globally. This replaces the old facet-order
         # refill in which the earliest stage always consumed the spare slot.
@@ -3082,6 +3164,16 @@ def retrieve_plan_from_collection(
                 if broad
                 else "not_applicable"
             ),
+            "lineage_stage_contract_version": (
+                LONG_LINEAGE_CONTRACT_VERSION
+                if long_lineage
+                else "not_applicable"
+            ),
+            "lineage_transition_capacity_policy": (
+                LONG_LINEAGE_TRANSITION_CAPACITY_POLICY
+                if long_lineage
+                else "not_applicable"
+            ),
             "premise_lane_reservation": True,
             "broad_context_order": "corpus_ordinal" if broad else "selection",
             "neighbor_expansion": "primaries_first_then_immediate_neighbors",
@@ -3093,6 +3185,22 @@ def retrieve_plan_from_collection(
             "fallback_reason": _plan_value(plan, "fallback_reason"),
             "facet_count": len(facets),
             "requirement_count": len(tuple(requirements or ())),
+            "lineage_stage_required_count": (
+                LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS
+                if long_lineage
+                else 0
+            ),
+            "lineage_stage_planned_count": (
+                len(stage_lanes) if long_lineage else 0
+            ),
+            "lineage_stage_source_capacity_count": (
+                min(
+                    LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS,
+                    max_final_sources,
+                )
+                if long_lineage
+                else 0
+            ),
         },
         "lanes": safe_lane_trace,
         "candidates": {},
@@ -3104,6 +3212,14 @@ def retrieve_plan_from_collection(
             "stage_coverage_satisfied_count": stage_coverage_satisfied_count,
             "stage_coverage_shortfall_count": (
                 stage_coverage_required_count - stage_coverage_satisfied_count
+            ),
+            "stage_capacity_shortfall_count": (
+                max(
+                    0,
+                    stage_coverage_required_count - max_final_sources,
+                )
+                if broad
+                else 0
             ),
             "canonical_core_required_count": canonical_core_required_count,
             "canonical_core_satisfied_count": canonical_core_satisfied_count,
@@ -3119,6 +3235,24 @@ def retrieve_plan_from_collection(
             "transition_coverage_shortfall_count": (
                 transition_coverage_required_count
                 - transition_coverage_satisfied_count
+            ),
+            "transition_extra_source_capacity_count": (
+                transition_extra_source_capacity_count
+            ),
+            "transition_reuse_satisfied_count": (
+                transition_reuse_satisfied_count
+            ),
+            "transition_new_source_satisfied_count": (
+                transition_new_source_satisfied_count
+            ),
+            "transition_capacity_limited_count": (
+                transition_capacity_limited_count
+            ),
+            "transition_candidate_shortfall_count": (
+                transition_candidate_shortfall_count
+            ),
+            "transition_selection_shortfall_count": (
+                transition_selection_shortfall_count
             ),
             "discarded": [],
             "document_distribution": {

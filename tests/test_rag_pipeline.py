@@ -161,6 +161,99 @@ def planned_context(
     )
 
 
+def two_stage_transition_plan() -> QuestionPlan:
+    return QuestionPlan(
+        traits=(RouteTrait.BROAD_SYNTHESIS,),
+        requirements=(
+            AnswerRequirement(requirement_id="R1", label="Foundation", order=0),
+            AnswerRequirement(requirement_id="R2", label="Successor", order=1),
+        ),
+        facets=(
+            SearchFacet(
+                facet_id="F0",
+                requirement_ids=("R1", "R2"),
+                role=FacetRole.ORIGINAL,
+                search_query="Trace Project Lumen from foundation to successor.",
+            ),
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=("R1",),
+                role=FacetRole.ORIGIN,
+                search_query="Project Lumen charter foundation",
+            ),
+            SearchFacet(
+                facet_id="F2",
+                requirement_ids=("R2",),
+                role=FacetRole.ENDPOINT,
+                search_query="Project Lumen institutional successor",
+            ),
+        ),
+        planner_used=True,
+    )
+
+
+def three_passage_transition_context() -> list[dict]:
+    return [
+        {
+            **CHUNK,
+            "chunk_id": "foundation_001",
+            "paragraph_start": 1,
+            "paragraph_end": 1,
+            "text": "Project Lumen began with a synthetic charter foundation.",
+        },
+        {
+            **CHUNK,
+            "chunk_id": "successor_002",
+            "paragraph_start": 2,
+            "paragraph_end": 2,
+            "text": "Project Lumen later had a synthetic institutional successor.",
+        },
+        {
+            **CHUNK,
+            "chunk_id": "transition_003",
+            "paragraph_start": 3,
+            "paragraph_end": 3,
+            "text": (
+                "Project Lumen's charter foundation explicitly enabled its "
+                "institutional successor."
+            ),
+        },
+    ]
+
+
+def transition_planned_context(
+    plan: QuestionPlan,
+    chunks: list[dict],
+) -> PlannedContext:
+    return PlannedContext(
+        final_chunks=chunks,
+        facet_source_numbers={
+            "F0": (1, 2, 3),
+            "F1": (1,),
+            "F2": (2,),
+        },
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={
+            str(chunk["chunk_id"]): tuple(
+                facet.facet_id for facet in plan.facets
+            )
+            for chunk in chunks
+        },
+        broad_stage_anchor_chunk_ids={
+            "F1": str(chunks[0]["chunk_id"]),
+            "F2": str(chunks[1]["chunk_id"]),
+        },
+        broad_transition_chunk_ids={
+            ("F1", "F2"): str(chunks[2]["chunk_id"]),
+        },
+    )
+
+
 def supported_answer(
     requirement_ids: tuple[str, ...],
     *,
@@ -1167,6 +1260,289 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     assert result.status == "answered"
     assert result.diagnostics["generation"]["inspection_scope_count"] == 1
     assert result.diagnostics["generation"]["obligation_count"] == 5
+
+
+def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generation(
+    monkeypatch,
+):
+    question = (
+        "Trace the institutional lineage from Alpha Consortium to Omega Network."
+    )
+    stage_specs = (
+        ("Chartered venture", FacetRole.ORIGIN, "chartered venture"),
+        ("Provincial council", FacetRole.TRANSITION, "provincial council"),
+        ("Assembly taxation", FacetRole.MECHANISM, "assembly taxation"),
+        ("Commonwealth office", FacetRole.TRANSITION, "commonwealth office"),
+        ("National treasury", FacetRole.MECHANISM, "national treasury"),
+        ("Federal procurement", FacetRole.MECHANISM, "federal procurement"),
+        ("Contractor command", FacetRole.TRANSITION, "contractor command"),
+        ("Data center", FacetRole.ENDPOINT, "data center"),
+    )
+    chunks = [
+        {
+            **CHUNK,
+            "chunk_id": f"lineage_{index:03}",
+            "document": f"lineage-{index}.md",
+            "chapter_title": label,
+            "paragraph_start": index,
+            "paragraph_end": index,
+            "text": (
+                f"Alpha Consortium and Omega Network appear in the {query} "
+                "stage, which established and transformed synthetic authority."
+            ),
+        }
+        for index, (label, _role, query) in enumerate(
+            stage_specs,
+            start=1,
+        )
+    ]
+    proposal = PlannerQuestionPlan(
+        requirements=tuple(
+            PlannerAnswerRequirement(
+                requirement_id=f"R{index}",
+                label=label,
+            )
+            for index, (label, _role, _query) in enumerate(
+                stage_specs,
+                start=1,
+            )
+        ),
+        facets=tuple(
+            PlannerSearchFacet(
+                facet_id=f"F{index}",
+                requirement_ids=(f"R{index}",),
+                role=role,
+                search_query=(
+                    f"{'Alpha Consortium' if index <= 4 else 'Omega Network'} "
+                    f"{query}"
+                ),
+                document_hints=(f"lineage-{index}.md",),
+            )
+            for index, (_label, role, query) in enumerate(
+                stage_specs,
+                start=1,
+            )
+        ),
+    )
+    finalized = build_question_plan(
+        question,
+        proposal,
+        rag_pipeline.build_document_catalog(chunks),
+    )
+    planned = PlannedContext(
+        final_chunks=chunks,
+        facet_source_numbers={
+            "F0": tuple(range(1, 9)),
+            **{
+                f"F{index}": (index,)
+                for index in range(1, 9)
+            },
+        },
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={
+            str(item["chunk_id"]): ("F0", f"F{index}")
+            for index, item in enumerate(chunks, start=1)
+        },
+        broad_stage_anchor_chunk_ids={
+            f"F{index}": str(item["chunk_id"])
+            for index, item in enumerate(chunks, start=1)
+        },
+    )
+    obligation_scopes = rag_pipeline._evidence_obligation_scopes(
+        finalized,
+        chunks,
+        {
+            f"F{index}": index
+            for index in range(1, 9)
+        },
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "retrieve_plan_from_collection",
+        lambda *_args, **_kwargs: planned,
+    )
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        parsed = (
+            proposal
+            if operation == "query_planning"
+            else supported_obligation_answer(
+                tuple(f"R{index}" for index in range(1, 9)),
+                obligation_scopes,
+            )
+        )
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        fake_parse,
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(standalone_question=question),
+        collection_handle=Collection(count=8),
+        chunks=chunks,
+        client=object(),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert calls == ["query_planning", "answer_generation"]
+    assert result.status == "answered"
+    assert result.plan.traits == (
+        RouteTrait.BROAD_SYNTHESIS,
+        RouteTrait.LONG_INSTITUTIONAL_LINEAGE,
+    )
+    assert len(result.plan.requirements) == 8
+    assert len(result.plan.facets) == 9
+    assert result.diagnostics["generation"]["obligation_count"] == 8
+    assert {
+        scope["allowed_requirement_ids"][0]
+        for scope in result.diagnostics["generation"]["obligation_scopes"]
+    } == {f"R{index}" for index in range(1, 9)}
+
+
+def test_pipeline_accepts_a_dedicated_transition_passage(monkeypatch):
+    plan = two_stage_transition_plan()
+    chunks = three_passage_transition_context()
+    planned = transition_planned_context(plan, chunks)
+    obligation_scopes = rag_pipeline._evidence_obligation_scopes(
+        plan,
+        chunks,
+        {"F1": 1, "F2": 2},
+        {("F1", "F2"): 3},
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "plan_question",
+        lambda *_args, **_kwargs: plan,
+    )
+    monkeypatch.setattr(
+        rag_pipeline,
+        "retrieve_plan_from_collection",
+        lambda *_args, **_kwargs: planned,
+    )
+    monkeypatch.setattr(rag_pipeline, "emit_retrieval_trace", lambda _trace: None)
+
+    def fake_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        return SimpleNamespace(
+            output_parsed=supported_obligation_answer(
+                ("R1", "R2"),
+                obligation_scopes,
+            ),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question=(
+                "Trace Project Lumen from foundation to successor."
+            ),
+        ),
+        collection_handle=Collection(count=3),
+        chunks=chunks,
+        client=object(),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert calls == ["answer_generation"]
+    assert result.status == "answered"
+    link_scope = next(
+        scope
+        for scope in result.diagnostics["generation"]["obligation_scopes"]
+        if scope["kind"] == "adjacent_stage_link"
+    )
+    assert link_scope["source_number"] == 3
+    assert link_scope["predecessor_source_number"] == 1
+
+
+def test_pipeline_rejects_a_stage_shortfall_before_answer_generation(
+    monkeypatch,
+):
+    plan = two_stage_transition_plan()
+    chunks = three_passage_transition_context()
+    planned = transition_planned_context(plan, chunks)
+    valid_scopes = rag_pipeline._evidence_obligation_scopes(
+        plan,
+        chunks,
+        {"F1": 1, "F2": 2},
+        {("F1", "F2"): 3},
+    )
+    invalid_scopes = (valid_scopes[0], valid_scopes[2])
+    calls: list[str] = []
+    emitted_trace: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "plan_question",
+        lambda *_args, **_kwargs: plan,
+    )
+    monkeypatch.setattr(
+        rag_pipeline,
+        "retrieve_plan_from_collection",
+        lambda *_args, **_kwargs: planned,
+    )
+    monkeypatch.setattr(
+        rag_pipeline,
+        "_evidence_obligation_scopes",
+        lambda *_args, **_kwargs: invalid_scopes,
+    )
+    monkeypatch.setattr(
+        rag_pipeline,
+        "emit_retrieval_trace",
+        lambda trace: emitted_trace.update(trace),
+    )
+
+    def unexpected_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        raise AssertionError("invalid trusted context reached generation")
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        unexpected_parse,
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question=(
+                "Trace Project Lumen from foundation to successor."
+            ),
+        ),
+        collection_handle=Collection(count=3),
+        chunks=chunks,
+        client=object(),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert calls == []
+    assert result.status == "generation_contract_failed"
+    assert (
+        result.diagnostics["generation"]["error_code"]
+        == "invalid_context"
+    )
+    assert (
+        result.diagnostics["generation"]["structured_generation_called"]
+        is False
+    )
+    assert "answer_generation" not in result.diagnostics["stage_timings_ms"]
+    validate_text_free_retrieval_trace(emitted_trace)
 
 
 def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(

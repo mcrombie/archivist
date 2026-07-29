@@ -25,13 +25,13 @@ from pydantic import (
 )
 
 
-QUESTION_PLAN_SCHEMA = "archivist.question_plan/1"
-PLANNER_QUESTION_PLAN_SCHEMA = "archivist.planner_question_plan/1"
+QUESTION_PLAN_SCHEMA = "archivist.question_plan/2"
+PLANNER_QUESTION_PLAN_SCHEMA = "archivist.planner_question_plan/2"
 RESOLVED_TURN_SCHEMA = "archivist.resolved_turn/1"
 F0_FACET_ID = "F0"
 
 MAX_ANSWER_REQUIREMENTS = 8
-MAX_SEARCH_FACETS = 8
+MAX_SEARCH_FACETS = 9
 MAX_ADDED_SEARCH_FACETS = MAX_SEARCH_FACETS - 1
 MAX_PREMISE_HYPOTHESES = 2
 MAX_EVIDENCE_TARGETS = 3
@@ -42,6 +42,7 @@ MAX_ADDED_QUERY_CHARS = 1_200
 MAX_PLANNER_REQUIREMENTS = MAX_ANSWER_REQUIREMENTS
 MAX_PLANNER_FACETS = MAX_ADDED_SEARCH_FACETS
 MIN_BROAD_STAGE_REQUIREMENTS = 5
+LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS = MAX_ANSWER_REQUIREMENTS
 PLAN_STRUCTURE_INVALID = "plan_structure_invalid"
 PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
     {
@@ -52,6 +53,8 @@ PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
         "missing_requirement_mapping",
         "original_query_changed",
         "original_query_too_long",
+        "lineage_stage_cardinality_mismatch",
+        "lineage_stage_role_invalid",
         "planner_owned_original",
         "premise_route_mismatch",
         "query_drift",
@@ -70,6 +73,7 @@ DocumentHint = Annotated[str, Field(min_length=1, max_length=300)]
 
 class RouteTrait(StrEnum):
     BROAD_SYNTHESIS = "broad_synthesis"
+    LONG_INSTITUTIONAL_LINEAGE = "long_institutional_lineage"
     MULTI_PART = "multi_part"
     RELATIONSHIP = "relationship"
     PREMISE_SENSITIVE = "premise_sensitive"
@@ -221,7 +225,7 @@ class QuestionPlan(_ContractModel):
     the first position.
     """
 
-    schema_: Literal["archivist.question_plan/1"] = Field(
+    schema_: Literal["archivist.question_plan/2"] = Field(
         default=QUESTION_PLAN_SCHEMA,
         alias="schema",
     )
@@ -243,7 +247,7 @@ class QuestionPlan(_ContractModel):
     fallback_reason: str | None = Field(default=None, max_length=240)
 
     @property
-    def schema(self) -> Literal["archivist.question_plan/1"]:
+    def schema(self) -> Literal["archivist.question_plan/2"]:
         return self.schema_
 
     @model_validator(mode="after")
@@ -378,7 +382,7 @@ class PlannerQuestionPlan(_ContractModel):
     semantic rejection as an SDK parse failure.
     """
 
-    schema_: Literal["archivist.planner_question_plan/1"] = Field(
+    schema_: Literal["archivist.planner_question_plan/2"] = Field(
         default=PLANNER_QUESTION_PLAN_SCHEMA,
         alias="schema",
     )
@@ -396,7 +400,7 @@ class PlannerQuestionPlan(_ContractModel):
     )
 
     @property
-    def schema(self) -> Literal["archivist.planner_question_plan/1"]:
+    def schema(self) -> Literal["archivist.planner_question_plan/2"]:
         return self.schema_
 
 
@@ -486,6 +490,72 @@ def meaningful_query_tokens(value: str) -> frozenset[str]:
     )
 
 
+_LINEAGE_STAGE_ROLE_GENERIC_TOKENS = frozenset(
+    {
+        "actor",
+        "actors",
+        "administrative",
+        "after",
+        "before",
+        "body",
+        "change",
+        "changed",
+        "chronology",
+        "consolidation",
+        "continuity",
+        "development",
+        "developments",
+        "distinct",
+        "early",
+        "endpoint",
+        "event",
+        "events",
+        "final",
+        "first",
+        "function",
+        "governing",
+        "historical",
+        "history",
+        "immediate",
+        "institution",
+        "institutional",
+        "institutions",
+        "intermediate",
+        "late",
+        "later",
+        "lineage",
+        "mechanism",
+        "middle",
+        "narrative",
+        "next",
+        "origin",
+        "period",
+        "regime",
+        "role",
+        "stage",
+        "successor",
+        "system",
+        "trace",
+        "transition",
+        "transformation",
+    }
+)
+_LONG_INSTITUTIONAL_LINEAGE_PATTERNS = (
+    re.compile(
+        r"\b(?:administrative|civic|corporate|governmental|institutional|"
+        r"organizational|political|state)\s+"
+        r"(?:evolution|genealogy|lineage|succession|trajectory)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:evolution|genealogy|lineage|succession|trajectory)\b.{0,100}"
+        r"\b(?:administration|authority|company|corporation|government|"
+        r"institution|organization|regime|state|system)\w*\b",
+        re.IGNORECASE,
+    ),
+)
+
+
 _BROAD_PATTERNS = (
     re.compile(
         r"\b(?:change(?:d|s|ing)?|develop(?:ed|ment|ments|ing)?|evolv(?:e|ed|es|ing)|"
@@ -566,6 +636,11 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
         and not bounded_between_relationship
     ):
         traits.add(RouteTrait.BROAD_SYNTHESIS)
+        if any(
+            pattern.search(text)
+            for pattern in _LONG_INSTITUTIONAL_LINEAGE_PATTERNS
+        ):
+            traits.add(RouteTrait.LONG_INSTITUTIONAL_LINEAGE)
 
     dimension_matches = _MULTIPLE_DIMENSIONS.findall(text.casefold())
     if (
@@ -995,6 +1070,96 @@ def insert_original_facet(
     return QuestionPlan.model_validate(payload)
 
 
+def _lineage_stage_role_signature(
+    question: str,
+    requirement: AnswerRequirement,
+    facet: SearchFacet,
+) -> frozenset[str]:
+    """Return the stage-specific vocabulary that distinguishes one lineage role."""
+
+    question_tokens = meaningful_query_tokens(question)
+    stage_tokens = meaningful_query_tokens(
+        f"{requirement.label} {facet.search_query}"
+    )
+    return frozenset(
+        token
+        for token in stage_tokens - question_tokens
+        if token not in _LINEAGE_STAGE_ROLE_GENERIC_TOKENS
+        and not token.isdigit()
+    )
+
+
+def _validate_long_lineage_stage_roles(
+    _parsed: QuestionPlan,
+    turn: ResolvedTurn,
+    catalog: Sequence[DocumentCatalogEntry],
+    ordered_requirements: Sequence[AnswerRequirement],
+    dedicated_stage_facets_by_requirement: Mapping[str, Sequence[SearchFacet]],
+) -> None:
+    """Enforce distinct historical bearers and chronological catalog anchors."""
+
+    ordered_facets = [
+        dedicated_stage_facets_by_requirement[requirement.requirement_id][0]
+        for requirement in ordered_requirements
+    ]
+    signatures = [
+        _lineage_stage_role_signature(
+            turn.standalone_question,
+            requirement,
+            facet,
+        )
+        for requirement, facet in zip(
+            ordered_requirements,
+            ordered_facets,
+            strict=True,
+        )
+    ]
+    for index, signature in enumerate(signatures):
+        other_terms = frozenset().union(
+            *(
+                other_signature
+                for other_index, other_signature in enumerate(signatures)
+                if other_index != index
+            )
+        )
+        if not signature or not signature - other_terms:
+            raise PlanValidationError(
+                "lineage_stage_role_invalid",
+                "each institutional-lineage stage must name vocabulary unique "
+                "to its historical bearer, transfer, regime, or mechanism",
+            )
+
+    if not catalog:
+        return
+    catalog_ordinal_by_id = {
+        entry.document_id: entry.corpus_ordinal for entry in catalog
+    }
+    primary_ordinals: list[int] = []
+    for facet in ordered_facets:
+        if not facet.document_hints:
+            raise PlanValidationError(
+                "lineage_stage_role_invalid",
+                "each institutional-lineage stage requires at least one exact "
+                "eligible-document hint",
+            )
+        primary_ordinals.append(
+            min(catalog_ordinal_by_id[hint] for hint in facet.document_hints)
+        )
+    if any(
+        current <= previous
+        for previous, current in zip(
+            primary_ordinals,
+            primary_ordinals[1:],
+            strict=False,
+        )
+    ):
+        raise PlanValidationError(
+            "lineage_stage_role_invalid",
+            "institutional-lineage stage document hints must advance in "
+            "strict corpus order",
+        )
+
+
 def validate_question_plan(
     plan: QuestionPlan | Mapping[str, Any],
     resolved_turn: str | ResolvedTurn,
@@ -1148,6 +1313,26 @@ def validate_question_plan(
                 for role in ordered_stage_roles[1:-1]
             )
         )
+        long_lineage = (
+            RouteTrait.LONG_INSTITUTIONAL_LINEAGE in deterministic_traits
+        )
+        if long_lineage and (
+            len(parsed.requirements)
+            != LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS
+            or len(dedicated_stage_facets)
+            != LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS
+            or any(
+                len(facets) != 1
+                for facets in dedicated_stage_facets_by_requirement.values()
+            )
+            or not stage_chain_valid
+        ):
+            raise PlanValidationError(
+                "lineage_stage_cardinality_mismatch",
+                "a long institutional lineage requires exactly eight "
+                "dedicated ordered stages: one origin, six distinct "
+                "transition-or-mechanism roles, and one endpoint",
+            )
         if (
             len(parsed.requirements) < MIN_BROAD_STAGE_REQUIREMENTS
             or any(
@@ -1161,6 +1346,14 @@ def validate_question_plan(
                 "broad synthesis requires at least five dedicated, ordered "
                 "narrative-stage requirements: origin, at least three "
                 "transition-or-mechanism stages, and endpoint",
+            )
+        if long_lineage:
+            _validate_long_lineage_stage_roles(
+                parsed,
+                turn,
+                catalog,
+                ordered_requirements,
+                dedicated_stage_facets_by_requirement,
             )
 
     payload = parsed.model_dump()
@@ -1399,6 +1592,85 @@ def _relational_parts(
     return left, right, predicate, None
 
 
+def _long_lineage_fallback_stages(
+    question: str,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+) -> tuple[tuple[AnswerRequirement, ...], tuple[SearchFacet, ...]]:
+    """Build the full capacity-aware lineage shape when the planner is unavailable."""
+
+    start_label = start or "the earliest institutional bearer"
+    end_label = end or "the latest institutional system"
+    labels_and_queries = (
+        (
+            f"Founding mandate at {start_label}",
+            FacetRole.ORIGIN,
+            f"founding charter mandate {start_label}",
+        ),
+        (
+            f"First successor after {start_label}",
+            FacetRole.TRANSITION,
+            f"successor compact inheritance {start_label}",
+        ),
+        (
+            "Transfer of authority into a new bearer",
+            FacetRole.MECHANISM,
+            f"authority transfer replacement {start_label} {end_label}",
+        ),
+        (
+            "Fiscal machinery that consolidated the lineage",
+            FacetRole.MECHANISM,
+            f"fiscal finance revenue machinery {start_label} {end_label}",
+        ),
+        (
+            "Intermediate political order carrying the inherited powers",
+            FacetRole.TRANSITION,
+            f"political order inherited powers {start_label} {end_label}",
+        ),
+        (
+            "Later reorganization of public authority",
+            FacetRole.MECHANISM,
+            f"public authority reorganization bureaucracy {end_label}",
+        ),
+        (
+            f"Public-private integration toward {end_label}",
+            FacetRole.TRANSITION,
+            f"public private integration contracts {end_label}",
+        ),
+        (
+            f"Mature operating structure at {end_label}",
+            FacetRole.ENDPOINT,
+            f"operating structure persistence legacy {end_label}",
+        ),
+    )
+    compact_question = (
+        ""
+        if start is not None or end is not None
+        else _bounded_text(question, limit=48)
+    )
+    requirements = tuple(
+        _fallback_requirement(index, label)
+        for index, (label, _role, _query) in enumerate(
+            labels_and_queries,
+            start=1,
+        )
+    )
+    facets = tuple(
+        _fallback_facet(
+            index,
+            requirements[index - 1],
+            role,
+            " ".join(part for part in (query, compact_question) if part),
+        )
+        for index, (_label, role, query) in enumerate(
+            labels_and_queries,
+            start=1,
+        )
+    )
+    return requirements, facets
+
+
 def deterministic_fallback_plan(
     resolved_turn: str | ResolvedTurn,
     *,
@@ -1421,7 +1693,13 @@ def deterministic_fallback_plan(
         end = _bounded_text(span.group("end"))
         context = _bounded_text(question[: span.start()].strip(" ,;:?"))
         relationship = _bounded_text(turn.relationship or f"{start} {end}")
-        if RouteTrait.BROAD_SYNTHESIS in traits:
+        if RouteTrait.LONG_INSTITUTIONAL_LINEAGE in traits:
+            requirements, facets = _long_lineage_fallback_stages(
+                question,
+                start=start,
+                end=end,
+            )
+        elif RouteTrait.BROAD_SYNTHESIS in traits:
             requirements = (
                 _fallback_requirement(1, start),
                 _fallback_requirement(2, f"Early development after {start}"),
@@ -1574,6 +1852,8 @@ def deterministic_fallback_plan(
                 framing_facet_id="F3",
             ),
         )
+    elif RouteTrait.LONG_INSTITUTIONAL_LINEAGE in traits:
+        requirements, facets = _long_lineage_fallback_stages(question)
     elif RouteTrait.BROAD_SYNTHESIS in traits:
         requirements = (
             _fallback_requirement(1, "Earliest concrete origin"),
@@ -1695,13 +1975,20 @@ the application owns those fields.
 Use only IDs declared in the response, and map every requirement to at least one added facet.
 Prefer the smallest sufficient proposal. A single-clause request normally needs one requirement
 and one to three facets. Obey the application-owned route_traits supplied in the input. When
-broad_synthesis is present, return at least five ordered requirements, normally exactly five.
-Give every requirement exactly one dedicated narrative-stage facet: first an origin facet, then
-at least three transition or mechanism facets for distinct developments in the argument, and
-finally an endpoint facet. Do not use generic early/middle/late labels: make each requirement and
-query identify the distinct function or development it must find while staying neutral about the
-answer. Each stage label and query must name the stage's distinctive institution, actor, event,
-or mechanism; generic topic words shared by the whole question are not a sufficient stage anchor.
+broad_synthesis is present without long_institutional_lineage, return exactly five ordered
+requirements. When long_institutional_lineage is present, return exactly eight ordered
+requirements and exactly eight dedicated stage facets. The eight stages consume the complete
+stage-source capacity; do not add a ninth transition facet. Give every requirement exactly one
+dedicated narrative-stage facet: first an origin facet, then transition or mechanism facets for
+distinct developments in the argument, and finally an endpoint facet. For a long institutional
+lineage, each stage must name a different historical bearer, authority transfer, governing
+regime, fiscal or administrative mechanism, public-private arrangement, or endpoint system.
+Give each long-lineage stage at least one exact eligible-document hint, and make those primary
+hints advance in strict catalog order. Do not use generic early/middle/late labels: make each
+requirement and query identify the distinct function or development it must find while staying
+neutral about the answer. Each stage label and query must name the stage's distinctive
+institution, actor, event, or mechanism; generic topic words shared by the whole question are not
+a sufficient stage anchor.
 Do not merge or omit independently requested parts merely to stay under four.
 Keep labels and search queries terse and copy document hints only as exact catalog IDs.
 For relational questions, search each named concept plus evidence that explicitly links them.
@@ -1711,7 +1998,7 @@ alternative chronology, origin, identity, or causal frame if the premise fails; 
 alternative in the plan.
 Document hints must exactly match the supplied eligible catalog.
 Do not state conclusions, cite sources, invent aliases, or use prior assistant answers as evidence.
-Respect the version-1 limits encoded in the response schema.
+Respect the version-2 limits encoded in the response schema.
 """
 
 
@@ -1736,6 +2023,7 @@ __all__ = [
     "FacetRole",
     "MAX_ADDED_QUERY_CHARS",
     "MAX_ADDED_SEARCH_FACETS",
+    "LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS",
     "MIN_BROAD_STAGE_REQUIREMENTS",
     "MAX_ORIGINAL_QUERY_CHARS",
     "MAX_PLANNER_FACETS",

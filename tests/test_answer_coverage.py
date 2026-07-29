@@ -42,6 +42,7 @@ from answer_coverage import (
     process_interpretive_evidence_coverage,
     render_evidence_coverage,
     validate_evidence_coverage,
+    validate_evidence_coverage_context,
 )
 
 
@@ -114,7 +115,10 @@ def _obligation_scope(
     )
 
 
-def _adjacent_link_scopes() -> tuple[EvidenceObligationScope, ...]:
+def _adjacent_link_scopes(
+    *,
+    transition_source_number: int = 2,
+) -> tuple[EvidenceObligationScope, ...]:
     return (
         EvidenceObligationScope(
             obligation_id="O1",
@@ -139,7 +143,7 @@ def _adjacent_link_scopes() -> tuple[EvidenceObligationScope, ...]:
         EvidenceObligationScope(
             obligation_id="O3",
             kind=EvidenceObligationKind.ADJACENT_STAGE_LINK,
-            source_number=2,
+            source_number=transition_source_number,
             predecessor_source_number=1,
             paragraph_start=1,
             paragraph_end=1,
@@ -151,13 +155,19 @@ def _adjacent_link_scopes() -> tuple[EvidenceObligationScope, ...]:
     )
 
 
-def _adjacent_link_answer() -> EvidenceCoverageAnswer:
+def _adjacent_link_answer(
+    *,
+    transition_source_number: int = 2,
+) -> EvidenceCoverageAnswer:
     unit = AnswerUnit(
         unit_id="U1",
         requirement_ids=("R1", "R2"),
         role=AnswerUnitRole.CAUSE,
-        text="The later institution explicitly continued the earlier one [Source 2].",
-        source_numbers=(2,),
+        text=(
+            "The later institution explicitly continued the earlier one "
+            f"[Source {transition_source_number}]."
+        ),
+        source_numbers=(transition_source_number,),
         paragraph=1,
         obligation_links=(
             ObligationLink(
@@ -174,14 +184,14 @@ def _adjacent_link_answer() -> EvidenceCoverageAnswer:
                 "R1",
                 RequirementStatus.SUPPORTED,
                 ("U1",),
-                (2,),
+                (transition_source_number,),
                 GapReason.NONE,
             ),
             _coverage(
                 "R2",
                 RequirementStatus.SUPPORTED,
                 ("U1",),
-                (2,),
+                (transition_source_number,),
                 GapReason.NONE,
             ),
         ),
@@ -217,7 +227,7 @@ def _adjacent_link_answer() -> EvidenceCoverageAnswer:
                         dimension=EvidenceDimension.ADJACENT_STAGE_LINK,
                         status=RequirementStatus.SUPPORTED,
                         unit_ids=("U1",),
-                        source_numbers=(2,),
+                        source_numbers=(transition_source_number,),
                         gap_reason=GapReason.NONE,
                     ),
                 ),
@@ -1137,6 +1147,50 @@ def test_adjacent_stage_link_requires_a_later_source_bounded_causal_unit():
     assert link_unit.requirement_ids == ("R1", "R2")
     assert link_unit.source_numbers == (2,)
     assert link_unit.role is AnswerUnitRole.CAUSE
+
+
+def test_adjacent_stage_link_accepts_a_distinct_transition_passage():
+    validated = validate_evidence_coverage(
+        _adjacent_link_answer(transition_source_number=3),
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=_adjacent_link_scopes(
+            transition_source_number=3,
+        ),
+        source_count=3,
+    )
+
+    link_unit = validated.answer.answer_units[0]
+    assert link_unit.source_numbers == (3,)
+    assert link_unit.requirement_ids == ("R1", "R2")
+
+
+def test_adjacent_stage_link_context_rejects_a_missing_successor_stage():
+    scopes = _adjacent_link_scopes(transition_source_number=3)
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage_context(
+            requirement_ids=("R1", "R2"),
+            obligation_scopes=(scopes[0], scopes[2]),
+            source_count=3,
+        )
+
+    assert captured.value.code is CoverageValidationErrorCode.INVALID_CONTEXT
+
+
+def test_adjacent_stage_link_context_preserves_the_predecessor_anchor():
+    scopes = _adjacent_link_scopes(transition_source_number=3)
+    wrong_predecessor = scopes[2].model_copy(
+        update={"predecessor_source_number": 2},
+    )
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage_context(
+            requirement_ids=("R1", "R2"),
+            obligation_scopes=(*scopes[:2], wrong_predecessor),
+            source_count=3,
+        )
+
+    assert captured.value.code is CoverageValidationErrorCode.INVALID_CONTEXT
 
 
 def test_requirement_component_requires_its_source_bounded_material_layer():

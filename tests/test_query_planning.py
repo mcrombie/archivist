@@ -47,6 +47,30 @@ CATALOG = (
     ),
 )
 
+LINEAGE_CATALOG = tuple(
+    DocumentCatalogEntry(
+        document_id=f"lineage-{index}.md",
+        chapter_title=title,
+        corpus_ordinal=index,
+    )
+    for index, title in enumerate(
+        (
+            "Chartered Venture",
+            "Provincial Council",
+            "Assembly Tax Authority",
+            "Commonwealth Office",
+            "National Treasury",
+            "Federal Procurement Bureau",
+            "Contractor Command",
+            "Data Center Network",
+        ),
+        start=1,
+    )
+)
+LINEAGE_QUESTION = (
+    "Trace the institutional lineage from Alpha Consortium to Omega Network."
+)
+
 
 def requirement(identifier: str = "R1", *, order: int = 0) -> AnswerRequirement:
     return AnswerRequirement(
@@ -188,6 +212,76 @@ def valid_planner_proposal() -> PlannerQuestionPlan:
     )
 
 
+def valid_lineage_proposal() -> PlannerQuestionPlan:
+    stages = (
+        (
+            "Chartered Alpha Consortium",
+            FacetRole.ORIGIN,
+            "Alpha Consortium chartered venture",
+        ),
+        (
+            "Provincial council succession",
+            FacetRole.TRANSITION,
+            "Alpha Consortium provincial council",
+        ),
+        (
+            "Assembly tax authority",
+            FacetRole.MECHANISM,
+            "Alpha Consortium assembly taxation",
+        ),
+        (
+            "Commonwealth administrative office",
+            FacetRole.TRANSITION,
+            "Alpha Consortium commonwealth office",
+        ),
+        (
+            "National treasury integration",
+            FacetRole.MECHANISM,
+            "Omega Network national treasury",
+        ),
+        (
+            "Federal procurement bureau",
+            FacetRole.MECHANISM,
+            "Omega Network federal procurement",
+        ),
+        (
+            "Contractor command network",
+            FacetRole.TRANSITION,
+            "Omega Network contractor command",
+        ),
+        (
+            "Data-centered Omega Network",
+            FacetRole.ENDPOINT,
+            "Omega Network data center",
+        ),
+    )
+    return PlannerQuestionPlan(
+        requirements=tuple(
+            PlannerAnswerRequirement(
+                requirement_id=f"R{index}",
+                label=label,
+            )
+            for index, (label, _role, _query) in enumerate(
+                stages,
+                start=1,
+            )
+        ),
+        facets=tuple(
+            PlannerSearchFacet(
+                facet_id=f"F{index}",
+                requirement_ids=(f"R{index}",),
+                role=role,
+                search_query=query,
+                document_hints=(f"lineage-{index}.md",),
+            )
+            for index, (_label, role, query) in enumerate(
+                stages,
+                start=1,
+            )
+        ),
+    )
+
+
 def test_resolved_turn_carries_conversation_resolution_structure():
     turn = ResolvedTurn(
         standalone_question="How did Project Lumen affect the Harbor Network?",
@@ -213,6 +307,13 @@ def test_resolved_turn_carries_conversation_resolution_structure():
         (
             "Trace the Harbor Network's development over time.",
             (RouteTrait.BROAD_SYNTHESIS,),
+        ),
+        (
+            LINEAGE_QUESTION,
+            (
+                RouteTrait.BROAD_SYNTHESIS,
+                RouteTrait.LONG_INSTITUTIONAL_LINEAGE,
+            ),
         ),
         (
             "What caused the signal failure, and what consequences followed?",
@@ -569,7 +670,7 @@ def test_valid_plan_gets_trusted_traits_targets_and_unchanged_f0():
 
     result = validate_question_plan(valid_planner_plan(), question, CATALOG)
 
-    assert result.schema == "archivist.question_plan/1"
+    assert result.schema == "archivist.question_plan/2"
     assert result.planner_used is True
     assert result.fallback_reason is None
     assert result.facets[0] == SearchFacet(
@@ -848,6 +949,124 @@ def test_broad_proposal_requires_origin_middle_endpoint_requirement_order():
     ]
 
 
+def test_long_institutional_lineage_accepts_eight_distinct_ordered_roles():
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        valid_lineage_proposal(),
+        LINEAGE_CATALOG,
+    )
+
+    assert result.planner_used is True
+    assert result.traits == (
+        RouteTrait.BROAD_SYNTHESIS,
+        RouteTrait.LONG_INSTITUTIONAL_LINEAGE,
+    )
+    assert len(result.requirements) == 8
+    assert len(result.facets) == 9
+    assert [facet.role for facet in result.facets[1:]] == [
+        FacetRole.ORIGIN,
+        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.MECHANISM,
+        FacetRole.TRANSITION,
+        FacetRole.ENDPOINT,
+    ]
+    assert [facet.document_hints[0] for facet in result.facets[1:]] == [
+        f"lineage-{index}.md" for index in range(1, 9)
+    ]
+
+
+def test_short_lineage_proposal_falls_back_to_eight_capacity_aware_stages():
+    proposal = valid_lineage_proposal().model_copy(
+        update={
+            "requirements": valid_lineage_proposal().requirements[:5],
+            "facets": valid_lineage_proposal().facets[:5],
+        }
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        proposal,
+        LINEAGE_CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert result.fallback_reason == "invalid_planner_output"
+    assert len(result.requirements) == 8
+    assert len(result.facets) == 9
+    assert diagnostics == {
+        "planner_validation_code": "lineage_stage_cardinality_mismatch"
+    }
+
+
+def test_long_lineage_rejects_repeated_thematic_roles_and_nonadvancing_hints():
+    proposal = valid_lineage_proposal()
+    repeated_role = proposal.facets[1].model_copy(
+        update={
+            "search_query": "Alpha Consortium later chartered venture",
+        }
+    )
+    repeated_requirement = proposal.requirements[1].model_copy(
+        update={"label": "Later chartered Alpha Consortium"},
+    )
+    repeated = proposal.model_copy(
+        update={
+            "requirements": (
+                proposal.requirements[0],
+                repeated_requirement,
+                *proposal.requirements[2:],
+            ),
+            "facets": (
+                proposal.facets[0],
+                repeated_role,
+                *proposal.facets[2:],
+            ),
+        }
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        repeated,
+        LINEAGE_CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "lineage_stage_role_invalid"
+    }
+
+    reversed_hint = proposal.facets[1].model_copy(
+        update={"document_hints": ("lineage-1.md",)}
+    )
+    nonadvancing = proposal.model_copy(
+        update={
+            "facets": (
+                proposal.facets[0],
+                reversed_hint,
+                *proposal.facets[2:],
+            )
+        }
+    )
+    diagnostics = {}
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        nonadvancing,
+        LINEAGE_CATALOG,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "lineage_stage_role_invalid"
+    }
+
+
 def test_planner_cannot_promote_a_focused_question_to_a_sensitive_route():
     plan = QuestionPlan(
         traits=(RouteTrait.PREMISE_SENSITIVE, RouteTrait.ABSENCE_SENSITIVE),
@@ -1056,7 +1275,7 @@ def test_exact_version_one_count_caps_are_enforced():
         )
 
 
-def test_f0_makes_eight_added_facets_an_oversized_final_plan():
+def test_f0_allows_eight_lineage_facets_but_rejects_a_ninth_added_facet():
     plan = QuestionPlan(
         requirements=(requirement(),),
         facets=tuple(
@@ -1064,8 +1283,19 @@ def test_f0_makes_eight_added_facets_an_oversized_final_plan():
         ),
     )
 
+    result = validate_question_plan(plan, "What changed for Project Lumen?")
+
+    assert len(result.facets) == 9
+
+    oversized = QuestionPlan(
+        requirements=(requirement(),),
+        facets=tuple(
+            facet(f"F{index}", ("R1",), f"Project Lumen lane {index}")
+            for index in range(1, 10)
+        ),
+    )
     with pytest.raises(PlanValidationError, match="too_many_facets"):
-        validate_question_plan(plan, "What changed for Project Lumen?")
+        validate_question_plan(oversized, "What changed for Project Lumen?")
 
 
 def test_added_query_total_cap_is_exact():
@@ -1215,7 +1445,7 @@ def test_invalid_planner_output_falls_back_once_without_retry(monkeypatch):
 def test_planner_proposal_schema_exposes_only_model_owned_fields():
     schema = query_planning.planner_question_plan_json_schema()
 
-    assert schema["properties"]["schema"]["const"] == ("archivist.planner_question_plan/1")
+    assert schema["properties"]["schema"]["const"] == ("archivist.planner_question_plan/2")
     assert schema["additionalProperties"] is False
     assert set(schema["properties"]) == {
         "schema",
@@ -1224,7 +1454,7 @@ def test_planner_proposal_schema_exposes_only_model_owned_fields():
         "premises",
     }
     assert schema["properties"]["requirements"]["maxItems"] == 8
-    assert schema["properties"]["facets"]["maxItems"] == 7
+    assert schema["properties"]["facets"]["maxItems"] == 8
     facet_schema = schema["$defs"]["PlannerSearchFacet"]
     assert facet_schema["properties"]["search_query"]["maxLength"] == 240
     assert facet_schema["properties"]["document_hints"]["items"]["maxLength"] == 300
@@ -1281,7 +1511,7 @@ def test_planner_proposal_preserves_multi_part_contract_capacity():
 def test_finalized_question_plan_schema_remains_distinct_from_provider_proposal():
     schema = query_planning.question_plan_json_schema()
 
-    assert schema["properties"]["schema"]["const"] == "archivist.question_plan/1"
+    assert schema["properties"]["schema"]["const"] == "archivist.question_plan/2"
     assert {
         "traits",
         "targets",
