@@ -21,7 +21,187 @@ Important distinction for the post:
 - Good-looking answers are not yet evidence that the RAG is good. The gold-set evaluation is being
   built precisely so that claim can eventually be made with numbers.
 
+## A useful conceptual frame: crafting an elegant context window
+
+Archivist can reasonably be described as an attempt to craft an elegant context window for an
+LLM. The model cannot usefully receive an entire long manuscript plus every conversational turn,
+so most of the engineering is editorial:
+
+- ingestion turns the book into stable, addressable passages;
+- chunking decides which ideas should remain together;
+- retrieval and query planning decide which passages deserve the limited context budget;
+- neighbor expansion restores local continuity that chunking may have cut away;
+- stage and transition contracts reserve room for the different historical roles a long question
+  actually asks about;
+- conversation resolution carries forward the user's intent without treating old model prose as
+  evidence;
+- citations preserve the route from generated claims back to the passages admitted to context;
+  and
+- validation and evaluation ask whether the selected context was sufficient and whether the model
+  used it honestly.
+
+The analogy should not imply that Archivist merely writes a clever prompt. The context window is
+the center of the design, but corpus preparation, retrieval, source accounting, validation,
+privacy, and measurement determine what can safely enter it. A good short description for the
+eventual post is: **Archivist is a system for composing a small, inspectable reading packet from a
+large book before asking an LLM to answer.**
+
 ## Development chronology
+
+## Reconstructed pre-Codex chronology
+
+The original journal began on July 21. The following history was reconstructed from the first 25
+Git commits and their code, covering March 31 through July 14. Commits are grouped by calendar day
+but listed individually so the path from the initial experiment to the first web application
+remains auditable.
+
+### 2026-03-31 - Local, private scaffolding
+
+- `b8ec759` created the repository structure, environment exclusions, and first dependency
+  snapshot. The manuscript, generated output, virtual environment, `.env`, and Python caches were
+  excluded from Git from the first commit.
+- The dependency snapshot already included OpenAI and Chroma, making the initial technical thesis
+  visible before application code existed: keep the book local, create embeddings, and retrieve
+  passages into a model context.
+
+Useful blog lesson: the privacy boundary was not a late public-launch patch. The raw manuscript
+began outside source control.
+
+### 2026-04-01 - From manuscript files to addressable passages
+
+- `1ee0051` added the first ingestion experiment. It read the Markdown manuscript, removed headings
+  and image markers, and tested paragraph extraction. The commit records an important editorial
+  correction: an export that moved all footnotes to the end was rejected in favor of inline
+  footnotes so retrieved prose would retain its supporting context.
+- `146d101` converted that experiment into deterministic ingestion. Sorted Markdown files became
+  four-paragraph chunks with one-paragraph overlap, stable chunk IDs, chapter titles, paragraph
+  ranges, and JSON output.
+
+Useful blog lesson: RAG quality began with book production choices. Where footnotes appear and how
+paragraphs are addressed affect what the model can know later.
+
+### 2026-04-02 - Rhetorical chunking and the first vector search
+
+- `a945941` made chunk boundaries sensitive to prose. It avoided beginning a chunk with a quotation
+  whose setup lived in the prior paragraph and avoided weak transitional openings where possible.
+- `88388cb` added the first complete embedding and query path. Chunks were embedded in batches of
+  50 with `text-embedding-3-small`, stored in a persistent Chroma collection, and queried through a
+  command-line semantic search that returned five passages.
+
+Useful blog lesson: chunking is not only a token-size calculation. It is an editorial judgment
+about which sentences require one another to remain intelligible.
+
+### 2026-04-03 - The retriever became a source-grounded answer system
+
+- `745c366` exposed document names, chapter titles, chunk IDs, paragraph ranges, distances, and
+  longer previews in the query tool so relevance could be inspected rather than guessed.
+- `c7ffe0a` created the first Answer Mode. It passed retrieved manuscript passages to `gpt-5`,
+  required source-cited answers, and instructed the model to admit when the supplied evidence was
+  insufficient.
+- `2f6b034` strengthened the prompt's citation behavior.
+- `44566c0` added immediate neighboring chunks around semantic hits so a good match would not lose
+  the setup or consequence just across a chunk boundary.
+
+Useful blog lesson: the project became RAG when retrieval stopped being a search demo and became a
+bounded, visible evidence packet for generation.
+
+### 2026-04-04 - The displayed sources were aligned with the model's sources
+
+- `1b08639` required citations immediately after supported claims, allowed grouped citations for
+  genuinely shared support, emphasized precision, and prohibited invention.
+- `9956870` fixed a source-namespace bug in which an answer could cite an expanded source such as
+  Source 9 while the CLI displayed only the original five retrieval hits. The exact expanded
+  passages shown to the model became the exact passages shown to the user.
+
+Useful blog lesson: citation syntax is meaningless unless every displayed label resolves against
+the model's actual context.
+
+### 2026-04-05 - A finite source budget and the original indexing use case
+
+- `31f59b0` created a canonical context-finalization step: apply a configurable distance threshold
+  to primary hits, retain a fallback when all hits exceed it, expand neighbors, and cap the final
+  context at eight passages.
+- `b3079a9` created Index Mode, originally considered the project's most practical purpose. It was
+  intended to help build the book's back-of-book index after typesetting fixed the page numbers.
+- `6b77658` repaired Index Mode after pure semantic retrieval failed to find repeated literal uses
+  of “Virginia Company.” Exact case-insensitive matching, neighboring passages, and semantic
+  fallback became a hybrid retrieval path.
+
+Useful blog lesson: embeddings and literal search solve different problems. A good retrieval
+system combines them instead of asking one ranking method to impersonate the other.
+
+### 2026-04-06 - Shared retrieval primitives, noise filtering, and the first self-evaluation
+
+- `d4acece` added optional filtering for structural material such as tables of contents and
+  bibliographies so high-frequency but low-value text would not dominate retrieval.
+- `d1efc24` moved corpus loading and retrieval/context logic into shared modules, removing the first
+  substantial duplication between Answer Mode and Index Mode.
+- `2baab9c` wrote the first README, describing the architecture, two operating modes, source
+  transparency, limitations, and planned page-number mapping.
+- `9e908e1` recorded a large manual evaluation with representative answers, retrieval locations,
+  perceived strengths, and known failures. Its broad-theme weakness anticipated much of the later
+  formal RAG work, although its favorable citation judgments were not yet backed by the later
+  claim-level gold methodology.
+
+Useful blog lesson: the first prototype already identified the enduring problem. Focused questions
+could look impressive while broad questions overconcentrated on one dense section of the book.
+
+### 2026-07-03 - The CLI became a local manuscript workbench
+
+- `2888088` added the first FastAPI/React/Vite application. It introduced local project storage,
+  manuscript upload, embedding controls, Q&A, index-entry generation, candidate terms,
+  existing-index search, and expandable source cards.
+- The interface was deliberately local-first, and uploaded projects lived under a gitignored
+  directory. At this stage Archivist was still conceived as a general manuscript workbench rather
+  than a public conversation with one book.
+
+Useful blog lesson: putting a UI around a prototype reveals product ambiguity. The first web
+version exposed every capability at once because the application had not yet chosen its central
+reader experience.
+
+### 2026-07-06 - A staged workflow replaced the crowded dashboard
+
+- `4555b76` remodeled the interface around a sequence: upload a manuscript, process and embed it,
+  then choose Q&A or Index Mode. It replaced the always-visible sidebar, upload controls, and mode
+  tabs with focused screens and a library/archive visual language.
+
+Useful blog lesson: reducing simultaneous choices was the first major UI improvement, even before
+the later decision to make Archivist specific to *Cradle of the Empire*.
+
+### 2026-07-07 - Word and PDF manuscripts became first-class inputs
+
+- `f6c16a8` added a conversion layer for Markdown, text, DOCX, PDF, and ZIP uploads. DOCX import
+  preserved paragraphs and tables; PDF import extracted selectable text with page markers.
+- A final Index, General Index, or Index of Names section could be split from the searchable
+  manuscript and retained separately for comparison. Failed embedding received clearer recovery
+  instructions and could be retried after import.
+
+Useful blog lesson: accepting a file is not the same as understanding its structure. Import logic
+has to preserve the boundaries that retrieval and citations will later depend on.
+
+### 2026-07-13 - Long-running work became legible, then readable
+
+- `896fd8c` added staged processing messages for upload, parsing, embedding, retrieval, answer
+  generation, candidate-term discovery, index generation, and index search.
+- `bcd75f0` added Manuscript Viewer Mode with paginated processed text, document and chapter labels,
+  paragraph references, navigation, and access before the semantic index was built.
+
+Useful blog lesson: responsiveness is partly explanatory. When work takes time, showing which kind
+of work is occurring helps the user form an accurate mental model of the system.
+
+### 2026-07-14 - The viewer returned to the typeset artifact and citations became readable
+
+- `cb39521` responded to repeated chapter, page, and overlap errors in the reconstructed viewer by
+  opening the original PDF directly when available, while retaining a searchable processed-text
+  fallback.
+- `37a0df4` replaced opaque Source N labels with chapter-and-paragraph citations. Citations became
+  clickable, hoverable evidence links; internal chunk IDs moved behind a copy control; and adjacent
+  retrieved chunks from the same chapter were merged for display with duplicate overlap removed.
+  Stored chunks, embeddings, and retrieval ranking were deliberately left unchanged.
+
+Useful blog lesson: internal retrieval identifiers and reader-facing citations serve different
+audiences. The interface can translate between them without altering the evidence supplied to the
+model.
 
 ### 2026-07-21 — From generic document tool to a book-specific experience
 
@@ -1969,6 +2149,107 @@ Useful blog lesson: internal green counters prove only that the system satisfied
 created. If the plan compresses an eight-part historical arc into five stages, five-of-five can
 still be substantively incomplete. Evaluation has to measure the reader's question, not merely
 the pipeline's self-description.
+
+### 2026-07-29 - V17 repaired the transition contract before another paid run
+
+- Opened the `evidence-planned-v17` cohort to repair the deterministic G007 failure found by the
+  full v16 evaluation. Retrieval, prompts, models, the eight-source ceiling, and the manuscript
+  index remain unchanged.
+- Removed the obsolete assumption that an adjacent-stage link must cite the successor stage's
+  anchor. A link may now cite its selected dedicated transition passage while the validator still
+  requires consecutive requirements, one surviving stage scope at each endpoint, the correct
+  predecessor anchor, and source numbers inside the final context.
+- Made trusted coverage-context validation a public, shared contract used both before generation
+  and during final answer validation. Invalid local context now returns a fail-closed diagnostic
+  with `structured_generation_called=false` instead of spending on an answer that local code was
+  already certain to discard.
+- Added a true integration fixture with separate predecessor-anchor, successor-anchor, and
+  transition passages. It validates and reaches exactly one synthetic answer-generation call.
+  A paired stage-shortfall fixture removes the successor scope and proves that generation is never
+  invoked; its emitted retrieval trace also passes the text-free trace contract.
+- Added unit coverage showing that the dedicated third passage is valid, a missing endpoint stage
+  is invalid, and the predecessor source must still match the protected predecessor anchor.
+- The full offline suite passed 494 tests with one intentional skip, and Ruff passed across all
+  source and test files. No OpenAI calls were made and no API cost was incurred.
+- This repair restores contract consistency; it does not claim better gold-set completeness. The
+  remaining measured problem is broad stage planning: a five-stage plan can still underrepresent
+  a longer institutional lineage. That stage-cardinality and historical-role contract is the next
+  bounded repair before returning to the unchanged ten-question evaluation.
+
+Useful blog lesson: fail-closed validation is only economical when it runs at the earliest point
+where failure is knowable. The same strict check that protects readers after generation can also
+protect the budget before generation, provided both paths share one contract.
+
+### 2026-07-29 - V18 made long institutional-lineage plans match the question's span
+
+- Opened the `evidence-planned-v18` cohort to repair the false-green completeness signal exposed
+  by G006. The accepted v16 plan represented a book-spanning institutional lineage with only five
+  stages, so five satisfied anchors and four satisfied transitions described the undersized plan
+  rather than the reader's eight-part historical question.
+- Added an application-owned `long_institutional_lineage` route trait. It activates only for
+  explicitly institutional lineage, succession, or transformation questions that already qualify
+  as broad synthesis; ordinary broad questions retain the established five-stage contract.
+- Long-lineage plans now require exactly eight chronologically ordered stage requirements and
+  eight corresponding search facets, in addition to the original-question facet. Each stage must
+  name a distinct historical bearer, mechanism, or institutional role rather than repeating a
+  generic theme under different dates.
+- When the document catalog is available, every lineage stage must carry an exact document hint
+  and the primary hints must advance through the corpus. This constrains each anchor to the
+  historical role intended for that stage rather than allowing a generally relevant passage from
+  another period to satisfy it.
+- Kept the public final-source ceiling at eight. Stage anchors therefore receive the full capacity
+  for an eight-stage lineage. The adjacent-stage transition lane first reuses already selected
+  stage passages; it may add another passage only when capacity remains.
+- Made the capacity tradeoff visible in the text-free retrieval trace: required, planned, and
+  available stage counts; stage shortfall; spare transition capacity; transitions satisfied by
+  reuse versus a new source; and capacity, candidate, or selection shortfalls are recorded
+  separately. A transition can no longer disappear behind a single generic shortfall count.
+- Versioned the planner and provider contracts for the expanded maximum: question-plan schema 2,
+  planner schema 2, planner prompt v8, retrieval v11, retrieval trace 10, broad role execution v4,
+  and transition lane v2.
+- Added synthetic regressions for route precision, exact eight-stage cardinality, distinct stage
+  roles, advancing document hints, ordinary five-stage preservation, all-eight-anchor retrieval,
+  reuse-first transitions, explicit capacity shortfalls, trace privacy, and end-to-end retention
+  of all eight roles through answer generation.
+- The complete offline suite passed 500 tests with one intentional skip, and Ruff passed across
+  all source and test files. No OpenAI calls were made and no API cost was incurred.
+- This is a contract and observability repair, not yet a quality claim. The next measurement should
+  be the unchanged ten-question gold evaluation under the fresh v18 cohort.
+
+Useful blog lesson: a retrieval system can report perfect coverage of the wrong abstraction. The
+plan's cardinality and historical roles have to match the reader's requested arc before downstream
+coverage counters mean anything.
+
+### 2026-07-29 - A whimsical interlude expanded the shared visual language
+
+- Added three presentation-only vibes to Archivist and its parent portfolio, Cromblog: **Pretty
+  Pink Princess**, **Baleful Black Baron**, and **Rose & Ruin**.
+- Pretty Pink Princess uses blush parchment, pearl light, rose glass, soft courtly geometry, and
+  restrained crown ornament. Baleful Black Baron uses near-black iron, oxblood, tarnished metal,
+  sharper corners, and gothic heraldic forms. Rose & Ruin deliberately reconciles the two through
+  black plum, dusty rose, champagne gold, and a more controlled courtly silhouette.
+- The two applications retain their own materials while speaking the same visual language.
+  Archivist applies each palette to the cover treatment, conversation chrome, user messages,
+  controls, source panels, and archival answer paper. Cromblog carries the same identity through
+  its sidebar, masthead seal, navigation, home hero, project and post cards, long-form article
+  surfaces, and Archivist feature card.
+- No new image assets were added. Cromblog reuses three existing art-directed hero images under
+  theme-specific filters and overlays, keeping the interlude code-native and avoiding unnecessary
+  disk growth.
+- The Archivist appearance menu now safely scrolls when all ten vibes do not fit in a short
+  viewport. Both registries contain the same ten choices, and the existing persistence and cycling
+  mechanisms discover the additions from those registries without a second implementation.
+- Both production frontend builds passed. Key foreground, muted, user-message, and answer-paper
+  color pairs for all three themes measured above the 4.5:1 normal-text contrast target; the
+  weakest checked pair was 5.05:1.
+- Automated screenshot inspection was unavailable in this development session, so a final human
+  visual pass across desktop and mobile remains appropriate before publishing the styles.
+- This work changes presentation only. It does not alter retrieval, prompts, model context,
+  citations, evaluation contracts, or the pending unchanged v18 gold-set run.
+
+Useful blog lesson: a serious evidence system does not have to present itself with only one mood.
+Keeping theme selection entirely on the presentation side makes room for play without allowing
+the ornament to change the answer.
 
 ## Update convention
 
