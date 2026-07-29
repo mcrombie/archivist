@@ -45,6 +45,36 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] Empty supported-status mapping discarded a paid G006 answer
+Phase/Brief: Phase 1 evidence-planned-v19 focused G006/G007 confirmation
+Symptom: G006 completed one planner call, one embedding call, and one answer-generation call, but
+the reader received only the validated-answer fallback. Local validation rejected the generated
+coverage object with `status_unit_mismatch`; diagnostics recorded zero accepted answer units and
+no local repair.
+Cause: model error and spec gap in the brief - the provider can assign a non-unsupported
+requirement or dimension status while omitting its unit/source mapping, and the canonical
+normalizer does not distinguish that empty, safely downgradeable shape from a nonempty conflicting
+mapping that must fail closed.
+Resolution and verification: unresolved. The next repair may downgrade only an empty
+non-unsupported mapping to the existing unsupported representation when the trusted evidence
+ledger supplies no grounded unit. It must not invent, relocate, or infer support, and every
+nonempty invalid mapping must continue to fail. Synthetic tests must cover requirement-level and
+dimension-level empty mappings, nonempty conflicts, and preservation of valid mappings before a
+paid confirmation.
+
+## [2026-07-29] Paid runner lost stdout after its parent stopped waiting
+Phase/Brief: Phase 1 evidence-planned-v19 focused G006/G007 confirmation
+Symptom: the foreground command wrapper stopped waiting after five seconds while G006 continued.
+G006 completed and wrote its response and usage ledger exactly once, but then raised `OSError`
+while printing to the closed stdout pipe. G007 had not started.
+Cause: model error in the evaluation invocation - a long-running paid runner was attached to a
+short-lived parent output pipe instead of a persistent redirected process.
+Resolution and verification: the completed G006 was not rerun. A G007-only continuation asserted
+the same clean commit, frozen hashes, settings, and zero-retry rule; reduced its cap to the unused
+authorization; and redirected stdout/stderr to files. It completed exactly once. Future paid
+runners should use persistent file redirection from launch. The combined private assessment
+accounts for one call sequence per question and a total estimated cost of `$0.47055541`.
+
 ## [2026-07-29] Eight chronological roles did not constitute an institutional lineage
 Phase/Brief: Phase 1 evidence-planned-v18 unchanged ten-question evaluation
 Symptom: G006 received the required eight-stage plan. Retrieval satisfied seven stage anchors,
@@ -54,17 +84,15 @@ governing and economic regimes rather than the institutional succession requeste
 Cause: spec gap in the brief - the v18 validator proves cardinality, advancing document hints,
 and vocabulary-distinct roles, but it does not require a named institutional capacity to pass
 from one bearer to the next or bind each role to both endpoints of the question.
-Resolution and verification: repaired offline in `evidence-planned-v19`; paid quality measurement
-is pending. Every long-lineage stage now declares a distinct bearer, inherited capacity,
-transfer-or-transformation mechanism, and outgoing capacity. Each outgoing capacity must exactly
-become the next stage's inherited capacity, explicit question endpoints bind the first and last
-bearers, and generic-only handoff fields are rejected. Protected anchors must match both the bearer
-and a concrete handoff term; adjacent transitions must match both stages, their shared capacity,
-and an explicit transition signal. The generation ledger receives one source-bounded
-`institutional_handoff` obligation per stage, while planner fields are marked as non-evidence
-orientation. Corpus-agnostic regressions and the full offline suite passed (505 tests, one
-intentional skip); Ruff and `git diff --check` passed. No paid calls were made, so the unchanged
-G006 result remains the quality gate.
+Resolution and verification: unresolved after `evidence-planned-v19`. V19 added distinct bearers,
+contiguous capacities, transfer mechanisms, bearer-and-role anchor qualification, shared-capacity
+transitions, and source-bounded `institutional_handoff` obligations. Offline regressions and the
+full suite passed, but the unchanged paid G006 result fell to 0/8 claims and 3/8 target groups,
+then discarded its answer on a separate `status_unit_mismatch`. The stricter contract correctly
+rejected five weak transitions, yet the live planner still chose an evenly advancing chronology
+rather than documents performing the required institutional roles. The next repair must ground a
+proposed document hint in corpus-derived historical-role descriptors before accepting it; internal
+handoff continuity alone is insufficient.
 
 ## [2026-07-29] Target-bearing broad context remained outside answer obligations
 Phase/Brief: Phase 1 evidence-planned-v18 unchanged ten-question evaluation
@@ -76,10 +104,13 @@ Cause: spec gap in the brief - target breadth, planned-stage coverage, and answe
 coverage are measured independently, but the contract does not require a selected passage that
 carries a supported stage or handoff to be realized in the answer. Generic unsupported-link
 notices can coexist with an otherwise valid broad answer.
-Resolution and verification: unresolved. The next repair must bind supported stage and handoff
-evidence to explicit answer obligations and distinguish a genuinely unsupported connection from
-one whose relevant passage is present but unused. It must add no critic call, retry, gold hint,
-or manuscript-specific rule.
+Resolution and verification: unresolved. V19 did not change the ordinary five-stage obligation
+contract and the focused G007 guardrail regressed from V18's 5/5 target groups to 4/5, again
+realizing 0/7 strict claims. The accepted plan began too late and omitted the early colonial
+origin even though four later regions and all four adjacent transitions survived. The next repair
+must preserve an explicit origin stage for early-to-late causal questions and bind supported stage
+and handoff evidence to answer obligations. It must add no critic call, retry, gold hint, or
+manuscript-specific rule.
 
 ## [2026-07-29] A five-stage plan falsely satisfied a longer institutional lineage
 Phase/Brief: Phase 1 evidence-planned-v16 unchanged ten-question evaluation

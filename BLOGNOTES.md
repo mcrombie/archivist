@@ -2327,6 +2327,50 @@ Useful blog lesson: an elegant context window is not just a pile of relevant pas
 argument-shaped contract: who carries a capability, how it changes hands, which source supports
 each link, and which planning suggestions must remain outside the evidence boundary.
 
+### 2026-07-29 - V19's handoff contract made weak links visible but did not find the right lineage
+
+- Froze V19 at clean commit `3c39310` and ran the owner's unchanged G006/G007 pair once with no
+  model or API retries. The questions, 15-claim rubric subset, manuscript and index, neutral
+  settings, GPT-5.6 Sol model, and eight-source ceiling were unchanged.
+- The pair used two planner calls, two batched embeddings, and two answer generations: 39,929
+  priced tokens and an estimated **`$0.47055541`**, below the authorized `$0.75` ceiling. Combined
+  latency was 366.293 seconds.
+- The answer-quality gate failed. G006 realized 0/8 strict claims, covered 3/8 target groups, and
+  discarded its generated answer on `status_unit_mismatch`. G007 returned a valid answer with 15
+  resolvable citations but realized 0/7 strict claims and covered 4/5 target groups. The
+  predeclared thresholds were 2/8 plus 5/8 for G006 and 2/7 plus 5/5 for G007.
+- V19's stricter transition rule was honest: only two of seven G006 handoffs survived instead of
+  allowing generic chronological overlap to masquerade as institutional continuity. But the
+  planner still chose an evenly advancing series of chapters rather than chapters performing the
+  required corporate, fiscal, regulatory, procurement, and modern endpoint roles. A better-shaped
+  request did not by itself give the planner grounded knowledge of each document's historical
+  function.
+- G006 exposed a separate local reliability defect. The provider assigned a non-unsupported
+  status without the corresponding unit/source mapping. The normalizer did not safely downgrade
+  the empty record, so strict validation rejected the entire paid answer rather than preserving
+  only the supported units.
+- G007 protected the ordinary broad route and showed a regression: it began too late, losing the
+  early colonial origin that V18 had retrieved. Its four surviving historical regions still did
+  not become the required causal argument.
+- Both text-free traces passed the closed trace validator. The private grading and assessment
+  preserve the exact frozen identities, source-group counts, usage, latency, and the evaluation
+  harness interruption without committing manuscript text.
+- The first foreground wrapper stopped waiting while G006 continued. G006 completed exactly once
+  and wrote its artifacts, then could not print to the closed stdout pipe; G007 had not begun.
+  G006 was not rerun. A G007-only continuation asserted the same commit and frozen hashes, used
+  only the remaining authorization, and redirected output to files. The combined sample therefore
+  remains exactly one call sequence per question.
+- Held a full ten-question V19 rerun because this cohort is already known to lose one reader
+  answer and two target groups relative to the unchanged V18 pair. The next offline repair is
+  limited to honest empty-mapping normalization, corpus-derived document-role grounding, and an
+  earliest-stage breadth guardrail for the ordinary broad route. If the unchanged pair then
+  clears its gate, proceed directly to all ten questions.
+
+Useful blog lesson: a stricter context contract can turn false confidence into a useful failure.
+V19 did not improve the answer, but it separated three different problems that had looked like
+one: choosing the wrong historical roles, proving too few real handoffs, and discarding an answer
+because its support ledger was malformed.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

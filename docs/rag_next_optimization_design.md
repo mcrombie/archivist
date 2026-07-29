@@ -1598,3 +1598,71 @@ is a guardrail for the ordinary five-stage broad route. V19 does not claim to re
 separate problem in which target-bearing broad context can remain outside the generated answer's
 obligations. If the pair provides useful directional signal, the next measurement is the complete
 unchanged ten-question set rather than a succession of additional narrow gates.
+
+## V19 focused paid result: the gate did not clear
+
+The unchanged G006/G007 pair ran once from clean commit
+`3c393103f08a06be924e3dc44be90f8f0957020f`. It retained the frozen
+15-claim rubric subset, corpus and index identity, neutral interpretation, GPT-5.6 Sol runtime
+model, eight-source ceiling, and zero-retry rule. The two questions cost an estimated
+`$0.47055541` across two planner calls, two batched embeddings, and two answer generations.
+
+The predeclared gate required G006 to reach at least 2/8 strict claims and 5/8 target groups, and
+G007 to reach at least 2/7 claims and 5/5 groups. V19 reached:
+
+| Item | Strict claims | Target groups | Reader result |
+|---|---:|---:|---|
+| G006 | 0/8 | 3/8 | generation discarded on `status_unit_mismatch` |
+| G007 | 0/7 | 4/5 | valid but materially incomplete |
+
+Compared with the unchanged V18 pair, strict claims remained 0/15, target coverage fell from 9/13
+to 7/13, and valid reader answers fell from two to one. Cost fell 12.3 percent, but combined
+latency rose 19.0 percent. This is one directional sample rather than a noise-floor estimate, but
+it is sufficient to reject the V19 gate.
+
+### What the handoff contract did and did not prove
+
+G006's plan satisfied the eight-stage schema, yet its exact document hints still formed a
+roughly even chronological walk. The new validator could prove that the planner's proposed
+bearers and capacities were internally contiguous; it could not prove that the hinted documents
+actually performed the required historical roles. Retrieval retained seven stage anchors but
+only two of seven transitions under the stricter handoff test. Rejecting five weak transitions
+was correct. The missing capability is grounded document-role selection before a hint is accepted.
+
+G007 remained on the ordinary five-stage route. It retained four stage anchors and all four
+adjacent transitions, but the accepted plan began after the required early colonial origin.
+Long-lineage changes did not directly activate on G007, so this is a guardrail failure in the
+shared planner/document-hint boundary rather than in the eight-stage validator alone.
+
+### Generation-contract failure
+
+G006 also exposed an independent local defect. The generated coverage object assigned at least
+one requirement a non-unsupported status while providing no unit/source mapping. The existing
+normalizer left that mismatch intact, and the strict validator rejected the entire answer with
+`status_unit_mismatch`.
+
+The safe repair is not to invent a mapping or move a citation. When a non-unsupported status has
+an empty mapping, and the trusted evidence ledger does not prove a supported unit, canonical
+normalization should downgrade the record to the existing unsupported representation. Any
+nonempty conflicting mapping must continue to fail closed. Synthetic fixtures must distinguish
+those cases before another paid call.
+
+### V20 bounded design target
+
+The next cohort should make three offline changes and no others:
+
+1. **Empty-mapping normalization:** safely downgrade only empty, ungrounded non-unsupported
+   requirement and dimension records; preserve strict failure for contradictory or nonempty
+   invalid mappings.
+2. **Corpus-derived document roles:** derive compact, text-free-or-local descriptors of each
+   eligible document's historical actors, institutions, mechanisms, and period from the corpus,
+   then require proposed document hints to match the intended stage role before accepting a live
+   plan. These descriptors must not contain gold claims, target-group labels, or question-specific
+   answers.
+3. **Ordinary-route origin guardrail:** a broad causal sequence with an explicit early-to-late
+   span must retain an eligible origin stage before later stages can claim completeness.
+
+The public boundary remains one planner, one generation, zero automatic retries, eight final
+sources, and no critic. After corpus-agnostic regressions and the full offline suite pass, run the
+same unchanged G006/G007 pair once. If it clears both thresholds, proceed directly to the complete
+unchanged ten-question evaluation.
