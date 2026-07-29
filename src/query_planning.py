@@ -24,6 +24,8 @@ from pydantic import (
     model_validator,
 )
 
+from document_roles import MAX_DOCUMENT_ROLE_TERMS
+
 
 QUESTION_PLAN_SCHEMA = "archivist.question_plan/3"
 PLANNER_QUESTION_PLAN_SCHEMA = "archivist.planner_question_plan/3"
@@ -58,6 +60,8 @@ PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
         "lineage_handoff_route_mismatch",
         "lineage_stage_cardinality_mismatch",
         "lineage_stage_role_invalid",
+        "document_role_mismatch",
+        "broad_origin_not_preserved",
         "planner_owned_original",
         "premise_route_mismatch",
         "query_drift",
@@ -162,6 +166,35 @@ class DocumentCatalogEntry(_ContractModel):
     document_id: str = Field(min_length=1, max_length=300)
     chapter_title: str = Field(min_length=1, max_length=500)
     corpus_ordinal: int = Field(ge=0)
+    role_terms: tuple[str, ...] = Field(
+        default=(),
+        max_length=MAX_DOCUMENT_ROLE_TERMS,
+        description=(
+            "Bounded, normalized corpus-derived search-orientation tokens; "
+            "never evidence or manuscript passages."
+        ),
+    )
+
+    @field_validator("role_terms")
+    @classmethod
+    def role_terms_are_bounded_unique_tokens(
+        cls,
+        values: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("document role terms cannot contain duplicates")
+        if any(
+            not value
+            or value != value.casefold()
+            or value != value.strip()
+            or len(value) > 48
+            or re.search(r"\s", value)
+            for value in values
+        ):
+            raise ValueError(
+                "document role terms must be bounded normalized single tokens"
+            )
+        return values
 
 
 class InstitutionalHandoff(_ContractModel):
@@ -609,6 +642,30 @@ _LONG_INSTITUTIONAL_LINEAGE_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+
+_CAUSAL_ENGINE_PATTERN = re.compile(
+    r"\b(?P<driver>[^?.!,;]{2,100}?)\s+as\s+"
+    r"(?:an?\s+)?(?:engine|driver|instrument|source)\s+of\b",
+    re.IGNORECASE,
+)
+_CAUSAL_DRIVER_NOISE_TOKENS = frozenset(
+    {
+        "account",
+        "describe",
+        "describes",
+        "frame",
+        "frames",
+        "present",
+        "presents",
+        "treat",
+        "treats",
+    }
+)
+_NUMBERED_NARRATIVE_DOCUMENT_PATTERN = re.compile(
+    r"\bchapter[\s_:-]*\d+\b",
+    re.IGNORECASE,
+)
+_MAX_EARLY_ORIGIN_ROLE_MATCHES = 4
 
 
 _BROAD_PATTERNS = (
@@ -1166,6 +1223,167 @@ def _lineage_endpoint_tokens(value: str) -> frozenset[str]:
     )
 
 
+def _singular_role_token(value: str) -> str:
+    if len(value) > 5 and value.endswith("ies"):
+        return f"{value[:-3]}y"
+    if len(value) > 5 and value.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return value[:-2]
+    if len(value) > 4 and value.endswith("s") and not value.endswith("ss"):
+        return value[:-1]
+    return value
+
+
+def _role_token_matches(left: str, right: str) -> bool:
+    left_root = _singular_role_token(left)
+    right_root = _singular_role_token(right)
+    if left_root == right_root:
+        return True
+    shorter, longer = sorted((left_root, right_root), key=len)
+    return len(shorter) >= 5 and longer.startswith(shorter)
+
+
+def _role_token_overlap(
+    intended_tokens: frozenset[str],
+    descriptor_tokens: frozenset[str],
+) -> frozenset[str]:
+    return frozenset(
+        intended
+        for intended in intended_tokens
+        if any(
+            _role_token_matches(intended, descriptor)
+            for descriptor in descriptor_tokens
+        )
+    )
+
+
+def _document_role_tokens(entry: DocumentCatalogEntry) -> frozenset[str]:
+    return meaningful_query_tokens(
+        " ".join((entry.chapter_title, *entry.role_terms))
+    )
+
+
+def _stage_role_tokens(
+    requirement: AnswerRequirement,
+    facet: SearchFacet,
+) -> frozenset[str]:
+    handoff = requirement.institutional_handoff
+    handoff_text = (
+        " ".join(
+            (
+                handoff.bearer,
+                handoff.inherited_capacity,
+                handoff.transfer_mechanism,
+                handoff.outgoing_capacity,
+            )
+        )
+        if handoff is not None
+        else ""
+    )
+    generic_tokens = (
+        _LINEAGE_HANDOFF_GENERIC_TOKENS
+        if handoff is not None
+        else _LINEAGE_STAGE_ROLE_GENERIC_TOKENS
+    )
+    return frozenset(
+        token
+        for token in meaningful_query_tokens(
+            f"{requirement.label} {facet.search_query} {handoff_text}"
+        )
+        if token not in generic_tokens
+        and not token.isdigit()
+    )
+
+
+def _causal_driver_tokens(question: str) -> frozenset[str]:
+    match = _CAUSAL_ENGINE_PATTERN.search(question)
+    if match is None:
+        return frozenset()
+    return frozenset(
+        token
+        for token in meaningful_query_tokens(match.group("driver"))
+        if token not in _CAUSAL_DRIVER_NOISE_TOKENS
+        and token not in _LINEAGE_STAGE_ROLE_GENERIC_TOKENS
+        and not token.isdigit()
+    )
+
+
+def _validate_broad_document_roles(
+    turn: ResolvedTurn,
+    catalog: Sequence[DocumentCatalogEntry],
+    ordered_requirements: Sequence[AnswerRequirement],
+    dedicated_stage_facets_by_requirement: Mapping[str, Sequence[SearchFacet]],
+) -> None:
+    """Ground live broad-stage hints in bounded corpus-derived role tokens."""
+
+    profiled_catalog = tuple(entry for entry in catalog if entry.role_terms)
+    if not profiled_catalog:
+        return
+    catalog_by_id = {entry.document_id: entry for entry in profiled_catalog}
+    ordered_facets = [
+        dedicated_stage_facets_by_requirement[requirement.requirement_id][0]
+        for requirement in ordered_requirements
+    ]
+    for requirement, facet in zip(
+        ordered_requirements,
+        ordered_facets,
+        strict=True,
+    ):
+        if not facet.document_hints:
+            raise PlanValidationError(
+                "document_role_mismatch",
+                "every live broad stage requires an exact profiled-document hint",
+            )
+        primary_entry = catalog_by_id.get(facet.document_hints[0])
+        if primary_entry is None:
+            raise PlanValidationError(
+                "document_role_mismatch",
+                "a broad stage's primary hint lacks a local role profile",
+            )
+        intended_tokens = _stage_role_tokens(requirement, facet)
+        if not intended_tokens or not _role_token_overlap(
+            intended_tokens,
+            _document_role_tokens(primary_entry),
+        ):
+            raise PlanValidationError(
+                "document_role_mismatch",
+                "a broad stage's primary document does not contain its "
+                "proposed actor, institution, mechanism, or period role",
+            )
+
+    driver_tokens = _causal_driver_tokens(turn.standalone_question)
+    if not driver_tokens:
+        return
+    narrative_catalog = tuple(
+        entry
+        for entry in profiled_catalog
+        if _NUMBERED_NARRATIVE_DOCUMENT_PATTERN.search(
+            f"{entry.document_id} {entry.chapter_title}"
+        )
+    )
+    matching_origin_entries = tuple(
+        entry
+        for entry in sorted(
+            narrative_catalog or profiled_catalog,
+            key=lambda item: item.corpus_ordinal,
+        )
+        if _role_token_overlap(driver_tokens, _document_role_tokens(entry))
+    )
+    if not matching_origin_entries:
+        return
+    early_origin_ids = {
+        entry.document_id
+        for entry in matching_origin_entries[
+            :_MAX_EARLY_ORIGIN_ROLE_MATCHES
+        ]
+    }
+    if ordered_facets[0].document_hints[0] not in early_origin_ids:
+        raise PlanValidationError(
+            "broad_origin_not_preserved",
+            "a book-spanning causal sequence must ground its origin in the "
+            "earliest corpus documents that contain the named driver",
+        )
+
+
 def _validate_long_lineage_stage_roles(
     _parsed: QuestionPlan,
     turn: ResolvedTurn,
@@ -1404,7 +1622,17 @@ def validate_question_plan(
 
         allowed_tokens = set(question_tokens)
         for hint in facet.document_hints:
-            allowed_tokens.update(meaningful_query_tokens(catalog_by_id[hint].chapter_title))
+            catalog_entry = catalog_by_id[hint]
+            allowed_tokens.update(
+                meaningful_query_tokens(
+                    " ".join(
+                        (
+                            catalog_entry.chapter_title,
+                            *catalog_entry.role_terms,
+                        )
+                    )
+                )
+            )
         if not meaningful_query_tokens(facet.search_query) & allowed_tokens:
             raise PlanValidationError(
                 "query_drift",
@@ -1514,6 +1742,12 @@ def validate_question_plan(
                 "narrative-stage requirements: origin, at least three "
                 "transition-or-mechanism stages, and endpoint",
             )
+        _validate_broad_document_roles(
+            turn,
+            catalog,
+            ordered_requirements,
+            dedicated_stage_facets_by_requirement,
+        )
         if long_lineage:
             _validate_long_lineage_stage_roles(
                 parsed,
@@ -2216,6 +2450,12 @@ requirement and query identify the distinct function or development it must find
 neutral about the answer. Each stage label and query must name the stage's distinctive
 institution, actor, event, or mechanism; generic topic words shared by the whole question are not
 a sufficient stage anchor.
+The catalog's role_terms are bounded locally derived search-orientation tokens, not evidence.
+For every broad-synthesis stage, choose a primary document hint whose role_terms or title contain
+the stage's named actor, institution, mechanism, or period. For a book-spanning causal question
+that asks how a named driver acts as an engine, driver, instrument, or source of an outcome, choose
+the origin from the earliest eligible documents whose role terms contain that named driver.
+Do not quote, paraphrase, or treat role_terms as establishing a historical claim.
 Do not merge or omit independently requested parts merely to stay under four.
 Keep labels and search queries terse and copy document hints only as exact catalog IDs.
 For relational questions, search each named concept plus evidence that explicitly links them.

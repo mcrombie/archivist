@@ -2023,7 +2023,7 @@ def test_process_normalizes_gap_reason_from_unchanged_partial_status():
     assert result.diagnostics.coverage[0].source_numbers == (1,)
 
 
-def test_gap_normalization_does_not_supply_missing_units_or_sources():
+def test_empty_ungrounded_requirement_mapping_downgrades_to_unsupported():
     answer = EvidenceCoverageAnswer(
         schema=EVIDENCE_COVERAGE_SCHEMA,
         premise_decisions=(),
@@ -2045,9 +2045,100 @@ def test_gap_normalization_does_not_supply_missing_units_or_sources():
         source_count=1,
     )
 
+    assert result.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert result.answer == ALL_UNSUPPORTED_MESSAGE
+    assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
+    assert result.diagnostics.repair_codes == (
+        CoverageValidationErrorCode.STATUS_UNIT_MISMATCH,
+    )
+    record = result.diagnostics.coverage[0]
+    assert record.status is RequirementStatus.UNSUPPORTED
+    assert record.gap_reason is GapReason.NO_DIRECT_SUPPORT
+    assert record.unit_ids == ()
+    assert record.source_numbers == ()
+
+
+def test_empty_ungrounded_obligation_mapping_downgrades_without_inventing_support():
+    scope = _obligation_scope()
+    unit = _unit(
+        "U1",
+        ("R1",),
+        "A separate grounded unit remains available [Source 1].",
+        (1,),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1",),
+                (1,),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=(
+            EvidenceObligationCoverage(
+                obligation_id="O1",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.MECHANISM,
+                        status=RequirementStatus.PARTIAL,
+                        unit_ids=(),
+                        source_numbers=(),
+                        gap_reason=GapReason.PARTIAL_SUPPORT,
+                    ),
+                ),
+            ),
+        ),
+        answer_units=(unit,),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    dimension = result.diagnostics.obligation_coverage[0].dimensions[0]
+    assert dimension.status is RequirementStatus.UNSUPPORTED
+    assert dimension.gap_reason is GapReason.NO_DIRECT_SUPPORT
+    assert dimension.unit_ids == ()
+    assert dimension.source_numbers == ()
+    assert result.diagnostics.coverage[0].status is RequirementStatus.PARTIAL
+    assert CoverageValidationErrorCode.STATUS_UNIT_MISMATCH in (
+        result.diagnostics.repair_codes
+    )
+
+
+def test_nonempty_invalid_mapping_still_fails_closed():
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.PARTIAL,
+                ("UX",),
+                (1,),
+                GapReason.PARTIAL_SUPPORT,
+            ),
+        ),
+        answer_units=(),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+
     assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
-    assert result.diagnostics.error_code is CoverageValidationErrorCode.STATUS_UNIT_MISMATCH
-    assert result.diagnostics.repair_codes == (CoverageValidationErrorCode.STATUS_GAP_MISMATCH,)
+    assert result.diagnostics.error_code is CoverageValidationErrorCode.UNKNOWN_UNIT_ID
+    assert result.diagnostics.repair_codes == ()
 
 
 def test_gap_normalization_never_admits_an_unsupported_factual_unit():

@@ -82,7 +82,7 @@ INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = (
 )
 EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/7"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
-EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/6"
+EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/7"
 
 MAX_REQUIREMENTS = 8
 MAX_PREMISES = 2
@@ -1926,6 +1926,28 @@ def _normalize_mechanical_contract(
             )
         normalized_dimensions: list[EvidenceDimensionCoverage] = []
         for dimension_record in dimensions:
+            mapped_units = tuple(
+                unit
+                for unit in answer_units
+                if any(
+                    link.obligation_id == record.obligation_id
+                    and link.dimension is dimension_record.dimension
+                    for link in unit.obligation_links
+                )
+            )
+            if (
+                dimension_record.status is not RequirementStatus.UNSUPPORTED
+                and not dimension_record.unit_ids
+                and not dimension_record.source_numbers
+                and not mapped_units
+            ):
+                repair_codes.append(CoverageValidationErrorCode.STATUS_UNIT_MISMATCH)
+                dimension_record = dimension_record.model_copy(
+                    update={
+                        "status": RequirementStatus.UNSUPPORTED,
+                        "gap_reason": GapReason.NO_DIRECT_SUPPORT,
+                    }
+                )
             expected_gap = _STATUS_GAP_REASON[dimension_record.status]
             if dimension_record.gap_reason is not expected_gap:
                 repair_codes.append(CoverageValidationErrorCode.STATUS_GAP_MISMATCH)
@@ -1950,15 +1972,6 @@ def _normalize_mechanical_contract(
             if not mappings_are_safe_to_derive:
                 normalized_dimensions.append(dimension_record)
                 continue
-            mapped_units = tuple(
-                unit
-                for unit in answer_units
-                if any(
-                    link.obligation_id == record.obligation_id
-                    and link.dimension is dimension_record.dimension
-                    for link in unit.obligation_links
-                )
-            )
             mapped_unit_ids = tuple(unit.unit_id for unit in mapped_units)
             mapped_source_numbers = _ordered_unique(
                 source_number
@@ -2000,6 +2013,9 @@ def _normalize_mechanical_contract(
         repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_REQUIREMENT_ID)
     normalized_coverage: list[RequirementCoverage] = []
     for record in coverage:
+        mapped_units = tuple(
+            unit for unit in answer_units if record.requirement_id in unit.requirement_ids
+        )
         required_obligation_dimensions = {
             (scope.obligation_id, dimension)
             for scope in context.obligation_scopes
@@ -2033,6 +2049,19 @@ def _normalize_mechanical_contract(
                     "gap_reason": GapReason.PARTIAL_SUPPORT,
                 }
             )
+        if (
+            record.status is not RequirementStatus.UNSUPPORTED
+            and not record.unit_ids
+            and not record.source_numbers
+            and not mapped_units
+        ):
+            repair_codes.append(CoverageValidationErrorCode.STATUS_UNIT_MISMATCH)
+            record = record.model_copy(
+                update={
+                    "status": RequirementStatus.UNSUPPORTED,
+                    "gap_reason": GapReason.NO_DIRECT_SUPPORT,
+                }
+            )
         expected_gap = _STATUS_GAP_REASON[record.status]
         if record.gap_reason is not expected_gap:
             repair_codes.append(CoverageValidationErrorCode.STATUS_GAP_MISMATCH)
@@ -2057,9 +2086,6 @@ def _normalize_mechanical_contract(
             normalized_coverage.append(record)
             continue
 
-        mapped_units = tuple(
-            unit for unit in answer_units if record.requirement_id in unit.requirement_ids
-        )
         mapped_unit_ids = tuple(unit.unit_id for unit in mapped_units)
         mapped_source_numbers = _ordered_unique(
             source_number for unit in mapped_units for source_number in unit.source_numbers

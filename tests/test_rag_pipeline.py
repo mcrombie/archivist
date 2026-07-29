@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -1141,6 +1142,51 @@ def test_directional_resolved_relationship_does_not_call_the_planner(
     )
 
 
+def test_document_catalog_uses_bounded_role_tokens_without_sending_passages():
+    chunks = [
+        {
+            **CHUNK,
+            "document": "01_Chapter 1.md",
+            "chapter_title": "Chapter 1: Chartered Harbor",
+            "text": (
+                "The Harbor Council and the HCA used a corporate charter and "
+                "taxation to administer Asterbridge in 1620."
+            ),
+        },
+        {
+            **CHUNK,
+            "chunk_id": "synthetic_002",
+            "document": "02_Chapter 2.md",
+            "chapter_title": "Chapter 2: Naval Office",
+            "text": (
+                "The Naval Office used procurement and wartime finance "
+                "to administer the fleet in 1942."
+            ),
+        },
+    ]
+
+    catalog = rag_pipeline.build_document_catalog(chunks)
+    planner_input = rag_pipeline.build_planner_input(
+        ResolvedTurn(
+            standalone_question="Trace the Harbor administration over time."
+        ),
+        catalog,
+    )
+    payload = json.loads(planner_input)
+
+    assert payload["document_role_profile_version"] == "document-role-profile-v1"
+    assert "charter" in catalog[0].role_terms
+    assert "taxation" in catalog[0].role_terms
+    assert "hca" in catalog[0].role_terms
+    assert "asterbridge" in catalog[0].role_terms
+    assert "1620" in catalog[0].role_terms
+    assert "procurement" in catalog[1].role_terms
+    assert len(catalog[0].role_terms) <= 48
+    assert chunks[0]["text"] not in planner_input
+    assert chunks[1]["text"] not in planner_input
+    assert payload["eligible_document_catalog"][0]["role_terms"]
+
+
 def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     install_planned_retrieval(monkeypatch, [CHUNK])
     turn = ResolvedTurn(
@@ -1176,30 +1222,35 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
                 requirement_ids=("R1",),
                 role=FacetRole.ORIGIN,
                 search_query="origin Project Lumen",
+                document_hints=("chapter.md",),
             ),
             PlannerSearchFacet(
                 facet_id="F2",
                 requirement_ids=("R2",),
                 role=FacetRole.TRANSITION,
                 search_query="transition Project Lumen",
+                document_hints=("chapter.md",),
             ),
             PlannerSearchFacet(
                 facet_id="F3",
                 requirement_ids=("R3",),
                 role=FacetRole.MECHANISM,
                 search_query="middle mechanism Project Lumen",
+                document_hints=("chapter.md",),
             ),
             PlannerSearchFacet(
                 facet_id="F4",
                 requirement_ids=("R4",),
                 role=FacetRole.TRANSITION,
                 search_query="later transition Project Lumen",
+                document_hints=("chapter.md",),
             ),
             PlannerSearchFacet(
                 facet_id="F5",
                 requirement_ids=("R5",),
                 role=FacetRole.ENDPOINT,
                 search_query="endpoint Project Lumen",
+                document_hints=("chapter.md",),
             ),
         ),
     )

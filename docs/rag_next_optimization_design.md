@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v19 institutional-handoff repair implemented and verified offline;
-unchanged paid G006/G007 confirmation remains pending
+Status: evidence-planned-v20 document-role and normalization repair implemented and verified
+offline; unchanged paid G006/G007 confirmation requires a fresh capped authorization
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1666,3 +1666,77 @@ The public boundary remains one planner, one generation, zero automatic retries,
 sources, and no critic. After corpus-agnostic regressions and the full offline suite pass, run the
 same unchanged G006/G007 pair once. If it clears both thresholds, proceed directly to the complete
 unchanged ten-question evaluation.
+
+## V20 implementation: passage-free document roles and a safe downgrade
+
+V20 implements exactly the three bounded changes above. It does not change the private corpus,
+embedding model, vector index, retrieval thresholds, eight-source ceiling, generator model,
+coverage prompt, retry count, or public deployment.
+
+### Safe empty-mapping normalization
+
+The canonical coverage normalizer now distinguishes two cases that V19 treated alike:
+
+- A requirement or obligation dimension has a non-unsupported status but no unit IDs, no source
+  numbers, and no trusted answer unit linked to it. That empty, ungrounded status is downgraded to
+  the existing `unsupported` plus `no_direct_support` representation.
+- A mapping names a unit or source but conflicts with the trusted ledger. That nonempty
+  contradiction still fails closed.
+
+The repair never creates a unit, moves a citation, or infers support. If the trusted answer-unit
+ledger already contains a valid link, the existing derivation path remains available. The
+normalizer is versioned as `evidence-coverage-normalizer/7`.
+
+### Bounded document-role profiles
+
+Before a broad question reaches the planner, local code derives at most 48 normalized single-token
+terms for each eligible document. The selection balances:
+
+- chapter-title terms;
+- acronyms;
+- capitalized actor and institution names;
+- a corpus-agnostic vocabulary of institutional mechanisms; and
+- a small number of period markers and statistically salient terms.
+
+The planner receives those terms with explicit instructions that they are search orientation, not
+historical evidence. It receives no passage, sentence, paragraph, chunk ID, gold claim, target
+group, or expected answer from the profile. The terms are not written into the public response or
+the retrieval trace; the trace records only `document-role-profile-v1`.
+
+Every accepted live broad stage must provide an exact primary document hint whose title or role
+profile overlaps the stage's proposed actor, institution, mechanism, or period. This is a local
+rejection guard, not proof that the planner has found the best historical abstraction. The
+unchanged paid questions must determine whether the additional orientation actually improves
+G006.
+
+### Ordinary broad-route origin preservation
+
+For a broad causal question phrased as a named driver acting as an engine, driver, instrument, or
+source of an outcome, local validation extracts only the driver terms from the question. The
+origin hint must fall among the earliest numbered narrative documents whose title or role profile
+contains that driver. The rule contains no manuscript person, place, chapter, gold-group, or
+expected-answer name. Its purpose is to reject G007's V19 failure shape: a seemingly complete
+five-stage sequence that begins after the causal origin requested by the reader.
+
+### Cohort and verification
+
+The cohort identifiers are now:
+
+- policy `evidence-planned-v20`;
+- planner prompt `query-planner-v10`;
+- coverage prompt unchanged at `evidence-coverage-v9`;
+- normalizer `evidence-coverage-normalizer/7`;
+- retrieval trace `archivist.retrieval_trace/12`; and
+- document-role profile `document-role-profile-v1`.
+
+Corpus-agnostic regressions cover empty requirement and dimension mappings, nonempty invalid
+mappings, profiled document-role mismatch, late causal origin rejection, profile bounds,
+acronym/name retention, passage exclusion, and trace closure. The complete offline suite passed
+510 tests with one intentional skip, and Ruff passed on all changed source and test files. No
+OpenAI call was made.
+
+This is contract verification, not an answer-quality result. The next paid action remains one
+unchanged, no-retry G006/G007 pair using persistent file redirection. Because V19's pair cost
+`$0.47055541` and the role catalog increases planner input, that run requires a fresh explicit
+dollar ceiling. Only a pair that clears the existing thresholds licenses the unchanged full
+ten-question rerun.

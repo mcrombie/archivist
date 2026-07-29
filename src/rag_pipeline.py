@@ -98,14 +98,18 @@ from retrieval import (
     retrieve_plan_from_collection,
 )
 from retrieval_trace_contract import document_identifier_sha256
+from document_roles import (
+    DOCUMENT_ROLE_PROFILE_VERSION,
+    derive_document_role_terms,
+)
 
 
-RAG_POLICY_VERSION = "evidence-planned-v19"
+RAG_POLICY_VERSION = "evidence-planned-v20"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
-QUERY_PLANNER_PROMPT_VERSION = "query-planner-v9"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v10"
 EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v9"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
@@ -725,7 +729,14 @@ def without_automatic_retries(client: object) -> object:
 def build_document_catalog(
     chunks: Sequence[Mapping[str, object]],
 ) -> tuple[DocumentCatalogEntry, ...]:
-    """Build a passage-free eligible document catalog in corpus order."""
+    """Build a passage-free eligible document catalog in corpus order.
+
+    Each entry includes a bounded token profile derived locally from that
+    document.  The profile contains no sentence or excerpt and remains search
+    orientation rather than evidence.
+    """
+
+    role_terms_by_document = derive_document_role_terms(chunks)
     seen: set[str] = set()
     catalog: list[DocumentCatalogEntry] = []
     for ordinal, chunk in enumerate(chunks):
@@ -739,6 +750,7 @@ def build_document_catalog(
                 document_id=document,
                 chapter_title=title,
                 corpus_ordinal=ordinal,
+                role_terms=role_terms_by_document.get(document, ()),
             )
         )
     return tuple(catalog)
@@ -751,6 +763,7 @@ def build_planner_input(
     payload = {
         "resolved_turn": resolved_turn.model_dump(mode="json", by_alias=True),
         "route_traits": [trait.value for trait in route_question(resolved_turn)],
+        "document_role_profile_version": DOCUMENT_ROLE_PROFILE_VERSION,
         "eligible_document_catalog": [entry.model_dump(mode="json") for entry in document_catalog],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -2734,6 +2747,7 @@ def run_evidence_planned_answer(
         {
             "policy_version": policy.version,
             "planner_prompt_version": QUERY_PLANNER_PROMPT_VERSION,
+            "document_role_profile_version": DOCUMENT_ROLE_PROFILE_VERSION,
             "planner_prompt_sha256": hashlib.sha256(
                 (QUERY_PLANNER_INSTRUCTIONS + "\n" + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS).encode(
                     "utf-8"

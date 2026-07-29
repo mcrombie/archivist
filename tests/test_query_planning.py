@@ -68,6 +68,16 @@ LINEAGE_CATALOG = tuple(
         start=1,
     )
 )
+PROFILED_LINEAGE_CATALOG = tuple(
+    entry.model_copy(
+        update={
+            "role_terms": tuple(
+                query_planning.normalize_search_query(entry.chapter_title).split()
+            )
+        }
+    )
+    for entry in LINEAGE_CATALOG
+)
 LINEAGE_QUESTION = (
     "Trace the institutional lineage from Alpha Consortium to Omega Network."
 )
@@ -1017,6 +1027,113 @@ def test_long_institutional_lineage_accepts_eight_distinct_ordered_roles():
             strict=False,
         )
     )
+
+
+def test_profiled_long_lineage_rejects_a_document_without_the_stage_role():
+    mismatched_catalog = (
+        PROFILED_LINEAGE_CATALOG[0],
+        PROFILED_LINEAGE_CATALOG[1].model_copy(
+            update={
+                "chapter_title": "Unrelated Orbital Archive",
+                "role_terms": ("unrelated", "orbital", "archive"),
+            }
+        ),
+        *PROFILED_LINEAGE_CATALOG[2:],
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        LINEAGE_QUESTION,
+        valid_lineage_proposal(),
+        mismatched_catalog,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert result.fallback_reason == "invalid_planner_output"
+    assert diagnostics == {
+        "planner_validation_code": "document_role_mismatch"
+    }
+
+
+def test_book_spanning_causal_origin_must_use_an_early_driver_document():
+    catalog = tuple(
+        DocumentCatalogEntry(
+            document_id=f"{index:02}_Chapter {index}.md",
+            chapter_title=f"Chapter {index}",
+            corpus_ordinal=index,
+            role_terms=(
+                "conflict",
+                (
+                    "charter"
+                    if index == 1
+                    else "taxation"
+                    if index == 2
+                    else "mobilization"
+                    if index == 3
+                    else "procurement"
+                    if index == 4
+                    else "centralization"
+                    if index == 5
+                    else "endpoint"
+                ),
+            ),
+        )
+        for index in range(1, 7)
+    )
+    requirements = tuple(
+        PlannerAnswerRequirement(
+            requirement_id=f"R{index}",
+            label=label,
+        )
+        for index, label in enumerate(
+            (
+                "Conflict and centralization",
+                "Conflict taxation",
+                "Conflict mobilization",
+                "Conflict procurement",
+                "Conflict endpoint",
+            ),
+            start=1,
+        )
+    )
+    roles = (
+        FacetRole.ORIGIN,
+        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.TRANSITION,
+        FacetRole.ENDPOINT,
+    )
+    hints = (5, 2, 3, 4, 6)
+    proposal = PlannerQuestionPlan(
+        requirements=requirements,
+        facets=tuple(
+            PlannerSearchFacet(
+                facet_id=f"F{index}",
+                requirement_ids=(f"R{index}",),
+                role=role,
+                search_query=requirements[index - 1].label,
+                document_hints=(f"{hint:02}_Chapter {hint}.md",),
+            )
+            for index, (role, hint) in enumerate(
+                zip(roles, hints, strict=True),
+                start=1,
+            )
+        ),
+    )
+    diagnostics = {}
+
+    result = build_question_plan(
+        "How does the book treat conflict as an engine of central power?",
+        proposal,
+        catalog,
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "broad_origin_not_preserved"
+    }
 
 
 def test_long_lineage_requires_complete_contiguous_handoffs():

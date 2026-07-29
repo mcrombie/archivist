@@ -55,12 +55,13 @@ Cause: model error and spec gap in the brief - the provider can assign a non-uns
 requirement or dimension status while omitting its unit/source mapping, and the canonical
 normalizer does not distinguish that empty, safely downgradeable shape from a nonempty conflicting
 mapping that must fail closed.
-Resolution and verification: unresolved. The next repair may downgrade only an empty
-non-unsupported mapping to the existing unsupported representation when the trusted evidence
-ledger supplies no grounded unit. It must not invent, relocate, or infer support, and every
-nonempty invalid mapping must continue to fail. Synthetic tests must cover requirement-level and
-dimension-level empty mappings, nonempty conflicts, and preservation of valid mappings before a
-paid confirmation.
+Resolution and verification: resolved offline in `evidence-planned-v20`. The canonical normalizer
+now downgrades only an empty non-unsupported requirement or dimension mapping when no trusted
+answer unit supplies the missing link. It produces the existing unsupported representation and
+does not invent, relocate, or infer support. A nonempty invalid mapping still fails closed, while
+a valid trusted-ledger mapping remains derivable. Requirement-level, dimension-level, conflict,
+and preservation regressions pass; the complete offline suite passed 510 tests with one
+intentional skip. The unchanged paid G006/G007 confirmation remains the reader-level check.
 
 ## [2026-07-29] Paid runner lost stdout after its parent stopped waiting
 Phase/Brief: Phase 1 evidence-planned-v19 focused G006/G007 confirmation
@@ -92,7 +93,11 @@ then discarded its answer on a separate `status_unit_mismatch`. The stricter con
 rejected five weak transitions, yet the live planner still chose an evenly advancing chronology
 rather than documents performing the required institutional roles. The next repair must ground a
 proposed document hint in corpus-derived historical-role descriptors before accepting it; internal
-handoff continuity alone is insufficient.
+handoff continuity alone is insufficient. V20 now supplies bounded passage-free role profiles and
+rejects primary hints with no token-grounded stage-role match. Corpus-agnostic regressions and the
+complete offline suite pass, but the defect remains open until the unchanged paid G006 check shows
+that the planner chooses the requested institutional lineage rather than another internally valid
+chronology.
 
 ## [2026-07-29] Target-bearing broad context remained outside answer obligations
 Phase/Brief: Phase 1 evidence-planned-v18 unchanged ten-question evaluation
@@ -110,7 +115,10 @@ realizing 0/7 strict claims. The accepted plan began too late and omitted the ea
 origin even though four later regions and all four adjacent transitions survived. The next repair
 must preserve an explicit origin stage for early-to-late causal questions and bind supported stage
 and handoff evidence to answer obligations. It must add no critic call, retry, gold hint, or
-manuscript-specific rule.
+manuscript-specific rule. V20 now rejects an origin outside the earliest numbered narrative
+documents containing the named causal driver, using only corpus-derived role tokens. That origin
+contract passes offline tests. The broader obligation-realization defect remains open, and the
+unchanged paid G007 check must still establish target-group and strict-claim behavior.
 
 ## [2026-07-29] A five-stage plan falsely satisfied a longer institutional lineage
 Phase/Brief: Phase 1 evidence-planned-v16 unchanged ten-question evaluation

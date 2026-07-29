@@ -2371,6 +2371,47 @@ V19 did not improve the answer, but it separated three different problems that h
 one: choosing the wrong historical roles, proving too few real handoffs, and discarding an answer
 because its support ledger was malformed.
 
+### 2026-07-29 - V20 gave the planner a passage-free map of historical roles
+
+- Clarified the distinction between the owner's current ten-question practical rubric and the
+  formal gold artifacts. The empty `gold_set.pilot.template.json` is intentionally empty: the
+  owner must supply the questions, essential claim paraphrases, exact per-claim supporting chunk
+  IDs, complete per-question relevant chunk IDs, plausible forbidden claims, and answer-versus-
+  abstain behavior before seeing a model answer. The formal pilot is exactly ten items and remains
+  calibration-only; the eventual stable run-of-record gold set is 34-46 items across six locked
+  strata. Automatically filling either from Archivist's output would make the benchmark circular.
+- Opened the `evidence-planned-v20` cohort around the three failure shapes isolated by V19. The
+  manuscript, embeddings, vector index, retrieval parameters, eight-source ceiling, generator,
+  coverage prompt, and zero-retry boundary remain unchanged.
+- Made empty provider bookkeeping failures survivable without loosening grounding. If a supported
+  or partial status has no unit, no source, and no trusted ledger link, the normalizer now
+  downgrades only that record to unsupported. A nonempty contradictory mapping still fails closed,
+  and the repair never manufactures or relocates evidence.
+- Built a bounded role profile for each eligible document from local corpus statistics. Each
+  profile contains at most 48 normalized tokens balanced across title terms, acronyms, named
+  actors and institutions, institutional mechanisms, periods, and general salience. No passage,
+  sentence, paragraph, chunk ID, gold claim, target group, or expected answer enters the profile.
+- The planner may use that token map to choose document hints, but cannot use it as evidence. Local
+  validation rejects a broad stage whose primary document does not contain the proposed role.
+  For causal "X as an engine of Y" questions, it also rejects an origin placed after the earliest
+  narrative documents containing X. Both rules are corpus-agnostic.
+- Balanced selection mattered. A first pure top-term profile could omit rare acronyms or decisive
+  one-off institutions while preserving many generic high-frequency words. Reserving bounded
+  representation for acronyms, names, mechanisms, and periods produced a more useful map without
+  sending passages or allowing the planner input to grow without limit.
+- Versioned the policy as V20, planner prompt v10, normalizer v7, retrieval trace 12, and document
+  role profile v1. The complete offline suite passed 510 tests with one intentional skip; Ruff
+  passed on every changed source and test file. No OpenAI call or API cost was incurred.
+- This is not yet evidence that G006 or G007 improved. The token map increases planner input, so
+  the next unchanged, zero-retry pair must measure latency, cost, strict claims, target groups, and
+  whether a reader receives an answer. It requires a fresh explicit spending ceiling before it
+  runs. The public V13 deployment remains untouched until V20 clears measurement.
+
+Useful blog lesson: the planner did not need more manuscript prose; it needed a small index of
+what kinds of historical work each document performs. That resembles crafting an elegant context
+window at a second level: first orient the model with a compact map, then reserve the scarce source
+slots for passages that can actually support the answer.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

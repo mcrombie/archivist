@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/11"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/12"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -218,6 +218,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "facet_count",
             "fallback_reason",
             "planner_call",
+            "document_role_profile_version",
             "planner_model",
             "planner_prompt_sha256",
             "planner_prompt_version",
@@ -1006,6 +1007,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-normalizer/4",
             "evidence-coverage-normalizer/5",
             "evidence-coverage-normalizer/6",
+            "evidence-coverage-normalizer/7",
         }
     ),
     "origin": frozenset({"corpus_anchor", "neighbor", "primary", "retrieval"}),
@@ -1019,11 +1021,14 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "query-planner-v7",
             "query-planner-v8",
             "query-planner-v9",
+            "query-planner-v10",
         }
     ),
     "planner_validation_code": frozenset(
         {
             "broad_plan_under_decomposed",
+            "broad_origin_not_preserved",
+            "document_role_mismatch",
             "duplicate_query",
             "established_answer_claim",
             "missing_premise_framing",
@@ -1067,6 +1072,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v17",
             "evidence-planned-v18",
             "evidence-planned-v19",
+            "evidence-planned-v20",
         }
     ),
     "prompt_version": frozenset(
@@ -1191,6 +1197,9 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "premise_sensitive",
             "relationship",
         }
+    ),
+    "document_role_profile_version": frozenset(
+        {"document-role-profile-v1"}
     ),
     "validation_result": frozenset({"invalid", "not_run", "valid"}),
     "value": frozenset(
