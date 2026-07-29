@@ -45,6 +45,23 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] Dedicated transition evidence was rejected by the older validation context
+Phase/Brief: Phase 1 evidence-planned-v16 unchanged ten-question evaluation
+Symptom: G007's final returned context covered all five expected target document groups, and its
+retrieval trace reported four of five stage anchors plus four of four transition searches. The
+application nevertheless paid for a full answer generation and then returned no usable answer
+because local validation classified the context as `invalid_context`.
+Cause: contract edited and spec gap in the brief - the v16 obligation builder correctly binds an
+`adjacent_stage_link` to its selected dedicated transition passage, but the older
+validation-context check still requires that link's source number to equal the successor stage
+anchor's source number. Builder and validator tests exercised their own assumptions separately;
+no end-to-end fixture used a transition source distinct from both stage anchors.
+Resolution and verification: unresolved. The next repair must accept a distinct in-range
+transition source while still requiring consecutive requirements, surviving predecessor and
+successor scopes, and the correct predecessor anchor. Complete trusted-context validation must run
+before paid generation, and an end-to-end regression must cover both a valid distinct transition
+passage and a genuine stage shortfall.
+
 ## [2026-07-26] Valid source selections were discarded by citation-locality validation
 Phase/Brief: Phase 1 evidence-planned-v11 directional ten-question evaluation
 Symptom: G001 retrieved both expected document groups and G009 correctly stayed on the

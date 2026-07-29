@@ -1294,3 +1294,72 @@ Offline verification passed 489 tests with one intentional skip, and Ruff passed
 improvement. The next quality measurement should be the owner's unchanged ten-question evaluation
 under a fresh v16 cohort, with the same manuscript/index identity, model settings, neutral
 interpretation, source ceiling, and no-retry policy used for the v15 comparison.
+
+## V16 integrated result and V17 repair boundary
+
+The unchanged ten-question evaluation ran on 2026-07-29 from clean commit `4586135`. It retained
+the frozen 58-claim rubric, private corpus and index, neutral interpretation, eight-source limit,
+and no-retry policy. All ten questions completed exactly once. The isolated ledger recorded 27
+priced operations, 116,367 tokens, and an estimated `$1.28785761`, with no API errors, retries, or
+unpriced events.
+
+The directional result did not establish an overall improvement:
+
+- strict essential claims moved from 18/58 in v15 to 19/58 in v16;
+- target-document coverage remained 21/26;
+- expected high-level behavior fell from 10/10 to 9/10;
+- accepted planner proposals fell from 8/8 to 7/8;
+- valid generated answers fell from 9/9 to 8/9;
+- estimated cost rose 15.2 percent; and
+- total latency rose 19.7 percent.
+
+All 71 rendered citation tokens resolved to returned sources, but citation count is not a
+faithfulness or completeness score. This is one nondeterministic sample per cohort and supports
+diagnosis, not a statistical claim.
+
+### What worked narrowly
+
+The material-component pass produced bounded gains on focused questions. G001 and G002 each gained
+one strict claim relative to v15, and G003 stated one additional source-present mechanism. The
+result supports retaining the component obligations, but G005 still realized only one of seven
+strict claims after four component obligations validated. Broad component labels such as mechanism
+and qualification are not substitutes for a question-specific composite relation or
+counterargument.
+
+### What failed in broad execution
+
+G006 produced no strict claims and covered only three of eight target groups. Its accepted plan
+contained five stages, and retrieval satisfied all five planned stage anchors and all four planned
+transition searches. Those green counters described the smaller plan rather than the full
+longitudinal role of the question. A transition lane cannot recover stages that the planner never
+represented.
+
+The next broad-planning repair must therefore establish an explicit, corpus-agnostic
+stage-cardinality and historical-role contract. For longitudinal succession questions, the plan
+must represent the requested span with distinct institutional roles rather than an arbitrary
+thematic chronology. The design must also make the eight-source tradeoff explicit: required stages
+and required connective passages cannot silently exceed final context capacity.
+
+### Deterministic transition validation defect
+
+G007's final context covered all five expected target groups, yet the generated answer was
+discarded as `invalid_context`. The transition obligation builder correctly assigned an
+`adjacent_stage_link` to its dedicated transition passage. The older validation-context check,
+however, still required the link source to equal the later stage anchor. Existing tests covered
+the new builder and the older same-source validator separately, but no end-to-end fixture used a
+distinct transition passage.
+
+The first V17 repair is consequently bounded:
+
+1. accept a dedicated transition source while requiring consecutive requirements, surviving
+   predecessor and successor stage scopes, the correct predecessor anchor, and an in-range source;
+2. run complete trusted-context validation before answer generation so a deterministic local
+   contradiction cannot consume a paid call and then erase the answer;
+3. add an end-to-end regression with a distinct transition source;
+4. add a regression proving that a genuine stage shortfall still fails closed; and
+5. preserve one answer-generation call, zero automatic retries, and the existing source and
+   privacy boundaries.
+
+After this validator repair and the stage-cardinality contract pass offline verification, the next
+quality measurement should again be the complete unchanged ten-question evaluation. A small local
+fixture may prove mechanics, but it should not become another reason to defer the gold-set run.

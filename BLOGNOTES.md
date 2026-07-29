@@ -1935,6 +1935,41 @@ Useful blog lesson: completeness can be made more concrete without asking a seco
 the answer. The application can identify visible layers and connective passages in the evidence,
 then require the single generation call either to use them honestly or disclose the gap.
 
+### 2026-07-29 - The full v16 evaluation found a narrow gain and a real regression
+
+- Ran the owner's unchanged ten-question, 58-claim evaluation from clean commit `4586135`, with
+  the same private corpus and index, neutral settings, eight-source ceiling, frozen rubric, and
+  no-retry policy used for the v15 comparison. All ten questions ran exactly once.
+- The isolated run cost an estimated `$1.28785761` across 27 priced operations and 116,367 tokens.
+  It produced zero API errors, retries, or unpriced events.
+- Strict coverage moved only from 18/58 claims in v15 to 19/58 in v16. Target-document coverage
+  stayed at 21/26. Nine of ten expected high-level behaviors passed, down from ten of ten, while
+  all 71 rendered citation tokens remained syntactically valid and resolvable.
+- The focused component obligations helped narrowly: G001 and G002 each gained one strict claim,
+  and G003 expressed one additional mechanism. G005 still realized only one of seven claims
+  despite validating four source-visible component obligations. Generic completeness dimensions
+  do not guarantee the particular composite relationship or counterargument a reader needs.
+- The broad lineage question regressed from two strict claims to none. Its live plan represented
+  only five stages of a longer book-spanning arc, so successful five-of-five stage and four-of-four
+  transition counters overstated completeness relative to the user's actual question.
+- G007 retrieved all five expected source groups but returned no usable answer after generation.
+  Inspection found a deterministic integration defect: the new obligation builder correctly bound
+  an adjacent-stage link to a dedicated transition passage, while the older validator still
+  required that link to cite the later stage's anchor. The mismatch was locally knowable before
+  the paid generation call but was checked only afterward.
+- V16 therefore did not clear the overall product-quality bar. Its focused component work is worth
+  preserving, but the one-claim gain came with one failed behavior, 15.2 percent higher estimated
+  cost, and 19.7 percent higher total latency in this single directional sample.
+- The next bounded repair is to align transition-source validation and run the complete trusted
+  context check before generation, then add an explicit stage-cardinality and historical-role
+  contract for longitudinal questions. After offline verification, return directly to the full
+  unchanged ten-question evaluation rather than postponing it behind repeated narrow paid gates.
+
+Useful blog lesson: internal green counters prove only that the system satisfied the plan it
+created. If the plan compresses an eight-part historical arc into five stages, five-of-five can
+still be substantively incomplete. Evaluation has to measure the reader's question, not merely
+the pipeline's self-description.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
