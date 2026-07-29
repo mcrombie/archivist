@@ -32,13 +32,16 @@ finishing the current RAG cohort.
 The next evidence-producing sequence is:
 
 1. **Stabilize the candidate release.** The narrow V21 repair for V20's lossy G007 fallback is
-   complete and passes the full offline suite. Freeze that exact revision, run the predeclared
-   unchanged no-retry G007 reader confirmation, then confirm the unchanged ten-question practical
-   set and deploy the same candidate. Do not collect resume numbers from a different local or
-   public cohort.
-2. **Author and freeze the final held-out gold set.** The owner supplies 34–46 questions and the
-   exact relevance/support labels required by Brief 3 without seeing candidate answers. The
-   existing ten questions remain development data.
+   frozen at `bf424c880bca4728a8d13225f85978e27a8d8dcf` and passes the full offline suite. Run the
+   predeclared unchanged no-retry G007 reader confirmation, then confirm the unchanged
+   ten-question practical set and deploy that same candidate. Do not collect resume numbers from
+   a different local or public cohort.
+2. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
+   development-question registry, leakage and quotation audits, provenance binding, location
+   carry-over check, and Git freeze validator are implemented. The owner must now supply the
+   34–46 questions and exact relevance/support labels required by Brief 3 without running those
+   items through Archivist. The existing practical, Brief 1, opening-screen, smoke, and known
+   manual questions remain development data.
 3. **Run a retrieval-only controlled comparison.** Compare vector-only retrieval with the current
    dense/BM25 reciprocal-rank-fusion path using the same corpus, eligibility rules, question text,
    query embedding, and values of `k`. Generation is excluded.

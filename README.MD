@@ -171,8 +171,10 @@ Set-Location frontend
 npm run build
 ```
 
-The owner-authored ten-question evaluation remains the principal RAG quality benchmark. Passing
-the public security boundary does not by itself mean every historical answer is correct.
+The repeatedly used ten-question set is a development regression suite, not held-out evidence.
+Formal measurement is gated on a separately owner-authored 34–46 item gold set whose questions,
+claims, and source locations are locked before any item is run. Passing the public security
+boundary does not by itself mean every historical answer is correct.
 
 ## Privacy
 

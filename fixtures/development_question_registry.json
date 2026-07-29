@@ -1,0 +1,157 @@
+{
+  "schema": "archivist.development_question_registry/1",
+  "version": "1.0.0",
+  "normalization": "NFKC+casefold+collapse-whitespace/v1",
+  "questions": [
+    {
+      "id": "DEV-PRACTICAL-G001",
+      "question": "Who was Paquiquineo, and what became of him?",
+      "normalized_sha256": "1988df6f0f60d7da5cd8270918637777db3b638a773bf4b84c8dd1ef7ec66519"
+    },
+    {
+      "id": "DEV-PRACTICAL-G002",
+      "question": "What role do John Foster and Allen Dulles play in the book's argument?",
+      "normalized_sha256": "a5a83ab5c50fb06b4e608a4b3d2ae00ec9f12387ef455a095ad1afbaab35122e"
+    },
+    {
+      "id": "DEV-PRACTICAL-G003",
+      "question": "How does the book explain the shift from the Virginia Company's joint-stock structure to royal control of the colony?",
+      "normalized_sha256": "b0baa2bd7ffaa8a256f0aa1cd46ec6e3d771b0b16bfb5f7aa2c457500c242be8"
+    },
+    {
+      "id": "DEV-PRACTICAL-G004",
+      "question": "What does the book say about NSC-68 and the defense budget during the Korean War?",
+      "normalized_sha256": "86b005ba2959811815b2ac99d79361b4d12217c8a930519077712a2804105481"
+    },
+    {
+      "id": "DEV-PRACTICAL-G005",
+      "question": "What does the book mean by \"the grand illusion\"?",
+      "normalized_sha256": "a1129d9a9ca04c5719cad238f2cfbea495bb5fe7e69b11ffbe06705f5d75a940"
+    },
+    {
+      "id": "DEV-PRACTICAL-G006",
+      "question": "Trace the institutional lineage the book draws from the Virginia Company to the federal-corporate world of modern Northern Virginia.",
+      "normalized_sha256": "c074095add6fb83eda94d2bd8b65b5b9f7d347d75e66e72103fa6f25f07505b5"
+    },
+    {
+      "id": "DEV-PRACTICAL-G007",
+      "question": "How does the book treat war as an engine of federal and central power?",
+      "normalized_sha256": "d7a0cf8069b66a22aea0909e7c142b3d6fbe40a0f782a7663c1692a023c12621"
+    },
+    {
+      "id": "DEV-PRACTICAL-G008",
+      "question": "How does the book treat the Hudson's Bay Company and the Canadian fur trade?",
+      "normalized_sha256": "4230e563fa18244662047cf8a2660b24cea146e610cd7204ae235d72efedbdd7"
+    },
+    {
+      "id": "DEV-PRACTICAL-G009",
+      "question": "What does the book say about COVID-19 and its effect on federal contracting?",
+      "normalized_sha256": "8e3bb6ef955ef6555fc4193546c890e07b10827404044a0fbd6a4a5232c462be"
+    },
+    {
+      "id": "DEV-PRACTICAL-G010",
+      "question": "The book argues American empire began with the Spanish-American War in 1898. Why does it identify that war as the founding moment?",
+      "normalized_sha256": "2607aa25726abf5cefb623b7d0c43f7061a3df0a88b527bd44ce48311590df48"
+    },
+    {
+      "id": "DEV-B1-001",
+      "question": "What does the manuscript say about Paquiquineo?",
+      "normalized_sha256": "ec7fa967df00d37996f35f43773dec481297667f026ee9539ee3c8c2f095d328"
+    },
+    {
+      "id": "DEV-B1-002",
+      "question": "Who was Edwin Sandys and what did he do?",
+      "normalized_sha256": "1a0609798792fb027a1669dd78ffe418644acb9638ffce569f5d2440d32ee13b"
+    },
+    {
+      "id": "DEV-B1-003",
+      "question": "What role did Jamestown play as a corporate experiment?",
+      "normalized_sha256": "5d4c3124de4ea2dc5022ffb44072f601a97800faa83392bee926335c9480ba5d"
+    },
+    {
+      "id": "DEV-B1-004",
+      "question": "How did the headright system work?",
+      "normalized_sha256": "1f6fe5587b499360f8efce4b8b1a67ef891431e08fd77d2d94dcbe0fadf0fdc3"
+    },
+    {
+      "id": "DEV-B1-005",
+      "question": "What was the Starving Time and how did the Virginia Company describe it?",
+      "normalized_sha256": "958a4b4d7d717083b0c559b9ad847751b455696e105a4a318a2d33d0e0824c8c"
+    },
+    {
+      "id": "DEV-B1-006",
+      "question": "What does the manuscript say about propaganda in the interwar period?",
+      "normalized_sha256": "a7a0123f97dca88ffd4af457dee75da29c5da48ea493b5e83c91d0a4ddbf9c3f"
+    },
+    {
+      "id": "DEV-B1-007",
+      "question": "How does the manuscript treat the relationship between tobacco and labor?",
+      "normalized_sha256": "152dd60f969535151df6f153fb61898069c9f70a0fcdcf44325ff7364d4603a7"
+    },
+    {
+      "id": "DEV-B1-008",
+      "question": "What does the manuscript say about slavery?",
+      "normalized_sha256": "479dd6509cd7ad50c8b497b747c976d72081397855e174ec07cd14c4626e3aa3"
+    },
+    {
+      "id": "DEV-B1-009",
+      "question": "How did Virginia's relationship with westward expansion change over time?",
+      "normalized_sha256": "4b1da82b20db8a8564412321709851f5035fe246487f6678e13847ad082500dd"
+    },
+    {
+      "id": "DEV-B1-010",
+      "question": "What does the manuscript say about the founding of Oregon?",
+      "normalized_sha256": "64c8e66305aab5b0e153701e6796d6936560259c3e1770385d7d097bcb6c5928"
+    },
+    {
+      "id": "DEV-OPENING-001",
+      "question": "Who was Edwin Sandys, and what did he do?",
+      "normalized_sha256": "5a8d8bf8194f8f83a17af0ea55cc4097ba931e354f42760cef824e570c1457d7"
+    },
+    {
+      "id": "DEV-OPENING-002",
+      "question": "How does the manuscript connect tobacco to labor?",
+      "normalized_sha256": "5d2debec806e58ad28df1118c5083bff4f89aa6b037e14807bab6bd8b9017e96"
+    },
+    {
+      "id": "DEV-SMOKE-001",
+      "question": "How did that relationship shape everyday exchange in Jamestown?",
+      "normalized_sha256": "36b7c53758c8309947305bbcef5d47ce6ad83f063682294d654e0b0ed4d9bcc2"
+    },
+    {
+      "id": "DEV-MANUAL-001",
+      "question": "What was he before he was treasurer?",
+      "normalized_sha256": "c45956c49e82de22414fe2afe3e5eef1f3df7dde7de85efc8005192458a9586e"
+    },
+    {
+      "id": "DEV-MANUAL-002",
+      "question": "How did Sandys die?",
+      "normalized_sha256": "a15c7afbd7f4991f0943dc656a8fd735ce98bd07e1eeac9c34cd9ace366f9e8d"
+    },
+    {
+      "id": "DEV-MANUAL-003",
+      "question": "Who was Pocahontas?",
+      "normalized_sha256": "71fa29a939d6df4b49c938fad87401d87db547f3241d046498198ef8fa3efb99"
+    },
+    {
+      "id": "DEV-MANUAL-004",
+      "question": "Where is Virginia?",
+      "normalized_sha256": "91fc4a88f0acc6312cddb55a732e22783592895a2819b8ff38eae46464f39cad"
+    },
+    {
+      "id": "DEV-MANUAL-005",
+      "question": "Why is it called Virginia?",
+      "normalized_sha256": "70ddf0c9ebf5ad4c94ad5c9c52fd667ee655245b45a1f32e53a16ef39170431a"
+    },
+    {
+      "id": "DEV-MANUAL-006",
+      "question": "Tell me about the Pentagon",
+      "normalized_sha256": "b0846d95fd42ecbd2a59554ce2572871079d64e8cce301374c306be0085e6a00"
+    },
+    {
+      "id": "DEV-MANUAL-007",
+      "question": "John Rolfe",
+      "normalized_sha256": "8681f203a5a2910733092da6eb9e526e641d68e0b2538f3956eafb312e78167e"
+    }
+  ]
+}

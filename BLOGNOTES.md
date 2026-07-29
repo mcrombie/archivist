@@ -2507,6 +2507,44 @@ Useful blog lesson: strict validation should not erase good structure merely bec
 wrong. A carefully engineered context window can repair the one faulty coordinate and then prove
 the entire map still satisfies its contract.
 
+### 2026-07-29 - Froze V21 and built a blind gold-authoring room
+
+- Froze the offline-verified V21 system at exact commit
+  `bf424c880bca4728a8d13225f85978e27a8d8dcf`. That hash is now the candidate identity carried by
+  the held-out provenance template. It passed 511 tests with one intentional skip before the
+  freeze; the paid G007 reader confirmation remains deliberately separate.
+- Reclassified more than the familiar ten-question practical set as development data. The
+  committed registry now includes all ten practical questions, all ten Brief 1 questions, both
+  opening-screen suggestions, the recorded contextual smoke follow-up, and seven known manual
+  queries—30 questions in all. Exact normalized reuse is a hard error; transparent token and
+  sequence thresholds flag near matches for owner review.
+- Added a private 40-slot workbook centered inside the six locked stratum ranges. It supplies IDs
+  and blank fields only. It does not invent a question, answer, claim, essentiality decision,
+  source location, relevance judgment, or false-claim trap; those remain the manuscript owner's
+  work.
+- Added an offline authoring workbench that lists text-free corpus metadata and reveals manuscript
+  text only for chunk IDs the owner explicitly requests, after checking their frozen text and
+  document hashes. It performs no semantic retrieval, ranking, embedding, or API call, so the
+  candidate cannot help write its own exam.
+- Bound the eventual gold file to the exact candidate, V21 policy, corpus manifest, development
+  registry, timestamps, and four explicit owner attestations. A clean-tree lock rejects any
+  system-under-test change after the candidate commit while permitting only enumerated evaluation
+  artifacts and documentation.
+- Implemented the missing re-ingest carry-over contract: unchanged eligible ID-plus-hash locations
+  survive; changed, missing, or newly skipped locations quarantine the entire item. Also added a
+  privacy audit that detects long exact token runs but emits only item, claim, and chunk IDs plus
+  counts.
+- Corrected the README and historical pilot ledger. The repeatedly used ten questions can still
+  drive repairs, but can no longer be described or promoted as held-out evidence.
+- The held-out machinery passed 61 focused tests and Ruff. It made no model, embedding, retrieval,
+  or paid API call. The actual historical content is intentionally still blank because only the
+  owner can make those judgments without circularity.
+
+Useful blog lesson: building an evaluation set is less like asking an AI to write a quiz and more
+like constructing a clean room. The interesting engineering is in proving what the candidate did
+not see, what corpus the answers refer to, and that the measuring apparatus changed without the
+measured system moving underneath it.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

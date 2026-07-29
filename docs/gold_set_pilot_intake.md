@@ -1,11 +1,12 @@
 # Gold-set pilot intake
 
-Status: owner-authored questions received; exact claim locations not yet locked.
+Status: historical development/calibration ledger; permanently ineligible for the held-out set.
 
-This ledger records provenance and decisions made before any pilot question is
-run. It is not a gold set and must not be supplied to an evaluation harness.
-The mechanically validated pilot will eventually live at
-`fixtures/gold_set.pilot.json`.
+This ledger records the state before the ten questions were first run. They were subsequently used
+through many retrieval cohorts to identify defects and guide repairs. It is not a gold set, must
+not be supplied to a run-of-record harness, and will not be promoted to
+`fixtures/gold_set.json`. Its questions are recorded in
+`fixtures/development_question_registry.json` so the final held-out set cannot reuse them.
 
 ## Provenance
 
@@ -22,10 +23,9 @@ The mechanically validated pilot will eventually live at
   `b7ff94315a3f1f28c831e2c3ca62c385567d2b1447c19ff45139d175c3ff3c17`
 - Intake date: 2026-07-23
 
-At the time this intake ledger was frozen, the ten questions had not been sent
-through Archivist. No retrieval results, generated answers, or judge output
-had been viewed while defining this set. No API call is required for intake,
-location review, or schema validation.
+At the time this intake ledger was frozen, the ten questions had not been sent through Archivist.
+That statement is historical only. The questions have since been run repeatedly, and their results
+have influenced V11–V21. No later provenance claim may describe them as held out.
 
 ## Owner retrieval-scope decision
 
@@ -70,11 +70,11 @@ unlocked until the owner approves exact claim locations.
 This composition spans all six strata and satisfies the ten-item pilot
 composition rule.
 
-## Remaining owner approvals for a formal pilot fixture
+## Historical approvals that were never promoted
 
-These approvals apply if the practical test set is later promoted into the
-strict `fixtures/gold_set.pilot.json` format. They did not block the completed
-directional practical baseline, which is not a formal run of record.
+These approvals describe the work that would have been necessary to promote the practical set into
+the strict pilot format. That promotion is now forbidden because the system outputs have been
+seen. The list is retained to document why a question list alone was never a formal gold artifact.
 
 Before the pilot JSON can be created, the owner reviews and approves:
 

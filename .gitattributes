@@ -1,0 +1,8 @@
+fixtures/corpus_manifest.json text eol=lf
+fixtures/development_question_registry.json text eol=lf
+fixtures/gold_set.json text eol=lf
+fixtures/gold_set.template.json text eol=lf
+fixtures/gold_set.pilot.json text eol=lf
+fixtures/gold_set.pilot.template.json text eol=lf
+fixtures/gold_set.provenance.json text eol=lf
+fixtures/gold_set.provenance.template.json text eol=lf

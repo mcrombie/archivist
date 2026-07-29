@@ -45,6 +45,21 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] Final gold workflow had no mechanical holdout or carry-over boundary
+Phase/Brief: Phase 1, Briefs 2–3
+Symptom: the repository could validate a completed gold JSON schema, but could not prove that its
+questions differed from development questions, bind owner attestations and exact candidate/file
+hashes, reject system changes after candidate freeze, detect long copied manuscript passages, or
+execute the mandatory EVAL_CONTRACT §2.5 location carry-over procedure.
+Cause: spec gap in the brief - the gold schema defined the artifact's content but not the complete
+blind-authoring, provenance, leakage, privacy, and re-ingest workflow needed to make it credible.
+Resolution and verification: added a 30-question development registry, exact and deterministic
+near-match checks, an intentionally incomplete provenance sidecar bound to frozen V21 commit
+`bf424c880bca4728a8d13225f85978e27a8d8dcf`, a blank private workbook, an offline owner-directed
+chunk workbench, text-free quotation-risk and carry-over reports, and a clean-tree post-freeze
+allowlist validator. Focused validation passed 61 tests and Ruff. No historical gold content was
+model-authored; owner authoring and attestations remain pending.
+
 ## [2026-07-29] Correct origin rejection discarded an otherwise useful broad plan
 Phase/Brief: Phase 1 evidence-planned-v20 focused G006/G007 confirmation
 Symptom: G007's live five-stage plan failed `broad_origin_not_preserved`; the zero-retry path then

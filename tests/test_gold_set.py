@@ -113,6 +113,32 @@ def _full_set(digest="a" * 64):
     }
 
 
+def _maximum_full_set(digest="a" * 64):
+    maximum_counts = {
+        "focused_biographical": 9,
+        "focused_analytical": 9,
+        "conceptual": 7,
+        "broad_thematic": 11,
+        "out_of_corpus": 6,
+        "adversarial_premise": 4,
+    }
+    items = []
+    number = 1
+    for stratum, count in maximum_counts.items():
+        for _ in range(count):
+            if stratum == "out_of_corpus":
+                items.append(_abstain_item(number))
+            else:
+                items.append(_answer_item(number, stratum))
+            number += 1
+    return {
+        "schema": "archivist.gold/1",
+        "version": "1.0.0",
+        "authored_against_corpus": digest,
+        "items": items,
+    }
+
+
 def _error_text(gold_set, *, mode="pilot", manifest=None, digest="a" * 64):
     with pytest.raises(GoldSetValidationError) as caught:
         validate_gold_set(
@@ -148,6 +174,53 @@ def test_valid_full_set_enforces_locked_minimum_composition():
     assert summary.item_count == 34
     assert summary.eligible_for_run_of_record is True
     assert summary.stratum_counts["broad_thematic"] == 9
+
+
+def test_valid_full_set_accepts_every_locked_maximum():
+    summary = validate_gold_set(
+        _maximum_full_set(),
+        _manifest(),
+        corpus_manifest_sha256="a" * 64,
+        mode="run-of-record",
+    )
+
+    assert summary.item_count == 46
+    assert summary.stratum_counts == {
+        "focused_biographical": 9,
+        "focused_analytical": 9,
+        "conceptual": 7,
+        "broad_thematic": 11,
+        "out_of_corpus": 6,
+        "adversarial_premise": 4,
+    }
+
+
+@pytest.mark.parametrize(
+    ("stratum", "maximum"),
+    (
+        ("focused_biographical", 9),
+        ("focused_analytical", 9),
+        ("conceptual", 7),
+        ("broad_thematic", 11),
+        ("out_of_corpus", 6),
+        ("adversarial_premise", 4),
+    ),
+)
+def test_run_of_record_rejects_each_stratum_above_its_locked_maximum(
+    stratum,
+    maximum,
+):
+    gold_set = _maximum_full_set()
+    number = len(gold_set["items"]) + 1
+    if stratum == "out_of_corpus":
+        gold_set["items"].append(_abstain_item(number))
+    else:
+        gold_set["items"].append(_answer_item(number, stratum))
+
+    errors = _error_text(gold_set, mode="run-of-record")
+
+    assert f"stratum {stratum!r}" in errors
+    assert f"found {maximum + 1}" in errors
 
 
 def test_pilot_cannot_pass_run_of_record_mode():

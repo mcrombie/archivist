@@ -1,0 +1,18 @@
+{
+  "schema": "archivist.gold_provenance/1",
+  "gold_set_path": "fixtures/gold_set.json",
+  "gold_set_sha256": "<replace after the owner locks the complete gold set>",
+  "candidate_commit": "bf424c880bca4728a8d13225f85978e27a8d8dcf",
+  "candidate_rag_policy": "evidence-planned-v21",
+  "corpus_manifest_sha256": "b7ff94315a3f1f28c831e2c3ca62c385567d2b1447c19ff45139d175c3ff3c17",
+  "development_registry_sha256": "121208e1f3712fc20118eaae39f7249c8afd50bca0e3b50f78dfaac48defd494",
+  "authoring_started_at": "<owner records an ISO-8601 timestamp before authoring>",
+  "authoring_completed_at": "<owner records an ISO-8601 timestamp after locking>",
+  "owner_attestations": {
+    "questions_authored_without_candidate_outputs": false,
+    "claims_and_locations_owner_authored": false,
+    "held_out_items_not_run_before_lock": false,
+    "near_match_flags_reviewed": false
+  },
+  "near_match_reviews": []
+}
