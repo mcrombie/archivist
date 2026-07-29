@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v18 implemented and verified offline; v16 remains the latest complete
-unchanged ten-question measurement
+Status: evidence-planned-v18 measured on the complete unchanged ten-question set; the next
+bounded repair is institutional-handoff binding and answer realization
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1483,3 +1483,45 @@ The complete offline suite passed 500 tests with one intentional skip, and Ruff 
 `src` and `tests`. Verification made no OpenAI calls. This proves the V18 mechanics and contract,
 not improved historical-answer quality. The next quality measurement is the complete unchanged
 ten-question evaluation under a clean v18 cohort.
+
+## V18 integrated result and V19 repair boundary
+
+The unchanged ten-question evaluation ran once from clean commit
+`97ca2bc96fd1cb6408cc0d80f63ec6ffa54bd2dd`. It retained the same frozen
+58-claim practical rubric, corpus and index identity, GPT-5.6 Sol runtime model, neutral
+interpretation, eight-source ceiling, and zero-retry rule. All ten items completed for an
+estimated `$1.32257351`.
+
+V17's transition-source repair cleared its operational target: all nine generated answers
+validated, including G007, and the high-level behavior profile returned from 9/10 to 10/10. V18
+also raised target-document coverage from 21/26 to 22/26. Strict answer completeness did not
+move, remaining 19/58 claims. Total latency increased from 589.539 to 750.837 seconds.
+
+G006 made the new boundary explicit. Its plan contained the required eight stages; retrieval
+satisfied seven stage anchors and six of seven transitions while recording the remaining
+shortfalls. The final context nevertheless covered only four of eight target groups and the
+answer realized none of the strict claims. The chain was chronological and role-distinct but
+described a general sequence of regimes and economic eras rather than the specific
+institutional capacity carried from the question's origin to its endpoint.
+
+G007 exposed the complementary generation boundary. Its final context covered all five target
+groups, all five stage anchors survived, all four transition searches were satisfied, and the
+answer validated. It still realized none of the seven strict claims because target-bearing
+passages were not necessarily bound to the stage and transition obligations that organized the
+answer.
+
+The next repair must therefore be narrower than another source-cap or stage-count change:
+
+1. each long-lineage stage must identify an institutional bearer, inherited capacity,
+   transfer-or-transformation mechanism, and outgoing capacity;
+2. adjacent stages must share an explicit institutional handoff rather than merely advancing in
+   time and using distinct vocabulary;
+3. selected stage evidence must support the declared historical role before the stage counts as
+   covered; and
+4. the generation contract must require supported handoffs to appear in the answer, so a passage
+   cannot help context breadth while remaining outside the answer's obligations.
+
+This design may not receive gold claims, target-document groups, or manuscript-specific names.
+It must preserve the one-planner, one-generation, zero-retry, eight-source public boundary. The
+V18 run is a complete measurement; the next cohort should be opened only after these mechanics
+have a synthetic corpus-agnostic contract.

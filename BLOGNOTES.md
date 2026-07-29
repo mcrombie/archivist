@@ -2251,6 +2251,44 @@ Useful blog lesson: a serious evidence system does not have to present itself wi
 Keeping theme selection entirely on the presentation side makes room for play without allowing
 the ornament to change the answer.
 
+### 2026-07-29 - V18 restored reliability but not answer completeness
+
+- Froze V18 at clean commit `97ca2bc` and ran the owner's unchanged ten-question, 58-claim
+  evaluation exactly once. The questions, practical rubric, manuscript/index identity, neutral
+  interpretation, GPT-5.6 Sol runtime model, eight-source ceiling, and zero-retry rule were
+  unchanged.
+- All ten items completed for an estimated `$1.32257351`. Eight planner-eligible questions
+  accepted live plans, all nine generated answers validated, and the remaining item cleanly
+  abstained before generation. V17 therefore repaired the paid-but-discarded transition failure
+  that had reduced V16's high-level behavior result to 9/10.
+- Strict completeness remained **19/58 claims**, while final-context target coverage improved
+  from 21/26 to **22/26**. All 97 citation tokens were well formed and resolved to returned
+  sources, but that mechanical result is not a faithfulness score.
+- G006 demonstrated why a larger plan can still represent the wrong abstraction. Its planner
+  supplied all eight required stages, retrieval satisfied seven anchors and six transitions, and
+  the trace honestly reported the shortfalls. The chain still described a generic chronology of
+  regimes and economic eras rather than the requested institutional succession; it covered only
+  four of eight target groups and realized none of the strict claims.
+- G007 demonstrated the second half of the problem. Its context contained all five target groups,
+  its five stage anchors and four transition searches survived, and the answer was valid. It
+  still realized none of the seven strict claims because passages that broadened context were not
+  necessarily bound to the obligations that organized the prose.
+- The new result narrows the next repair. Another increase in stages or sources is not justified.
+  Long-lineage stages need explicit institutional bearers, inherited capacities, transfer
+  mechanisms, and outgoing capacities; adjacent stages need a shared handoff, and supported
+  handoffs must be realized in the answer.
+- Total latency increased from 589.539 seconds in V16 to 750.837 seconds in V18, while estimated
+  cost rose only 2.7 percent. The extra observability and reliability are useful, but the absence
+  of a strict-claim gain means V18 is not an overall quality improvement.
+- The private run directory contains the isolated usage ledger, full answers and passages,
+  text-free traces, exact-span manual grading, and assessment. Those artifacts remain gitignored
+  because they contain commercial manuscript text.
+
+Useful blog lesson: a RAG pipeline can become more internally correct without becoming more
+useful. V18 replaced a false green light with an honest instrument panel. The next challenge is
+making the plan describe the reader's causal object rather than merely a tidy sequence through
+time.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

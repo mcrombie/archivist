@@ -45,6 +45,35 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] Eight chronological roles did not constitute an institutional lineage
+Phase/Brief: Phase 1 evidence-planned-v18 unchanged ten-question evaluation
+Symptom: G006 received the required eight-stage plan. Retrieval satisfied seven stage anchors,
+six of seven transitions, and four of eight target document groups, yet the answer realized none
+of the frozen strict claims. The selected stages formed a broad chronological sequence of
+governing and economic regimes rather than the institutional succession requested.
+Cause: spec gap in the brief - the v18 validator proves cardinality, advancing document hints,
+and vocabulary-distinct roles, but it does not require a named institutional capacity to pass
+from one bearer to the next or bind each role to both endpoints of the question.
+Resolution and verification: unresolved. The next bounded repair must give every long-lineage
+stage a bearer, inherited capacity, transfer-or-transformation mechanism, and outgoing capacity;
+adjacent stages must share a verifiable handoff. Stage evidence must support that declared role.
+The contract must remain corpus-agnostic and may not receive gold claims or target locations.
+
+## [2026-07-29] Target-bearing broad context remained outside answer obligations
+Phase/Brief: Phase 1 evidence-planned-v18 unchanged ten-question evaluation
+Symptom: G007 returned all five expected target document groups, retained all five planned stage
+anchors, satisfied all four transition searches, and produced a locally valid answer. The answer
+nevertheless realized none of the seven frozen strict claims; several target-bearing passages
+never entered a supported stage or transition unit in the generated answer.
+Cause: spec gap in the brief - target breadth, planned-stage coverage, and answer-obligation
+coverage are measured independently, but the contract does not require a selected passage that
+carries a supported stage or handoff to be realized in the answer. Generic unsupported-link
+notices can coexist with an otherwise valid broad answer.
+Resolution and verification: unresolved. The next repair must bind supported stage and handoff
+evidence to explicit answer obligations and distinguish a genuinely unsupported connection from
+one whose relevant passage is present but unused. It must add no critic call, retry, gold hint,
+or manuscript-specific rule.
+
 ## [2026-07-29] A five-stage plan falsely satisfied a longer institutional lineage
 Phase/Brief: Phase 1 evidence-planned-v16 unchanged ten-question evaluation
 Symptom: G006 asked for a long institutional lineage spanning eight expected historical roles.
