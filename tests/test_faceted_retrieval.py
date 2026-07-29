@@ -431,12 +431,13 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     }
     assert (
         outcome.trace["parameters"]["lane_selection"]
-        == "canonical_stage_core_then_global_supplement"
+        == "consensus_stage_anchor_then_global_supplement"
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-canonical-core-v1"
+        == "broad-stage-consensus-v1"
     )
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v8"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"
@@ -450,10 +451,27 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     assert outcome.trace["selection"]["canonical_core_required_count"] == 5
     assert outcome.trace["selection"]["canonical_core_satisfied_count"] == 5
     assert outcome.trace["selection"]["canonical_core_shortfall_count"] == 0
+    assert set(outcome.broad_stage_anchor_chunk_ids) == {
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+    }
+    assert all(
+        chunk_id == lanes[facet_id]["stage_anchor_selected_chunk_ids"][0]
+        for facet_id, chunk_id in (
+            outcome.broad_stage_anchor_chunk_ids.items()
+        )
+    )
+    assert all(
+        lanes[facet_id]["stage_anchor_consensus_candidates"]
+        for facet_id in ("F1", "F2", "F3", "F4", "F5")
+    )
     validate_text_free_retrieval_trace(outcome.trace)
 
 
-def test_canonical_broad_core_survives_provider_query_hint_and_order_variance(
+def test_broad_stage_consensus_uses_provider_agreement_deterministically(
     monkeypatch,
 ):
     documents = [
@@ -618,24 +636,31 @@ def test_canonical_broad_core_survives_provider_query_hint_and_order_variance(
         {lane["facet_id"]: lane for lane in outcome.trace["lanes"]}
         for outcome in outcomes
     ]
-    expected_core_ids = tuple(
-        item["chunk_id"] for item in core_by_position.values()
-    )
-    selected_core_ids = [
+    selected_anchor_ids = [
         tuple(
-            lane_map[f"F{index}"]["canonical_core_selected_chunk_ids"][0]
+            lane_map[f"F{index}"]["stage_anchor_selected_chunk_ids"][0]
             for index in range(1, 6)
         )
         for lane_map in lane_maps
     ]
 
-    assert selected_core_ids == [expected_core_ids, expected_core_ids]
-    assert {
-        item["chunk_id"] for item in outcomes[0].final_chunks
-    }.issuperset(expected_core_ids)
-    assert {
-        item["chunk_id"] for item in outcomes[1].final_chunks
-    }.issuperset(expected_core_ids)
+    for outcome, lane_map, selected_ids in zip(
+        outcomes,
+        lane_maps,
+        selected_anchor_ids,
+        strict=True,
+    ):
+        assert {
+            item["chunk_id"] for item in outcome.final_chunks
+        }.issuperset(selected_ids)
+        for index, selected_id in enumerate(selected_ids, start=1):
+            diagnostics = lane_map[f"F{index}"][
+                "stage_anchor_consensus_candidates"
+            ]
+            assert diagnostics[0]["chunk_id"] == selected_id
+            assert diagnostics[0]["pool_hit_count"] == max(
+                candidate["pool_hit_count"] for candidate in diagnostics
+            )
     assert [
         lane_maps[0][f"F{index}"]["canonical_query_sha256"]
         for index in range(1, 6)
@@ -654,7 +679,7 @@ def test_canonical_broad_core_survives_provider_query_hint_and_order_variance(
         validate_text_free_retrieval_trace(outcome.trace)
 
 
-def test_origin_uses_canonical_mechanism_core_instead_of_semantic_decoy(
+def test_origin_consensus_prefers_candidate_found_by_all_three_routes(
     monkeypatch,
 ):
     generic = chunk(
@@ -708,11 +733,18 @@ def test_origin_uses_canonical_mechanism_core_instead_of_semantic_decoy(
         lane for lane in outcome.trace["lanes"] if lane["facet_id"] == "F1"
     )
 
-    assert origin_lane["canonical_core_selected_chunk_ids"] == [
-        "mechanism_001"
-    ]
+    assert origin_lane["stage_anchor_selected_chunk_ids"] == ["generic_001"]
+    diagnostics = origin_lane["stage_anchor_consensus_candidates"]
+    assert diagnostics[0] == {
+        "chunk_id": "generic_001",
+        "pool_names": ["canonical", "mechanism", "provider"],
+        "pool_ranks": {"canonical": 2, "mechanism": 2, "provider": 1},
+        "pool_hit_count": 3,
+    }
+    assert diagnostics[1]["chunk_id"] == "mechanism_001"
+    assert diagnostics[1]["pool_hit_count"] == 2
     assert [item["chunk_id"] for item in outcome.final_chunks] == [
-        "mechanism_001"
+        "generic_001"
     ]
 
 
@@ -755,6 +787,101 @@ def test_broad_supplemental_utility_is_global_not_facet_ordered():
     assert reverse[0]["chunk_id"] == "consensus_001"
 
 
+def test_broad_stage_anchor_prefers_two_pool_consensus_over_canonical_singleton():
+    canonical = {
+        "chunk_id": "canonical_001",
+        "document": "early.md",
+        "rrf_score": 1.0,
+    }
+    consensus = {
+        "chunk_id": "consensus_001",
+        "document": "middle.md",
+        "rrf_score": 0.01,
+    }
+    ranked = retrieval._ranked_broad_stage_anchor_candidates(
+        {
+            "canonical_core_candidates": [canonical],
+            "mechanism_candidates": [consensus],
+            "candidates": [consensus],
+        },
+        document_ordinal_by_id={"early.md": 1, "middle.md": 2},
+    )
+
+    assert ranked[0]["chunk_id"] == "consensus_001"
+    assert ranked[0]["anchor_pool_names"] == ("mechanism", "provider")
+    assert ranked[0]["anchor_pool_hit_count"] == 2
+    assert ranked[1]["chunk_id"] == "canonical_001"
+
+
+def test_broad_stage_anchor_prefers_three_way_over_two_way_consensus():
+    three_way = {
+        "chunk_id": "three_way_001",
+        "document": "later.md",
+        "rrf_score": 0.01,
+    }
+    two_way = {
+        "chunk_id": "two_way_001",
+        "document": "earlier.md",
+        "rrf_score": 1.0,
+    }
+    ranked = retrieval._ranked_broad_stage_anchor_candidates(
+        {
+            "canonical_core_candidates": [two_way, three_way],
+            "mechanism_candidates": [three_way, two_way],
+            "candidates": [three_way],
+        },
+        document_ordinal_by_id={"earlier.md": 1, "later.md": 2},
+    )
+
+    assert ranked[0]["chunk_id"] == "three_way_001"
+    assert ranked[0]["anchor_pool_names"] == (
+        "canonical",
+        "mechanism",
+        "provider",
+    )
+    assert ranked[0]["anchor_pool_hit_count"] == 3
+    assert ranked[1]["chunk_id"] == "two_way_001"
+
+
+def test_broad_stage_anchor_uses_canonical_fallback_when_pools_disagree():
+    canonical = {
+        "chunk_id": "canonical_001",
+        "document": "later.md",
+        "rrf_score": 0.001,
+    }
+    mechanism = {
+        "chunk_id": "mechanism_001",
+        "document": "middle.md",
+        "rrf_score": 10.0,
+    }
+    provider = {
+        "chunk_id": "provider_001",
+        "document": "early.md",
+        "rrf_score": 100.0,
+    }
+    ranked = retrieval._ranked_broad_stage_anchor_candidates(
+        {
+            "canonical_core_candidates": [canonical],
+            "mechanism_candidates": [mechanism],
+            "candidates": [provider],
+        },
+        document_ordinal_by_id={
+            "early.md": 1,
+            "middle.md": 2,
+            "later.md": 3,
+        },
+    )
+
+    assert [candidate["chunk_id"] for candidate in ranked] == [
+        "canonical_001",
+        "mechanism_001",
+        "provider_001",
+    ]
+    assert all(
+        candidate["anchor_pool_hit_count"] == 1 for candidate in ranked
+    )
+
+
 def test_broad_mechanism_rerank_prefers_explicit_financing_link():
     generic = chunk(
         "generic_001",
@@ -788,6 +915,41 @@ def test_broad_mechanism_rerank_prefers_explicit_financing_link():
     assert len(queries) == 2
     assert candidates[0]["chunk_id"] == "mechanism_001"
     assert candidates[0]["mechanism_utility_score"] > 0
+
+
+def test_broad_mechanism_pool_excludes_primary_without_lexical_route():
+    semantic_only = chunk(
+        "semantic_001",
+        "chapter.md",
+        "An unrelated background passage.",
+        1,
+    )
+    mechanism = chunk(
+        "mechanism_001",
+        "chapter.md",
+        (
+            "Conflict expanded authority because taxation financed a "
+            "permanent administrative institution."
+        ),
+        2,
+    )
+
+    candidates, _queries = retrieval._broad_mechanism_candidates(
+        "How did conflict expand authority?",
+        "transition",
+        [semantic_only, mechanism],
+        [
+            {
+                "chunk_id": semantic_only["chunk_id"],
+                "document": semantic_only["document"],
+                "rrf_score": 1.0,
+            }
+        ],
+    )
+
+    assert [candidate["chunk_id"] for candidate in candidates] == [
+        "mechanism_001"
+    ]
 
 
 def test_broad_endpoint_rerank_prefers_institutional_transformation():

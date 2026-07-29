@@ -8,7 +8,7 @@ import unicodedata
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -55,10 +55,10 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v7"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v8"
 BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
 BROAD_MECHANISM_CANDIDATE_LIMIT = 20
-BROAD_CANONICAL_EXECUTION_VERSION = "broad-canonical-core-v1"
+BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-consensus-v1"
 RETRIEVAL_DIAGNOSTICS_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS"
 RETRIEVAL_DIAGNOSTICS_DIR_ENV = "ARCHIVIST_RETRIEVAL_DIAGNOSTICS_DIR"
 RETRIEVAL_DIAGNOSTICS_DIR = BASE_DIR / "runtime" / "retrieval-diagnostics"
@@ -219,6 +219,7 @@ class PlannedContext:
     facet_source_numbers: dict[str, tuple[int, ...]]
     trace: dict[str, Any]
     lane_by_chunk_id: dict[str, tuple[str, ...]]
+    broad_stage_anchor_chunk_ids: dict[str, str] = field(default_factory=dict)
 
 
 class FileTraceSink:
@@ -1470,6 +1471,108 @@ def _ranked_broad_supplemental_options(
     return options
 
 
+def _ranked_broad_stage_anchor_candidates(
+    lane: Mapping[str, Any],
+    *,
+    document_ordinal_by_id: Mapping[str, int],
+) -> list[dict[str, Any]]:
+    """Rank one stage's protected anchor by agreement across three routes.
+
+    Canonical, mechanism, and provider-relevance ranks are deliberately kept
+    as independent votes. Any candidate found by at least two routes outranks
+    every singleton. If the three routes do not agree on any candidate, the
+    application-owned canonical route remains the deterministic fallback.
+    """
+
+    candidate_pools = (
+        ("canonical", lane.get("canonical_core_candidates", ())),
+        ("mechanism", lane.get("mechanism_candidates", ())),
+        ("provider", lane.get("candidates", ())),
+    )
+    by_chunk_id: dict[str, dict[str, Any]] = {}
+    for pool_name, candidates in candidate_pools:
+        for rank, candidate in enumerate(candidates, start=1):
+            chunk_id = str(candidate.get("chunk_id") or "")
+            if not chunk_id:
+                continue
+            entry = by_chunk_id.setdefault(
+                chunk_id,
+                {
+                    "candidate": candidate,
+                    "pool_ranks": {},
+                    "rank_utility": 0.0,
+                    "best_rank": rank,
+                },
+            )
+            pool_ranks = entry["pool_ranks"]
+            if pool_name in pool_ranks:
+                continue
+            pool_ranks[pool_name] = rank
+            entry["rank_utility"] += 1.0 / (RRF_K + rank)
+            entry["best_rank"] = min(int(entry["best_rank"]), rank)
+
+    ranked: list[dict[str, Any]] = []
+    for chunk_id, entry in by_chunk_id.items():
+        candidate = entry["candidate"]
+        document = str(candidate.get("document") or "")
+        pool_ranks = dict(entry["pool_ranks"])
+        pool_names = tuple(
+            pool_name
+            for pool_name, _candidates in candidate_pools
+            if pool_name in pool_ranks
+        )
+        fallback_pool_priority = min(
+            (
+                index
+                for index, (pool_name, _candidates) in enumerate(
+                    candidate_pools
+                )
+                if pool_name in pool_ranks
+            ),
+            default=len(candidate_pools),
+        )
+        fallback_pool_name = candidate_pools[fallback_pool_priority][0]
+        fallback_rank = int(pool_ranks[fallback_pool_name])
+        ranked.append(
+            {
+                **candidate,
+                "chunk_id": chunk_id,
+                "document": document,
+                "rrf_score": float(entry["rank_utility"]),
+                "anchor_pool_names": pool_names,
+                "anchor_pool_ranks": pool_ranks,
+                "anchor_pool_hit_count": len(pool_ranks),
+                "anchor_best_rank": int(entry["best_rank"]),
+                "anchor_fallback_pool_priority": fallback_pool_priority,
+                "anchor_fallback_rank": fallback_rank,
+                "anchor_document_ordinal": document_ordinal_by_id.get(
+                    document,
+                    10**9,
+                ),
+            }
+        )
+
+    ranked.sort(
+        key=lambda candidate: (
+            0 if int(candidate["anchor_pool_hit_count"]) >= 2 else 1,
+            (
+                -int(candidate["anchor_pool_hit_count"])
+                if int(candidate["anchor_pool_hit_count"]) >= 2
+                else int(candidate["anchor_fallback_pool_priority"])
+            ),
+            (
+                -float(candidate["rrf_score"])
+                if int(candidate["anchor_pool_hit_count"]) >= 2
+                else int(candidate["anchor_fallback_rank"])
+            ),
+            int(candidate["anchor_best_rank"]),
+            int(candidate["anchor_document_ordinal"]),
+            str(candidate["chunk_id"]),
+        )
+    )
+    return ranked
+
+
 def _broad_mechanism_queries(query: str, role: str) -> tuple[str, ...]:
     suffixes = _BROAD_MECHANISM_QUERY_SUFFIXES.get(role, ())
     return tuple(f"{query} {suffix}".strip() for suffix in suffixes)
@@ -1560,7 +1663,12 @@ def _broad_mechanism_candidates(
                     "mechanism_signal_score": mechanism_signal_score,
                     "mechanism_utility_score": mechanism_utility_score,
                 }
-    candidate_ids = set(primary_by_id) | set(lexical_by_id)
+    # The provider-relevance pool already carries semantic primaries. Keeping
+    # primary-only candidates here would give every provider result a second,
+    # artificial "mechanism" vote during broad-stage consensus. This pool is
+    # therefore limited to candidates independently found by the bounded
+    # lexical mechanism route; semantic rank remains available as a tie-break.
+    candidate_ids = set(lexical_by_id)
     ranked: list[dict[str, Any]] = []
     for chunk_id in candidate_ids:
         chunk = lookup[chunk_id]
@@ -1874,29 +1982,36 @@ def retrieve_plan_from_collection(
                 else []
             )
         lane_trace = hybrid.get("trace", {}) if isinstance(hybrid, Mapping) else {}
-        lanes.append(
-            {
-                "facet": facet,
-                "facet_id": facet_id,
-                "role": role,
-                "query": query,
-                "document_hints": document_hints,
-                "chronology_band": chronology_band,
-                "chronology_min_document_ordinal": chronology_min_document_ordinal,
-                "chronology_max_document_ordinal": chronology_max_document_ordinal,
-                "stage_position": stage_position,
-                "candidates": primary_candidates,
-                "mechanism_candidates": mechanism_candidates,
-                "mechanism_queries": mechanism_queries,
-                "canonical_query": canonical_query,
-                "canonical_primary_candidates": canonical_primary_candidates,
-                "canonical_mechanism_candidates": canonical_mechanism_candidates,
-                "canonical_mechanism_queries": canonical_mechanism_queries,
-                "canonical_core_candidates": canonical_core_candidates,
-                "endpoint_anchor_candidates": endpoint_anchor_candidates,
-                "trace": lane_trace,
-            }
+        lane = {
+            "facet": facet,
+            "facet_id": facet_id,
+            "role": role,
+            "query": query,
+            "document_hints": document_hints,
+            "chronology_band": chronology_band,
+            "chronology_min_document_ordinal": chronology_min_document_ordinal,
+            "chronology_max_document_ordinal": chronology_max_document_ordinal,
+            "stage_position": stage_position,
+            "candidates": primary_candidates,
+            "mechanism_candidates": mechanism_candidates,
+            "mechanism_queries": mechanism_queries,
+            "canonical_query": canonical_query,
+            "canonical_primary_candidates": canonical_primary_candidates,
+            "canonical_mechanism_candidates": canonical_mechanism_candidates,
+            "canonical_mechanism_queries": canonical_mechanism_queries,
+            "canonical_core_candidates": canonical_core_candidates,
+            "endpoint_anchor_candidates": endpoint_anchor_candidates,
+            "trace": lane_trace,
+        }
+        lane["stage_anchor_candidates"] = (
+            _ranked_broad_stage_anchor_candidates(
+                lane,
+                document_ordinal_by_id=document_ordinal_by_id,
+            )
+            if broad and role in _BROAD_STAGE_ROLES
+            else []
         )
+        lanes.append(lane)
 
     ordered_lanes = sorted(lanes, key=lambda lane: _facet_priority(lane["facet"]))
     selected_ids: set[str] = set()
@@ -1905,7 +2020,7 @@ def retrieve_plan_from_collection(
     selected_by_facet: dict[str, list[str]] = {
         str(lane["facet_id"]): [] for lane in lanes
     }
-    canonical_core_selected_by_facet: dict[str, list[str]] = {
+    stage_anchor_selected_by_facet: dict[str, list[str]] = {
         str(lane["facet_id"]): [] for lane in lanes
     }
     lookup = build_chunk_lookup(chunks)
@@ -1954,13 +2069,14 @@ def retrieve_plan_from_collection(
                 str(lane["facet_id"]),
             ),
         )
-        # Protect one application-owned candidate for every narrative stage.
-        # Planner wording and hints participate only after this invariant pass.
+        # Protect one candidate for every narrative stage. Agreement between
+        # canonical, mechanism, and provider-relevance routes takes precedence;
+        # a disjoint vote falls back to the application-owned canonical route.
         for lane in stage_lanes:
             if len(selected_chunks) >= max_final_sources:
                 break
             candidate = _pick_first_lane_candidate(
-                lane["canonical_core_candidates"],
+                lane["stage_anchor_candidates"],
                 selected_ids=selected_ids,
                 selected_documents=selected_documents,
                 prefer_new_document=True,
@@ -1969,7 +2085,7 @@ def retrieve_plan_from_collection(
                 continue
             facet_id = str(lane["facet_id"])
             if accept(candidate, facet_id):
-                canonical_core_selected_by_facet[facet_id].append(
+                stage_anchor_selected_by_facet[facet_id].append(
                     str(candidate["chunk_id"])
                 )
 
@@ -2129,7 +2245,7 @@ def retrieve_plan_from_collection(
         sum(
             any(
                 chunk_id in source_number_by_id
-                for chunk_id in canonical_core_selected_by_facet[
+                for chunk_id in stage_anchor_selected_by_facet[
                     str(lane["facet_id"])
                 ]
             )
@@ -2213,10 +2329,33 @@ def retrieve_plan_from_collection(
                             if str(candidate.get("chunk_id") or "")
                         ],
                         "canonical_core_selected_chunk_ids": (
-                            canonical_core_selected_by_facet[
+                            stage_anchor_selected_by_facet[
                                 str(lane["facet_id"])
                             ]
                         ),
+                        "stage_anchor_selected_chunk_ids": (
+                            stage_anchor_selected_by_facet[
+                                str(lane["facet_id"])
+                            ]
+                        ),
+                        "stage_anchor_consensus_candidates": [
+                            {
+                                "chunk_id": str(
+                                    candidate.get("chunk_id") or ""
+                                ),
+                                "pool_names": list(
+                                    candidate.get("anchor_pool_names") or ()
+                                ),
+                                "pool_ranks": dict(
+                                    candidate.get("anchor_pool_ranks") or {}
+                                ),
+                                "pool_hit_count": int(
+                                    candidate.get("anchor_pool_hit_count") or 0
+                                ),
+                            }
+                            for candidate in lane["stage_anchor_candidates"]
+                            if str(candidate.get("chunk_id") or "")
+                        ],
                     }
                     if lane["canonical_query"] is not None
                     else {}
@@ -2251,7 +2390,7 @@ def retrieve_plan_from_collection(
             "lane_primary_limit": lane_primary_limit,
             "facet_embedding": "single_batched_request",
             "lane_selection": (
-                "canonical_stage_core_then_global_supplement"
+                "consensus_stage_anchor_then_global_supplement"
                 if broad
                 else "one_each_then_round_robin"
             ),
@@ -2329,6 +2468,12 @@ def retrieve_plan_from_collection(
         lane_by_chunk_id={
             chunk_id: tuple(facet_ids)
             for chunk_id, facet_ids in lane_by_chunk.items()
+        },
+        broad_stage_anchor_chunk_ids={
+            facet_id: chunk_id
+            for facet_id, chunk_ids in stage_anchor_selected_by_facet.items()
+            for chunk_id in chunk_ids
+            if chunk_id in source_number_by_id
         },
     )
 

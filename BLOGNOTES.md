@@ -1718,6 +1718,42 @@ Useful blog lesson: one portfolio can span several providers cleanly. Vercel ser
 Render runs the stateful Python/Chroma application, and Cloudflare supplies the small DNS bridge
 that gives the separate service a coherent `mcrombie.com` identity.
 
+### 2026-07-28 - V14 narrowed broad-answer pressure to the passages that carry the argument
+
+- Closed the public launch record in commit `7c68c9f`. The repository now treats
+  `https://archivist.mcrombie.com` as the canonical demo address, keeps the generated Render URL as
+  an operational fallback, records the Cloudflare DNS-only bridge and Vercel production setting,
+  and regression-tests the deliberately smaller public response contract.
+- Implemented `evidence-planned-v14`, `faceted-hybrid-rrf-v8`, and
+  `broad-stage-consensus-v1` without changing the manuscript, private index, pinned models,
+  neutral baseline, eight-source ceiling, or one-generation-call architecture.
+- Broad-stage anchors are no longer chosen from one route alone. Each stage now compares the
+  application-owned canonical ranking, a role-specific mechanism ranking, and provider relevance.
+  Three-way agreement beats two-way agreement; any agreement beats a singleton; fully disjoint
+  rankings fall back in canonical, mechanism, then provider order.
+- Preserved the chosen anchor by chunk identity through later context promotion, chronological
+  sorting, evidence gating, and source renumbering. The versioned private trace records only
+  text-free pool names, ranks, hit counts, and identifiers.
+- Replaced the v13 paragraph-as-obligation design with two separate ledgers in
+  `evidence-coverage-v6`. `inspection_passages` still cover every retained source range, but do not
+  demand output. `synthesis_obligations` are created only for the protected anchor of each surviving
+  historical stage.
+- Each synthesis anchor now asks for all of the historical functions appropriate to that stage
+  rather than rotating one function across arbitrary paragraphs. The local validator still
+  requires every declared synthesis dimension before a coarse requirement can be called supported,
+  while allowing other directly relevant, cited facts to enrich the answer without artificial
+  obligation links.
+- Bumped the closed diagnostic trace to `archivist.retrieval_trace/7` and the generation request to
+  `archivist.answer_request/3`. The full offline suite passed 476 tests with one intentional skip;
+  Ruff and whitespace checks passed. No OpenAI calls were made for this verification.
+- The next measurement is deliberately small: one unchanged, no-retry G006/G007 confirmation on a
+  clean v14 commit. It must show materially better mechanism synthesis without losing source-group
+  coverage or introducing a contradiction before another full ten-question run is warranted.
+
+Useful blog lesson: forcing a model to mention every retrieved paragraph can improve bookkeeping
+while making the historical argument worse. A useful completeness pass distinguishes evidence the
+model must inspect from the smaller set of mechanisms it must actually reconstruct.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

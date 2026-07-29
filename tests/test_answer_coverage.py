@@ -1226,6 +1226,72 @@ def test_incomplete_required_obligation_dimensions_downgrade_supported_to_partia
     assert result.diagnostics.obligation_scopes == (scope,)
 
 
+def test_broad_supplemental_unit_may_be_cited_without_synthesis_link():
+    scope = _obligation_scope()
+    linked = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.MECHANISM,
+        text="A synthetic process connected the stages [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O1",
+                dimension=EvidenceDimension.MECHANISM,
+            ),
+        ),
+    )
+    supplemental = AnswerUnit(
+        unit_id="U2",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.CONSEQUENCE,
+        text="A separate relevant result followed [Source 2].",
+        source_numbers=(2,),
+        paragraph=2,
+        obligation_links=(),
+    )
+    answer = EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=(
+            _coverage(
+                "R1",
+                RequirementStatus.SUPPORTED,
+                ("U1", "U2"),
+                (1, 2),
+                GapReason.NONE,
+            ),
+        ),
+        obligation_coverage=(
+            EvidenceObligationCoverage(
+                obligation_id="O1",
+                dimensions=(
+                    EvidenceDimensionCoverage(
+                        dimension=EvidenceDimension.MECHANISM,
+                        status=RequirementStatus.SUPPORTED,
+                        unit_ids=("U1",),
+                        source_numbers=(1,),
+                        gap_reason=GapReason.NONE,
+                    ),
+                ),
+            ),
+        ),
+        answer_units=(linked, supplemental),
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=2,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
+    assert result.diagnostics.answer_unit_count == 2
+
+
 def test_missing_unresolvable_and_mismatched_citations_are_distinct_errors():
     answer = _valid_answer()
 

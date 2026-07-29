@@ -793,14 +793,6 @@ def validate_evidence_coverage(
             raise CoverageContractError(
                 CoverageValidationErrorCode.MISSING_UNIT_REQUIREMENT_ID
             )
-        if (
-            context.obligation_scopes
-            and unit.role is not AnswerUnitRole.PREMISE_CORRECTION
-            and not unit.obligation_links
-        ):
-            raise CoverageContractError(
-                CoverageValidationErrorCode.MISSING_UNIT_OBLIGATION_LINK
-            )
         if _has_duplicates(unit.requirement_ids):
             raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_REQUIREMENT_ID)
         if any(requirement_id not in requirement_order for requirement_id in unit.requirement_ids):

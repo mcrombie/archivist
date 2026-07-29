@@ -143,6 +143,21 @@ def planned_context(
             str(chunk["chunk_id"]): tuple(facet.facet_id for facet in plan.facets)
             for chunk in chunks
         },
+        broad_stage_anchor_chunk_ids=(
+            {
+                facet.facet_id: str(chunks[0]["chunk_id"])
+                for facet in plan.facets
+                if facet.role
+                in {
+                    FacetRole.ORIGIN,
+                    FacetRole.TRANSITION,
+                    FacetRole.MECHANISM,
+                    FacetRole.ENDPOINT,
+                }
+            }
+            if chunks
+            else {}
+        ),
     )
 
 
@@ -311,7 +326,7 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v5"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v6"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -321,13 +336,15 @@ def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     assert "correction unit never satisfies an answer requirement" in instructions
     assert "framing candidate sources" in instructions
     assert "positive replacement chronology" in instructions
-    assert "evidence_obligations ledger" in instructions
-    assert "Inspect every obligation in order" in instructions
+    assert "inspection_passages" in instructions
+    assert "synthesis_obligations" in instructions
+    assert "Inspect every inspection passage in order" in instructions
+    assert "do not create an answer unit merely to prove" in instructions
     assert "cite only that obligation's single source" in instructions
     assert "required for that requirement is supported" in instructions
 
 
-def test_broad_obligation_scopes_cover_exact_paragraphs_and_safe_fallback_ranges():
+def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
     requirements = (
         AnswerRequirement(requirement_id="R1", label="Origin", order=0),
         AnswerRequirement(requirement_id="R2", label="Endpoint", order=1),
@@ -373,7 +390,7 @@ def test_broad_obligation_scopes_cover_exact_paragraphs_and_safe_fallback_ranges
         },
     ]
 
-    scopes = rag_pipeline._evidence_obligation_scopes(
+    inspection_scopes = rag_pipeline._evidence_inspection_scopes(
         plan,
         chunks,
         {
@@ -385,6 +402,47 @@ def test_broad_obligation_scopes_cover_exact_paragraphs_and_safe_fallback_ranges
 
     assert [
         (
+            scope.inspection_id,
+            scope.source_number,
+            scope.paragraph_start,
+            scope.paragraph_end,
+            scope.allowed_requirement_ids,
+            scope.focus.value,
+        )
+        for scope in inspection_scopes
+    ] == [
+        (
+            "I1",
+            1,
+            10,
+            10,
+            ("R1",),
+            "origin",
+        ),
+        (
+            "I2",
+            1,
+            11,
+            11,
+            ("R1",),
+            "origin",
+        ),
+        (
+            "I3",
+            2,
+            20,
+            22,
+            ("R2",),
+            "endpoint",
+        ),
+    ]
+    obligation_scopes = rag_pipeline._evidence_obligation_scopes(
+        plan,
+        chunks,
+        {"F1": 1, "F2": 2},
+    )
+    assert [
+        (
             scope.obligation_id,
             scope.source_number,
             scope.paragraph_start,
@@ -393,40 +451,33 @@ def test_broad_obligation_scopes_cover_exact_paragraphs_and_safe_fallback_ranges
             scope.focus.value,
             tuple(dimension.value for dimension in scope.dimension_ids),
         )
-        for scope in scopes
+        for scope in obligation_scopes
     ] == [
         (
             "O1",
             1,
             10,
-            10,
+            11,
             ("R1",),
             "origin",
-            ("stage_development",),
+            ("cause_or_enabler", "stage_development"),
         ),
         (
             "O2",
-            1,
-            11,
-            11,
-            ("R1",),
-            "origin",
-            ("cause_or_enabler",),
-        ),
-        (
-            "O3",
             2,
             20,
             22,
             ("R2",),
             "endpoint",
-            ("consequence",),
+            ("continuity_or_change", "consequence", "qualification"),
         ),
     ]
-    assert all(scope.required_for_requirement_status for scope in scopes)
+    assert all(
+        scope.required_for_requirement_status for scope in obligation_scopes
+    )
 
 
-def test_broad_obligation_scope_cap_coalesces_without_omitting_any_source_range():
+def test_broad_inspection_scope_cap_coalesces_without_omitting_any_source_range():
     requirements = (
         AnswerRequirement(requirement_id="R1", label="Development", order=0),
     )
@@ -462,7 +513,7 @@ def test_broad_obligation_scope_cap_coalesces_without_omitting_any_source_range(
         for source_number in range(1, 9)
     ]
 
-    scopes = rag_pipeline._evidence_obligation_scopes(
+    scopes = rag_pipeline._evidence_inspection_scopes(
         plan,
         chunks,
         {
@@ -471,9 +522,7 @@ def test_broad_obligation_scope_cap_coalesces_without_omitting_any_source_range(
         },
     )
 
-    assert len(scopes) == rag_pipeline.MAX_BROAD_EVIDENCE_OBLIGATIONS
-    assert all(len(scope.dimension_ids) == 1 for scope in scopes)
-    assert sum(len(scope.dimension_ids) for scope in scopes) == len(scopes)
+    assert len(scopes) == rag_pipeline.MAX_BROAD_INSPECTION_SCOPES
     for source_number, chunk in enumerate(chunks, start=1):
         source_scopes = [
             scope for scope in scopes if scope.source_number == source_number
@@ -847,7 +896,17 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     obligation_scopes = rag_pipeline._evidence_obligation_scopes(
         finalized_plan,
         [CHUNK],
-        {facet.facet_id: (1,) for facet in finalized_plan.facets},
+        {
+            facet.facet_id: 1
+            for facet in finalized_plan.facets
+            if facet.role
+            in {
+                FacetRole.ORIGIN,
+                FacetRole.TRANSITION,
+                FacetRole.MECHANISM,
+                FacetRole.ENDPOINT,
+            }
+        },
     )
     requirement_ids = tuple(
         requirement.requirement_id for requirement in finalized_plan.requirements
@@ -886,9 +945,15 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     } == QUERY_PLANNER_SETTINGS.responses_create_kwargs()
     assert calls[0]["text_format"] is PlannerQuestionPlan
     assert calls[0]["max_output_tokens"] == 4_000
+    assert '"schema": "archivist.answer_request/3"' in calls[1]["input"]
+    assert '"inspection_passages"' in calls[1]["input"]
+    assert '"synthesis_obligations"' in calls[1]["input"]
+    assert '"evidence_obligations"' not in calls[1]["input"]
     assert result.plan.planner_used is True
     assert result.plan.facets[0].facet_id == "F0"
     assert result.status == "answered"
+    assert result.diagnostics["generation"]["inspection_scope_count"] == 1
+    assert result.diagnostics["generation"]["obligation_count"] == 5
 
 
 def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
@@ -928,7 +993,17 @@ def test_semantically_invalid_proposal_is_local_fallback_not_parse_failure(
     obligation_scopes = rag_pipeline._evidence_obligation_scopes(
         finalized_plan,
         [CHUNK],
-        {facet.facet_id: (1,) for facet in finalized_plan.facets},
+        {
+            facet.facet_id: 1
+            for facet in finalized_plan.facets
+            if facet.role
+            in {
+                FacetRole.ORIGIN,
+                FacetRole.TRANSITION,
+                FacetRole.MECHANISM,
+                FacetRole.ENDPOINT,
+            }
+        },
     )
     requirement_ids = tuple(
         requirement.requirement_id for requirement in finalized_plan.requirements
@@ -994,7 +1069,17 @@ def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch)
     obligation_scopes = rag_pipeline._evidence_obligation_scopes(
         finalized_plan,
         [CHUNK],
-        {facet.facet_id: (1,) for facet in finalized_plan.facets},
+        {
+            facet.facet_id: 1
+            for facet in finalized_plan.facets
+            if facet.role
+            in {
+                FacetRole.ORIGIN,
+                FacetRole.TRANSITION,
+                FacetRole.MECHANISM,
+                FacetRole.ENDPOINT,
+            }
+        },
     )
     requirement_ids = tuple(
         requirement.requirement_id for requirement in finalized_plan.requirements
@@ -1735,6 +1820,12 @@ def test_anchor_promotion_preserves_every_broad_requirement_lane():
             )
             for index, chunk in enumerate(old_chunks, start=1)
         },
+        broad_stage_anchor_chunk_ids={
+            "F1": "old_1",
+            "F2": "old_3",
+            "F3": "old_5",
+            "F4": "old_7",
+        },
     )
     integrity = rag_pipeline.assess_corpus_integrity(
         eligible_chunks,
@@ -1780,6 +1871,24 @@ def test_anchor_promotion_preserves_every_broad_requirement_lane():
     assert planned.facet_source_numbers["F2"] == (2,)
     assert planned.facet_source_numbers["F3"] == (3,)
     assert planned.facet_source_numbers["F4"] == (4,)
+    assert planned.broad_stage_anchor_chunk_ids == {
+        "F1": "old_1",
+        "F2": "old_3",
+        "F3": "old_5",
+        "F4": "old_7",
+    }
+    (
+        _filtered_chunks,
+        _old_to_new,
+        _remapped_facets,
+        remapped_stage_anchors,
+    ) = rag_pipeline._filter_context(planned, tuple(range(1, 9)))
+    assert remapped_stage_anchors == {
+        "F1": 1,
+        "F2": 2,
+        "F3": 3,
+        "F4": 4,
+    }
     assert planned.trace["selection"]["anchor_requested_count"] == 4
     assert planned.trace["selection"]["protected_source_count"] == 4
     assert planned.trace["selection"]["protected_source_shortfall_count"] == 0

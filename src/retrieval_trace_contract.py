@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/6"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/7"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -251,8 +251,25 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "role",
             "selected_chunk_ids",
             "semantic_fallback_used",
+            "stage_anchor_consensus_candidates",
+            "stage_anchor_selected_chunk_ids",
         }
     ),
+    ("lanes", "[]", "stage_anchor_consensus_candidates", "[]"): frozenset(
+        {
+            "chunk_id",
+            "pool_hit_count",
+            "pool_names",
+            "pool_ranks",
+        }
+    ),
+    (
+        "lanes",
+        "[]",
+        "stage_anchor_consensus_candidates",
+        "[]",
+        "pool_ranks",
+    ): frozenset({"canonical", "mechanism", "provider"}),
     ("evidence",): frozenset(
         {
             "anchor_normalizer_version",
@@ -333,6 +350,8 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "generator_reasoning_effort",
             "generator_verbosity",
             "instructions_sha256",
+            "inspection_scope_count",
+            "inspection_scopes",
             "normalizer_version",
             "obligation_count",
             "obligation_coverage",
@@ -343,6 +362,7 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "premise_source_scopes",
             "premise_status_counts",
             "prompt_version",
+            "request_schema",
             "renderer_version",
             "repair_applied",
             "repair_codes",
@@ -362,6 +382,16 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
     ),
     ("generation_contract", "premise_status_counts"): frozenset(
         {"contradicted", "not_applicable", "supported", "unresolved"}
+    ),
+    ("generation_contract", "inspection_scopes", "[]"): frozenset(
+        {
+            "allowed_requirement_ids",
+            "focus",
+            "inspection_id",
+            "paragraph_end",
+            "paragraph_start",
+            "source_number",
+        }
     ),
     ("generation_contract", "coverage", "[]"): frozenset(
         {
@@ -500,6 +530,13 @@ _ARRAY_PATHS = frozenset(
             "unit_ids",
         ),
         ("generation_contract", "obligation_scopes"),
+        ("generation_contract", "inspection_scopes"),
+        (
+            "generation_contract",
+            "inspection_scopes",
+            "[]",
+            "allowed_requirement_ids",
+        ),
         (
             "generation_contract",
             "obligation_scopes",
@@ -545,6 +582,15 @@ _ARRAY_PATHS = frozenset(
         ("lanes", "[]", "mechanism_query_char_counts"),
         ("lanes", "[]", "mechanism_query_sha256s"),
         ("lanes", "[]", "selected_chunk_ids"),
+        ("lanes", "[]", "stage_anchor_consensus_candidates"),
+        (
+            "lanes",
+            "[]",
+            "stage_anchor_consensus_candidates",
+            "[]",
+            "pool_names",
+        ),
+        ("lanes", "[]", "stage_anchor_selected_chunk_ids"),
         ("plan", "traits"),
         ("selection", "anchor_source_number_remap"),
         ("selection", "context"),
@@ -584,6 +630,7 @@ _IDENTIFIER_FIELDS = frozenset(
         "conversation_id",
         "correction_unit_id",
         "facet_id",
+        "inspection_id",
         "obligation_id",
         "premise_id",
         "project_id",
@@ -745,7 +792,11 @@ _EXCEPTION_CODES = frozenset(
 _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "anchor_normalizer_version": frozenset({"unicode-nfkc-casefold-anchor-v1"}),
     "broad_execution_version": frozenset(
-        {"broad-canonical-core-v1", "not_applicable"}
+        {
+            "broad-canonical-core-v1",
+            "broad-stage-consensus-v1",
+            "not_applicable",
+        }
     ),
     "broad_context_order": frozenset({"corpus_ordinal", "selection"}),
     "chronology_band": frozenset({"early", "late", "middle", "none"}),
@@ -824,6 +875,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
         {
             "one_each_then_round_robin",
             "canonical_stage_core_then_global_supplement",
+            "consensus_stage_anchor_then_global_supplement",
             "stage_coverage_then_document_diversity",
             "stage_mechanism_coverage_then_document_diversity",
         }
@@ -889,6 +941,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v11",
             "evidence-planned-v12",
             "evidence-planned-v13",
+            "evidence-planned-v14",
         }
     ),
     "prompt_version": frozenset(
@@ -897,8 +950,11 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-v3",
             "evidence-coverage-v4",
             "evidence-coverage-v5",
+            "evidence-coverage-v6",
         }
     ),
+    "pool_names": frozenset({"canonical", "mechanism", "provider"}),
+    "request_schema": frozenset({"archivist.answer_request/3"}),
     "reason": frozenset(
         {
             "distance_threshold",
@@ -918,6 +974,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v5",
             "faceted-hybrid-rrf-v6",
             "faceted-hybrid-rrf-v7",
+            "faceted-hybrid-rrf-v8",
             "hybrid-bm25-rrf-v1",
         }
     ),
@@ -1012,6 +1069,7 @@ _CHUNK_ID_ARRAY_FIELDS = frozenset(
         "primary_chunk_ids",
         "relationship_chunk_ids",
         "selected_chunk_ids",
+        "stage_anchor_selected_chunk_ids",
     }
 )
 

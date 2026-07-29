@@ -1,7 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v13 measured on the unchanged ten-question cohort on 2026-07-27;
-contract reliability improved, while strict claim realization and target breadth remained flat
+Status: evidence-planned-v14 implemented and verified offline on 2026-07-28; the unchanged
+G006/G007 focused confirmation remains the paid content gate
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -357,6 +357,32 @@ one strict composite claim each. The next bounded repair is therefore not a larg
 second model call. It should choose protected broad-stage anchors by consensus across canonical,
 mechanism, and provider-relevance pools, then distinguish paragraphs that must be inspected from
 historical mechanisms that must become claims.
+
+`Evidence-planned-v14` implements that two-part repair without changing the manuscript, index,
+model configuration, eight-source ceiling, or one-generation-call boundary:
+
+- `faceted-hybrid-rrf-v8` ranks each protected broad-stage anchor by reciprocal-rank agreement
+  across three independent pools: the application-owned canonical route, the role-scoped mechanism
+  route, and provider relevance. Three-pool agreement outranks two-pool agreement, which outranks
+  a singleton; when no two pools agree, selection falls back in canonical, mechanism, then provider
+  order.
+- The selected anchor is retained by chunk identity through direct-anchor promotion, corpus-order
+  sorting, evidence gating, and final source renumbering. Text-free lane diagnostics record pool
+  names, ranks, hit counts, and the selected anchor without persisting query or manuscript prose.
+- `evidence-coverage-v6` separates `inspection_passages` from `synthesis_obligations`. Every
+  retained source range remains part of the source-bounded inspection pass, but supplemental
+  paragraphs no longer force one answer unit merely to prove inspection.
+- Only the protected anchor for each surviving broad stage creates a synthesis obligation. That
+  obligation uses only the stage facet's requirement IDs and all role-compatible dimensions, with
+  deterministic capacity trimming that preserves at least one dimension per stage.
+- Ordinary relevant units may remain unlinked to a synthesis obligation. Linked units retain the
+  stricter one-source, role, requirement, citation, and dimension checks, and a requirement still
+  cannot be marked supported when any required synthesis dimension is missing.
+
+The closed trace contract is now `archivist.retrieval_trace/7`, and the answer request is
+`archivist.answer_request/3`. The full offline suite passes 476 tests with one intentional skip.
+No paid inference result is claimed from this implementation yet; G006 and G007 must clear the
+focused gate before another unchanged ten-question cohort is justified.
 
 The implementation follows the bounded-call design in this document:
 

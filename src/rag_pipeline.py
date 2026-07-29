@@ -97,16 +97,17 @@ from retrieval import (
 from retrieval_trace_contract import document_identifier_sha256
 
 
-RAG_POLICY_VERSION = "evidence-planned-v13"
+RAG_POLICY_VERSION = "evidence-planned-v14"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v6"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v5"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v6"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
 MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
+MAX_BROAD_INSPECTION_SCOPES = 32
 EMBEDDING_MODEL = "text-embedding-3-small"
 ANSWER_STAGE_TIMING_KEYS = frozenset(
     {
@@ -283,18 +284,24 @@ into a direct answer.
 Neutral output should be compact but must not omit supported requirements. Use one short
 paragraph for focused questions or compact ordered paragraphs/bullets for broad questions.
 
-For a broad question, the request includes an ordered evidence_obligations ledger. It is a
-source-bounded completeness pass, not permission to add claims. Inspect every obligation in
-order. The first blank-line-separated text block in a source is its paragraph_start, with
-later blocks following in order; a range covering several paragraphs is one fallback scope.
-Return every obligation_id and every dimension_id exactly once and in the supplied order.
+For a broad question, the request separates inspection_passages from
+synthesis_obligations. Inspect every inspection passage in order, but do not create an answer
+unit merely to prove that a passage was inspected. Ignore tangential inspected material.
+The first blank-line-separated text block in a source is its paragraph_start, with later
+blocks following in order; a range covering several paragraphs is one fallback scope.
+
+The smaller synthesis_obligations ledger identifies the stage-bounded historical mechanisms
+that the answer must explicitly attempt to reconstruct. Return every obligation_id and every
+dimension_id exactly once and in the supplied order. This is a source-bounded completeness
+pass, not permission to add claims.
 
 For each obligation dimension:
 - mark it supported only when an atomic answer unit states material directly supported by
   that obligation's one source scope;
 - otherwise use partial, unsupported, or conflicting honestly and keep unsupported
   dimensions free of unit and source mappings;
-- link every ordinary broad-answer unit to the exact obligation and dimension it realizes;
+- link a broad-answer unit to the exact obligation and dimension only when it realizes that
+  synthesis obligation; other directly relevant units may use an empty obligation_links list;
 - cite only that obligation's single source in a linked unit, even if another source is
   similar; and
 - use only the obligation's allowed requirement IDs on that unit.
@@ -304,10 +311,11 @@ chronology; cause_or_enabler and mechanism use cause or mechanism; consequence u
 mechanism, consequence, or chronology; continuity_or_change uses mechanism, consequence,
 chronology, or qualification; qualification uses counterargument or qualification. A unit
 may realize several dimensions of the same source scope when its one claim genuinely does
-so. Premise corrections have no obligation links. When no evidence_obligations are listed,
+so. Premise corrections have no obligation links. When no synthesis_obligations are listed,
 return an empty obligation_coverage list and empty obligation_links on every unit.
 
-For broad output, mark a coarse requirement supported only when every supplied obligation
+For broad output, mark a coarse requirement supported only when every supplied synthesis
+obligation
 dimension flagged as required for that requirement is supported. If some directly supported
 material is present but that completeness condition is not met, mark the requirement partial.
 The supplied ledger is bounded so one dedicated supported unit per listed obligation
@@ -322,27 +330,28 @@ _OBLIGATION_DIMENSIONS_BY_FOCUS: Mapping[
     tuple[EvidenceDimension, ...],
 ] = {
     EvidenceObligationFocus.ORIGIN: (
-        EvidenceDimension.STAGE_DEVELOPMENT,
         EvidenceDimension.CAUSE_OR_ENABLER,
+        EvidenceDimension.STAGE_DEVELOPMENT,
     ),
     EvidenceObligationFocus.TRANSITION: (
-        EvidenceDimension.STAGE_DEVELOPMENT,
+        EvidenceDimension.MECHANISM,
         EvidenceDimension.CAUSE_OR_ENABLER,
+        EvidenceDimension.STAGE_DEVELOPMENT,
         EvidenceDimension.CONSEQUENCE,
     ),
     EvidenceObligationFocus.MECHANISM: (
-        EvidenceDimension.CAUSE_OR_ENABLER,
         EvidenceDimension.MECHANISM,
+        EvidenceDimension.CAUSE_OR_ENABLER,
         EvidenceDimension.CONSEQUENCE,
     ),
     EvidenceObligationFocus.ENDPOINT: (
-        EvidenceDimension.CONSEQUENCE,
         EvidenceDimension.CONTINUITY_OR_CHANGE,
+        EvidenceDimension.CONSEQUENCE,
         EvidenceDimension.QUALIFICATION,
     ),
     EvidenceObligationFocus.CROSS_CUTTING: (
-        EvidenceDimension.STAGE_DEVELOPMENT,
         EvidenceDimension.MECHANISM,
+        EvidenceDimension.STAGE_DEVELOPMENT,
         EvidenceDimension.CONSEQUENCE,
     ),
 }
@@ -356,6 +365,18 @@ _OBLIGATION_FOCUS_BY_FACET_ROLE: Mapping[
     FacetRole.MECHANISM: EvidenceObligationFocus.MECHANISM,
     FacetRole.ENDPOINT: EvidenceObligationFocus.ENDPOINT,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceInspectionScope:
+    """A source range the model must inspect without an output obligation."""
+
+    inspection_id: str
+    source_number: int
+    paragraph_start: int
+    paragraph_end: int
+    allowed_requirement_ids: tuple[str, ...]
+    focus: EvidenceObligationFocus
 
 
 @dataclass(frozen=True, slots=True)
@@ -1134,6 +1155,11 @@ def _promote_direct_anchor_chunks(
         if facet_id in protected_facet_ids:
             return
         protected_facet_ids.add(facet_id)
+        stage_anchor_id = planned.broad_stage_anchor_chunk_ids.get(facet_id)
+        if stage_anchor_id in old_ids:
+            if stage_anchor_id not in protected_ids:
+                protected_ids.append(stage_anchor_id)
+            return
         for chunk_id in old_facet_chunk_ids.get(facet_id, ()):
             if chunk_id not in protected_ids:
                 protected_ids.append(chunk_id)
@@ -1571,6 +1597,7 @@ def _filter_context(
     list[dict[str, Any]],
     dict[int, int],
     dict[str, tuple[int, ...]],
+    dict[str, int],
 ]:
     allowed = set(allowed_source_numbers)
     selected_pairs = [
@@ -1586,7 +1613,22 @@ def _filter_context(
         facet_id: tuple(old_to_new[number] for number in source_numbers if number in old_to_new)
         for facet_id, source_numbers in planned.facet_source_numbers.items()
     }
-    return [chunk for _number, chunk in selected_pairs], old_to_new, remapped_facets
+    final_chunks = [chunk for _number, chunk in selected_pairs]
+    source_number_by_chunk_id = {
+        str(chunk.get("chunk_id") or ""): source_number
+        for source_number, chunk in enumerate(final_chunks, start=1)
+    }
+    remapped_stage_anchors = {
+        facet_id: source_number_by_chunk_id[chunk_id]
+        for facet_id, chunk_id in planned.broad_stage_anchor_chunk_ids.items()
+        if chunk_id in source_number_by_chunk_id
+    }
+    return (
+        final_chunks,
+        old_to_new,
+        remapped_facets,
+        remapped_stage_anchors,
+    )
 
 
 def _record_generation_context(
@@ -1717,22 +1759,22 @@ def _coalesce_paragraph_ranges(
     )
 
 
-def _bounded_obligation_ranges(
+def _bounded_inspection_ranges(
     final_chunks: Sequence[Mapping[str, object]],
     *,
-    max_obligations: int = MAX_BROAD_EVIDENCE_OBLIGATIONS,
+    max_scopes: int = MAX_BROAD_INSPECTION_SCOPES,
 ) -> tuple[tuple[tuple[int, int], ...], ...]:
-    """Cover every retained source within the structured-output obligation cap."""
+    """Cover every retained source within the bounded inspection-input cap."""
 
     raw_ranges = tuple(_paragraph_scope_ranges(chunk) for chunk in final_chunks)
-    obligation_limit = min(MAX_BROAD_EVIDENCE_OBLIGATIONS, max_obligations)
-    if obligation_limit < len(raw_ranges):
-        raise ValueError("obligation cap cannot preserve one scope per retained source")
-    if sum(len(ranges) for ranges in raw_ranges) <= obligation_limit:
+    scope_limit = min(MAX_BROAD_INSPECTION_SCOPES, max_scopes)
+    if scope_limit < len(raw_ranges):
+        raise ValueError("inspection cap cannot preserve one scope per retained source")
+    if sum(len(ranges) for ranges in raw_ranges) <= scope_limit:
         return raw_ranges
 
     group_counts = [1 for _ranges in raw_ranges]
-    remaining = obligation_limit - len(raw_ranges)
+    remaining = scope_limit - len(raw_ranges)
     while remaining > 0:
         candidates = [
             index
@@ -1757,93 +1799,215 @@ def _bounded_obligation_ranges(
     )
 
 
-def _evidence_obligation_scopes(
-    plan: QuestionPlan,
+def _bounded_obligation_ranges(
     final_chunks: Sequence[Mapping[str, object]],
+    *,
+    max_obligations: int = MAX_BROAD_EVIDENCE_OBLIGATIONS,
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    """Backward-compatible name for the bounded passage-inspection ranges."""
+
+    return _bounded_inspection_ranges(
+        final_chunks,
+        max_scopes=max_obligations,
+    )
+
+
+def _stage_facets_for_source(
+    plan: QuestionPlan,
     facet_source_numbers: Mapping[str, Sequence[int]],
-) -> tuple[EvidenceObligationScope, ...]:
-    """Build an opaque, source-bounded completeness ledger for broad answers."""
+    source_number: int,
+) -> tuple[Any, ...]:
+    return tuple(
+        facet
+        for facet in plan.facets
+        if (
+            facet.role in _OBLIGATION_FOCUS_BY_FACET_ROLE
+            and source_number in facet_source_numbers.get(facet.facet_id, ())
+        )
+    )
 
-    if RouteTrait.BROAD_SYNTHESIS not in plan.traits or not final_chunks:
-        return ()
 
+def _ordered_facet_requirement_ids(
+    plan: QuestionPlan,
+    facets: Sequence[Any],
+) -> tuple[str, ...]:
+    facet_requirement_ids = {
+        requirement_id
+        for facet in facets
+        for requirement_id in facet.requirement_ids
+    }
+    return tuple(
+        requirement.requirement_id
+        for requirement in sorted(plan.requirements, key=lambda item: item.order)
+        if requirement.requirement_id in facet_requirement_ids
+    )
+
+
+def _focus_for_stage_facets(
+    plan: QuestionPlan,
+    stage_facets: Sequence[Any],
+) -> EvidenceObligationFocus:
+    if not stage_facets:
+        return EvidenceObligationFocus.CROSS_CUTTING
     requirement_order = {
         requirement.requirement_id: requirement.order
         for requirement in plan.requirements
     }
+    facet_order = {
+        facet.facet_id: index for index, facet in enumerate(plan.facets)
+    }
+    focus_facet = min(
+        stage_facets,
+        key=lambda facet: (
+            min(
+                (
+                    requirement_order[requirement_id]
+                    for requirement_id in facet.requirement_ids
+                    if requirement_id in requirement_order
+                ),
+                default=len(requirement_order),
+            ),
+            facet_order[facet.facet_id],
+        ),
+    )
+    return _OBLIGATION_FOCUS_BY_FACET_ROLE[focus_facet.role]
+
+
+def _evidence_inspection_scopes(
+    plan: QuestionPlan,
+    final_chunks: Sequence[Mapping[str, object]],
+    facet_source_numbers: Mapping[str, Sequence[int]],
+) -> tuple[EvidenceInspectionScope, ...]:
+    """List every retained broad-answer passage without requiring answer output."""
+
+    if RouteTrait.BROAD_SYNTHESIS not in plan.traits or not final_chunks:
+        return ()
+
     all_requirement_ids = tuple(
         requirement.requirement_id
         for requirement in sorted(plan.requirements, key=lambda item: item.order)
     )
-    facet_order = {
-        facet.facet_id: index for index, facet in enumerate(plan.facets)
-    }
-    ranges_by_source = _bounded_obligation_ranges(
-        final_chunks,
-        max_obligations=MAX_ANSWER_UNITS - len(plan.premises),
-    )
-    scopes: list[EvidenceObligationScope] = []
-    dimension_offsets: defaultdict[EvidenceObligationFocus, int] = defaultdict(int)
-
+    ranges_by_source = _bounded_inspection_ranges(final_chunks)
+    scopes: list[EvidenceInspectionScope] = []
     for source_number, paragraph_ranges in enumerate(ranges_by_source, start=1):
-        stage_facets = tuple(
-            facet
-            for facet in plan.facets
-            if (
-                facet.role in _OBLIGATION_FOCUS_BY_FACET_ROLE
-                and source_number
-                in facet_source_numbers.get(facet.facet_id, ())
-            )
+        stage_facets = _stage_facets_for_source(
+            plan,
+            facet_source_numbers,
+            source_number,
         )
-        allowed_requirement_ids = tuple(
-            requirement_id
-            for requirement_id in all_requirement_ids
-            if any(
-                requirement_id in facet.requirement_ids
-                for facet in stage_facets
-            )
+        allowed_requirement_ids = (
+            _ordered_facet_requirement_ids(plan, stage_facets)
+            or all_requirement_ids
         )
-        if not allowed_requirement_ids:
-            allowed_requirement_ids = all_requirement_ids
-
-        if stage_facets:
-            focus_facet = min(
-                stage_facets,
-                key=lambda facet: (
-                    min(
-                        (
-                            requirement_order[requirement_id]
-                            for requirement_id in facet.requirement_ids
-                            if requirement_id in requirement_order
-                        ),
-                        default=len(requirement_order),
-                    ),
-                    facet_order[facet.facet_id],
-                ),
-            )
-            focus = _OBLIGATION_FOCUS_BY_FACET_ROLE[focus_facet.role]
-        else:
-            focus = EvidenceObligationFocus.CROSS_CUTTING
-
-        focus_dimensions = _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
+        focus = _focus_for_stage_facets(plan, stage_facets)
         for paragraph_start, paragraph_end in paragraph_ranges:
-            dimension = focus_dimensions[
-                dimension_offsets[focus] % len(focus_dimensions)
-            ]
-            dimension_offsets[focus] += 1
             scopes.append(
-                EvidenceObligationScope(
-                    obligation_id=f"O{len(scopes) + 1}",
+                EvidenceInspectionScope(
+                    inspection_id=f"I{len(scopes) + 1}",
                     source_number=source_number,
                     paragraph_start=paragraph_start,
                     paragraph_end=paragraph_end,
                     allowed_requirement_ids=allowed_requirement_ids,
                     focus=focus,
-                    dimension_ids=(dimension,),
-                    required_for_requirement_status=bool(stage_facets),
                 )
             )
+    return tuple(scopes)
 
+
+def _evidence_obligation_scopes(
+    plan: QuestionPlan,
+    final_chunks: Sequence[Mapping[str, object]],
+    stage_anchor_source_numbers: Mapping[str, int],
+) -> tuple[EvidenceObligationScope, ...]:
+    """Require synthesis only from the protected anchor for each broad stage."""
+
+    if RouteTrait.BROAD_SYNTHESIS not in plan.traits or not final_chunks:
+        return ()
+
+    stage_records: list[
+        tuple[int, tuple[str, ...], EvidenceObligationFocus, tuple[int, int]]
+    ] = []
+    for facet in plan.facets:
+        if facet.role not in _OBLIGATION_FOCUS_BY_FACET_ROLE:
+            continue
+        source_number = stage_anchor_source_numbers.get(facet.facet_id)
+        if (
+            not isinstance(source_number, int)
+            or isinstance(source_number, bool)
+            or not 1 <= source_number <= len(final_chunks)
+        ):
+            continue
+        allowed_requirement_ids = _ordered_facet_requirement_ids(plan, (facet,))
+        if not allowed_requirement_ids:
+            continue
+        paragraph_ranges = _paragraph_scope_ranges(
+            final_chunks[source_number - 1]
+        )
+        stage_records.append(
+            (
+                source_number,
+                allowed_requirement_ids,
+                _OBLIGATION_FOCUS_BY_FACET_ROLE[facet.role],
+                (paragraph_ranges[0][0], paragraph_ranges[-1][1]),
+            )
+        )
+
+    capacity = MAX_ANSWER_UNITS - len(plan.premises)
+    if len(stage_records) > capacity:
+        raise ValueError("answer-unit capacity cannot preserve one dimension per stage")
+
+    selected_dimensions: list[list[EvidenceDimension]] = [
+        [_OBLIGATION_DIMENSIONS_BY_FOCUS[focus][0]]
+        for _source_number, _requirement_ids, focus, _paragraph_range in stage_records
+    ]
+    remaining_capacity = capacity - len(stage_records)
+    dimension_priority = (
+        EvidenceDimension.MECHANISM,
+        EvidenceDimension.CAUSE_OR_ENABLER,
+        EvidenceDimension.STAGE_DEVELOPMENT,
+        EvidenceDimension.CONSEQUENCE,
+        EvidenceDimension.CONTINUITY_OR_CHANGE,
+        EvidenceDimension.QUALIFICATION,
+    )
+    for dimension in dimension_priority:
+        for index, (_source_number, _requirement_ids, focus, _paragraph_range) in enumerate(
+            stage_records
+        ):
+            if remaining_capacity <= 0:
+                break
+            desired = _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
+            if dimension not in desired or dimension in selected_dimensions[index]:
+                continue
+            selected_dimensions[index].append(dimension)
+            remaining_capacity -= 1
+        if remaining_capacity <= 0:
+            break
+
+    scopes: list[EvidenceObligationScope] = []
+    for index, (
+        source_number,
+        allowed_requirement_ids,
+        focus,
+        paragraph_range,
+    ) in enumerate(stage_records):
+        selected = set(selected_dimensions[index])
+        dimension_ids = tuple(
+            dimension
+            for dimension in _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
+            if dimension in selected
+        )
+        scopes.append(
+            EvidenceObligationScope(
+                obligation_id=f"O{len(scopes) + 1}",
+                source_number=source_number,
+                paragraph_start=paragraph_range[0],
+                paragraph_end=paragraph_range[1],
+                allowed_requirement_ids=allowed_requirement_ids,
+                focus=focus,
+                dimension_ids=dimension_ids,
+                required_for_requirement_status=True,
+            )
+        )
     return tuple(scopes)
 
 
@@ -1853,6 +2017,7 @@ def build_coverage_input(
     final_chunks: list[dict[str, Any]],
     facet_source_numbers: Mapping[str, Sequence[int]],
     premise_source_scopes: Sequence[PremiseSourceScope],
+    inspection_scopes: Sequence[EvidenceInspectionScope],
     obligation_scopes: Sequence[EvidenceObligationScope],
     gate: EvidenceGateResult,
     *,
@@ -1881,7 +2046,7 @@ def build_coverage_input(
         plan,
     )
     control = {
-        "schema": "archivist.answer_request/2",
+        "schema": "archivist.answer_request/3",
         "question": resolved_turn.standalone_question,
         "conversation_context": {
             "entities": list(resolved_turn.entities),
@@ -1903,7 +2068,18 @@ def build_coverage_input(
             for requirement in plan.requirements
         ],
         "premises": premise_sources,
-        "evidence_obligations": [
+        "inspection_passages": [
+            {
+                "inspection_id": scope.inspection_id,
+                "source_number": scope.source_number,
+                "paragraph_start": scope.paragraph_start,
+                "paragraph_end": scope.paragraph_end,
+                "allowed_requirement_ids": list(scope.allowed_requirement_ids),
+                "focus": scope.focus.value,
+            }
+            for scope in inspection_scopes
+        ],
+        "synthesis_obligations": [
             {
                 "obligation_id": scope.obligation_id,
                 "source_number": scope.source_number,
@@ -1985,11 +2161,13 @@ def _generation_trace(
     coverage: EvidenceCoverageResult | None,
     *,
     status: str,
+    inspection_scopes: Sequence[EvidenceInspectionScope] = (),
     style_prompt_sha256: str | None = None,
     response_format: type[EvidenceCoverageAnswer] = EvidenceCoverageAnswer,
 ) -> dict[str, Any]:
     contract = {
         "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
+        "request_schema": "archivist.answer_request/3",
         "instructions_sha256": hashlib.sha256(
             EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")
         ).hexdigest(),
@@ -2005,6 +2183,18 @@ def _generation_trace(
         "generator_verbosity": GENERATOR_SETTINGS.verbosity,
         "normalizer_version": EVIDENCE_COVERAGE_NORMALIZER_VERSION,
         "style_prompt_sha256": style_prompt_sha256,
+        "inspection_scope_count": len(inspection_scopes),
+        "inspection_scopes": [
+            {
+                "inspection_id": scope.inspection_id,
+                "source_number": scope.source_number,
+                "paragraph_start": scope.paragraph_start,
+                "paragraph_end": scope.paragraph_end,
+                "allowed_requirement_ids": list(scope.allowed_requirement_ids),
+                "focus": scope.focus.value,
+            }
+            for scope in inspection_scopes
+        ],
     }
     if coverage is None:
         return {
@@ -2184,7 +2374,12 @@ def run_evidence_planned_answer(
         )
 
     context_started_ns = perf_counter_ns()
-    final_chunks, old_to_new, remapped_facets = _filter_context(
+    (
+        final_chunks,
+        old_to_new,
+        remapped_facets,
+        remapped_stage_anchors,
+    ) = _filter_context(
         planned,
         gate.allowed_source_numbers,
     )
@@ -2195,10 +2390,15 @@ def run_evidence_planned_answer(
         requirement.requirement_id: requirement.label for requirement in plan.requirements
     }
     premise_source_scopes = _premise_source_scopes(plan, remapped_facets)
-    obligation_scopes = _evidence_obligation_scopes(
+    inspection_scopes = _evidence_inspection_scopes(
         plan,
         final_chunks,
         remapped_facets,
+    )
+    obligation_scopes = _evidence_obligation_scopes(
+        plan,
+        final_chunks,
+        remapped_stage_anchors,
     )
     stage_timings_ms["context_preparation"] = _elapsed_ms(context_started_ns)
 
@@ -2217,6 +2417,7 @@ def run_evidence_planned_answer(
         planned.trace["generation_contract"] = _generation_trace(
             coverage,
             status="insufficient_evidence",
+            inspection_scopes=inspection_scopes,
         )
         emit_retrieval_trace(planned.trace)
         return AnswerModeResult(
@@ -2237,6 +2438,7 @@ def run_evidence_planned_answer(
         final_chunks,
         remapped_facets,
         premise_source_scopes,
+        inspection_scopes,
         obligation_scopes,
         gate,
         historiographical_lens=historiographical_lens,
@@ -2314,6 +2516,7 @@ def run_evidence_planned_answer(
     planned.trace["generation_contract"] = _generation_trace(
         coverage,
         status=coverage.status.value,
+        inspection_scopes=inspection_scopes,
         style_prompt_sha256=style_prompt_sha256,
         response_format=response_format,
     )
