@@ -27,7 +27,12 @@ from corpus import (
 )
 from costs import current_usage_context, tracked_embeddings_create
 from filters import should_skip_document
-from query_planning import LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS
+from query_planning import (
+    BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS,
+    LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS,
+    narrative_span_document_bands,
+    requires_broad_narrative_span,
+)
 from retrieval_trace_contract import (
     RETRIEVAL_TRACE_SCHEMA,
     document_identifier_sha256,
@@ -56,10 +61,10 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v12"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v13"
 BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
 BROAD_MECHANISM_CANDIDATE_LIMIT = 20
-BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-role-eligibility-v5"
+BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-narrative-span-v6"
 BROAD_TRANSITION_LANE_VERSION = "adjacent-pair-transition-v3"
 LONG_LINEAGE_CONTRACT_VERSION = "long-institutional-lineage-v2"
 LONG_LINEAGE_TRANSITION_CAPACITY_POLICY = (
@@ -1330,10 +1335,65 @@ def _broad_stage_scope(
     *,
     stage_index: int | None = None,
     stage_count: int | None = None,
+    narrative_span: bool = False,
 ) -> tuple[tuple[str, ...], str, int | None, int | None]:
     if role not in _BROAD_STAGE_ROLES or not documents:
         return (), "none", None, None
     narrative_documents = _broad_narrative_documents(documents)
+    if (
+        narrative_span
+        and stage_index is not None
+        and stage_count == BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+        and 0 <= stage_index < stage_count
+    ):
+        structural_bands = narrative_span_document_bands(
+            documents,
+            structure_text=str,
+            stage_count=stage_count,
+        )
+        if (
+            len(structural_bands) == stage_count
+            and structural_bands[stage_index]
+        ):
+            structural_documents = tuple(
+                document
+                for band in structural_bands
+                for document in band
+            )
+            structural_ordinal = {
+                document: ordinal
+                for ordinal, document in enumerate(structural_documents)
+            }
+            core_ordinals = [
+                structural_ordinal[document]
+                for document in structural_bands[stage_index]
+            ]
+            selected_start = max(
+                0,
+                core_ordinals[0] - BROAD_STAGE_OVERLAP_DOCUMENTS,
+            )
+            selected_end = min(
+                len(structural_documents) - 1,
+                core_ordinals[-1] + BROAD_STAGE_OVERLAP_DOCUMENTS,
+            )
+            selected = structural_documents[selected_start : selected_end + 1]
+            ordinal_by_document = {
+                document: ordinal
+                for ordinal, document in enumerate(documents)
+            }
+            label = (
+                "early"
+                if stage_index == 0
+                else "late"
+                if stage_index == stage_count - 1
+                else "middle"
+            )
+            return (
+                selected,
+                label,
+                ordinal_by_document[selected[0]],
+                ordinal_by_document[selected[-1]],
+            )
     if (
         stage_index is not None
         and stage_count is not None
@@ -1393,6 +1453,33 @@ def _broad_stage_scope(
         ordinal_by_document[selected[0]],
         ordinal_by_document[selected[-1]],
     )
+
+
+def _broad_structural_anchor_scope(
+    documents: Sequence[str],
+    *,
+    stage_index: int | None,
+    stage_count: int | None,
+    narrative_span: bool,
+) -> tuple[str, ...]:
+    """Return the non-overlapping core eligible for a protected stage anchor."""
+
+    if not narrative_span:
+        return ()
+    if (
+        stage_index is None
+        or stage_count != BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+        or not 0 <= stage_index < stage_count
+    ):
+        return ()
+    bands = narrative_span_document_bands(
+        documents,
+        structure_text=str,
+        stage_count=stage_count,
+    )
+    if len(bands) != stage_count:
+        return ()
+    return tuple(bands[stage_index])
 
 
 def _broad_canonical_position_label(
@@ -2130,6 +2217,11 @@ def retrieve_plan_from_collection(
     original_query = str(
         _plan_value(original_facets[0], "search_query", "")
     ).strip()
+    broad_narrative_span = (
+        broad
+        and not long_lineage
+        and requires_broad_narrative_span(original_query)
+    )
     requirements = tuple(_plan_value(plan, "requirements", ()) or ())
     requirement_by_id = {
         str(_plan_value(requirement, "requirement_id", "")): requirement
@@ -2321,9 +2413,28 @@ def retrieve_plan_from_collection(
                     if facet_id in broad_stage_positions
                     else None
                 ),
+                narrative_span=broad_narrative_span,
             )
             if broad
             else ((), "none", None, None)
+        )
+        structural_anchor_scope = (
+            _broad_structural_anchor_scope(
+                document_order,
+                stage_index=(
+                    broad_stage_positions[facet_id][0]
+                    if facet_id in broad_stage_positions
+                    else None
+                ),
+                stage_count=(
+                    broad_stage_positions[facet_id][1]
+                    if facet_id in broad_stage_positions
+                    else None
+                ),
+                narrative_span=broad_narrative_span,
+            )
+            if broad and role in _BROAD_STAGE_ROLES
+            else ()
         )
         if (
             long_lineage
@@ -2494,6 +2605,7 @@ def retrieve_plan_from_collection(
             "query": query,
             "document_hints": document_hints,
             "stage_scope": stage_scope,
+            "structural_anchor_scope": structural_anchor_scope,
             "chronology_band": chronology_band,
             "chronology_min_document_ordinal": chronology_min_document_ordinal,
             "chronology_max_document_ordinal": chronology_max_document_ordinal,
@@ -2527,6 +2639,20 @@ def retrieve_plan_from_collection(
             if broad and role in _BROAD_STAGE_ROLES
             else []
         )
+        if structural_anchor_scope:
+            structural_anchor_documents = set(structural_anchor_scope)
+            ranked_stage_anchor_candidates = [
+                candidate
+                for candidate in ranked_stage_anchor_candidates
+                if str(
+                    lookup.get(
+                        str(candidate.get("chunk_id") or ""),
+                        {},
+                    ).get("document")
+                    or ""
+                )
+                in structural_anchor_documents
+            ]
         lane["stage_anchor_diagnostics"] = ranked_stage_anchor_candidates
         lane["stage_anchor_candidates"] = [
             candidate

@@ -713,7 +713,7 @@ def test_long_lineage_reserves_eight_stage_slots_and_reports_transition_capacity
     validate_text_free_retrieval_trace(outcome.trace)
 
 
-def test_five_broad_stages_span_numbered_chapters_through_epilogue(
+def test_five_noncausal_broad_stages_span_numbered_chapters_through_epilogue(
     monkeypatch,
 ):
     document_names = [
@@ -787,7 +787,7 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
         SimpleNamespace(
             facet_id="F0",
             role="original",
-            search_query="war as an engine of central power",
+            search_query="trace central power across the whole history",
             document_hints=(),
             requirement_ids=tuple(f"R{index}" for index in range(1, 6)),
         ),
@@ -859,9 +859,9 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-stage-role-eligibility-v5"
+        == "broad-stage-narrative-span-v6"
     )
-    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v12"
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v13"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"
@@ -891,6 +891,158 @@ def test_five_broad_stages_span_numbered_chapters_through_epilogue(
     assert all(
         lanes[facet_id]["stage_anchor_consensus_candidates"]
         for facet_id in ("F1", "F2", "F3", "F4", "F5")
+    )
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_six_stage_causal_span_protects_five_body_bands_and_terminal(
+    monkeypatch,
+):
+    documents = [
+        "05_Introduction.md",
+        *(f"{index + 7:02}_Chapter {index}.md" for index in range(1, 21)),
+        "28_Epilogue.md",
+    ]
+    text = (
+        "conflict central power charter taxation mobilization procurement "
+        "centralization terminal endpoint began because finance transformed "
+        "institutions and persisted"
+    )
+    chunks = [
+        chunk(f"span_{index:03}", document, text, 1)
+        for index, document in enumerate(documents)
+    ]
+    embedding_batches: list[list[str]] = []
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: (
+            embedding_batches.append(list(queries))
+            or [[float(index)] for index in range(len(queries))]
+        ),
+    )
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            where = request.get("where")
+            if where is None:
+                return semantic_results([chunks[0]])
+            document_filter = where["document"]
+            selected_documents = (
+                set(document_filter["$in"])
+                if isinstance(document_filter, dict)
+                else {document_filter}
+            )
+            return semantic_results(
+                [
+                    item
+                    for item in chunks
+                    if item["document"] in selected_documents
+                ]
+            )
+
+    labels = (
+        "conflict charter",
+        "conflict taxation",
+        "conflict mobilization",
+        "conflict procurement",
+        "conflict centralization",
+        "conflict terminal endpoint",
+    )
+    requirements = tuple(
+        SimpleNamespace(
+            requirement_id=f"R{index}",
+            order=index - 1,
+            label=label,
+        )
+        for index, label in enumerate(labels, start=1)
+    )
+    stage_roles = (
+        "origin",
+        "transition",
+        "mechanism",
+        "transition",
+        "mechanism",
+        "endpoint",
+    )
+    hints = (
+        (
+            "08_Chapter 1.md",
+            "05_Introduction.md",
+        ),
+        ("12_Chapter 5.md",),
+        ("16_Chapter 9.md",),
+        ("20_Chapter 13.md",),
+        ("24_Chapter 17.md",),
+        ("28_Epilogue.md",),
+    )
+    facets = (
+        facet(
+            "F0",
+            "original",
+            "How does the book treat conflict as an engine of central power?",
+            requirement_ids=tuple(
+                requirement.requirement_id for requirement in requirements
+            ),
+        ),
+        *(
+            facet(
+                f"F{index}",
+                role,
+                labels[index - 1],
+                document_hints=hints[index - 1],
+                requirement_ids=(f"R{index}",),
+            )
+            for index, role in enumerate(stage_roles, start=1)
+        ),
+    )
+    causal_plan = SimpleNamespace(
+        schema="archivist.question_plan/3",
+        traits=("broad_synthesis",),
+        facets=facets,
+        requirements=requirements,
+        planner_used=True,
+        fallback_reason=None,
+    )
+
+    outcome = retrieve_plan_from_collection(
+        causal_plan,
+        Collection(),
+        chunks,
+        max_final_sources=8,
+    )
+
+    assert len(embedding_batches) == 1
+    assert set(outcome.broad_stage_anchor_chunk_ids) == {
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+        "F6",
+    }
+    anchor_documents = {
+        facet_id: next(
+            item["document"]
+            for item in chunks
+            if item["chunk_id"] == chunk_id
+        )
+        for facet_id, chunk_id in outcome.broad_stage_anchor_chunk_ids.items()
+    }
+    assert "05_Introduction.md" not in anchor_documents.values()
+    assert anchor_documents["F6"] == "28_Epilogue.md"
+    assert len(set(anchor_documents.values())) == 6
+    assert len(outcome.final_chunks) <= 8
+    assert outcome.trace["selection"]["stage_coverage_required_count"] == 6
+    assert outcome.trace["selection"]["stage_coverage_satisfied_count"] == 6
+    assert (
+        outcome.trace["selection"]["transition_extra_source_capacity_count"]
+        == 2
     )
     validate_text_free_retrieval_trace(outcome.trace)
 

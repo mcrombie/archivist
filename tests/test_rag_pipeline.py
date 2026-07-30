@@ -1176,6 +1176,7 @@ def test_document_catalog_uses_bounded_role_tokens_without_sending_passages():
     payload = json.loads(planner_input)
 
     assert payload["document_role_profile_version"] == "document-role-profile-v1"
+    assert payload["broad_stage_requirement_count"] == 5
     assert "charter" in catalog[0].role_terms
     assert "taxation" in catalog[0].role_terms
     assert "hca" in catalog[0].role_terms
@@ -1186,6 +1187,19 @@ def test_document_catalog_uses_bounded_role_tokens_without_sending_passages():
     assert chunks[0]["text"] not in planner_input
     assert chunks[1]["text"] not in planner_input
     assert payload["eligible_document_catalog"][0]["role_terms"]
+
+
+def test_planner_input_declares_six_stages_for_book_spanning_causal_question():
+    planner_input = rag_pipeline.build_planner_input(
+        ResolvedTurn(
+            standalone_question=(
+                "How does the book treat conflict as an engine of central power?"
+            )
+        ),
+        (),
+    )
+
+    assert json.loads(planner_input)["broad_stage_requirement_count"] == 6
 
 
 def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
@@ -1325,35 +1339,39 @@ def test_late_causal_origin_is_repaired_after_one_planner_call(monkeypatch):
             "How does the book treat conflict as an engine of central power?"
         ),
     )
-    catalog = tuple(
-        DocumentCatalogEntry(
-            document_id=f"{index:02}_Chapter {index}.md",
-            chapter_title=f"Chapter {index}",
-            corpus_ordinal=index,
-            role_terms=(
-                "conflict",
-                (
-                    "charter"
-                    if index == 1
-                    else "taxation"
-                    if index == 2
-                    else "mobilization"
-                    if index == 3
-                    else "procurement"
-                    if index == 4
-                    else "centralization"
-                    if index == 5
-                    else "endpoint"
+    role_by_band = (
+        "charter",
+        "taxation",
+        "mobilization",
+        "procurement",
+        "centralization",
+    )
+    catalog = (
+        *tuple(
+            DocumentCatalogEntry(
+                document_id=f"{index:02}_Chapter {index}.md",
+                chapter_title=f"Chapter {index}",
+                corpus_ordinal=index,
+                role_terms=(
+                    "conflict",
+                    role_by_band[min(4, (5 * (index - 1)) // 25)],
                 ),
-            ),
-        )
-        for index in range(1, 7)
+            )
+            for index in range(1, 26)
+        ),
+        DocumentCatalogEntry(
+            document_id="26_Epilogue.md",
+            chapter_title="Epilogue",
+            corpus_ordinal=26,
+            role_terms=("conflict", "endpoint"),
+        ),
     )
     labels = (
-        "Conflict and centralization",
+        "Conflict charter origin",
         "Conflict taxation",
         "Conflict mobilization",
         "Conflict procurement",
+        "Conflict centralization",
         "Conflict endpoint",
     )
     roles = (
@@ -1361,9 +1379,17 @@ def test_late_causal_origin_is_repaired_after_one_planner_call(monkeypatch):
         FacetRole.TRANSITION,
         FacetRole.MECHANISM,
         FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
         FacetRole.ENDPOINT,
     )
-    hints = (5, 2, 3, 4, 6)
+    hints = (
+        "05_Chapter 5.md",
+        "06_Chapter 6.md",
+        "11_Chapter 11.md",
+        "16_Chapter 16.md",
+        "21_Chapter 21.md",
+        "26_Epilogue.md",
+    )
     proposal = PlannerQuestionPlan(
         requirements=tuple(
             PlannerAnswerRequirement(
@@ -1378,7 +1404,7 @@ def test_late_causal_origin_is_repaired_after_one_planner_call(monkeypatch):
                 requirement_ids=(f"R{index}",),
                 role=role,
                 search_query=labels[index - 1],
-                document_hints=(f"{hint:02}_Chapter {hint}.md",),
+                document_hints=(hint,),
             )
             for index, (role, hint) in enumerate(
                 zip(roles, hints, strict=True),
@@ -1405,16 +1431,17 @@ def test_late_causal_origin_is_repaired_after_one_planner_call(monkeypatch):
     assert calls == ["query_planning"]
     assert plan.planner_used is True
     assert plan.fallback_reason is None
-    assert len(plan.requirements) == 5
+    assert len(plan.requirements) == 6
     assert plan.facets[1].document_hints == (
         "01_Chapter 1.md",
         "05_Chapter 5.md",
     )
     assert tuple(facet.document_hints for facet in plan.facets[2:]) == (
-        ("02_Chapter 2.md",),
-        ("03_Chapter 3.md",),
-        ("04_Chapter 4.md",),
         ("06_Chapter 6.md",),
+        ("11_Chapter 11.md",),
+        ("16_Chapter 16.md",),
+        ("21_Chapter 21.md",),
+        ("26_Epilogue.md",),
     )
     assert diagnostics == {
         "schema": "archivist.planner_call_diagnostics/2",

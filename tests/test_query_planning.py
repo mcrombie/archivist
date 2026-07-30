@@ -81,6 +81,9 @@ PROFILED_LINEAGE_CATALOG = tuple(
 LINEAGE_QUESTION = (
     "Trace the institutional lineage from Alpha Consortium to Omega Network."
 )
+CAUSAL_SPAN_QUESTION = (
+    "How does the book treat conflict as an engine of central power?"
+)
 
 
 def requirement(identifier: str = "R1", *, order: int = 0) -> AnswerRequirement:
@@ -314,6 +317,104 @@ def valid_lineage_proposal() -> PlannerQuestionPlan:
             )
             for index, (_label, role, query, _bearer) in enumerate(
                 stages,
+                start=1,
+            )
+        ),
+    )
+
+
+def causal_span_catalog() -> tuple[DocumentCatalogEntry, ...]:
+    role_by_band = (
+        "charter",
+        "taxation",
+        "mobilization",
+        "procurement",
+        "centralization",
+    )
+    body = tuple(
+        DocumentCatalogEntry(
+            document_id=f"{index:02}_Chapter {index}.md",
+            chapter_title=f"Chapter {index}",
+            corpus_ordinal=index,
+            role_terms=(
+                "conflict",
+                role_by_band[min(4, (5 * (index - 1)) // 25)],
+            ),
+        )
+        for index in range(1, 26)
+    )
+    return (
+        DocumentCatalogEntry(
+            document_id="00_Introduction.md",
+            chapter_title="Introduction",
+            corpus_ordinal=0,
+            role_terms=("conflict", "charter"),
+        ),
+        *body,
+        DocumentCatalogEntry(
+            document_id="26_Epilogue.md",
+            chapter_title="Epilogue",
+            corpus_ordinal=26,
+            role_terms=("conflict", "endpoint"),
+        ),
+    )
+
+
+def valid_causal_span_proposal(
+    *,
+    origin_hint: str = "01_Chapter 1.md",
+    origin_secondary_hints: tuple[str, ...] = (),
+    stage_hint_overrides: dict[int, str] | None = None,
+) -> PlannerQuestionPlan:
+    labels = (
+        "Conflict charter origin",
+        "Conflict taxation",
+        "Conflict mobilization",
+        "Conflict procurement",
+        "Conflict centralization",
+        "Conflict endpoint",
+    )
+    roles = (
+        FacetRole.ORIGIN,
+        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
+        FacetRole.ENDPOINT,
+    )
+    hints = [
+        origin_hint,
+        "06_Chapter 6.md",
+        "11_Chapter 11.md",
+        "16_Chapter 16.md",
+        "21_Chapter 21.md",
+        "26_Epilogue.md",
+    ]
+    for stage, hint in (stage_hint_overrides or {}).items():
+        hints[stage - 1] = hint
+    requirements = tuple(
+        PlannerAnswerRequirement(
+            requirement_id=f"R{index}",
+            label=label,
+        )
+        for index, label in enumerate(labels, start=1)
+    )
+    return PlannerQuestionPlan(
+        requirements=requirements,
+        facets=tuple(
+            PlannerSearchFacet(
+                facet_id=f"F{index}",
+                requirement_ids=(f"R{index}",),
+                role=role,
+                search_query=labels[index - 1],
+                document_hints=(
+                    (hint, *origin_secondary_hints)
+                    if index == 1
+                    else (hint,)
+                ),
+            )
+            for index, (role, hint) in enumerate(
+                zip(roles, hints, strict=True),
                 start=1,
             )
         ),
@@ -905,7 +1006,7 @@ def test_genuine_planner_premise_requires_a_framing_facet():
         validate_question_plan(plan, "Why did Project Lumen cause the signal failure?")
 
 
-def test_under_decomposed_broad_proposal_falls_back_to_five_protected_lanes():
+def test_under_decomposed_causal_proposal_falls_back_to_six_protected_lanes():
     proposal = PlannerQuestionPlan(
         requirements=(
             PlannerAnswerRequirement(
@@ -923,7 +1024,7 @@ def test_under_decomposed_broad_proposal_falls_back_to_five_protected_lanes():
         ),
     )
     diagnostics = {}
-    question = "How does the book treat conflict as an engine of central power?"
+    question = CAUSAL_SPAN_QUESTION
 
     result = build_question_plan(
         question,
@@ -932,15 +1033,16 @@ def test_under_decomposed_broad_proposal_falls_back_to_five_protected_lanes():
     )
 
     assert result.fallback_reason == "invalid_planner_output"
-    assert len(result.requirements) == 5
+    assert len(result.requirements) == 6
     assert [facet.role for facet in result.facets[1:]] == [
         FacetRole.ORIGIN,
         FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
         FacetRole.TRANSITION,
-        FacetRole.TRANSITION,
+        FacetRole.MECHANISM,
         FacetRole.ENDPOINT,
     ]
-    assert diagnostics == {"planner_validation_code": "broad_plan_under_decomposed"}
+    assert diagnostics == {"planner_validation_code": "broad_narrative_gap"}
 
 
 def test_broad_proposal_requires_origin_middle_endpoint_requirement_order():
@@ -1059,74 +1161,14 @@ def test_profiled_long_lineage_rejects_a_document_without_the_stage_role():
 def test_book_spanning_causal_origin_repairs_only_the_late_origin_hint(
     monkeypatch,
 ):
-    catalog = tuple(
-        DocumentCatalogEntry(
-            document_id=f"{index:02}_Chapter {index}.md",
-            chapter_title=f"Chapter {index}",
-            corpus_ordinal=index,
-            role_terms=(
-                "conflict",
-                (
-                    "charter"
-                    if index == 1
-                    else "taxation"
-                    if index == 2
-                    else "mobilization"
-                    if index == 3
-                    else "procurement"
-                    if index == 4
-                    else "centralization"
-                    if index == 5
-                    else "endpoint"
-                ),
-            ),
-        )
-        for index in range(1, 7)
-    )
-    requirements = tuple(
-        PlannerAnswerRequirement(
-            requirement_id=f"R{index}",
-            label=label,
-        )
-        for index, label in enumerate(
-            (
-                "Conflict and centralization",
-                "Conflict taxation",
-                "Conflict mobilization",
-                "Conflict procurement",
-                "Conflict endpoint",
-            ),
-            start=1,
-        )
-    )
-    roles = (
-        FacetRole.ORIGIN,
-        FacetRole.TRANSITION,
-        FacetRole.MECHANISM,
-        FacetRole.TRANSITION,
-        FacetRole.ENDPOINT,
-    )
-    hints = (5, 2, 3, 4, 6)
-    proposal = PlannerQuestionPlan(
-        requirements=requirements,
-        facets=tuple(
-            PlannerSearchFacet(
-                facet_id=f"F{index}",
-                requirement_ids=(f"R{index}",),
-                role=role,
-                search_query=requirements[index - 1].label,
-                document_hints=(f"{hint:02}_Chapter {hint}.md",),
-            )
-            for index, (role, hint) in enumerate(
-                zip(roles, hints, strict=True),
-                start=1,
-            )
-        ),
+    catalog = causal_span_catalog()
+    proposal = valid_causal_span_proposal(
+        origin_hint="05_Chapter 5.md",
     )
     diagnostics = {}
 
     result = build_question_plan(
-        "How does the book treat conflict as an engine of central power?",
+        CAUSAL_SPAN_QUESTION,
         proposal,
         catalog,
         validation_diagnostics=diagnostics,
@@ -1136,7 +1178,7 @@ def test_book_spanning_causal_origin_repairs_only_the_late_origin_hint(
     assert result.fallback_reason is None
     assert diagnostics == {"planner_validation_code": None}
     assert tuple(requirement.label for requirement in result.requirements) == tuple(
-        requirement.label for requirement in requirements
+        requirement.label for requirement in proposal.requirements
     )
     stage_facets = result.facets[1:]
     assert tuple(facet.facet_id for facet in stage_facets) == (
@@ -1145,16 +1187,18 @@ def test_book_spanning_causal_origin_repairs_only_the_late_origin_hint(
         "F3",
         "F4",
         "F5",
+        "F6",
     )
     assert stage_facets[0].document_hints == (
         "01_Chapter 1.md",
         "05_Chapter 5.md",
     )
     assert tuple(facet.document_hints for facet in stage_facets[1:]) == (
-        ("02_Chapter 2.md",),
-        ("03_Chapter 3.md",),
-        ("04_Chapter 4.md",),
         ("06_Chapter 6.md",),
+        ("11_Chapter 11.md",),
+        ("16_Chapter 16.md",),
+        ("21_Chapter 21.md",),
+        ("26_Epilogue.md",),
     )
 
     monkeypatch.setattr(
@@ -1164,7 +1208,7 @@ def test_book_spanning_causal_origin_repairs_only_the_late_origin_hint(
     )
     failed_repair_diagnostics = {}
     fallback = build_question_plan(
-        "How does the book treat conflict as an engine of central power?",
+        CAUSAL_SPAN_QUESTION,
         proposal,
         catalog,
         validation_diagnostics=failed_repair_diagnostics,
@@ -1174,6 +1218,59 @@ def test_book_spanning_causal_origin_repairs_only_the_late_origin_hint(
     assert fallback.fallback_reason == "invalid_planner_output"
     assert failed_repair_diagnostics == {
         "planner_validation_code": "broad_origin_not_preserved"
+    }
+
+
+def test_causal_span_rejects_secondary_overview_hint_from_v21_shape():
+    diagnostics = {}
+
+    result = build_question_plan(
+        CAUSAL_SPAN_QUESTION,
+        valid_causal_span_proposal(
+            origin_secondary_hints=("00_Introduction.md",),
+        ),
+        causal_span_catalog(),
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert len(result.requirements) == 6
+    assert diagnostics == {
+        "planner_validation_code": "broad_origin_is_overview"
+    }
+
+
+def test_causal_span_rejects_a_skipped_body_band():
+    diagnostics = {}
+
+    result = build_question_plan(
+        CAUSAL_SPAN_QUESTION,
+        valid_causal_span_proposal(
+            stage_hint_overrides={2: "11_Chapter 11.md"},
+        ),
+        causal_span_catalog(),
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {"planner_validation_code": "broad_narrative_gap"}
+
+
+def test_causal_span_requires_terminal_endpoint_when_catalog_has_epilogue():
+    diagnostics = {}
+
+    result = build_question_plan(
+        CAUSAL_SPAN_QUESTION,
+        valid_causal_span_proposal(
+            stage_hint_overrides={6: "25_Chapter 25.md"},
+        ),
+        causal_span_catalog(),
+        validation_diagnostics=diagnostics,
+    )
+
+    assert result.planner_used is False
+    assert diagnostics == {
+        "planner_validation_code": "broad_endpoint_not_terminal"
     }
 
 

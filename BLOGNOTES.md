@@ -2577,6 +2577,41 @@ Useful blog lesson: freezing before testing makes a disappointing result valuabl
 question, corpus, rubric, code, cost boundary, and retry count could not move, the failure exposed
 a new contract boundary instead of becoming another prompt-tuning anecdote.
 
+### 2026-07-29 - V22 turned chronology into a protected contract
+
+- Traced V21's miss to a subtle two-layer loophole. The planner validator approved the primary
+  body-chapter origin but did not inspect its secondary Introduction hint. Retrieval then treated
+  both hints as candidates and promoted the overview because it ranked well as a summary. The
+  model had followed the literal contract; the contract had not expressed the intended history.
+- Replaced the causal broad route's five generic stages with six structural obligations derived
+  from corpus order: five non-overlapping bands across the numbered narrative body and one
+  terminal Conclusion/Epilogue band. This is a reusable rule about book structure, not a hidden
+  list of the chapters the G007 rubric wanted.
+- Preserved overlap where it helps. Neighboring bands can still contribute discovery and
+  transition evidence, but a protected stage anchor must come from its own exact core. All origin
+  hints must be body documents, every stage stays inside its assigned span, and the endpoint is
+  now the sixth protected anchor rather than an optional extra.
+- Kept the budget shape intact. Six of the existing eight source positions are reserved for
+  chronological anchors, leaving two for transitions. The request still uses one planner call,
+  one batched embedding call, one generation call, and no retry or critic.
+- Versioned the change as policy V22, planner prompt v11, broad execution v6, and faceted
+  retrieval v13 without changing retrieval-trace schema 12. Ordinary noncausal broad questions
+  remain five stages; long institutional-lineage questions remain eight.
+- Added zero-call regressions for the exact failure modes: a secondary overview origin, a missing
+  body band, a nonterminal endpoint, duplicate structural anchors, source-cap drift, and extra
+  embedding calls. The focused set passed 204 tests; the complete offline suite passed 565 tests
+  with one intentional skip, and repository-wide Ruff passed. A metadata-only private-corpus
+  check produced five contiguous body spans followed by the Epilogue; no manuscript prose was
+  added to code or fixtures.
+- This is a repaired context-window contract, not yet proof of a better answer. V22 still needs an
+  exact freeze and one unchanged no-retry G007 reader confirmation under the original
+  2/7-claim plus 5/5-group gate. The practical ten-question run remains held until that gate
+  passes.
+
+Useful blog lesson: an elegant context window is not just a collection of relevant passages. It
+is an allocation of scarce attention in which every narrative role has a protected seat, while
+flexible overlap is reserved for discovering the connections between them.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

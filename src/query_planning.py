@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
@@ -45,6 +45,7 @@ MAX_INSTITUTIONAL_HANDOFF_CHARS = 160
 MAX_PLANNER_REQUIREMENTS = MAX_ANSWER_REQUIREMENTS
 MAX_PLANNER_FACETS = MAX_ADDED_SEARCH_FACETS
 MIN_BROAD_STAGE_REQUIREMENTS = 5
+BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS = 6
 LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS = MAX_ANSWER_REQUIREMENTS
 PLAN_STRUCTURE_INVALID = "plan_structure_invalid"
 PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
@@ -61,6 +62,9 @@ PLANNER_SEMANTIC_VALIDATION_CODES = frozenset(
         "lineage_stage_cardinality_mismatch",
         "lineage_stage_role_invalid",
         "document_role_mismatch",
+        "broad_endpoint_not_terminal",
+        "broad_narrative_gap",
+        "broad_origin_is_overview",
         "broad_origin_not_preserved",
         "planner_owned_original",
         "premise_route_mismatch",
@@ -665,7 +669,69 @@ _NUMBERED_NARRATIVE_DOCUMENT_PATTERN = re.compile(
     r"\bchapter[\s_:-]*\d+\b",
     re.IGNORECASE,
 )
+_TERMINAL_NARRATIVE_DOCUMENT_PATTERN = re.compile(
+    r"\b(?:conclusion|epilogue)\b",
+    re.IGNORECASE,
+)
 _MAX_EARLY_ORIGIN_ROLE_MATCHES = 4
+
+_NarrativeItem = TypeVar("_NarrativeItem")
+
+
+def is_numbered_narrative_document(structure_text: str) -> bool:
+    """Return whether a catalog surface identifies a numbered body chapter."""
+
+    return _NUMBERED_NARRATIVE_DOCUMENT_PATTERN.search(structure_text) is not None
+
+
+def is_terminal_narrative_document(structure_text: str) -> bool:
+    """Return whether a catalog surface identifies a narrative terminus."""
+
+    return _TERMINAL_NARRATIVE_DOCUMENT_PATTERN.search(structure_text) is not None
+
+
+def narrative_span_document_bands(
+    items: Sequence[_NarrativeItem],
+    *,
+    structure_text: Callable[[_NarrativeItem], str],
+    stage_count: int = BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS,
+) -> tuple[tuple[_NarrativeItem, ...], ...]:
+    """Partition ordered body chapters into stage bands plus a terminal band.
+
+    The partition depends only on document structure and document order. When
+    a conclusion or epilogue exists, it owns the final band; otherwise all
+    numbered body chapters are divided across the requested stage count.
+    """
+
+    if stage_count < 1:
+        return ()
+    body = tuple(
+        item
+        for item in items
+        if is_numbered_narrative_document(structure_text(item))
+    )
+    if not body:
+        return ()
+    terminal = tuple(
+        item
+        for item in items
+        if is_terminal_narrative_document(structure_text(item))
+        and not is_numbered_narrative_document(structure_text(item))
+    )
+    body_band_count = stage_count - 1 if terminal and stage_count > 1 else stage_count
+    bands: list[list[_NarrativeItem]] = [
+        [] for _index in range(body_band_count)
+    ]
+    for ordinal, item in enumerate(body):
+        band_index = min(
+            body_band_count - 1,
+            (body_band_count * ordinal) // len(body),
+        )
+        bands[band_index].append(item)
+    result = tuple(tuple(band) for band in bands)
+    if terminal and stage_count > 1:
+        return (*result, terminal)
+    return result
 
 
 _BROAD_PATTERNS = (
@@ -796,6 +862,20 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
             traits.add(RouteTrait.PREMISE_SENSITIVE)
 
     return tuple(trait for trait in RouteTrait if trait in traits)
+
+
+def requires_broad_narrative_span(
+    question: str | ResolvedTurn,
+) -> bool:
+    """Identify broad causal questions that need six protected chronology lanes."""
+
+    turn = _coerce_resolved_turn(question)
+    traits = set(route_question(turn))
+    return (
+        RouteTrait.BROAD_SYNTHESIS in traits
+        and RouteTrait.LONG_INSTITUTIONAL_LINEAGE not in traits
+        and _CAUSAL_ENGINE_PATTERN.search(turn.standalone_question) is not None
+    )
 
 
 def requires_planning(question: str | ResolvedTurn) -> bool:
@@ -1320,7 +1400,7 @@ def _early_causal_origin_entries(
     narrative_catalog = tuple(
         entry
         for entry in profiled_catalog
-        if _NUMBERED_NARRATIVE_DOCUMENT_PATTERN.search(
+        if is_numbered_narrative_document(
             f"{entry.document_id} {entry.chapter_title}"
         )
     )
@@ -1332,6 +1412,106 @@ def _early_causal_origin_entries(
         )
         if _role_token_overlap(driver_tokens, _document_role_tokens(entry))
     )[:_MAX_EARLY_ORIGIN_ROLE_MATCHES]
+
+
+def _validate_broad_narrative_span(
+    catalog: Sequence[DocumentCatalogEntry],
+    ordered_requirements: Sequence[AnswerRequirement],
+    dedicated_stage_facets_by_requirement: Mapping[
+        str,
+        Sequence[SearchFacet],
+    ],
+) -> None:
+    """Keep every causal stage hint inside its structural chronology band."""
+
+    ordered_catalog = tuple(
+        sorted(catalog, key=lambda item: item.corpus_ordinal)
+    )
+    bands = narrative_span_document_bands(
+        ordered_catalog,
+        structure_text=lambda entry: (
+            f"{entry.document_id} {entry.chapter_title}"
+        ),
+    )
+    if not bands:
+        return
+    if (
+        len(bands) != BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+        or any(not band for band in bands)
+    ):
+        raise PlanValidationError(
+            "broad_narrative_gap",
+            "the catalog cannot support six distinct body-to-terminal "
+            "chronology bands",
+        )
+
+    ordered_facets = tuple(
+        dedicated_stage_facets_by_requirement[
+            requirement.requirement_id
+        ][0]
+        for requirement in ordered_requirements
+    )
+    if len(ordered_facets) != len(bands):
+        raise PlanValidationError(
+            "broad_narrative_gap",
+            "a book-spanning causal plan must map one stage to every "
+            "protected chronology band",
+        )
+
+    origin_facet = ordered_facets[0]
+    origin_structure_by_id = {
+        entry.document_id: f"{entry.document_id} {entry.chapter_title}"
+        for entry in ordered_catalog
+    }
+    if any(
+        not is_numbered_narrative_document(
+            origin_structure_by_id.get(hint, hint)
+        )
+        for hint in origin_facet.document_hints
+    ):
+        raise PlanValidationError(
+            "broad_origin_is_overview",
+            "a historical origin cannot use an overview, front-matter, "
+            "terminal, or supplemental document when numbered body chapters "
+            "are available",
+        )
+
+    terminal_ids = {
+        entry.document_id
+        for entry in ordered_catalog
+        if is_terminal_narrative_document(
+            f"{entry.document_id} {entry.chapter_title}"
+        )
+    }
+    endpoint_facet = ordered_facets[-1]
+    if terminal_ids and any(
+        hint not in terminal_ids for hint in endpoint_facet.document_hints
+    ):
+        raise PlanValidationError(
+            "broad_endpoint_not_terminal",
+            "a book-spanning causal endpoint must use the conclusion or "
+            "epilogue when the catalog contains one",
+        )
+
+    seen_primary_hints: set[str] = set()
+    for facet, band in zip(ordered_facets, bands, strict=True):
+        band_ids = {entry.document_id for entry in band}
+        if not facet.document_hints or any(
+            hint not in band_ids for hint in facet.document_hints
+        ):
+            raise PlanValidationError(
+                "broad_narrative_gap",
+                "every book-spanning causal stage must keep all document "
+                "hints inside its distinct structural chronology band",
+            )
+        primary_hint = facet.document_hints[0]
+        if primary_hint in seen_primary_hints:
+            raise PlanValidationError(
+                "broad_narrative_gap",
+                "book-spanning causal stages require distinct primary "
+                "documents while an uncovered chronology band remains",
+            )
+        seen_primary_hints.add(primary_hint)
 
 
 def _validate_broad_document_roles(
@@ -1658,6 +1838,9 @@ def validate_question_plan(
     long_lineage = (
         RouteTrait.LONG_INSTITUTIONAL_LINEAGE in deterministic_traits
     )
+    broad_narrative_span = (
+        not long_lineage and requires_broad_narrative_span(turn)
+    )
     if not long_lineage and any(
         requirement.institutional_handoff is not None
         for requirement in parsed.requirements
@@ -1832,6 +2015,23 @@ def validate_question_plan(
                 "dedicated ordered stages: one origin, six distinct "
                 "transition-or-mechanism roles, and one endpoint",
             )
+        if broad_narrative_span and (
+            len(parsed.requirements)
+            != BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+            or len(dedicated_stage_facets)
+            != BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+            or any(
+                len(facets) != 1
+                for facets in dedicated_stage_facets_by_requirement.values()
+            )
+            or not stage_chain_valid
+        ):
+            raise PlanValidationError(
+                "broad_narrative_gap",
+                "a book-spanning causal synthesis requires exactly six "
+                "dedicated ordered stages: one body origin, four distinct "
+                "transition-or-mechanism stages, and one terminal endpoint",
+            )
         if (
             len(parsed.requirements) < MIN_BROAD_STAGE_REQUIREMENTS
             or any(
@@ -1845,6 +2045,12 @@ def validate_question_plan(
                 "broad synthesis requires at least five dedicated, ordered "
                 "narrative-stage requirements: origin, at least three "
                 "transition-or-mechanism stages, and endpoint",
+            )
+        if broad_narrative_span:
+            _validate_broad_narrative_span(
+                catalog,
+                ordered_requirements,
+                dedicated_stage_facets_by_requirement,
             )
         _validate_broad_document_roles(
             turn,
@@ -2011,6 +2217,113 @@ def _fallback_facet(
         search_query=_bounded_text(query),
         document_hints=(),
     )
+
+
+def _broad_fallback_stages(
+    question: str,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    relationship: str | None = None,
+    narrative_span: bool,
+) -> tuple[tuple[AnswerRequirement, ...], tuple[SearchFacet, ...]]:
+    """Build the five-stage broad fallback or six-stage causal-span fallback."""
+
+    if narrative_span:
+        labels = (
+            start or "Earliest concrete body-chapter origin",
+            (
+                f"Early development after {start}"
+                if start
+                else "Early development and first causal handoff"
+            ),
+            relationship or "First middle-period mechanism or consolidation",
+            "Later middle-period transformation",
+            (
+                f"Late transformation toward {end}"
+                if end
+                else "Late normalization or persistence"
+            ),
+            end or "Terminal consequences and endpoint",
+        )
+        roles = (
+            FacetRole.ORIGIN,
+            FacetRole.TRANSITION,
+            FacetRole.MECHANISM,
+            FacetRole.TRANSITION,
+            FacetRole.MECHANISM,
+            FacetRole.ENDPOINT,
+        )
+        query_prefixes = (
+            "earliest concrete body chapter origin",
+            "early development first causal handoff",
+            "first middle mechanism consolidation",
+            "later middle transformation",
+            "late normalization persistence",
+            "terminal consequence endpoint conclusion epilogue",
+        )
+    elif start is not None and end is not None:
+        labels = (
+            start,
+            f"Early development after {start}",
+            relationship or f"{start} {end}",
+            f"Later transformation toward {end}",
+            end,
+        )
+        roles = (
+            FacetRole.ORIGIN,
+            FacetRole.TRANSITION,
+            FacetRole.MECHANISM,
+            FacetRole.TRANSITION,
+            FacetRole.ENDPOINT,
+        )
+        query_prefixes = (
+            "origin",
+            "early development",
+            "middle mechanism",
+            "later transformation",
+            "endpoint",
+        )
+    else:
+        labels = (
+            "Earliest concrete origin",
+            "Early institutional development",
+            "Middle-period mechanism or consolidation",
+            "Later transformation or normalization",
+            "Latest consequences and endpoint",
+        )
+        roles = (
+            FacetRole.ORIGIN,
+            FacetRole.TRANSITION,
+            FacetRole.TRANSITION,
+            FacetRole.TRANSITION,
+            FacetRole.ENDPOINT,
+        )
+        query_prefixes = (
+            "earliest concrete origin",
+            "early institutional development",
+            "middle mechanism consolidation",
+            "later transformation normalization",
+            "latest consequence endpoint",
+        )
+
+    requirements = tuple(
+        _fallback_requirement(index, label)
+        for index, label in enumerate(labels, start=1)
+    )
+    facets = tuple(
+        _fallback_facet(
+            index,
+            requirement,
+            role,
+            f"{query_prefix} {question}",
+        )
+        for index, (requirement, role, query_prefix) in enumerate(
+            zip(requirements, roles, query_prefixes, strict=True),
+            start=1,
+        )
+    )
+    return requirements, facets
 
 
 def _coordinated_parts(question: str) -> tuple[str, ...]:
@@ -2252,6 +2565,7 @@ def deterministic_fallback_plan(
     turn = _coerce_resolved_turn(resolved_turn)
     question = turn.standalone_question
     traits = route_question(turn)
+    broad_narrative_span = requires_broad_narrative_span(turn)
     targets = extract_trusted_targets(turn)
     requirements: tuple[AnswerRequirement, ...]
     facets: tuple[SearchFacet, ...]
@@ -2271,44 +2585,12 @@ def deterministic_fallback_plan(
                 end=end,
             )
         elif RouteTrait.BROAD_SYNTHESIS in traits:
-            requirements = (
-                _fallback_requirement(1, start),
-                _fallback_requirement(2, f"Early development after {start}"),
-                _fallback_requirement(3, relationship),
-                _fallback_requirement(4, f"Later transformation toward {end}"),
-                _fallback_requirement(5, end),
-            )
-            facets = (
-                _fallback_facet(
-                    1,
-                    requirements[0],
-                    FacetRole.ORIGIN,
-                    f"origin {context} {start}",
-                ),
-                _fallback_facet(
-                    2,
-                    requirements[1],
-                    FacetRole.TRANSITION,
-                    f"early development {start} {relationship}",
-                ),
-                _fallback_facet(
-                    3,
-                    requirements[2],
-                    FacetRole.MECHANISM,
-                    f"middle mechanism {start} {end} {relationship}",
-                ),
-                _fallback_facet(
-                    4,
-                    requirements[3],
-                    FacetRole.TRANSITION,
-                    f"later transformation {end} {relationship}",
-                ),
-                _fallback_facet(
-                    5,
-                    requirements[4],
-                    FacetRole.ENDPOINT,
-                    f"endpoint {context} {end}",
-                ),
+            requirements, facets = _broad_fallback_stages(
+                question,
+                start=start,
+                end=end,
+                relationship=relationship,
+                narrative_span=broad_narrative_span,
             )
         else:
             requirements = (
@@ -2426,44 +2708,9 @@ def deterministic_fallback_plan(
     elif RouteTrait.LONG_INSTITUTIONAL_LINEAGE in traits:
         requirements, facets = _long_lineage_fallback_stages(question)
     elif RouteTrait.BROAD_SYNTHESIS in traits:
-        requirements = (
-            _fallback_requirement(1, "Earliest concrete origin"),
-            _fallback_requirement(2, "Early institutional development"),
-            _fallback_requirement(3, "Middle-period mechanism or consolidation"),
-            _fallback_requirement(4, "Later transformation or normalization"),
-            _fallback_requirement(5, "Latest consequences and endpoint"),
-        )
-        facets = (
-            _fallback_facet(
-                1,
-                requirements[0],
-                FacetRole.ORIGIN,
-                f"earliest concrete origin {question}",
-            ),
-            _fallback_facet(
-                2,
-                requirements[1],
-                FacetRole.TRANSITION,
-                f"early institutional development {question}",
-            ),
-            _fallback_facet(
-                3,
-                requirements[2],
-                FacetRole.TRANSITION,
-                f"middle mechanism consolidation {question}",
-            ),
-            _fallback_facet(
-                4,
-                requirements[3],
-                FacetRole.TRANSITION,
-                f"later transformation normalization {question}",
-            ),
-            _fallback_facet(
-                5,
-                requirements[4],
-                FacetRole.ENDPOINT,
-                f"latest consequence endpoint {question}",
-            ),
+        requirements, facets = _broad_fallback_stages(
+            question,
+            narrative_span=broad_narrative_span,
         )
     else:
         requirements = (_fallback_requirement(1, question.strip(" ?")),)
@@ -2571,11 +2818,12 @@ Return no route traits, evidence targets, requirement order, execution status, o
 the application owns those fields.
 Use only IDs declared in the response, and map every requirement to at least one added facet.
 Prefer the smallest sufficient proposal. A single-clause request normally needs one requirement
-and one to three facets. Obey the application-owned route_traits supplied in the input. When
-broad_synthesis is present without long_institutional_lineage, return exactly five ordered
-requirements. When long_institutional_lineage is present, return exactly eight ordered
-requirements and exactly eight dedicated stage facets. The eight stages consume the complete
-stage-source capacity; do not add a ninth transition facet. Give every requirement exactly one
+and one to three facets. Obey the application-owned route_traits and
+broad_stage_requirement_count supplied in the input. When broad_stage_requirement_count is
+nonzero, return exactly that many ordered requirements and exactly that many dedicated stage
+facets. Ordinary broad synthesis uses five stages, book-spanning causal synthesis uses six, and
+long institutional lineage uses eight. The eight lineage stages consume the complete stage-source
+capacity; do not add a ninth transition facet. Give every requirement exactly one
 dedicated narrative-stage facet: first an origin facet, then transition or mechanism facets for
 distinct developments in the argument, and finally an endpoint facet. For a long institutional
 lineage, populate institutional_handoff on every requirement. Name a distinct historical bearer,
@@ -2596,7 +2844,11 @@ The catalog's role_terms are bounded locally derived search-orientation tokens, 
 For every broad-synthesis stage, choose a primary document hint whose role_terms or title contain
 the stage's named actor, institution, mechanism, or period. For a book-spanning causal question
 that asks how a named driver acts as an engine, driver, instrument, or source of an outcome, choose
-the origin from the earliest eligible documents whose role terms contain that named driver.
+the origin from the earliest eligible numbered body chapter whose role terms contain that named
+driver. Map its six stages in order to five distinct numbered-body chronology bands and then a
+terminal conclusion or epilogue. Do not use an introduction, overview, front-matter, terminal, or
+supplemental document as an origin hint, and do not use a nonterminal document as the endpoint when
+the catalog supplies a conclusion or epilogue.
 Do not quote, paraphrase, or treat role_terms as establishing a historical claim.
 Do not merge or omit independently requested parts merely to stay under four.
 Keep labels and search queries terse and copy document hints only as exact catalog IDs.
@@ -2633,6 +2885,7 @@ __all__ = [
     "InstitutionalHandoff",
     "MAX_ADDED_QUERY_CHARS",
     "MAX_ADDED_SEARCH_FACETS",
+    "BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS",
     "LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS",
     "MIN_BROAD_STAGE_REQUIREMENTS",
     "MAX_ORIGINAL_QUERY_CHARS",
@@ -2666,9 +2919,13 @@ __all__ = [
     "deterministic_fallback_plan",
     "extract_trusted_targets",
     "insert_original_facet",
+    "is_numbered_narrative_document",
+    "is_terminal_narrative_document",
+    "narrative_span_document_bands",
     "question_plan_json_schema",
     "planner_question_plan_json_schema",
     "requires_planning",
+    "requires_broad_narrative_span",
     "route_question",
     "safe_planner_validation_code",
     "validate_question_plan",

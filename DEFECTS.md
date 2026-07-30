@@ -45,6 +45,25 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] V22 opened a six-stage narrative-span contract
+Phase/Brief: Phase 1 evidence-planned-v22 offline repair
+Symptom: the frozen V21 reader confirmation showed that a formally valid five-stage broad plan
+could protect an overview as its historical origin, skip a substantial middle period, and return
+terminal evidence without making the endpoint an answer obligation.
+Cause: cohort opening following a specification gap - V22 changes planner cardinality, plan
+validation, structural retrieval allocation, and version identifiers. Earlier paid cohorts are
+not directly comparable to this candidate.
+Resolution and verification: implemented a corpus-ordered six-stage contract for broad causal
+narrative-span questions: five non-overlapping numbered-body bands plus a terminal
+Conclusion/Epilogue band. All origin hints must be body documents; every stage hint must remain
+inside its structural band; protected anchors are filtered to the exact bands even though
+neighboring bands remain available for discovery and transitions; and all six protected anchors
+become existing generation obligations before two optional source positions are filled. Ordinary
+noncausal broad plans remain five stages and long institutional-lineage plans remain eight.
+Focused verification passed 204 tests; the complete offline suite passed 565 tests with one
+intentional skip, and repository-wide Ruff passed. No paid API call was made. V22 is not yet
+frozen or reader-confirmed, so the unchanged G007 gate and ten-question hold remain in force.
+
 ## [2026-07-29] A valid broad plan used an overview as historical origin
 Phase/Brief: Phase 1 evidence-planned-v21 unchanged G007 confirmation
 Symptom: the one no-retry G007 confirmation returned a valid eight-source reader answer and a
@@ -52,17 +71,19 @@ closed valid trace, but realized only 1/7 frozen strict claims and 3/5 target do
 against the predeclared 2/7 plus 5/5 gate. It omitted the Chapter 4/5 origin and Chapter 14 Civil
 War groups. An Epilogue passage was returned but its required recent-shock chain was not used.
 Cause: spec gap in the brief and model error - the provider proposal passed local validation, so
-V21's rejected-origin salvage path did not run. The accepted origin lane then promoted an
-Introduction overview as an eligible early driver-bearing anchor. The ordinary broad-stage
-contract also allowed the middle chronology to skip the Civil War, and returned endpoint evidence
-did not have to become a supported answer obligation.
-Resolution and verification: unresolved. The exact frozen V21 commit
-`bf424c880bca4728a8d13225f85978e27a8d8dcf` was measured once with one planner, one batched
-embedding, one generation, no retry, and `$0.29870543` estimated spend under the `$0.40` cap.
-The next repair must remain corpus-agnostic: make overview/front-matter documents ineligible as
-historical origins when body-chapter causal episodes exist, enforce broad chronological
-cardinality, and preserve explicit unanswered obligations through generation. The failed gate
-does not license the unchanged ten-question run.
+V21's rejected-origin salvage path did not run. Validation examined only the primary origin hint;
+a secondary Introduction hint therefore entered retrieval, outranked the body origin, and became
+the protected anchor. The ordinary five-stage contract could also skip a middle period, and
+returned endpoint evidence did not have to become a supported answer obligation.
+Resolution and verification: resolved at the offline contract level in `evidence-planned-v22`.
+Validation rejects an overview in any origin-hint position and assigns all six causal stages to
+five exact numbered-body bands plus a terminal band. Retrieval independently filters protected
+anchors to those non-overlapping cores, and the sixth protected endpoint flows through the
+existing generation-obligation contract. The exact frozen V21 commit
+`bf424c880bca4728a8d13225f85978e27a8d8dcf` remains the measured failed candidate: one planner,
+one batched embedding, one generation, no retry, and `$0.29870543` estimated spend under the
+`$0.40` cap. V22 has passed focused zero-call regression and lint checks but is not yet frozen or
+reader-confirmed. The failed gate still does not license the unchanged ten-question run.
 
 ## [2026-07-29] Final gold workflow had no mechanical holdout or carry-over boundary
 Phase/Brief: Phase 1, Briefs 2–3

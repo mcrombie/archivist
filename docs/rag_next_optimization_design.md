@@ -1,7 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v21 implemented, frozen, and measured; its unchanged G007 confirmation
-failed the predeclared reader gate, so the practical ten-question rerun remains blocked
+Status: evidence-planned-v22 implemented and verified offline, but not yet frozen or measured;
+V21's unchanged G007 confirmation failed the predeclared reader gate, so the practical
+ten-question rerun remains blocked pending one unchanged V22 G007 confirmation
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1866,3 +1867,63 @@ targets are:
 These rules must be derived from document structure, chronology, and role evidence—not the G007
 gold locations or expected answer. After offline regressions pass, freeze a new exact candidate
 and repeat only the unchanged G007 gate before considering the ten-question development run.
+
+## V22 implementation: six protected spans from body origin to terminal endpoint
+
+V21 exposed a contract gap rather than a shortage of candidate evidence. Its plan validator
+checked only the primary origin hint, so a body chapter could make the plan valid while a
+secondary Introduction hint remained eligible for retrieval. Retrieval then pooled both hints
+and could promote the overview passage as the protected origin. Five broadly named stages also
+left enough chronological freedom to skip a major middle period, while the Epilogue remained an
+optional source rather than an answer obligation.
+
+V22 replaces that weak shape with a structural narrative-span contract for causal questions of
+the form "X as an engine, driver, instrument, or source of Y":
+
+1. Sort eligible documents by corpus order and identify numbered narrative-body documents plus
+   any non-numbered terminal Conclusion or Epilogue.
+2. Partition the ordered numbered body into five non-overlapping, position-based bands. Use the
+   terminal document set as a sixth band. This depends on document structure, not chapter names,
+   gold locations, raw chapter-number distances, or manuscript-specific historical facts.
+3. Require exactly six planned stages in order. Every hint in the origin stage must be a numbered
+   body document, every stage hint must remain inside its assigned band, primary stage hints must
+   be distinct, and the endpoint must use the terminal band when one exists.
+4. Keep the existing neighboring-band overlap only for candidate discovery and transition
+   evidence. Before protecting a stage anchor, filter candidates back to that stage's exact
+   non-overlapping structural band. This defense also protects deterministic fallback plans and
+   raw callers that do not traverse proposal validation.
+5. Protect one distinct anchor for each of the six stages before optional transitions fill the
+   remaining two positions under the unchanged eight-source limit. Because each protected anchor
+   becomes an existing generation obligation, the terminal endpoint can no longer reach context
+   and silently disappear from the answer.
+
+Ordinary noncausal broad questions retain five stages. Long institutional-lineage questions
+retain eight. V22 adds no planner retry, critic call, embedding request, generation request,
+source slot, manuscript-specific rule, gold target, or expected-answer phrase. The public call
+shape remains one planner call, one batched embedding call, one generation call, and zero
+automatic retries.
+
+The cohort identifiers are:
+
+- policy `evidence-planned-v22`;
+- planner prompt `query-planner-v11`;
+- broad canonical execution `broad-stage-narrative-span-v6`;
+- faceted retrieval `faceted-hybrid-rrf-v13`;
+- coverage prompt unchanged at `evidence-coverage-v9`;
+- normalizer unchanged at `evidence-coverage-normalizer/7`; and
+- retrieval trace schema unchanged at `archivist.retrieval_trace/12`.
+
+Zero-call synthetic regressions prove that a secondary overview hint is rejected, a skipped body
+band is rejected, a nonterminal endpoint is rejected, all six protected anchors occupy distinct
+structural bands, the sixth anchor is terminal, the source ceiling remains eight, and retrieval
+still makes one batched embedding request. Focused verification passed 204 tests; the complete
+offline suite then passed 565 tests with one intentional skip, and repository-wide Ruff passed.
+A metadata-only check of the current private corpus produced five contiguous body bands followed
+by its Epilogue; no manuscript passage or gold answer entered the implementation or committed
+fixtures.
+
+This is still offline contract evidence, not reader evidence. The held-out provenance remains
+bound to the frozen V21 candidate until V22 itself is clean, fully verified, and frozen. The next
+paid action is one unchanged, no-retry G007 confirmation against that exact V22 commit. The
+existing 2/7 strict-claim plus 5/5 target-group gate remains unchanged; only a passing result
+licenses the practical ten-question development evaluation.

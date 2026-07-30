@@ -76,6 +76,9 @@ from perspectives import (
     normalize_worldview,
 )
 from query_planning import (
+    BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS,
+    LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS,
+    MIN_BROAD_STAGE_REQUIREMENTS,
     QUERY_PLANNER_INSTRUCTIONS,
     DocumentCatalogEntry,
     EvidenceTargetRole,
@@ -86,6 +89,7 @@ from query_planning import (
     RouteTrait,
     build_question_plan,
     normalize_search_query,
+    requires_broad_narrative_span,
     requires_planning,
     route_question,
     safe_planner_validation_code,
@@ -104,12 +108,12 @@ from document_roles import (
 )
 
 
-RAG_POLICY_VERSION = "evidence-planned-v21"
+RAG_POLICY_VERSION = "evidence-planned-v22"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
-QUERY_PLANNER_PROMPT_VERSION = "query-planner-v10"
+QUERY_PLANNER_PROMPT_VERSION = "query-planner-v11"
 EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v9"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
@@ -760,9 +764,20 @@ def build_planner_input(
     resolved_turn: ResolvedTurn,
     document_catalog: Sequence[DocumentCatalogEntry],
 ) -> str:
+    route_traits = route_question(resolved_turn)
+    broad_stage_requirement_count = (
+        LONG_INSTITUTIONAL_LINEAGE_STAGE_REQUIREMENTS
+        if RouteTrait.LONG_INSTITUTIONAL_LINEAGE in route_traits
+        else BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+        if requires_broad_narrative_span(resolved_turn)
+        else MIN_BROAD_STAGE_REQUIREMENTS
+        if RouteTrait.BROAD_SYNTHESIS in route_traits
+        else 0
+    )
     payload = {
         "resolved_turn": resolved_turn.model_dump(mode="json", by_alias=True),
-        "route_traits": [trait.value for trait in route_question(resolved_turn)],
+        "route_traits": [trait.value for trait in route_traits],
+        "broad_stage_requirement_count": broad_stage_requirement_count,
         "document_role_profile_version": DOCUMENT_ROLE_PROFILE_VERSION,
         "eligible_document_catalog": [entry.model_dump(mode="json") for entry in document_catalog],
     }

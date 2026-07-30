@@ -853,6 +853,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "broad-stage-role-eligibility-v3",
             "broad-stage-role-eligibility-v4",
             "broad-stage-role-eligibility-v5",
+            "broad-stage-narrative-span-v6",
             "not_applicable",
         }
     ),
@@ -1022,11 +1023,15 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "query-planner-v8",
             "query-planner-v9",
             "query-planner-v10",
+            "query-planner-v11",
         }
     ),
     "planner_validation_code": frozenset(
         {
             "broad_plan_under_decomposed",
+            "broad_endpoint_not_terminal",
+            "broad_narrative_gap",
+            "broad_origin_is_overview",
             "broad_origin_not_preserved",
             "document_role_mismatch",
             "duplicate_query",
@@ -1074,6 +1079,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v19",
             "evidence-planned-v20",
             "evidence-planned-v21",
+            "evidence-planned-v22",
         }
     ),
     "prompt_version": frozenset(
@@ -1121,6 +1127,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v10",
             "faceted-hybrid-rrf-v11",
             "faceted-hybrid-rrf-v12",
+            "faceted-hybrid-rrf-v13",
             "hybrid-bm25-rrf-v1",
         }
     ),
