@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 
-RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/12"
+RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/13"
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -389,6 +389,8 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "answer_units",
             "citation_count",
             "citation_locality_failure",
+            "completeness_profile",
+            "content_outcome",
             "coverage",
             "coverage_status_counts",
             "error_code",
@@ -398,6 +400,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "instructions_sha256",
             "inspection_scope_count",
             "inspection_scopes",
+            "expected_stage_count",
+            "expected_transition_count",
+            "minimum_supported_obligation_ratio",
             "normalizer_version",
             "obligation_count",
             "obligation_coverage",
@@ -410,14 +415,18 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "prompt_version",
             "request_schema",
             "renderer_version",
+            "realized_stage_count",
+            "realized_transition_count",
             "repair_applied",
             "repair_codes",
+            "required_obligation_dimension_count",
             "requirement_count",
             "requirement_ids",
             "schema",
             "schema_sha256",
             "source_count",
             "status",
+            "supported_required_obligation_dimension_count",
             "structured_generation_called",
             "style_prompt_sha256",
             "validation_result",
@@ -821,6 +830,8 @@ _RULE_CODES = frozenset(
         "some_subject_targets_direct",
         "structural_stage_shortfall",
         "trusted_related_tail_material",
+        "trusted_analogue_request",
+        "trusted_bounded_relation_request",
     }
 )
 _EXCEPTION_CODES = frozenset(
@@ -862,6 +873,8 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     ),
     "broad_context_order": frozenset({"corpus_ordinal", "selection"}),
     "chronology_band": frozenset({"early", "late", "middle", "none"}),
+    "completeness_profile": frozenset({"broad_synthesis", "focused", "long_institutional_lineage"}),
+    "content_outcome": frozenset({"insufficient_evidence", "valid_complete", "valid_partial"}),
     "displacement_cause": frozenset({"distance_filtering", "document_filtering", "truncation"}),
     "code": frozenset(
         {
@@ -962,9 +975,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
     "generator_reasoning_effort": frozenset({"high", "low", "max", "medium", "none", "xhigh"}),
     "generator_verbosity": frozenset({"high", "low", "medium"}),
     "hnsw_space": frozenset({"", "cosine", "ip", "l2"}),
-    "kind": frozenset(
-        {"adjacent_stage_link", "requirement_component", "stage"}
-    ),
+    "kind": frozenset({"adjacent_stage_link", "requirement_component", "stage"}),
     "lane": frozenset({"analogue", "broader_related", "direct", "generic_semantic"}),
     "lane_selection": frozenset(
         {
@@ -1064,6 +1075,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-gate-v1",
             "evidence-gate-v2",
             "evidence-gate-v3",
+            "evidence-gate-v4",
             "evidence-planned-v4",
             "evidence-planned-v5",
             "evidence-planned-v6",
@@ -1085,6 +1097,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v22",
             "evidence-planned-v23",
             "evidence-planned-v24",
+            "evidence-planned-v25",
         }
     ),
     "prompt_version": frozenset(
@@ -1117,7 +1130,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "structural_document",
         }
     ),
-    "renderer_version": frozenset({"evidence-coverage-renderer/1"}),
+    "renderer_version": frozenset({"evidence-coverage-renderer/1", "evidence-coverage-renderer/2"}),
     "repair_codes": _COVERAGE_ERROR_CODES,
     "retrieval_version": frozenset(
         {
@@ -1172,6 +1185,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.evidence_coverage_diagnostics/5",
             "archivist.evidence_coverage_diagnostics/6",
             "archivist.evidence_coverage_diagnostics/7",
+            "archivist.evidence_coverage_diagnostics/8",
             "archivist.evidence_policy_diagnostics/1",
             "archivist.planner_call_diagnostics/1",
             "archivist.planner_call_diagnostics/2",
@@ -1213,9 +1227,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "relationship",
         }
     ),
-    "document_role_profile_version": frozenset(
-        {"document-role-profile-v1"}
-    ),
+    "document_role_profile_version": frozenset({"document-role-profile-v1"}),
     "validation_result": frozenset({"invalid", "not_run", "valid"}),
     "value": frozenset(
         {

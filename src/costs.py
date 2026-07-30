@@ -25,7 +25,7 @@ PRICING_VERSION = "2026-07-22"
 CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
 TOKENS_PER_MILLION = Decimal("1000000")
-ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
+ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 HISTORICAL_PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
 ANSWER_RUN_TIMING_KEYS = frozenset(
@@ -388,6 +388,7 @@ def _normalized_answer_run_diagnostics(
         "schema",
         "cohort",
         "answer_status",
+        "content_outcome",
         "evidence_decision",
         "validation_result",
         "validation_error_code",
@@ -525,6 +526,19 @@ def _normalized_answer_run_diagnostics(
     )
     if (validation_result == "invalid") != (validation_error_code is not None):
         raise ValueError("answer-run validation metadata is inconsistent")
+    content_outcome = _diagnostic_code(
+        diagnostics.get("content_outcome"),
+        nullable=True,
+    )
+    if content_outcome not in {
+        None,
+        "valid_complete",
+        "valid_partial",
+        "insufficient_evidence",
+    }:
+        raise ValueError("answer-run diagnostics contain an invalid content outcome")
+    if validation_result == "invalid" and content_outcome is not None:
+        raise ValueError("invalid structural output cannot have a content outcome")
 
     return {
         "schema": ANSWER_RUN_DIAGNOSTICS_SCHEMA,
@@ -532,6 +546,7 @@ def _normalized_answer_run_diagnostics(
         "answer_status": _diagnostic_code(diagnostics.get("answer_status")),
         "evidence_decision": _diagnostic_code(diagnostics.get("evidence_decision")),
         "validation_result": validation_result,
+        "content_outcome": content_outcome,
         "validation_error_code": validation_error_code,
         "repair_applied": repair_applied,
         "repair_codes": repair_codes,
@@ -592,6 +607,7 @@ class UsageLedger:
                 answer_status TEXT NOT NULL,
                 evidence_decision TEXT NOT NULL,
                 validation_result TEXT NOT NULL,
+                content_outcome TEXT,
                 validation_error_code TEXT,
                 repair_applied INTEGER NOT NULL CHECK (repair_applied IN (0, 1)),
                 repair_codes_json TEXT NOT NULL,
@@ -637,6 +653,13 @@ class UsageLedger:
                 ALTER TABLE answer_run_diagnostics
                 ADD COLUMN planner_json TEXT NOT NULL DEFAULT
                 '{_HISTORICAL_UNKNOWN_PLANNER_JSON}'
+                """
+            )
+        if "content_outcome" not in diagnostic_columns:
+            connection.execute(
+                """
+                ALTER TABLE answer_run_diagnostics
+                ADD COLUMN content_outcome TEXT
                 """
             )
         connection.execute(
@@ -727,15 +750,16 @@ class UsageLedger:
                 INSERT INTO answer_run_diagnostics (
                     run_id, recorded_at, project_id, conversation_id, turn_id,
                     answer_status, evidence_decision, validation_result,
-                    validation_error_code, repair_applied, repair_codes_json,
+                    content_outcome, validation_error_code, repair_applied, repair_codes_json,
                     cohort_json, planner_json, stage_timings_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project_id, conversation_id, turn_id) DO UPDATE SET
                     run_id = excluded.run_id,
                     recorded_at = excluded.recorded_at,
                     answer_status = excluded.answer_status,
                     evidence_decision = excluded.evidence_decision,
                     validation_result = excluded.validation_result,
+                    content_outcome = excluded.content_outcome,
                     validation_error_code = excluded.validation_error_code,
                     repair_applied = excluded.repair_applied,
                     repair_codes_json = excluded.repair_codes_json,
@@ -752,6 +776,7 @@ class UsageLedger:
                     normalized["answer_status"],
                     normalized["evidence_decision"],
                     normalized["validation_result"],
+                    normalized["content_outcome"],
                     normalized["validation_error_code"],
                     int(bool(normalized["repair_applied"])),
                     json.dumps(normalized["repair_codes"], separators=(",", ":")),
@@ -785,7 +810,7 @@ class UsageLedger:
             row = connection.execute(
                 """
                 SELECT run_id, recorded_at, answer_status, evidence_decision,
-                       validation_result, validation_error_code, repair_applied,
+                       validation_result, content_outcome, validation_error_code, repair_applied,
                        repair_codes_json, cohort_json, planner_json,
                        stage_timings_json
                 FROM answer_run_diagnostics
@@ -802,6 +827,9 @@ class UsageLedger:
             "answer_status": str(row["answer_status"]),
             "evidence_decision": str(row["evidence_decision"]),
             "validation_result": str(row["validation_result"]),
+            "content_outcome": (
+                str(row["content_outcome"]) if row["content_outcome"] is not None else None
+            ),
             "validation_error_code": (
                 str(row["validation_error_code"])
                 if row["validation_error_code"] is not None

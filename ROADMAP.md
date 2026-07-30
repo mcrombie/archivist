@@ -36,14 +36,17 @@ measurement of the complete practical cohort.
 
 The next evidence-producing sequence is:
 
-1. **Enforce source-bounded completeness offline.** V24 often retrieves the intended chapters but
-   permits a broad answer to validate while its own diagnostics mark required stages and
-   transitions partial or unsupported. Separate structural JSON validity from content status;
-   define route-specific `valid_complete`, `valid_partial`, and `insufficient_evidence`
-   outcomes; require surviving protected stages and institutional handoffs to be realized or
-   concisely bounded; and restore clean abstention when a corpus-level absence is established and
-   the user did not ask for analogues. Use only synthetic fixtures and add no source slot, model
-   call, retry, critic, or development-answer hint.
+1. **Completed offline in V25: enforce source-bounded completeness.** Structural JSON and
+   citation validity now remain separate from the route-specific content outcomes
+   `valid_complete`, `valid_partial`, and `insufficient_evidence`. Broad answers must realize the
+   exact ordered stage/transition chain and all required obligation dimensions; long
+   institutional lineages additionally require supported handoffs. Partial valid answers remain
+   usable but receive one concise limitation rather than one notice per requirement. Absence
+   handling now requires affirmative current-turn permission for analogues, while causal
+   near-matches require a locally certified relation. The change added no source slot, model call,
+   retry, critic, or development-answer hint. Verification passed 598 offline tests with one
+   intentional skip, repository-wide Ruff, and the production frontend build. V25 has not yet
+   received a paid development run or been declared the frozen final candidate.
 2. **Freeze and measure the repaired candidate once.** Run the unchanged ten development
    questions in a fresh isolated directory with zero retries. Compare the complete distribution
    with V24 rather than reinstating a G007 reader-quality veto. If the repair does not improve the

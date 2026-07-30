@@ -40,6 +40,9 @@ __all__ = [
     "NO_SOURCES_MESSAGE",
     "AnswerUnit",
     "AnswerUnitRole",
+    "ContentCompletenessContext",
+    "ContentCompletenessProfile",
+    "ContentOutcome",
     "CoverageContractError",
     "CoverageDiagnosticSummary",
     "CoverageOutcomeStatus",
@@ -56,6 +59,7 @@ __all__ = [
     "EvidenceObligationScope",
     "EvidenceCoverageAnswer",
     "EvidenceCoverageResult",
+    "ExpectedStageTransition",
     "GapReason",
     "InterpretiveEvidenceCoverageAnswer",
     "InterpretiveMove",
@@ -77,11 +81,9 @@ __all__ = [
 
 
 EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/5"
-INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = (
-    "archivist.interpretive_evidence_coverage/3"
-)
-EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/7"
-EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/1"
+INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = "archivist.interpretive_evidence_coverage/3"
+EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/8"
+EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/2"
 EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/7"
 
 MAX_REQUIREMENTS = 8
@@ -210,6 +212,18 @@ class CoverageOutcomeStatus(StrEnum):
     ANSWERED = "answered"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
     GENERATION_CONTRACT_FAILED = "generation_contract_failed"
+
+
+class ContentOutcome(StrEnum):
+    VALID_COMPLETE = "valid_complete"
+    VALID_PARTIAL = "valid_partial"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class ContentCompletenessProfile(StrEnum):
+    FOCUSED = "focused"
+    BROAD_SYNTHESIS = "broad_synthesis"
+    LONG_INSTITUTIONAL_LINEAGE = "long_institutional_lineage"
 
 
 class DiagnosticValidationResult(StrEnum):
@@ -374,9 +388,7 @@ class CoverageValidationErrorCode(StrEnum):
     PREMISE_CORRECTION_MISSING = "premise_correction_missing"
     PREMISE_CORRECTION_INVALID = "premise_correction_invalid"
     PREMISE_CORRECTION_NOT_FIRST = "premise_correction_not_first"
-    PREMISE_CORRECTION_REQUIREMENT_MISMATCH = (
-        "premise_correction_requirement_mismatch"
-    )
+    PREMISE_CORRECTION_REQUIREMENT_MISMATCH = "premise_correction_requirement_mismatch"
     MISSING_UNIT_REQUIREMENT_ID = "missing_unit_requirement_id"
     DUPLICATE_SOURCE_NUMBER = "duplicate_source_number"
     SOURCE_NUMBER_OUT_OF_RANGE = "source_number_out_of_range"
@@ -406,9 +418,7 @@ class CoverageValidationErrorCode(StrEnum):
     UNSUPPORTED_OBLIGATION_HAS_UNIT = "unsupported_obligation_has_unit"
     OBLIGATION_ROLE_MISMATCH = "obligation_role_mismatch"
     OBLIGATION_REQUIREMENT_STATUS_MISMATCH = "obligation_requirement_status_mismatch"
-    OBLIGATION_DIMENSION_CAPACITY_EXCEEDED = (
-        "obligation_dimension_capacity_exceeded"
-    )
+    OBLIGATION_DIMENSION_CAPACITY_EXCEEDED = "obligation_dimension_capacity_exceeded"
     MISSING_INTERPRETIVE_PARAGRAPH = "missing_interpretive_paragraph"
     INTERPRETIVE_MOVE_MISMATCH = "interpretive_move_mismatch"
     INTERPRETIVE_CITATION_FORBIDDEN = "interpretive_citation_forbidden"
@@ -526,15 +536,11 @@ class EvidenceCoverageAnswer(_ContractModel):
 class InterpretiveEvidenceCoverageAnswer(EvidenceCoverageAnswer):
     """Evidence coverage framed by explicitly subjective, uncited prose."""
 
-    schema_version: Literal["archivist.interpretive_evidence_coverage/3"] = (
-        Field(alias="schema")
-    )
+    schema_version: Literal["archivist.interpretive_evidence_coverage/3"] = Field(alias="schema")
     interpretive_moves: tuple[InterpretiveMove, ...] = Field(
         min_length=1,
         max_length=2,
-        description=(
-            "The exact ordered rhetorical moves requested in the input contract."
-        ),
+        description=("The exact ordered rhetorical moves requested in the input contract."),
     )
     interpretive_preface: InterpretivePrefaceText = Field(
         description=(
@@ -554,12 +560,7 @@ class InterpretiveEvidenceCoverageAnswer(EvidenceCoverageAnswer):
     @field_validator("interpretive_preface", "interpretive_coda")
     @classmethod
     def reject_blank_padded_or_multiline_framing(cls, value: str) -> str:
-        if (
-            not value.strip()
-            or value != value.strip()
-            or "\n" in value
-            or "\r" in value
-        ):
+        if not value.strip() or value != value.strip() or "\n" in value or "\r" in value:
             raise ValueError(
                 "interpretive framing must be one nonblank paragraph with no outer whitespace"
             )
@@ -621,16 +622,13 @@ class EvidenceObligationScope(_ContractModel):
                 self.predecessor_source_number is not None
                 or EvidenceDimension.ADJACENT_STAGE_LINK in self.dimension_ids
             ):
-                raise ValueError(
-                    "stage obligations cannot carry adjacent-stage link metadata"
-                )
+                raise ValueError("stage obligations cannot carry adjacent-stage link metadata")
             return self
 
         if self.kind is EvidenceObligationKind.ADJACENT_STAGE_LINK:
             if (
                 len(self.allowed_requirement_ids) != 2
-                or self.dimension_ids
-                != (EvidenceDimension.ADJACENT_STAGE_LINK,)
+                or self.dimension_ids != (EvidenceDimension.ADJACENT_STAGE_LINK,)
                 or self.predecessor_source_number is None
                 or not self.required_for_requirement_status
             ):
@@ -661,15 +659,113 @@ class EvidenceObligationScope(_ContractModel):
         return self
 
 
+class ExpectedStageTransition(_ContractModel):
+    """One application-owned connection expected between ordered broad stages."""
+
+    predecessor_requirement_id: Identifier
+    successor_requirement_id: Identifier
+
+    @model_validator(mode="after")
+    def requirements_are_distinct(self) -> "ExpectedStageTransition":
+        if self.predecessor_requirement_id == self.successor_requirement_id:
+            raise ValueError("an expected transition requires two distinct requirements")
+        return self
+
+
+class ContentCompletenessContext(_ContractModel):
+    """Trusted pre-retrieval expectations used only for local completeness."""
+
+    profile: ContentCompletenessProfile
+    required_requirement_ids: tuple[Identifier, ...] = Field(
+        min_length=1,
+        max_length=MAX_REQUIREMENTS,
+    )
+    expected_stage_requirement_ids: tuple[Identifier, ...] = Field(
+        max_length=MAX_REQUIREMENTS,
+    )
+    expected_stage_transitions: tuple[ExpectedStageTransition, ...] = Field(
+        max_length=MAX_REQUIREMENTS - 1,
+    )
+    minimum_supported_obligation_ratio: Annotated[
+        float,
+        Field(strict=True, ge=0.0, le=1.0),
+    ]
+    require_institutional_handoffs: bool
+
+    @field_validator(
+        "required_requirement_ids",
+        "expected_stage_requirement_ids",
+    )
+    @classmethod
+    def requirement_ids_are_unique(
+        cls,
+        values: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("content-completeness requirement IDs must be unique")
+        return values
+
+    @model_validator(mode="after")
+    def expectations_are_coherent(self) -> "ContentCompletenessContext":
+        required = set(self.required_requirement_ids)
+        expected_stages = set(self.expected_stage_requirement_ids)
+        transitions = tuple(
+            (
+                transition.predecessor_requirement_id,
+                transition.successor_requirement_id,
+            )
+            for transition in self.expected_stage_transitions
+        )
+        if not expected_stages <= required:
+            raise ValueError("expected stages must be required answer requirements")
+        if len(transitions) != len(set(transitions)):
+            raise ValueError("expected stage transitions must be unique")
+        if any(
+            predecessor not in expected_stages or successor not in expected_stages
+            for predecessor, successor in transitions
+        ):
+            raise ValueError("expected transitions must connect expected stages")
+        if self.profile is ContentCompletenessProfile.FOCUSED:
+            if (
+                self.expected_stage_requirement_ids
+                or self.expected_stage_transitions
+                or self.minimum_supported_obligation_ratio != 0.0
+                or self.require_institutional_handoffs
+            ):
+                raise ValueError("focused completeness cannot carry broad-stage expectations")
+        else:
+            if (
+                self.expected_stage_requirement_ids != self.required_requirement_ids
+                or self.minimum_supported_obligation_ratio != 1.0
+            ):
+                raise ValueError(
+                    "broad completeness requires every required answer requirement "
+                    "as an ordered stage and full obligation coverage"
+                )
+            expected_transitions = tuple(
+                zip(
+                    self.expected_stage_requirement_ids,
+                    self.expected_stage_requirement_ids[1:],
+                )
+            )
+            if transitions != expected_transitions:
+                raise ValueError(
+                    "broad completeness transitions must exactly connect adjacent ordered stages"
+                )
+        if self.require_institutional_handoffs != (
+            self.profile is ContentCompletenessProfile.LONG_INSTITUTIONAL_LINEAGE
+        ):
+            raise ValueError("institutional handoffs are required only for the lineage profile")
+        return self
+
+
 class CoverageValidationContext(_ContractModel):
     requirement_ids: tuple[Identifier, ...] = Field(
         min_length=1,
         max_length=MAX_REQUIREMENTS,
     )
     premise_ids: tuple[Identifier, ...] = Field(max_length=MAX_PREMISES)
-    premise_source_scopes: tuple[PremiseSourceScope, ...] = Field(
-        max_length=MAX_PREMISES
-    )
+    premise_source_scopes: tuple[PremiseSourceScope, ...] = Field(max_length=MAX_PREMISES)
     obligation_scopes: tuple[EvidenceObligationScope, ...] = Field(
         max_length=MAX_EVIDENCE_OBLIGATIONS,
     )
@@ -721,9 +817,21 @@ class PremiseStatusCounts(_ContractModel):
 
 
 class CoverageDiagnosticSummary(_ContractModel):
-    schema_version: Literal["archivist.evidence_coverage_diagnostics/7"] = Field(alias="schema")
-    renderer_version: Literal["evidence-coverage-renderer/1"]
+    schema_version: Literal["archivist.evidence_coverage_diagnostics/8"] = Field(alias="schema")
+    renderer_version: Literal["evidence-coverage-renderer/2"]
     validation_result: DiagnosticValidationResult
+    content_outcome: ContentOutcome | None
+    completeness_profile: ContentCompletenessProfile | None
+    minimum_supported_obligation_ratio: float | None
+    required_obligation_dimension_count: int = Field(ge=0, le=MAX_ANSWER_UNITS)
+    supported_required_obligation_dimension_count: int = Field(
+        ge=0,
+        le=MAX_ANSWER_UNITS,
+    )
+    expected_stage_count: int = Field(ge=0, le=MAX_REQUIREMENTS)
+    realized_stage_count: int = Field(ge=0, le=MAX_REQUIREMENTS)
+    expected_transition_count: int = Field(ge=0, le=MAX_REQUIREMENTS - 1)
+    realized_transition_count: int = Field(ge=0, le=MAX_REQUIREMENTS - 1)
     error_code: CoverageValidationErrorCode | None
     citation_locality_failure: CitationLocalityFailure | None
     repair_applied: bool
@@ -780,6 +888,18 @@ class ValidatedEvidenceCoverage:
     answer: EvidenceCoverageAnswer
     context: CoverageValidationContext
     citation_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ContentCompletenessAssessment:
+    outcome: ContentOutcome
+    context: ContentCompletenessContext
+    required_obligation_dimension_count: int
+    supported_required_obligation_dimension_count: int
+    expected_stage_count: int
+    realized_stage_count: int
+    expected_transition_count: int
+    realized_transition_count: int
 
 
 def parse_citation_numbers(text: str) -> tuple[int, ...]:
@@ -871,12 +991,9 @@ def validate_evidence_coverage(
     requirement_order = {
         requirement_id: index for index, requirement_id in enumerate(context.requirement_ids)
     }
-    obligation_scopes_by_id = {
-        scope.obligation_id: scope for scope in context.obligation_scopes
-    }
+    obligation_scopes_by_id = {scope.obligation_id: scope for scope in context.obligation_scopes}
     obligation_order = {
-        scope.obligation_id: index
-        for index, scope in enumerate(context.obligation_scopes)
+        scope.obligation_id: index for index, scope in enumerate(context.obligation_scopes)
     }
     obligation_dimension_order = {
         (scope.obligation_id, dimension): index
@@ -896,9 +1013,7 @@ def validate_evidence_coverage(
                     CoverageValidationErrorCode.PREMISE_CORRECTION_REQUIREMENT_MISMATCH
                 )
         elif not unit.requirement_ids:
-            raise CoverageContractError(
-                CoverageValidationErrorCode.MISSING_UNIT_REQUIREMENT_ID
-            )
+            raise CoverageContractError(CoverageValidationErrorCode.MISSING_UNIT_REQUIREMENT_ID)
         if _has_duplicates(unit.requirement_ids):
             raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_REQUIREMENT_ID)
         if any(requirement_id not in requirement_order for requirement_id in unit.requirement_ids):
@@ -929,22 +1044,15 @@ def validate_evidence_coverage(
         if _ordered_unique(cited_numbers) != unit.source_numbers:
             raise CoverageContractError(CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH)
 
-        link_keys = tuple(
-            (link.obligation_id, link.dimension)
-            for link in unit.obligation_links
-        )
+        link_keys = tuple((link.obligation_id, link.dimension) for link in unit.obligation_links)
         if len(link_keys) != len(set(link_keys)):
-            raise CoverageContractError(
-                CoverageValidationErrorCode.DUPLICATE_UNIT_OBLIGATION_LINK
-            )
+            raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_UNIT_OBLIGATION_LINK)
         if any(
             obligation_id not in obligation_scopes_by_id
             or (obligation_id, dimension) not in obligation_dimension_order
             for obligation_id, dimension in link_keys
         ):
-            raise CoverageContractError(
-                CoverageValidationErrorCode.UNKNOWN_UNIT_OBLIGATION_LINK
-            )
+            raise CoverageContractError(CoverageValidationErrorCode.UNKNOWN_UNIT_OBLIGATION_LINK)
         canonical_link_order = tuple(
             sorted(
                 link_keys,
@@ -964,25 +1072,15 @@ def validate_evidence_coverage(
                 for link in unit.obligation_links
             )
             if set(linked_source_numbers) != set(unit.source_numbers):
-                raise CoverageContractError(
-                    CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH
-                )
+                raise CoverageContractError(CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH)
             if any(
                 (
                     tuple(unit.requirement_ids)
-                    != obligation_scopes_by_id[
-                        link.obligation_id
-                    ].allowed_requirement_ids
-                    if obligation_scopes_by_id[
-                        link.obligation_id
-                    ].kind
+                    != obligation_scopes_by_id[link.obligation_id].allowed_requirement_ids
+                    if obligation_scopes_by_id[link.obligation_id].kind
                     is EvidenceObligationKind.ADJACENT_STAGE_LINK
                     else not set(unit.requirement_ids)
-                    <= set(
-                        obligation_scopes_by_id[
-                            link.obligation_id
-                        ].allowed_requirement_ids
-                    )
+                    <= set(obligation_scopes_by_id[link.obligation_id].allowed_requirement_ids)
                 )
                 for link in unit.obligation_links
             ):
@@ -991,9 +1089,7 @@ def validate_evidence_coverage(
                 )
         citation_count += len(cited_numbers)
 
-    premise_scopes = {
-        scope.premise_id: scope for scope in context.premise_source_scopes
-    }
+    premise_scopes = {scope.premise_id: scope for scope in context.premise_source_scopes}
     correction_reference_counts: Counter[str] = Counter()
     for decision in answer.premise_decisions:
         _validate_source_numbers(decision.source_numbers, context.source_count)
@@ -1007,9 +1103,7 @@ def validate_evidence_coverage(
             raise CoverageContractError(CoverageValidationErrorCode.PREMISE_STATUS_INVALID)
         if decision.status is PremiseStatus.SUPPORTED:
             if not set(decision.source_numbers) <= set(scope.support_source_numbers):
-                raise CoverageContractError(
-                    CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
-                )
+                raise CoverageContractError(CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH)
         if decision.status is PremiseStatus.CONTRADICTED:
             if decision.correction_unit_id is None:
                 raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_MISSING)
@@ -1023,17 +1117,11 @@ def validate_evidence_coverage(
             allowed_correction_sources = set(scope.counter_source_numbers) | set(
                 scope.framing_source_numbers
             )
-            if (
-                not set(decision.source_numbers) <= allowed_correction_sources
-                or (
-                    scope.framing_source_numbers
-                    and not set(decision.source_numbers)
-                    & set(scope.framing_source_numbers)
-                )
+            if not set(decision.source_numbers) <= allowed_correction_sources or (
+                scope.framing_source_numbers
+                and not set(decision.source_numbers) & set(scope.framing_source_numbers)
             ):
-                raise CoverageContractError(
-                    CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
-                )
+                raise CoverageContractError(CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH)
             if decision.correction_unit_id != first_rendered_unit_id:
                 raise CoverageContractError(
                     CoverageValidationErrorCode.PREMISE_CORRECTION_NOT_FIRST
@@ -1047,9 +1135,8 @@ def validate_evidence_coverage(
         for unit in answer.answer_units
         if unit.role is AnswerUnitRole.PREMISE_CORRECTION
     }
-    if (
-        set(correction_reference_counts) != correction_unit_ids
-        or any(count != 1 for count in correction_reference_counts.values())
+    if set(correction_reference_counts) != correction_unit_ids or any(
+        count != 1 for count in correction_reference_counts.values()
     ):
         raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID)
 
@@ -1085,10 +1172,7 @@ def validate_evidence_coverage(
             mapped_source_numbers = _ordered_unique(
                 number for unit in mapped_units for number in unit.source_numbers
             )
-            if (
-                dimension_record.status is RequirementStatus.UNSUPPORTED
-                and mapped_units
-            ):
+            if dimension_record.status is RequirementStatus.UNSUPPORTED and mapped_units:
                 raise CoverageContractError(
                     CoverageValidationErrorCode.UNSUPPORTED_OBLIGATION_HAS_UNIT
                 )
@@ -1101,18 +1185,12 @@ def validate_evidence_coverage(
                     CoverageValidationErrorCode.OBLIGATION_SOURCE_MAPPING_MISMATCH
                 )
             if mapped_units and mapped_source_numbers != (scope.source_number,):
-                raise CoverageContractError(
-                    CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH
-                )
+                raise CoverageContractError(CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH)
             if any(
-                unit.role not in _DIMENSION_COMPATIBLE_ROLES[
-                    dimension_record.dimension
-                ]
+                unit.role not in _DIMENSION_COMPATIBLE_ROLES[dimension_record.dimension]
                 for unit in mapped_units
             ):
-                raise CoverageContractError(
-                    CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
-                )
+                raise CoverageContractError(CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH)
 
     coverage_by_requirement = {record.requirement_id: record for record in answer.coverage}
     for record in answer.coverage:
@@ -1155,16 +1233,13 @@ def validate_evidence_coverage(
             for scope in context.obligation_scopes
             if scope.required_for_requirement_status
             and record.requirement_id in scope.allowed_requirement_ids
-            for dimension_record in obligation_coverage_by_id[
-                scope.obligation_id
-            ].dimensions
+            for dimension_record in obligation_coverage_by_id[scope.obligation_id].dimensions
             if dimension_record.status is RequirementStatus.SUPPORTED
         }
         if (
             record.status is RequirementStatus.SUPPORTED
             and required_obligation_dimensions
-            and not required_obligation_dimensions
-            <= supported_obligation_dimensions
+            and not required_obligation_dimensions <= supported_obligation_dimensions
         ):
             raise CoverageContractError(
                 CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_STATUS_MISMATCH
@@ -1182,12 +1257,193 @@ def validate_evidence_coverage(
     )
 
 
+def _content_completeness_context(
+    requirement_ids: Sequence[str],
+    value: ContentCompletenessContext | Mapping[str, Any] | None,
+) -> ContentCompletenessContext:
+    try:
+        context = (
+            ContentCompletenessContext(
+                profile=ContentCompletenessProfile.FOCUSED,
+                required_requirement_ids=tuple(requirement_ids),
+                expected_stage_requirement_ids=(),
+                expected_stage_transitions=(),
+                minimum_supported_obligation_ratio=0.0,
+                require_institutional_handoffs=False,
+            )
+            if value is None
+            else value
+            if isinstance(value, ContentCompletenessContext)
+            else ContentCompletenessContext.model_validate(value)
+        )
+    except (TypeError, ValidationError):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT) from None
+    if context.required_requirement_ids != tuple(requirement_ids):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
+    return context
+
+
+def _supported_obligation_dimensions(
+    validated: ValidatedEvidenceCoverage,
+) -> dict[tuple[str, EvidenceDimension], RequirementStatus]:
+    return {
+        (record.obligation_id, dimension.dimension): dimension.status
+        for record in validated.answer.obligation_coverage
+        for dimension in record.dimensions
+    }
+
+
+def _assess_content_outcome(
+    validated: ValidatedEvidenceCoverage,
+    *,
+    completeness_context: ContentCompletenessContext | Mapping[str, Any] | None = None,
+) -> _ContentCompletenessAssessment:
+    """Classify source-bounded completeness after structural validation."""
+
+    context = _content_completeness_context(
+        validated.context.requirement_ids,
+        completeness_context,
+    )
+    coverage_by_requirement = {
+        record.requirement_id: record for record in validated.answer.coverage
+    }
+    required_records = tuple(
+        coverage_by_requirement[requirement_id]
+        for requirement_id in context.required_requirement_ids
+    )
+    if not validated.answer.answer_units or all(
+        record.status is RequirementStatus.UNSUPPORTED for record in required_records
+    ):
+        outcome = ContentOutcome.INSUFFICIENT_EVIDENCE
+    else:
+        outcome = ContentOutcome.VALID_PARTIAL
+
+    dimension_status = _supported_obligation_dimensions(validated)
+    required_dimensions = tuple(
+        (scope.obligation_id, dimension)
+        for scope in validated.context.obligation_scopes
+        if scope.required_for_requirement_status
+        for dimension in scope.dimension_ids
+    )
+    supported_required_dimensions = sum(
+        dimension_status.get(key) is RequirementStatus.SUPPORTED for key in required_dimensions
+    )
+
+    stage_scopes = tuple(
+        scope
+        for scope in validated.context.obligation_scopes
+        if scope.kind is EvidenceObligationKind.STAGE
+    )
+    realized_stage_count = 0
+    for requirement_id in context.expected_stage_requirement_ids:
+        matching_scopes = tuple(
+            scope for scope in stage_scopes if requirement_id in scope.allowed_requirement_ids
+        )
+        if any(
+            (
+                not context.require_institutional_handoffs
+                or EvidenceDimension.INSTITUTIONAL_HANDOFF in scope.dimension_ids
+            )
+            and all(
+                dimension_status.get((scope.obligation_id, dimension))
+                is RequirementStatus.SUPPORTED
+                for dimension in scope.dimension_ids
+            )
+            for scope in matching_scopes
+        ):
+            realized_stage_count += 1
+
+    transition_scopes = tuple(
+        scope
+        for scope in validated.context.obligation_scopes
+        if scope.kind is EvidenceObligationKind.ADJACENT_STAGE_LINK
+    )
+    realized_transition_count = 0
+    for transition in context.expected_stage_transitions:
+        pair = (
+            transition.predecessor_requirement_id,
+            transition.successor_requirement_id,
+        )
+        if any(
+            scope.allowed_requirement_ids == pair
+            and all(
+                dimension_status.get((scope.obligation_id, dimension))
+                is RequirementStatus.SUPPORTED
+                for dimension in scope.dimension_ids
+            )
+            for scope in transition_scopes
+        ):
+            realized_transition_count += 1
+
+    required_dimension_count = len(required_dimensions)
+    supported_ratio = (
+        supported_required_dimensions / required_dimension_count
+        if required_dimension_count
+        else 1.0
+    )
+    content_complete = (
+        outcome is not ContentOutcome.INSUFFICIENT_EVIDENCE
+        and all(record.status is RequirementStatus.SUPPORTED for record in required_records)
+        and supported_ratio >= context.minimum_supported_obligation_ratio
+        and realized_stage_count == len(context.expected_stage_requirement_ids)
+        and realized_transition_count == len(context.expected_stage_transitions)
+    )
+    if content_complete:
+        outcome = ContentOutcome.VALID_COMPLETE
+
+    return _ContentCompletenessAssessment(
+        outcome=outcome,
+        context=context,
+        required_obligation_dimension_count=required_dimension_count,
+        supported_required_obligation_dimension_count=supported_required_dimensions,
+        expected_stage_count=len(context.expected_stage_requirement_ids),
+        realized_stage_count=realized_stage_count,
+        expected_transition_count=len(context.expected_stage_transitions),
+        realized_transition_count=realized_transition_count,
+    )
+
+
+def _bounded_content_limitation(
+    profile: ContentCompletenessProfile,
+    coverage: Sequence[RequirementCoverage],
+) -> str:
+    statuses = {record.status for record in coverage}
+    has_conflict = RequirementStatus.CONFLICTING in statuses
+    has_unsupported = RequirementStatus.UNSUPPORTED in statuses
+    if profile is ContentCompletenessProfile.LONG_INSTITUTIONAL_LINEAGE:
+        if has_conflict:
+            return (
+                "The retrieved passages conflict on part of the requested institutional "
+                "lineage; one or more required stages or handoffs remain disputed."
+            )
+        return (
+            "The retrieved passages establish only part of the requested institutional "
+            "lineage; one or more required stages or handoffs remain unestablished."
+        )
+    if profile is ContentCompletenessProfile.BROAD_SYNTHESIS:
+        if has_conflict:
+            return (
+                "The retrieved passages conflict on part of the requested historical "
+                "account; one or more required stages or connections remain disputed."
+            )
+        return (
+            "The retrieved passages establish only part of the requested historical "
+            "account; one or more required stages or connections remain unestablished."
+        )
+    if has_conflict:
+        return "The retrieved passages conflict on part of the requested answer."
+    if has_unsupported:
+        return "The retrieved passages do not establish all of the requested answer."
+    return "The retrieved passages establish only part of the requested answer."
+
+
 def render_evidence_coverage(
     validated: ValidatedEvidenceCoverage,
     *,
     requirement_labels: Mapping[str, str] | None = None,
+    completeness_context: ContentCompletenessContext | Mapping[str, Any] | None = None,
 ) -> str:
-    """Render every validated unit once, followed by deterministic gap text."""
+    """Render every validated unit once, followed by at most one bounded limitation."""
 
     answer = validated.answer
     if validated.context.source_count == 0:
@@ -1207,23 +1463,18 @@ def render_evidence_coverage(
         " ".join(unit.text for unit in grouped_units)
         for _, grouped_units in groupby(ordered_units, key=lambda unit: unit.paragraph)
     ]
-
-    labels = requirement_labels or {}
-    for record in answer.coverage:
-        label = _reader_safe_label(labels.get(record.requirement_id))
-        if record.status is RequirementStatus.PARTIAL:
-            paragraphs.append(
-                f"The retrieved passages only partially establish this requested point ({label})."
+    del requirement_labels
+    resolved_assessment = _assess_content_outcome(
+        validated,
+        completeness_context=completeness_context,
+    )
+    if resolved_assessment.outcome is ContentOutcome.VALID_PARTIAL:
+        paragraphs.append(
+            _bounded_content_limitation(
+                resolved_assessment.context.profile,
+                answer.coverage,
             )
-        elif record.status is RequirementStatus.UNSUPPORTED:
-            paragraphs.append(
-                f"The retrieved passages do not establish this requested point ({label})."
-            )
-        elif record.status is RequirementStatus.CONFLICTING:
-            citation = _format_citation(record.source_numbers)
-            paragraphs.append(
-                f"The retrieved sources conflict about this requested point ({label}) {citation}."
-            )
+        )
 
     return "\n\n".join(paragraphs)
 
@@ -1232,6 +1483,7 @@ def coverage_diagnostic_summary(
     validated: ValidatedEvidenceCoverage,
     *,
     repair_codes: Sequence[CoverageValidationErrorCode] = (),
+    completeness_context: ContentCompletenessContext | Mapping[str, Any] | None = None,
 ) -> CoverageDiagnosticSummary:
     """Return a trace-safe summary with no generated or question-derived prose."""
 
@@ -1239,10 +1491,29 @@ def coverage_diagnostic_summary(
     normalized_repair_codes = tuple(dict.fromkeys(repair_codes))
     coverage_counts = Counter(record.status for record in answer.coverage)
     premise_counts = Counter(record.status for record in answer.premise_decisions)
+    resolved_assessment = _assess_content_outcome(
+        validated,
+        completeness_context=completeness_context,
+    )
     return CoverageDiagnosticSummary(
         schema=EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA,
         renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
         validation_result=DiagnosticValidationResult.VALID,
+        content_outcome=resolved_assessment.outcome,
+        completeness_profile=resolved_assessment.context.profile,
+        minimum_supported_obligation_ratio=(
+            resolved_assessment.context.minimum_supported_obligation_ratio
+        ),
+        required_obligation_dimension_count=(
+            resolved_assessment.required_obligation_dimension_count
+        ),
+        supported_required_obligation_dimension_count=(
+            resolved_assessment.supported_required_obligation_dimension_count
+        ),
+        expected_stage_count=resolved_assessment.expected_stage_count,
+        realized_stage_count=resolved_assessment.realized_stage_count,
+        expected_transition_count=resolved_assessment.expected_transition_count,
+        realized_transition_count=resolved_assessment.realized_transition_count,
         error_code=None,
         citation_locality_failure=None,
         repair_applied=bool(normalized_repair_codes),
@@ -1312,6 +1583,7 @@ def process_evidence_coverage(
     obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
     source_count: int,
     requirement_labels: Mapping[str, str] | None = None,
+    completeness_context: ContentCompletenessContext | Mapping[str, Any] | None = None,
     refused: bool = False,
 ) -> EvidenceCoverageResult:
     """Validate and render, or return one stable fail-closed result.
@@ -1334,6 +1606,17 @@ def process_evidence_coverage(
             error_code=error.code,
         )
 
+    try:
+        resolved_completeness_context = _content_completeness_context(
+            context.requirement_ids,
+            completeness_context,
+        )
+    except CoverageContractError as error:
+        return _contract_failure_result(
+            context=context,
+            error_code=error.code,
+        )
+
     if context.source_count == 0:
         return EvidenceCoverageResult(
             status=CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE,
@@ -1342,6 +1625,8 @@ def process_evidence_coverage(
             diagnostics=_empty_diagnostic_summary(
                 context,
                 validation_result=DiagnosticValidationResult.NOT_RUN,
+                content_outcome=ContentOutcome.INSUFFICIENT_EVIDENCE,
+                completeness_context=resolved_completeness_context,
                 error_code=None,
             ),
         )
@@ -1374,17 +1659,19 @@ def process_evidence_coverage(
             citation_locality_failure=error.citation_locality_failure,
         )
 
+    assessment = _assess_content_outcome(
+        validated,
+        completeness_context=resolved_completeness_context,
+    )
     rendered = render_evidence_coverage(
         validated,
         requirement_labels=requirement_labels,
-    )
-    all_unsupported = all(
-        record.status is RequirementStatus.UNSUPPORTED for record in validated.answer.coverage
+        completeness_context=resolved_completeness_context,
     )
     return EvidenceCoverageResult(
         status=(
             CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
-            if all_unsupported
+            if assessment.outcome is ContentOutcome.INSUFFICIENT_EVIDENCE
             else CoverageOutcomeStatus.ANSWERED
         ),
         answer=rendered,
@@ -1392,6 +1679,7 @@ def process_evidence_coverage(
         diagnostics=coverage_diagnostic_summary(
             validated,
             repair_codes=repair_codes,
+            completeness_context=resolved_completeness_context,
         ),
     )
 
@@ -1407,6 +1695,7 @@ def process_interpretive_evidence_coverage(
     obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
     source_count: int,
     requirement_labels: Mapping[str, str] | None = None,
+    completeness_context: ContentCompletenessContext | Mapping[str, Any] | None = None,
     refused: bool = False,
 ) -> EvidenceCoverageResult:
     """Frame validated factual coverage with explicitly subjective prose.
@@ -1425,9 +1714,7 @@ def process_interpretive_evidence_coverage(
             source_count,
         )
         expected_moves = _validate_required_interpretive_moves(required_moves)
-        expected_question_anchors = _validate_interpretive_question_anchors(
-            question_anchors
-        )
+        expected_question_anchors = _validate_interpretive_question_anchors(question_anchors)
     except CoverageContractError as error:
         return _contract_failure_result(
             context=None,
@@ -1443,6 +1730,7 @@ def process_interpretive_evidence_coverage(
             obligation_scopes=context.obligation_scopes,
             source_count=context.source_count,
             requirement_labels=requirement_labels,
+            completeness_context=completeness_context,
             refused=refused,
         )
 
@@ -1469,6 +1757,7 @@ def process_interpretive_evidence_coverage(
         obligation_scopes=context.obligation_scopes,
         source_count=context.source_count,
         requirement_labels=requirement_labels,
+        completeness_context=completeness_context,
     )
     if factual_result.status is not CoverageOutcomeStatus.ANSWERED:
         return factual_result
@@ -1501,12 +1790,8 @@ def process_interpretive_evidence_coverage(
 def validate_evidence_coverage_context(
     requirement_ids: Sequence[str],
     premise_ids: Sequence[str] = (),
-    premise_source_scopes: Sequence[
-        PremiseSourceScope | Mapping[str, Any]
-    ] = (),
-    obligation_scopes: Sequence[
-        EvidenceObligationScope | Mapping[str, Any]
-    ] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
     source_count: int = 0,
 ) -> CoverageValidationContext:
     """Validate trusted coverage inputs before generation is attempted."""
@@ -1568,19 +1853,13 @@ def _validation_context(
             CoverageValidationErrorCode.OBLIGATION_DIMENSION_CAPACITY_EXCEEDED
         )
     scope_ids = tuple(scope.premise_id for scope in context.premise_source_scopes)
-    obligation_ids = tuple(
-        scope.obligation_id for scope in context.obligation_scopes
-    )
+    obligation_ids = tuple(scope.obligation_id for scope in context.obligation_scopes)
     requirement_order = {
-        requirement_id: index
-        for index, requirement_id in enumerate(context.requirement_ids)
+        requirement_id: index for index, requirement_id in enumerate(context.requirement_ids)
     }
     stage_scopes_by_requirement: dict[str, list[EvidenceObligationScope]] = {}
     for scope in context.obligation_scopes:
-        if (
-            scope.kind is EvidenceObligationKind.STAGE
-            and len(scope.allowed_requirement_ids) == 1
-        ):
+        if scope.kind is EvidenceObligationKind.STAGE and len(scope.allowed_requirement_ids) == 1:
             stage_scopes_by_requirement.setdefault(
                 scope.allowed_requirement_ids[0],
                 [],
@@ -1592,9 +1871,7 @@ def _validation_context(
             for requirement_id in scope.allowed_requirement_ids
         ):
             return False
-        predecessor_requirement_id, current_requirement_id = (
-            scope.allowed_requirement_ids
-        )
+        predecessor_requirement_id, current_requirement_id = scope.allowed_requirement_ids
         predecessor_scopes = stage_scopes_by_requirement.get(
             predecessor_requirement_id,
             (),
@@ -1608,8 +1885,7 @@ def _validation_context(
             == requirement_order[predecessor_requirement_id] + 1
             and len(predecessor_scopes) == 1
             and len(current_scopes) == 1
-            and scope.predecessor_source_number
-            == predecessor_scopes[0].source_number
+            and scope.predecessor_source_number == predecessor_scopes[0].source_number
         )
 
     adjacent_link_scopes_valid = all(
@@ -1706,12 +1982,9 @@ def _validate_interpretive_question_anchors(
     if (
         len(normalized) > MAX_REQUIREMENTS
         or any(
-            not anchor or len(anchor) > MAX_REQUIREMENT_LABEL_CHARACTERS
-            for anchor in normalized
+            not anchor or len(anchor) > MAX_REQUIREMENT_LABEL_CHARACTERS for anchor in normalized
         )
-        or _has_duplicates(
-            tuple(_normalize_interpretive_text(anchor) for anchor in normalized)
-        )
+        or _has_duplicates(tuple(_normalize_interpretive_text(anchor) for anchor in normalized))
     ):
         raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
     return normalized
@@ -1724,13 +1997,9 @@ def _validate_interpretive_frame(
     question_anchors: Sequence[str],
 ) -> None:
     if not answer.interpretive_preface or not answer.interpretive_coda:
-        raise CoverageContractError(
-            CoverageValidationErrorCode.MISSING_INTERPRETIVE_PARAGRAPH
-        )
+        raise CoverageContractError(CoverageValidationErrorCode.MISSING_INTERPRETIVE_PARAGRAPH)
     if answer.interpretive_moves != tuple(required_moves):
-        raise CoverageContractError(
-            CoverageValidationErrorCode.INTERPRETIVE_MOVE_MISMATCH
-        )
+        raise CoverageContractError(CoverageValidationErrorCode.INTERPRETIVE_MOVE_MISMATCH)
     if any(
         "[" in text or "]" in text
         for text in (
@@ -1738,16 +2007,12 @@ def _validate_interpretive_frame(
             answer.interpretive_coda,
         )
     ):
-        raise CoverageContractError(
-            CoverageValidationErrorCode.INTERPRETIVE_CITATION_FORBIDDEN
-        )
+        raise CoverageContractError(CoverageValidationErrorCode.INTERPRETIVE_CITATION_FORBIDDEN)
     if (
         _sentence_count(answer.interpretive_preface) not in {2, 3}
         or _sentence_count(answer.interpretive_coda) != 1
     ):
-        raise CoverageContractError(
-            CoverageValidationErrorCode.INTERPRETIVE_SENTENCE_COUNT_INVALID
-        )
+        raise CoverageContractError(CoverageValidationErrorCode.INTERPRETIVE_SENTENCE_COUNT_INVALID)
     if any(
         _FIRST_PERSON_PATTERN.search(text)
         for text in (
@@ -1755,9 +2020,7 @@ def _validate_interpretive_frame(
             answer.interpretive_coda,
         )
     ):
-        raise CoverageContractError(
-            CoverageValidationErrorCode.INTERPRETIVE_FIRST_PERSON_FORBIDDEN
-        )
+        raise CoverageContractError(CoverageValidationErrorCode.INTERPRETIVE_FIRST_PERSON_FORBIDDEN)
     if question_anchors and any(
         not _contains_every_interpretive_anchor(text, question_anchors)
         for text in (
@@ -1765,9 +2028,7 @@ def _validate_interpretive_frame(
             answer.interpretive_coda,
         )
     ):
-        raise CoverageContractError(
-            CoverageValidationErrorCode.INTERPRETIVE_SUBJECT_MISSING
-        )
+        raise CoverageContractError(CoverageValidationErrorCode.INTERPRETIVE_SUBJECT_MISSING)
 
 
 def _normalize_interpretive_text(text: str) -> str:
@@ -1788,9 +2049,7 @@ def _contains_every_interpretive_anchor(
 
 def _sentence_count(text: str) -> int:
     sentences = re.split(r"(?<=[.!?])\s+", text)
-    if not sentences or any(
-        not sentence or sentence[-1] not in ".!?" for sentence in sentences
-    ):
+    if not sentences or any(not sentence or sentence[-1] not in ".!?" for sentence in sentences):
         return 0
     return len(sentences)
 
@@ -1817,8 +2076,7 @@ def _normalize_mechanical_contract(
         requirement_id: index for index, requirement_id in enumerate(context.requirement_ids)
     }
     obligation_order = {
-        scope.obligation_id: index
-        for index, scope in enumerate(context.obligation_scopes)
+        scope.obligation_id: index for index, scope in enumerate(context.obligation_scopes)
     }
     dimension_order = {
         (scope.obligation_id, dimension): index
@@ -1858,13 +2116,9 @@ def _normalize_mechanical_contract(
             source_numbers = canonical_citations
 
         obligation_links = unit.obligation_links
-        link_keys = tuple(
-            (link.obligation_id, link.dimension)
-            for link in obligation_links
-        )
-        if (
-            len(link_keys) == len(set(link_keys))
-            and all(key[0] in obligation_order and key in dimension_order for key in link_keys)
+        link_keys = tuple((link.obligation_id, link.dimension) for link in obligation_links)
+        if len(link_keys) == len(set(link_keys)) and all(
+            key[0] in obligation_order and key in dimension_order for key in link_keys
         ):
             canonical_links = tuple(
                 sorted(
@@ -1876,9 +2130,7 @@ def _normalize_mechanical_contract(
                 )
             )
             if canonical_links != obligation_links:
-                repair_codes.append(
-                    CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_OBLIGATION_LINK
-                )
+                repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_OBLIGATION_LINK)
                 obligation_links = canonical_links
 
         normalized_units.append(
@@ -1897,18 +2149,12 @@ def _normalize_mechanical_contract(
 
     obligation_coverage = _reorder_exact_records(
         answer.obligation_coverage,
-        expected_ids=tuple(
-            scope.obligation_id for scope in context.obligation_scopes
-        ),
+        expected_ids=tuple(scope.obligation_id for scope in context.obligation_scopes),
         id_attribute="obligation_id",
     )
     if obligation_coverage != answer.obligation_coverage:
-        repair_codes.append(
-            CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_ID
-        )
-    scopes_by_id = {
-        scope.obligation_id: scope for scope in context.obligation_scopes
-    }
+        repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_ID)
+    scopes_by_id = {scope.obligation_id: scope for scope in context.obligation_scopes}
     normalized_obligation_coverage: list[EvidenceObligationCoverage] = []
     for record in obligation_coverage:
         scope = scopes_by_id.get(record.obligation_id)
@@ -1921,9 +2167,7 @@ def _normalize_mechanical_contract(
             id_attribute="dimension",
         )
         if dimensions != record.dimensions:
-            repair_codes.append(
-                CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_DIMENSION
-            )
+            repair_codes.append(CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_DIMENSION)
         normalized_dimensions: list[EvidenceDimensionCoverage] = []
         for dimension_record in dimensions:
             mapped_units = tuple(
@@ -1951,18 +2195,13 @@ def _normalize_mechanical_contract(
             expected_gap = _STATUS_GAP_REASON[dimension_record.status]
             if dimension_record.gap_reason is not expected_gap:
                 repair_codes.append(CoverageValidationErrorCode.STATUS_GAP_MISMATCH)
-                dimension_record = dimension_record.model_copy(
-                    update={"gap_reason": expected_gap}
-                )
+                dimension_record = dimension_record.model_copy(update={"gap_reason": expected_gap})
             if dimension_record.status is RequirementStatus.UNSUPPORTED:
                 normalized_dimensions.append(dimension_record)
                 continue
             mappings_are_safe_to_derive = (
                 not _has_duplicates(dimension_record.unit_ids)
-                and all(
-                    unit_id in known_unit_ids
-                    for unit_id in dimension_record.unit_ids
-                )
+                and all(unit_id in known_unit_ids for unit_id in dimension_record.unit_ids)
                 and not _has_duplicates(dimension_record.source_numbers)
                 and all(
                     1 <= source_number <= context.source_count
@@ -1974,18 +2213,12 @@ def _normalize_mechanical_contract(
                 continue
             mapped_unit_ids = tuple(unit.unit_id for unit in mapped_units)
             mapped_source_numbers = _ordered_unique(
-                source_number
-                for unit in mapped_units
-                for source_number in unit.source_numbers
+                source_number for unit in mapped_units for source_number in unit.source_numbers
             )
             if dimension_record.unit_ids != mapped_unit_ids:
-                repair_codes.append(
-                    CoverageValidationErrorCode.OBLIGATION_UNIT_MAPPING_MISMATCH
-                )
+                repair_codes.append(CoverageValidationErrorCode.OBLIGATION_UNIT_MAPPING_MISMATCH)
             if dimension_record.source_numbers != mapped_source_numbers:
-                repair_codes.append(
-                    CoverageValidationErrorCode.OBLIGATION_SOURCE_MAPPING_MISMATCH
-                )
+                repair_codes.append(CoverageValidationErrorCode.OBLIGATION_SOURCE_MAPPING_MISMATCH)
             normalized_dimensions.append(
                 dimension_record.model_copy(
                     update={
@@ -1995,13 +2228,10 @@ def _normalize_mechanical_contract(
                 )
             )
         normalized_obligation_coverage.append(
-            record.model_copy(
-                update={"dimensions": tuple(normalized_dimensions)}
-            )
+            record.model_copy(update={"dimensions": tuple(normalized_dimensions)})
         )
     obligation_coverage_by_id = {
-        record.obligation_id: record
-        for record in normalized_obligation_coverage
+        record.obligation_id: record for record in normalized_obligation_coverage
     }
 
     coverage = _reorder_exact_records(
@@ -2029,20 +2259,15 @@ def _normalize_mechanical_contract(
             if scope.required_for_requirement_status
             and record.requirement_id in scope.allowed_requirement_ids
             and scope.obligation_id in obligation_coverage_by_id
-            for dimension_record in obligation_coverage_by_id[
-                scope.obligation_id
-            ].dimensions
+            for dimension_record in obligation_coverage_by_id[scope.obligation_id].dimensions
             if dimension_record.status is RequirementStatus.SUPPORTED
         }
         if (
             record.status is RequirementStatus.SUPPORTED
             and required_obligation_dimensions
-            and not required_obligation_dimensions
-            <= supported_obligation_dimensions
+            and not required_obligation_dimensions <= supported_obligation_dimensions
         ):
-            repair_codes.append(
-                CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_STATUS_MISMATCH
-            )
+            repair_codes.append(CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_STATUS_MISMATCH)
             record = record.model_copy(
                 update={
                     "status": RequirementStatus.PARTIAL,
@@ -2226,7 +2451,7 @@ def _normalize_pre_citation_terminal(text: str) -> tuple[str, bool]:
     normalized_claim = claim[:-1].rstrip()
     if not normalized_claim:
         return text, False
-    return f"{normalized_claim} {text[citation.start():]}", True
+    return f"{normalized_claim} {text[citation.start() :]}", True
 
 
 def _citation_locality_failure(
@@ -2277,9 +2502,7 @@ def _citation_locality_failure(
     elif ";" in claim:
         code = CitationLocalityFailureCode.SEMICOLON_IN_CLAIM
     else:
-        terminators = tuple(
-            index for index, character in enumerate(claim) if character in ".!?"
-        )
+        terminators = tuple(index for index, character in enumerate(claim) if character in ".!?")
         if len(terminators) == 1 and terminators[0] == len(claim) - 1:
             code = CitationLocalityFailureCode.PRE_CITATION_TERMINAL_PUNCTUATION
         elif terminators:
@@ -2333,6 +2556,8 @@ def _empty_diagnostic_summary(
     context: CoverageValidationContext,
     *,
     validation_result: DiagnosticValidationResult,
+    content_outcome: ContentOutcome | None = None,
+    completeness_context: ContentCompletenessContext | None = None,
     error_code: CoverageValidationErrorCode | None,
     citation_locality_failure: CitationLocalityFailure | None = None,
     repair_codes: Sequence[CoverageValidationErrorCode] = (),
@@ -2342,6 +2567,29 @@ def _empty_diagnostic_summary(
         schema=EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA,
         renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
         validation_result=validation_result,
+        content_outcome=content_outcome,
+        completeness_profile=(
+            completeness_context.profile if completeness_context is not None else None
+        ),
+        minimum_supported_obligation_ratio=(
+            completeness_context.minimum_supported_obligation_ratio
+            if completeness_context is not None
+            else None
+        ),
+        required_obligation_dimension_count=0,
+        supported_required_obligation_dimension_count=0,
+        expected_stage_count=(
+            len(completeness_context.expected_stage_requirement_ids)
+            if completeness_context is not None
+            else 0
+        ),
+        realized_stage_count=0,
+        expected_transition_count=(
+            len(completeness_context.expected_stage_transitions)
+            if completeness_context is not None
+            else 0
+        ),
+        realized_transition_count=0,
         error_code=error_code,
         citation_locality_failure=citation_locality_failure,
         repair_applied=bool(normalized_repair_codes),
@@ -2388,6 +2636,15 @@ def _contract_failure_result(
             schema=EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA,
             renderer_version=EVIDENCE_COVERAGE_RENDERER_VERSION,
             validation_result=DiagnosticValidationResult.INVALID,
+            content_outcome=None,
+            completeness_profile=None,
+            minimum_supported_obligation_ratio=None,
+            required_obligation_dimension_count=0,
+            supported_required_obligation_dimension_count=0,
+            expected_stage_count=0,
+            realized_stage_count=0,
+            expected_transition_count=0,
+            realized_transition_count=0,
             error_code=error_code,
             citation_locality_failure=citation_locality_failure,
             repair_applied=bool(normalized_repair_codes),

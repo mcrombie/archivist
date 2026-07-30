@@ -50,7 +50,7 @@ def ledger_path(request):
 
 def answer_run_diagnostics_payload(**overrides):
     payload = {
-        "schema": "archivist.answer_run_diagnostics/2",
+        "schema": "archivist.answer_run_diagnostics/3",
         "cohort": {
             "rag_policy_version": "evidence-planned-v4",
             "query_planner_prompt_version": "query-planner-v2",
@@ -65,6 +65,7 @@ def answer_run_diagnostics_payload(**overrides):
         "answer_status": "generation_contract_failed",
         "evidence_decision": "direct_answer",
         "validation_result": "invalid",
+        "content_outcome": None,
         "validation_error_code": "citation_source_mismatch",
         "repair_applied": False,
         "repair_codes": [],
@@ -114,6 +115,7 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
     repaired = answer_run_diagnostics_payload(
         answer_status="answered",
         validation_result="valid",
+        content_outcome="valid_partial",
         validation_error_code=None,
         repair_applied=True,
         repair_codes=["source_mapping_mismatch"],
@@ -139,6 +141,7 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
     assert updated is not None
     assert updated["run_id"] != first_run_id
     assert updated["answer_status"] == "answered"
+    assert updated["content_outcome"] == "valid_partial"
     assert updated["repair_codes"] == ["source_mapping_mismatch"]
     assert updated["planner"]["exception_class"] == "SyntheticPlannerFailure"
     assert updated["planner"]["exception_code"] == "rate-limit/429"
@@ -202,7 +205,8 @@ def test_answer_run_diagnostics_migration_marks_historical_planner_state_unknown
     )
 
     assert stored is not None
-    assert stored["schema"] == "archivist.answer_run_diagnostics/2"
+    assert stored["schema"] == "archivist.answer_run_diagnostics/3"
+    assert stored["content_outcome"] is None
     assert stored["cohort"] == costs.HISTORICAL_UNKNOWN_COHORT
     assert stored["planner"] == {
         "schema": "archivist.planner_call_diagnostics/1",
@@ -213,7 +217,7 @@ def test_answer_run_diagnostics_migration_marks_historical_planner_state_unknown
     }
 
 
-def test_historical_unknown_diagnostics_are_valid_v2_write_contract(ledger_path):
+def test_historical_unknown_diagnostics_are_valid_v3_write_contract(ledger_path):
     payload = answer_run_diagnostics_payload(
         cohort=costs.HISTORICAL_UNKNOWN_COHORT,
         planner=costs.HISTORICAL_UNKNOWN_PLANNER,
@@ -970,16 +974,17 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["resolved_query"] == "Standalone question?"
     run_diagnostics = dict(response["run_diagnostics"])
     cohort = run_diagnostics.pop("cohort")
-    assert cohort["rag_policy_version"] == "evidence-planned-v24"
+    assert cohort["rag_policy_version"] == "evidence-planned-v25"
     assert cohort["query_planner_prompt_version"] == "query-planner-v11"
     assert cohort["coverage_prompt_version"] == "evidence-coverage-v9"
     assert cohort["normalizer_version"] == "evidence-coverage-normalizer/7"
     assert len(cohort["coverage_instructions_sha256"]) == 64
     assert run_diagnostics == {
-        "schema": "archivist.answer_run_diagnostics/2",
+        "schema": "archivist.answer_run_diagnostics/3",
         "answer_status": "answered",
         "evidence_decision": "direct_answer",
         "validation_result": "not_run",
+        "content_outcome": None,
         "validation_error_code": None,
         "repair_applied": False,
         "repair_codes": [],

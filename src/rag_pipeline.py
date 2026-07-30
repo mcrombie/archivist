@@ -18,7 +18,11 @@ from time import perf_counter_ns
 from typing import Any
 
 from answer_coverage import (
+    ContentCompletenessContext,
+    ContentCompletenessProfile,
+    ContentOutcome,
     CoverageContractError,
+    CoverageOutcomeStatus,
     CoverageValidationErrorCode,
     DiagnosticValidationResult,
     EVIDENCE_COVERAGE_NORMALIZER_VERSION,
@@ -28,6 +32,7 @@ from answer_coverage import (
     EvidenceObligationFocus,
     EvidenceObligationKind,
     EvidenceObligationScope,
+    ExpectedStageTransition,
     InterpretiveEvidenceCoverageAnswer,
     InterpretiveMove,
     MAX_ANSWER_UNITS,
@@ -108,10 +113,10 @@ from document_roles import (
 )
 
 
-RAG_POLICY_VERSION = "evidence-planned-v24"
+RAG_POLICY_VERSION = "evidence-planned-v25"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
-ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
+ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v11"
 EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v9"
@@ -172,22 +177,14 @@ Structured interpretive frame:
 """
 
 _INTERPRETIVE_MOVE_BY_LENS = {
-    HistoriographicalLens.TRIUMPHALIST: (
-        InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY
-    ),
-    HistoriographicalLens.TRAGIC: (
-        InterpretiveMove.TRAGIC_TENSION_AND_CONTINGENCY
-    ),
+    HistoriographicalLens.TRIUMPHALIST: (InterpretiveMove.ACHIEVEMENT_AND_DURABLE_CAPACITY),
+    HistoriographicalLens.TRAGIC: (InterpretiveMove.TRAGIC_TENSION_AND_CONTINGENCY),
 }
 
 _INTERPRETIVE_MOVE_BY_WORLDVIEW = {
     Worldview.PIOUS: InterpretiveMove.FAITH_DUTY_AND_MORAL_CONSEQUENCE,
-    Worldview.SECULAR_HUMANIST: (
-        InterpretiveMove.HUMAN_DIGNITY_AND_LIVED_CONSEQUENCE
-    ),
-    Worldview.ENLIGHTENMENT_RATIONALIST: (
-        InterpretiveMove.INQUIRY_REFORM_AND_SCRUTINY
-    ),
+    Worldview.SECULAR_HUMANIST: (InterpretiveMove.HUMAN_DIGNITY_AND_LIVED_CONSEQUENCE),
+    Worldview.ENLIGHTENMENT_RATIONALIST: (InterpretiveMove.INQUIRY_REFORM_AND_SCRUTINY),
 }
 
 
@@ -247,8 +244,47 @@ _TRUSTED_RELATED_PREFIX_PATTERNS = (
         r"(?:on|upon|in|to|with)\s+",
         flags=re.IGNORECASE,
     ),
-    re.compile(r"^(?:the|a|an)\s+", flags=re.IGNORECASE),
 )
+_ANALOGUE_TERM = (
+    r"(?:analogue|analogues|analogous|similar|comparable|comparison|"
+    r"parallel|parallels|equivalent|equivalents)"
+)
+_NEGATED_ANALOGUE_REQUEST = re.compile(
+    rf"\b(?:do\s+not|don't|without)\b[^.!?]{{0,80}}\b{_ANALOGUE_TERM}\b",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_ANALOGUE_REQUESTS = (
+    re.compile(
+        rf"\b(?:show|provide|give|find|offer|identify|include|compare)\b"
+        rf"[^.!?]{{0,80}}\b{_ANALOGUE_TERM}\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:is|are|was|were)\s+there\b[^.!?]{{0,80}}\b{_ANALOGUE_TERM}\b",
+        flags=re.IGNORECASE,
+    ),
+)
+_BOUNDED_RELATION_REQUESTS = (
+    re.compile(
+        r"\b(?:its|their)\s+"
+        r"(?:effect|effects|impact|impacts|influence|relationship|role)\s+"
+        r"(?:on|upon|in|to|with)\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:effect|effects|impact|impacts|influence|relationship|role)\s+"
+        r"(?:did|does|do|has|have)\s+(?:it|they|this|that|the former|the latter)\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(r"\brelationship\s+between\b.+?\band\b", flags=re.IGNORECASE),
+)
+_DIRECT_CAUSAL_VERBS = (
+    r"(?:affect|affected|influence|influenced|shape|shaped|change|changed|"
+    r"alter|altered)"
+)
+_NEAR_MATCH_NONE = "none"
+_NEAR_MATCH_BOUNDED_RELATION = "bounded_relation"
+_NEAR_MATCH_EXPLICIT_ANALOGUE = "explicit_analogue"
 _MAX_TRUSTED_RELATED_TOKENS = 6
 
 QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS = """\
@@ -530,6 +566,20 @@ class AnswerModeResult:
         )
         return original
 
+    @property
+    def content_outcome(self) -> str | None:
+        generation = self.diagnostics.get("generation")
+        if isinstance(generation, Mapping):
+            value = generation.get("content_outcome")
+            if value in {outcome.value for outcome in ContentOutcome}:
+                return str(value)
+        if self.status in {
+            CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE.value,
+            EvidenceDecision.CLEAN_ABSTENTION.value,
+        }:
+            return ContentOutcome.INSUFFICIENT_EVIDENCE.value
+        return None
+
 
 def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     """Project internal diagnostics into a stable, passage-free API/ledger record."""
@@ -544,6 +594,7 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     raw_planner = raw_planner if isinstance(raw_planner, Mapping) else {}
     valid_error_codes = {code.value for code in CoverageValidationErrorCode}
     valid_results = {value.value for value in DiagnosticValidationResult}
+    valid_content_outcomes = {value.value for value in ContentOutcome}
 
     validation_result = generation.get("validation_result")
     if validation_result not in valid_results:
@@ -551,6 +602,13 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     validation_error_code = generation.get("error_code")
     if validation_error_code not in valid_error_codes:
         validation_error_code = None
+    content_outcome = generation.get("content_outcome")
+    if content_outcome not in valid_content_outcomes:
+        content_outcome = getattr(result, "content_outcome", None)
+    if content_outcome not in valid_content_outcomes:
+        content_outcome = None
+    if validation_result == DiagnosticValidationResult.INVALID.value:
+        content_outcome = None
 
     repair_codes = tuple(
         dict.fromkeys(
@@ -642,6 +700,7 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
         "answer_status": result.status,
         "evidence_decision": result.evidence_decision,
         "validation_result": validation_result,
+        "content_outcome": content_outcome,
         "validation_error_code": validation_error_code,
         "repair_applied": bool(generation.get("repair_applied")) and bool(repair_codes),
         "repair_codes": list(repair_codes),
@@ -1067,7 +1126,11 @@ def preflight_answer_corpus(
 def _parse_related_probe(
     plan: QuestionPlan,
     trusted_user_texts: Sequence[str],
+    *,
+    near_match_intent: str,
 ) -> tuple[str, tuple[str, ...]] | None:
+    if near_match_intent == _NEAR_MATCH_NONE:
+        return None
     normalized_trusted_texts = tuple(
         f" {normalize_search_query(value)} " for value in trusted_user_texts if value.strip()
     )
@@ -1099,12 +1162,54 @@ def _parse_related_probe(
     return None
 
 
+def _trusted_near_match_intent(
+    trusted_user_texts: Sequence[str],
+    *,
+    subject_surfaces: Sequence[str] = (),
+) -> str:
+    """Return current-turn permission for bounded related or analogue evidence."""
+
+    current_user_text = next(
+        (
+            value
+            for value in reversed(tuple(trusted_user_texts))
+            if isinstance(value, str) and value.strip()
+        ),
+        "",
+    )
+    if not current_user_text:
+        return _NEAR_MATCH_NONE
+    if _NEGATED_ANALOGUE_REQUEST.search(current_user_text) is None and any(
+        pattern.search(current_user_text) for pattern in _EXPLICIT_ANALOGUE_REQUESTS
+    ):
+        return _NEAR_MATCH_EXPLICIT_ANALOGUE
+    if any(pattern.search(current_user_text) for pattern in _BOUNDED_RELATION_REQUESTS):
+        return _NEAR_MATCH_BOUNDED_RELATION
+    if any(
+        re.search(
+            rf"\bhow\s+(?:did|does|do|has|have)\s+"
+            rf"{re.escape(surface.strip())}\s+{_DIRECT_CAUSAL_VERBS}\b\s+\S",
+            current_user_text,
+            flags=re.IGNORECASE,
+        )
+        is not None
+        for surface in subject_surfaces
+        if isinstance(surface, str) and surface.strip()
+    ):
+        return _NEAR_MATCH_BOUNDED_RELATION
+    return _NEAR_MATCH_NONE
+
+
 def _derive_trusted_related_probe(
     plan: QuestionPlan,
     trusted_user_texts: Sequence[str],
+    *,
+    near_match_intent: str,
 ) -> tuple[str, tuple[str, ...]] | None:
     """Derive one bounded broader/probe pair from an exact user-message tail."""
 
+    if near_match_intent != _NEAR_MATCH_BOUNDED_RELATION:
+        return None
     subject_targets = [
         target
         for target in plan.targets
@@ -1116,31 +1221,37 @@ def _derive_trusted_related_probe(
     if len(split_compound_named_anchor(surface)) != 1:
         return None
 
-    for trusted_text in reversed(tuple(trusted_user_texts)):
-        target_match = re.search(
-            re.escape(surface),
-            trusted_text,
-            flags=re.IGNORECASE,
-        )
-        if target_match is None:
-            continue
-        suffix_match = _TRUSTED_RELATED_TAIL_PATTERN.fullmatch(trusted_text[target_match.end() :])
-        if suffix_match is None:
-            continue
-        tail = suffix_match.group("tail").strip()
-        for prefix in _TRUSTED_RELATED_PREFIX_PATTERNS:
-            stripped = prefix.sub("", tail, count=1)
-            if stripped != tail:
-                tail = stripped.strip()
-                break
-        else:
-            continue
+    trusted_text = next(
+        (
+            value
+            for value in reversed(tuple(trusted_user_texts))
+            if isinstance(value, str) and value.strip()
+        ),
+        "",
+    )
+    target_match = re.search(
+        re.escape(surface),
+        trusted_text,
+        flags=re.IGNORECASE,
+    )
+    if target_match is None:
+        return None
+    suffix_match = _TRUSTED_RELATED_TAIL_PATTERN.fullmatch(trusted_text[target_match.end() :])
+    if suffix_match is None:
+        return None
+    tail = suffix_match.group("tail").strip()
+    for prefix in _TRUSTED_RELATED_PREFIX_PATTERNS:
+        stripped = prefix.sub("", tail, count=1)
+        if stripped != tail:
+            tail = stripped.strip()
+            break
+    else:
+        return None
 
-        tokens = tokenize_anchor(tail)
-        if not 2 <= len(tokens) <= _MAX_TRUSTED_RELATED_TOKENS:
-            continue
-        return tokens[0], (" ".join(tokens[1:]),)
-    return None
+    tokens = tokenize_anchor(tail)
+    if not 2 <= len(tokens) <= _MAX_TRUSTED_RELATED_TOKENS:
+        return None
+    return tokens[0], (" ".join(tokens[1:]),)
 
 
 _BOUNDED_RELATED_FACET_ROLES = frozenset(
@@ -1157,10 +1268,7 @@ _BOUNDED_RELATED_FACET_ROLES = frozenset(
 def _contains_normalized_surface(query: str, surface: str) -> bool:
     normalized_query = f" {normalize_search_query(query)} "
     normalized_surface = normalize_search_query(surface)
-    return bool(
-        normalized_surface
-        and f" {normalized_surface} " in normalized_query
-    )
+    return bool(normalized_surface and f" {normalized_surface} " in normalized_query)
 
 
 def _bounded_planner_related_chunk_ids(
@@ -1168,6 +1276,9 @@ def _bounded_planner_related_chunk_ids(
     planned: PlannedContext,
     subject_scan: EvidenceTargetScan,
     related_spec: tuple[str, tuple[str, ...]] | None,
+    broader_scan: Any | None,
+    *,
+    near_match_intent: str,
 ) -> tuple[str, ...]:
     """Return at most two requirement-linked hinted sources for qualified absence.
 
@@ -1181,6 +1292,11 @@ def _bounded_planner_related_chunk_ids(
         or not plan.planner_used
         or plan.premises
         or related_spec is None
+        or near_match_intent == _NEAR_MATCH_NONE
+        or (
+            near_match_intent == _NEAR_MATCH_BOUNDED_RELATION
+            and (broader_scan is None or not broader_scan.qualifying_pairs)
+        )
     ):
         return ()
     subject_surface = next(
@@ -1212,9 +1328,7 @@ def _bounded_planner_related_chunk_ids(
         for source_number in planned.facet_source_numbers.get(facet.facet_id, ()):
             if not 1 <= source_number <= len(planned.final_chunks):
                 continue
-            chunk_id = str(
-                planned.final_chunks[source_number - 1].get("chunk_id") or ""
-            )
+            chunk_id = str(planned.final_chunks[source_number - 1].get("chunk_id") or "")
             if chunk_id and chunk_id not in selected:
                 selected.append(chunk_id)
             if len(selected) == MAX_QUALIFIED_NEAR_MATCH_SOURCES:
@@ -1274,9 +1388,7 @@ def _promote_direct_anchor_chunks(
         # Additional hits remain available through ordinary retrieval.
         requested_anchor_ids.extend(scan.direct_chunk_ids[:1])
     requested_anchor_ids = list(
-        dict.fromkeys(
-            chunk_id for chunk_id in requested_anchor_ids if chunk_id in lookup
-        )
+        dict.fromkeys(chunk_id for chunk_id in requested_anchor_ids if chunk_id in lookup)
     )
     if not requested_anchor_ids:
         return
@@ -1345,17 +1457,15 @@ def _promote_direct_anchor_chunks(
         if chunk_id in mandatory_ids:
             admitted_anchor_ids.append(chunk_id)
             continue
-        if len(mandatory_ids) + len(
-            [value for value in admitted_anchor_ids if value not in mandatory_ids]
-        ) >= MAX_FINAL_SOURCES:
+        if (
+            len(mandatory_ids)
+            + len([value for value in admitted_anchor_ids if value not in mandatory_ids])
+            >= MAX_FINAL_SOURCES
+        ):
             continue
         admitted_anchor_ids.append(chunk_id)
-    mandatory_order = list(
-        dict.fromkeys((*admitted_anchor_ids, *protected_ids))
-    )
-    remaining_old_ids = [
-        chunk_id for chunk_id in old_ids if chunk_id not in mandatory_order
-    ]
+    mandatory_order = list(dict.fromkeys((*admitted_anchor_ids, *protected_ids)))
+    remaining_old_ids = [chunk_id for chunk_id in old_ids if chunk_id not in mandatory_order]
     represented_documents = {
         str(lookup[chunk_id].get("document") or "")
         for chunk_id in mandatory_order
@@ -1444,14 +1554,12 @@ def _promote_direct_anchor_chunks(
             }
         }
         satisfied_stage_ids = {
-            facet_id
-            for facet_id in stage_facet_ids
-            if new_facet_sources.get(facet_id)
+            facet_id for facet_id in stage_facet_ids if new_facet_sources.get(facet_id)
         }
         selection["stage_coverage_required_count"] = len(stage_facet_ids)
         selection["stage_coverage_satisfied_count"] = len(satisfied_stage_ids)
-        selection["stage_coverage_shortfall_count"] = (
-            len(stage_facet_ids) - len(satisfied_stage_ids)
+        selection["stage_coverage_shortfall_count"] = len(stage_facet_ids) - len(
+            satisfied_stage_ids
         )
 
     promoted = [chunk_id for chunk_id in admitted_anchor_ids if chunk_id not in old_ids]
@@ -1633,12 +1741,25 @@ def apply_evidence_gate(
         )
         diagnostics["targets"] = [scan.as_diagnostics() for scan in scans]
         return gate, diagnostics, None
-    related_spec = _parse_related_probe(plan, trusted_user_texts)
+    near_match_intent = _trusted_near_match_intent(
+        trusted_user_texts,
+        subject_surfaces=tuple(
+            target.query_surface_span
+            for target in plan.targets
+            if target.role.value == PolicyTargetRole.SUBJECT.value
+        ),
+    )
+    related_spec = _parse_related_probe(
+        plan,
+        trusted_user_texts,
+        near_match_intent=near_match_intent,
+    )
     trusted_tail_related = False
     if related_spec is None:
         related_spec = _derive_trusted_related_probe(
             plan,
             trusted_user_texts,
+            near_match_intent=near_match_intent,
         )
         trusted_tail_related = related_spec is not None
     broader_scan = (
@@ -1656,14 +1777,14 @@ def apply_evidence_gate(
         planned,
         subject_scan,
         related_spec,
+        broader_scan,
+        near_match_intent=near_match_intent,
     )
     lane_assignments = classify_evidence_lanes(
         planned.final_chunks,
         subject_scan=subject_scan,
         facet_scan=facet_scan,
-        broader_related_scan=(
-            None if bounded_planner_related_ids else broader_scan
-        ),
+        broader_related_scan=(None if bounded_planner_related_ids else broader_scan),
         qualified_related_chunk_ids=bounded_planner_related_ids,
         immediate_neighbors=neighbors,
     )
@@ -1674,10 +1795,7 @@ def apply_evidence_gate(
         broader_related_scan=broader_scan,
         immediate_neighbors=neighbors,
     )
-    if (
-        bounded_planner_related_ids
-        and gate.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH
-    ):
+    if bounded_planner_related_ids and gate.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH:
         gate = replace(
             gate,
             rules_fired=(
@@ -1685,10 +1803,20 @@ def apply_evidence_gate(
                 "planner_bounded_related_material",
             ),
         )
+    if gate.decision is EvidenceDecision.QUALIFIED_NEAR_MATCH:
+        gate = replace(
+            gate,
+            rules_fired=(
+                *gate.rules_fired,
+                (
+                    "trusted_analogue_request"
+                    if near_match_intent == _NEAR_MATCH_EXPLICIT_ANALOGUE
+                    else "trusted_bounded_relation_request"
+                ),
+            ),
+        )
     selected_exact_related_ids = (
-        set(broader_scan.qualified_chunk_ids)
-        if broader_scan is not None
-        else set()
+        set(broader_scan.qualified_chunk_ids) if broader_scan is not None else set()
     ).intersection(
         assignment.chunk_id
         for assignment in lane_assignments
@@ -1709,11 +1837,7 @@ def apply_evidence_gate(
 
     # Premise status is adjudicated against the sources in the one structured answer
     # call. Do not let a surface-form absence suppress those support/counter lanes first.
-    if (
-        plan.premises
-        and policy.premise_checking
-        and RouteTrait.PREMISE_SENSITIVE in plan.traits
-    ):
+    if plan.premises and policy.premise_checking and RouteTrait.PREMISE_SENSITIVE in plan.traits:
         gate = _all_sources_gate(
             planned,
             gate.integrity,
@@ -1850,18 +1974,11 @@ def _focused_requirement_component_scopes(
         RouteTrait.BROAD_SYNTHESIS,
         RouteTrait.PREMISE_SENSITIVE,
     }
-    if (
-        not final_chunks
-        or excluded_traits.intersection(plan.traits)
-    ):
+    if not final_chunks or excluded_traits.intersection(plan.traits):
         return ()
 
     original_query = next(
-        (
-            facet.search_query
-            for facet in plan.facets
-            if facet.role is FacetRole.ORIGINAL
-        ),
+        (facet.search_query for facet in plan.facets if facet.role is FacetRole.ORIGINAL),
         "",
     )
     requirement_sources = _requirement_source_map(
@@ -1879,9 +1996,7 @@ def _focused_requirement_component_scopes(
     for requirement in sorted(plan.requirements, key=lambda item: item.order):
         query_terms = {
             term
-            for term in normalize_search_query(
-                f"{requirement.label} {original_query}"
-            ).split()
+            for term in normalize_search_query(f"{requirement.label} {original_query}").split()
             if term not in _FOCUSED_COMPONENT_STOPWORDS
         }
         best_by_dimension: dict[
@@ -1906,11 +2021,7 @@ def _focused_requirement_component_scopes(
                 paragraph_ranges[-1][1],
             )
             for dimension in _FOCUSED_COMPONENT_ORDER:
-                signal_score = len(
-                    _FOCUSED_COMPONENT_SIGNAL_PATTERNS[dimension].findall(
-                        text
-                    )
-                )
+                signal_score = len(_FOCUSED_COMPONENT_SIGNAL_PATTERNS[dimension].findall(text))
                 if signal_score <= 0:
                     continue
                 score = (
@@ -1972,12 +2083,8 @@ def _premise_source_scopes(
     return tuple(
         PremiseSourceScope(
             premise_id=premise.premise_id,
-            support_source_numbers=tuple(
-                facet_source_numbers.get(premise.support_facet_id, ())
-            ),
-            counter_source_numbers=tuple(
-                facet_source_numbers.get(premise.counter_facet_id, ())
-            ),
+            support_source_numbers=tuple(facet_source_numbers.get(premise.support_facet_id, ())),
+            counter_source_numbers=tuple(facet_source_numbers.get(premise.counter_facet_id, ())),
             framing_source_numbers=(
                 tuple(facet_source_numbers.get(premise.framing_facet_id, ()))
                 if premise.framing_facet_id is not None
@@ -2011,16 +2118,13 @@ def _paragraph_scope_ranges(
 
     text = str(chunk.get("text") or "").strip()
     paragraph_blocks = tuple(
-        block
-        for block in re.split(r"\r?\n[ \t]*\r?\n", text)
-        if block.strip()
+        block for block in re.split(r"\r?\n[ \t]*\r?\n", text) if block.strip()
     )
     expected_count = raw_end - raw_start + 1
     if len(paragraph_blocks) != expected_count:
         return ((raw_start, raw_end),)
     return tuple(
-        (paragraph_number, paragraph_number)
-        for paragraph_number in range(raw_start, raw_end + 1)
+        (paragraph_number, paragraph_number) for paragraph_number in range(raw_start, raw_end + 1)
     )
 
 
@@ -2037,9 +2141,7 @@ def _coalesce_paragraph_ranges(
     return tuple(
         (
             ranges[(group_index * len(ranges)) // group_count][0],
-            ranges[
-                (((group_index + 1) * len(ranges)) // group_count) - 1
-            ][1],
+            ranges[(((group_index + 1) * len(ranges)) // group_count) - 1][1],
         )
         for group_index in range(group_count)
     )
@@ -2063,9 +2165,7 @@ def _bounded_inspection_ranges(
     remaining = scope_limit - len(raw_ranges)
     while remaining > 0:
         candidates = [
-            index
-            for index, ranges in enumerate(raw_ranges)
-            if group_counts[index] < len(ranges)
+            index for index, ranges in enumerate(raw_ranges) if group_counts[index] < len(ranges)
         ]
         if not candidates:
             break
@@ -2118,9 +2218,7 @@ def _ordered_facet_requirement_ids(
     facets: Sequence[Any],
 ) -> tuple[str, ...]:
     facet_requirement_ids = {
-        requirement_id
-        for facet in facets
-        for requirement_id in facet.requirement_ids
+        requirement_id for facet in facets for requirement_id in facet.requirement_ids
     }
     return tuple(
         requirement.requirement_id
@@ -2136,12 +2234,9 @@ def _focus_for_stage_facets(
     if not stage_facets:
         return EvidenceObligationFocus.CROSS_CUTTING
     requirement_order = {
-        requirement.requirement_id: requirement.order
-        for requirement in plan.requirements
+        requirement.requirement_id: requirement.order for requirement in plan.requirements
     }
-    facet_order = {
-        facet.facet_id: index for index, facet in enumerate(plan.facets)
-    }
+    facet_order = {facet.facet_id: index for index, facet in enumerate(plan.facets)}
     focus_facet = min(
         stage_facets,
         key=lambda facet: (
@@ -2182,8 +2277,7 @@ def _evidence_inspection_scopes(
             source_number,
         )
         allowed_requirement_ids = (
-            _ordered_facet_requirement_ids(plan, stage_facets)
-            or all_requirement_ids
+            _ordered_facet_requirement_ids(plan, stage_facets) or all_requirement_ids
         )
         focus = _focus_for_stage_facets(plan, stage_facets)
         for paragraph_start, paragraph_end in paragraph_ranges:
@@ -2198,6 +2292,53 @@ def _evidence_inspection_scopes(
                 )
             )
     return tuple(scopes)
+
+
+def _content_completeness_context_for_plan(
+    plan: QuestionPlan,
+) -> ContentCompletenessContext:
+    """Preserve pre-retrieval content expectations for local post-generation checks."""
+
+    ordered_requirement_ids = tuple(
+        requirement.requirement_id
+        for requirement in sorted(
+            plan.requirements,
+            key=lambda requirement: requirement.order,
+        )
+    )
+    if RouteTrait.BROAD_SYNTHESIS not in plan.traits:
+        return ContentCompletenessContext(
+            profile=ContentCompletenessProfile.FOCUSED,
+            required_requirement_ids=ordered_requirement_ids,
+            expected_stage_requirement_ids=(),
+            expected_stage_transitions=(),
+            minimum_supported_obligation_ratio=0.0,
+            require_institutional_handoffs=False,
+        )
+
+    long_lineage = RouteTrait.LONG_INSTITUTIONAL_LINEAGE in plan.traits
+    return ContentCompletenessContext(
+        profile=(
+            ContentCompletenessProfile.LONG_INSTITUTIONAL_LINEAGE
+            if long_lineage
+            else ContentCompletenessProfile.BROAD_SYNTHESIS
+        ),
+        required_requirement_ids=ordered_requirement_ids,
+        expected_stage_requirement_ids=ordered_requirement_ids,
+        expected_stage_transitions=tuple(
+            ExpectedStageTransition(
+                predecessor_requirement_id=predecessor,
+                successor_requirement_id=successor,
+            )
+            for predecessor, successor in zip(
+                ordered_requirement_ids,
+                ordered_requirement_ids[1:],
+                strict=False,
+            )
+        ),
+        minimum_supported_obligation_ratio=1.0,
+        require_institutional_handoffs=long_lineage,
+    )
 
 
 def _evidence_obligation_scopes(
@@ -2223,8 +2364,7 @@ def _evidence_obligation_scopes(
         ]
     ] = []
     requirement_order = {
-        requirement.requirement_id: requirement.order
-        for requirement in plan.requirements
+        requirement.requirement_id: requirement.order for requirement in plan.requirements
     }
     for facet in plan.facets:
         if facet.role not in _OBLIGATION_FOCUS_BY_FACET_ROLE:
@@ -2240,12 +2380,9 @@ def _evidence_obligation_scopes(
         if not allowed_requirement_ids:
             continue
         stage_order = min(
-            requirement_order[requirement_id]
-            for requirement_id in allowed_requirement_ids
+            requirement_order[requirement_id] for requirement_id in allowed_requirement_ids
         )
-        paragraph_ranges = _paragraph_scope_ranges(
-            final_chunks[source_number - 1]
-        )
+        paragraph_ranges = _paragraph_scope_ranges(final_chunks[source_number - 1])
         stage_records.append(
             (
                 stage_order,
@@ -2265,18 +2402,14 @@ def _evidence_obligation_scopes(
     ):
         if current[0] != predecessor[0] + 1:
             continue
-        transition_source_number = transition_sources.get(
-            (predecessor[1], current[1])
-        )
+        transition_source_number = transition_sources.get((predecessor[1], current[1]))
         if (
             not isinstance(transition_source_number, int)
             or isinstance(transition_source_number, bool)
             or not 1 <= transition_source_number <= len(final_chunks)
         ):
             continue
-        transition_ranges = _paragraph_scope_ranges(
-            final_chunks[transition_source_number - 1]
-        )
+        transition_ranges = _paragraph_scope_ranges(final_chunks[transition_source_number - 1])
         adjacent_stage_pairs.append(
             (
                 predecessor,
@@ -2292,13 +2425,9 @@ def _evidence_obligation_scopes(
     capacity = MAX_ANSWER_UNITS - len(plan.premises)
     required_slots = len(stage_records) + len(adjacent_stage_pairs)
     if required_slots > capacity:
-        raise ValueError(
-            "answer-unit capacity cannot preserve stages and adjacent links"
-        )
+        raise ValueError("answer-unit capacity cannot preserve stages and adjacent links")
 
-    long_lineage = (
-        RouteTrait.LONG_INSTITUTIONAL_LINEAGE in plan.traits
-    )
+    long_lineage = RouteTrait.LONG_INSTITUTIONAL_LINEAGE in plan.traits
     selected_dimensions: list[list[EvidenceDimension]] = [
         (
             [EvidenceDimension.INSTITUTIONAL_HANDOFF]
@@ -2312,8 +2441,7 @@ def _evidence_obligation_scopes(
             _requirement_ids,
             focus,
             _paragraph_range,
-        )
-        in stage_records
+        ) in stage_records
     ]
     remaining_capacity = capacity - required_slots
     dimension_priority = (
@@ -2337,10 +2465,7 @@ def _evidence_obligation_scopes(
                 if remaining_capacity <= 0:
                     break
                 desired = _OBLIGATION_DIMENSIONS_BY_FOCUS[focus]
-                if (
-                    dimension not in desired
-                    or dimension in selected_dimensions[index]
-                ):
+                if dimension not in desired or dimension in selected_dimensions[index]:
                     continue
                 selected_dimensions[index].append(dimension)
                 remaining_capacity -= 1
@@ -2437,8 +2562,7 @@ def build_coverage_input(
 ) -> str:
     requirement_sources = _requirement_source_map(plan, facet_source_numbers)
     requirement_by_id = {
-        requirement.requirement_id: requirement
-        for requirement in plan.requirements
+        requirement.requirement_id: requirement for requirement in plan.requirements
     }
     premise_by_id = {premise.premise_id: premise for premise in plan.premises}
     premise_sources = [
@@ -2468,25 +2592,16 @@ def build_coverage_input(
             "predecessor_source_number": scope.predecessor_source_number,
             "paragraph_start": scope.paragraph_start,
             "paragraph_end": scope.paragraph_end,
-            "allowed_requirement_ids": list(
-                scope.allowed_requirement_ids
-            ),
+            "allowed_requirement_ids": list(scope.allowed_requirement_ids),
             "focus": scope.focus.value,
-            "dimension_ids": [
-                dimension.value for dimension in scope.dimension_ids
-            ],
-            "required_for_requirement_status": (
-                scope.required_for_requirement_status
-            ),
+            "dimension_ids": [dimension.value for dimension in scope.dimension_ids],
+            "required_for_requirement_status": (scope.required_for_requirement_status),
         }
         if (
-            EvidenceDimension.INSTITUTIONAL_HANDOFF
-            in scope.dimension_ids
+            EvidenceDimension.INSTITUTIONAL_HANDOFF in scope.dimension_ids
             and len(scope.allowed_requirement_ids) == 1
         ):
-            requirement = requirement_by_id[
-                scope.allowed_requirement_ids[0]
-            ]
+            requirement = requirement_by_id[scope.allowed_requirement_ids[0]]
             handoff = requirement.institutional_handoff
             if handoff is not None:
                 obligation_payload["orientation_only"] = {
@@ -2544,9 +2659,7 @@ def build_coverage_input(
     }
     if required_interpretive_moves:
         control["interpretive_frame"] = {
-            "required_moves": [
-                move.value for move in required_interpretive_moves
-            ],
+            "required_moves": [move.value for move in required_interpretive_moves],
             "required_question_anchors": list(required_question_anchors),
             "preface_sentence_count": "2-3",
             "coda_sentence_count": 1,
@@ -2569,12 +2682,7 @@ def build_coverage_input(
         sections.append(
             "Interpretive presentation (never alter factual coverage or sources):\n"
             + style
-            + (
-                "\n"
-                + INTERPRETIVE_STRUCTURED_OUTPUT_RULES
-                if interpretive_expansion
-                else ""
-            )
+            + ("\n" + INTERPRETIVE_STRUCTURED_OUTPUT_RULES if interpretive_expansion else "")
             + "\nDo not add an uncited invitation or follow-up question outside the schema."
         )
     return "\n\n".join(sections)
@@ -2676,9 +2784,7 @@ def _generation_trace(
         **contract,
         "status": coverage.status.value,
         "structured_generation_called": (
-            True
-            if structured_generation_called is None
-            else structured_generation_called
+            True if structured_generation_called is None else structured_generation_called
         ),
         **diagnostics,
     }
@@ -2778,6 +2884,7 @@ def run_evidence_planned_answer(
         policy=policy,
         planner_diagnostics=planner_call_diagnostics,
     )
+    completeness_context = _content_completeness_context_for_plan(plan)
     stage_timings_ms["query_planning"] = _elapsed_ms(planning_started_ns)
     retrieval_started_ns = perf_counter_ns()
     planned = retrieve_plan_from_collection(
@@ -2813,22 +2920,18 @@ def run_evidence_planned_answer(
             "planner_call": _planner_trace_diagnostic(planner_call_diagnostics),
         }
     )
-    structural_stage_shortfall_count = (
-        _deterministic_structural_stage_shortfall_count(
-            resolved_turn,
-            plan,
-            planned,
-        )
+    structural_stage_shortfall_count = _deterministic_structural_stage_shortfall_count(
+        resolved_turn,
+        plan,
+        planned,
     )
     if structural_stage_shortfall_count:
-        requirement_ids = tuple(
-            requirement.requirement_id
-            for requirement in plan.requirements
-        )
+        requirement_ids = tuple(requirement.requirement_id for requirement in plan.requirements)
         coverage = process_evidence_coverage(
             None,
             requirement_ids=requirement_ids,
             source_count=0,
+            completeness_context=completeness_context,
         )
         gate_diagnostics = {
             "schema": EVIDENCE_DIAGNOSTICS_SCHEMA,
@@ -2841,9 +2944,7 @@ def run_evidence_planned_answer(
                 "premise_correction_required": False,
                 "relationship_chunk_ids": [],
                 "allowed_source_numbers": [],
-                "suppressed_source_numbers": list(
-                    range(1, len(planned.final_chunks) + 1)
-                ),
+                "suppressed_source_numbers": list(range(1, len(planned.final_chunks) + 1)),
                 "skip_answer_generation": True,
                 "rules_fired": ["structural_stage_shortfall"],
             },
@@ -2950,6 +3051,7 @@ def run_evidence_planned_answer(
             obligation_scopes=obligation_scopes,
             source_count=0,
             requirement_labels=requirement_labels,
+            completeness_context=completeness_context,
         )
         stage_timings_ms["answer_validation"] = _elapsed_ms(validation_started_ns)
         planned.trace["generation_contract"] = _generation_trace(
@@ -2985,9 +3087,7 @@ def run_evidence_planned_answer(
     )
     interpretive_expansion = bool(required_interpretive_moves)
     response_format = (
-        InterpretiveEvidenceCoverageAnswer
-        if interpretive_expansion
-        else EvidenceCoverageAnswer
+        InterpretiveEvidenceCoverageAnswer if interpretive_expansion else EvidenceCoverageAnswer
     )
     style_prompt_sha256 = (
         hashlib.sha256(style_block.encode("utf-8")).hexdigest() if style_block else None
@@ -3010,10 +3110,9 @@ def run_evidence_planned_answer(
             obligation_scopes=obligation_scopes,
             source_count=len(final_chunks),
             requirement_labels=requirement_labels,
+            completeness_context=completeness_context,
         )
-        stage_timings_ms["answer_validation"] = _elapsed_ms(
-            context_validation_started_ns
-        )
+        stage_timings_ms["answer_validation"] = _elapsed_ms(context_validation_started_ns)
         planned.trace["generation_contract"] = _generation_trace(
             coverage,
             status=coverage.status.value,
@@ -3081,6 +3180,7 @@ def run_evidence_planned_answer(
             obligation_scopes=obligation_scopes,
             source_count=len(final_chunks),
             requirement_labels=requirement_labels,
+            completeness_context=completeness_context,
             refused=refused,
         )
     else:
@@ -3092,6 +3192,7 @@ def run_evidence_planned_answer(
             obligation_scopes=obligation_scopes,
             source_count=len(final_chunks),
             requirement_labels=requirement_labels,
+            completeness_context=completeness_context,
             refused=refused,
         )
     stage_timings_ms["answer_validation"] = round(

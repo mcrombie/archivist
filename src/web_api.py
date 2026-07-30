@@ -291,11 +291,7 @@ def embed(project_id: str) -> dict[str, object]:
 def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
     ledger = UsageLedger()
     budget = ledger.budget_state()
-    if (
-        budget["hard_limit_enabled"]
-        and budget["exceeded"]
-        and not request.allow_over_budget
-    ):
+    if budget["hard_limit_enabled"] and budget["exceeded"] and not request.allow_over_budget:
         raise HTTPException(
             status_code=402,
             detail={
@@ -350,6 +346,7 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
         return {
             "answer": answer,
             "answer_status": answer_result.status,
+            "content_outcome": getattr(answer_result, "content_outcome", None),
             "evidence_decision": answer_result.evidence_decision,
             "run_diagnostics": run_diagnostics,
             "resolved_query": resolved_query,
@@ -467,7 +464,9 @@ def sources(
     documents = sorted({str(chunk.get("document", "N/A")) for chunk in reading_chunks})
     filtered_chunks = reading_chunks
     if document:
-        filtered_chunks = [chunk for chunk in filtered_chunks if str(chunk.get("document", "")) == document]
+        filtered_chunks = [
+            chunk for chunk in filtered_chunks if str(chunk.get("document", "")) == document
+        ]
     if search and search.strip():
         needle = search.strip().casefold()
         filtered_chunks = [
@@ -477,7 +476,7 @@ def sources(
             or needle in str(chunk.get("chapter_title", "")).casefold()
         ]
 
-    selected = filtered_chunks[offset:offset + limit]
+    selected = filtered_chunks[offset : offset + limit]
     return {
         "total": len(filtered_chunks),
         "sources": source_payload(selected)["sources"],
@@ -495,7 +494,9 @@ def source_file(project_id: str, file_path: str) -> FileResponse:
         raise HTTPException(status_code=400, detail="Invalid source file path.") from exc
     if not requested.is_file():
         raise HTTPException(status_code=404, detail="Source file not found.")
-    return FileResponse(requested, media_type="application/pdf" if requested.suffix.lower() == ".pdf" else None)
+    return FileResponse(
+        requested, media_type="application/pdf" if requested.suffix.lower() == ".pdf" else None
+    )
 
 
 @app.get("/{full_path:path}")
@@ -525,9 +526,7 @@ def _public_project_config(settings: ExposureSettings) -> dict[str, object]:
     manifest = load_manifest("current")
     stats = manifest.get("stats")
     searchable_chunks = (
-        int(stats.get("searchable_chunks") or 0)
-        if isinstance(stats, Mapping)
-        else 0
+        int(stats.get("searchable_chunks") or 0) if isinstance(stats, Mapping) else 0
     )
     embedded_chunks = int(manifest.get("embedded_chunks") or 0)
     load_locator_index(
@@ -570,11 +569,7 @@ def _public_safe_error(
     request_id: str,
     retry_after: int | None = None,
 ) -> JSONResponse:
-    headers = (
-        {"Retry-After": str(retry_after)}
-        if retry_after is not None
-        else None
-    )
+    headers = {"Retry-After": str(retry_after)} if retry_after is not None else None
     return JSONResponse(
         status_code=status_code,
         headers=headers,
@@ -592,9 +587,7 @@ def _with_public_security_headers(response: Response) -> Response:
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Permissions-Policy"] = (
-        "camera=(), microphone=(), geolocation=(), payment=()"
-    )
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "base-uri 'none'; "
@@ -692,6 +685,7 @@ def _run_public_question(
         return {
             "answer": answer_result.answer,
             "answer_status": answer_result.status,
+            "content_outcome": getattr(answer_result, "content_outcome", None),
             "historiographical_lens": request.historiographical_lens.value,
             "voice": request.voice.value,
             "worldview": request.worldview.value,
@@ -747,8 +741,7 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
     @public_app.middleware("http")
     async def public_security_boundary(request: Request, call_next):
         is_question = (
-            request.method == "POST"
-            and request.url.path == "/api/projects/current/question"
+            request.method == "POST" and request.url.path == "/api/projects/current/question"
         )
         client_id = request.client.host if request.client is not None else "unknown"
         entered_gate = False

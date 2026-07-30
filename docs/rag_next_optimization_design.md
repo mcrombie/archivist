@@ -1,9 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v24 implemented and verified offline; V23's unchanged G007 confirmation
-failed closed because the structural filename parser rejected the corpus's trailing underscore,
-and V24 now needs an exact freeze plus one mechanical G007 confirmation followed by the complete
-unchanged ten-question development run
+Status: evidence-planned-v25 implemented and verified offline; V24 completed the unchanged
+ten-question development run, and V25 now needs an exact clean freeze followed by one unchanged
+complete development run with no G007 reader-quality veto
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -2184,3 +2183,62 @@ Open V25 only for source-bounded completeness and absence semantics:
    or provider call.
 7. Freeze the repaired candidate and rerun all ten unchanged development questions once. G007
    remains descriptive and mechanically useful but cannot regain a reader-quality veto.
+
+## V25 offline repair: valid structure no longer means complete content
+
+V25 implements the bounded repair selected from the complete V24 distribution. It keeps the
+existing structured generation schema and citation/source validation intact, then performs a
+separate deterministic content assessment against application-owned expectations captured before
+retrieval.
+
+The content contract now has three outcomes:
+
+- `valid_complete`: the structured answer is valid and every route-required content expectation
+  is realized;
+- `valid_partial`: the structured answer is valid and useful, but one or more required content
+  expectations remain incomplete; and
+- `insufficient_evidence`: no requested requirement can be supported, or there are no usable
+  sources.
+
+`answer_status` remains the compatibility boundary for structural or technical success.
+`content_outcome` is additive and cannot turn invalid JSON, invalid citations, or failed source
+mapping into a successful answer.
+
+For focused questions, completeness requires every requested requirement to be supported. For
+broad synthesis, the pre-retrieval ordered requirements are also the expected stages; their
+transition contract must be the exact adjacent chain, every expected stage and transition must be
+realized, and every required source-bounded obligation dimension must be supported. Long
+institutional-lineage questions use the same rules and additionally require each realized stage
+to carry a supported `institutional_handoff` dimension. Missing, reversed, or disconnected stage
+chains fail context validation rather than weakening the standard after generation.
+
+The reader renderer still returns a useful structurally valid partial answer, but appends at most
+one route-specific limitation. It no longer repeats one gap notice per requirement. If the
+retrieved sources conflict, the single limitation says that they conflict instead of disguising
+disagreement as generic partial support.
+
+V25 also closes the G008-shaped absence regression without weakening the G009-shaped causal path:
+
+- related or analogue evidence must be affirmatively authorized by the current raw user turn;
+- a plain conjunction, an earlier turn, a negated request, or a proper name containing words such
+  as `Parallel` or `Affect` grants no permission;
+- an explicit analogue request may admit only the existing bounded, requirement-linked,
+  catalog-hinted sources; and
+- a causal or relational near match additionally requires at least one locally certified
+  broader/probe evidence pair.
+
+The new outcome is carried through retrieval-trace schema 13, answer-run diagnostics schema 3,
+the public and development API responses, the frontend type contract, and a nullable migration of
+the local cost ledger. Historical diagnostics remain readable with a null content outcome.
+Evidence policy is versioned as `evidence-gate-v4`, and the renderer is versioned as
+`evidence-coverage-renderer/2`. The generation prompt, structured output schema, planner prompt,
+retrieval core, eight-source ceiling, and model-call boundaries are unchanged.
+
+Focused verification passed 246 tests. The complete offline suite passed 598 tests with one
+intentional skip, repository-wide Ruff passed, the production frontend build passed, and
+`git diff --check` reported no whitespace errors. No OpenAI request was made.
+
+V25 is implemented but not yet frozen or reader-measured. The next action is an exact clean
+candidate commit followed by one fresh isolated run of all ten unchanged development questions
+with zero retries. G007 remains one descriptive row in that distribution and cannot regain a
+reader-quality veto.

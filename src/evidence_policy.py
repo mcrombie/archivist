@@ -18,7 +18,7 @@ from enum import StrEnum
 
 
 ANCHOR_NORMALIZER_VERSION = "unicode-nfkc-casefold-anchor-v1"
-EVIDENCE_POLICY_VERSION = "evidence-gate-v3"
+EVIDENCE_POLICY_VERSION = "evidence-gate-v4"
 EVIDENCE_DIAGNOSTICS_SCHEMA = "archivist.evidence_policy_diagnostics/1"
 WEAK_MATCH_WINDOW_TOKENS = 12
 MAX_QUALIFIED_NEAR_MATCH_SOURCES = 2
@@ -938,11 +938,7 @@ def classify_evidence_lanes(
     broader_ids = (
         set(broader_related_scan.qualified_chunk_ids) if broader_related_scan is not None else set()
     )
-    broader_ids.update(
-        str(chunk_id)
-        for chunk_id in qualified_related_chunk_ids
-        if str(chunk_id)
-    )
+    broader_ids.update(str(chunk_id) for chunk_id in qualified_related_chunk_ids if str(chunk_id))
     analogue_ids = {str(chunk_id) for chunk_id in analogue_chunk_ids}
 
     assignments: list[EvidenceLaneAssignment] = []
@@ -1073,9 +1069,7 @@ def _allowed_and_suppressed_sources(
             for assignment in assignments
             if assignment.lane is EvidenceLane.BROADER_RELATED
         )
-        allowed = set(
-            sorted(allowed)[:MAX_QUALIFIED_NEAR_MATCH_SOURCES]
-        )
+        allowed = set(sorted(allowed)[:MAX_QUALIFIED_NEAR_MATCH_SOURCES])
     else:
         allowed = set()
     allowed_numbers = tuple(

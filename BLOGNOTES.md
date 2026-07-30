@@ -2842,6 +2842,47 @@ does not mean the answer carried the right argument off it. The most valuable di
 wrong citation; it was the application correctly reporting partial evidence internally and then
 calling the result complete anyway.
 
+### 2026-07-30 - V25 separated a valid answer from a complete answer
+
+- Built V25 from the full V24 ten-question distribution rather than another G007-only patch. The
+  repair targets the two failures the complete cohort made clearest: broad answers could validate
+  while their own stage/obligation ledger said they were incomplete, and a certified absence
+  could still lead to an unsolicited analogue.
+- Kept structural correctness and content quality as different claims. JSON shape, source
+  mapping, citation locality, and premise validation still decide whether the generation
+  contract is valid. A new application-owned `content_outcome` separately reports
+  `valid_complete`, `valid_partial`, or `insufficient_evidence`.
+- Preserved the answer plan before retrieval so later stages cannot quietly disappear from the
+  completeness denominator. Broad synthesis must realize the exact ordered stage chain, every
+  adjacent transition, and every required source-bounded obligation. Long institutional
+  lineages additionally require supported institutional handoffs.
+- Made partial answers honest without making them unusable. A structurally sound answer can still
+  be presented as `valid_partial`, but it gets one concise limitation rather than seven repeated
+  gap notices. When sources disagree, that one limitation explicitly says they conflict.
+- Tightened absence semantics around user intent. Permission comes only from the current raw user
+  turn. Plain conjunctions, stale conversation history, negated analogue requests, and names such
+  as “Parallel Council” or “Affect Society” do not authorize near-match material. Explicit
+  analogue requests can use only bounded planner hints; causal near matches require a locally
+  certified relation pair.
+- Propagated the new outcome through the closed retrieval trace, answer-run diagnostics, the API,
+  frontend types, and a backward-compatible nullable column in the local cost ledger. Historical
+  rows remain readable with no invented completeness judgment.
+- Deliberately did **not** change the generation prompt, planner prompt, structured output schema,
+  retrieval core, eight-source ceiling, model-call count, retry policy, or manuscript-specific
+  knowledge. This was an application contract repair, not another attempt to buy completeness
+  with more context or more calls.
+- Focused verification passed **246 tests**. The complete offline suite passed **598 tests with
+  one intentional skip**, repository-wide Ruff passed, the production frontend build passed, and
+  the whitespace integrity check passed. No OpenAI API call was made.
+- V25 is not yet a measured improvement claim. The next step is to freeze the exact clean
+  candidate and run all ten unchanged development questions once, with G007 reported as one item
+  rather than restored as a quality veto.
+
+Useful blog lesson: an LLM application needs two notions of “success.” A response can be perfectly
+well-formed, accurately cited, and still fail to carry the argument the question asked for.
+Treating those as separate contracts turns a vague quality complaint into a measurable system
+state.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

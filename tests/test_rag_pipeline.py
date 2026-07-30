@@ -218,8 +218,7 @@ def three_passage_transition_context() -> list[dict]:
             "paragraph_start": 3,
             "paragraph_end": 3,
             "text": (
-                "Project Lumen's charter foundation explicitly enabled its "
-                "institutional successor."
+                "Project Lumen's charter foundation explicitly enabled its institutional successor."
             ),
         },
     ]
@@ -243,9 +242,7 @@ def transition_planned_context(
             "generation_contract": {},
         },
         lane_by_chunk_id={
-            str(chunk["chunk_id"]): tuple(
-                facet.facet_id for facet in plan.facets
-            )
+            str(chunk["chunk_id"]): tuple(facet.facet_id for facet in plan.facets)
             for chunk in chunks
         },
         broad_stage_anchor_chunk_ids={
@@ -319,9 +316,7 @@ def supported_interpretive_answer(
             "Project Lumen deserves recognition as a meaningful achievement. "
             "Project Lumen turns pressure into a proving ground of durable capacity."
         ),
-        interpretive_coda=(
-            "Project Lumen therefore stands as a meaningful accomplishment."
-        ),
+        interpretive_coda=("Project Lumen therefore stands as a meaningful accomplishment."),
     )
 
 
@@ -340,12 +335,8 @@ def supported_obligation_answer(
         EvidenceDimension.INSTITUTIONAL_HANDOFF: AnswerUnitRole.MECHANISM,
         EvidenceDimension.SUBJECT_OR_DEFINITION: AnswerUnitRole.IDENTITY,
         EvidenceDimension.ACTION_OR_MECHANISM: AnswerUnitRole.MECHANISM,
-        EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE: (
-            AnswerUnitRole.CONSEQUENCE
-        ),
-        EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT: (
-            AnswerUnitRole.QUALIFICATION
-        ),
+        EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE: (AnswerUnitRole.CONSEQUENCE),
+        EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT: (AnswerUnitRole.QUALIFICATION),
     }
     units: list[AnswerUnit] = []
     obligation_coverage: list[EvidenceObligationCoverage] = []
@@ -390,9 +381,7 @@ def supported_obligation_answer(
 
     coverage = []
     for requirement_id in requirement_ids:
-        mapped_units = tuple(
-            unit for unit in units if requirement_id in unit.requirement_ids
-        )
+        mapped_units = tuple(unit for unit in units if requirement_id in unit.requirement_ids)
         coverage.append(
             RequirementCoverage(
                 requirement_id=requirement_id,
@@ -604,9 +593,7 @@ def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
             ("adjacent_stage_link",),
         ),
     ]
-    assert all(
-        scope.required_for_requirement_status for scope in obligation_scopes
-    )
+    assert all(scope.required_for_requirement_status for scope in obligation_scopes)
 
 
 def test_focused_material_components_bind_distinct_answer_layers_to_sources():
@@ -779,11 +766,7 @@ def test_adjacent_obligation_uses_the_dedicated_transition_source():
         {"F1": 1, "F2": 2},
         {("F1", "F2"): 3},
     )
-    link = next(
-        scope
-        for scope in scopes
-        if scope.kind.value == "adjacent_stage_link"
-    )
+    link = next(scope for scope in scopes if scope.kind.value == "adjacent_stage_link")
 
     assert link.source_number == 3
     assert link.predecessor_source_number == 1
@@ -792,9 +775,7 @@ def test_adjacent_obligation_uses_the_dedicated_transition_source():
 
 
 def test_broad_inspection_scope_cap_coalesces_without_omitting_any_source_range():
-    requirements = (
-        AnswerRequirement(requirement_id="R1", label="Development", order=0),
-    )
+    requirements = (AnswerRequirement(requirement_id="R1", label="Development", order=0),)
     plan = QuestionPlan(
         traits=(RouteTrait.BROAD_SYNTHESIS,),
         requirements=requirements,
@@ -820,8 +801,7 @@ def test_broad_inspection_scope_cap_coalesces_without_omitting_any_source_range(
             "paragraph_start": (source_number * 10) + 1,
             "paragraph_end": (source_number * 10) + 10,
             "text": "\n\n".join(
-                f"Synthetic paragraph {paragraph_number}."
-                for paragraph_number in range(1, 11)
+                f"Synthetic paragraph {paragraph_number}." for paragraph_number in range(1, 11)
             ),
         }
         for source_number in range(1, 9)
@@ -838,9 +818,7 @@ def test_broad_inspection_scope_cap_coalesces_without_omitting_any_source_range(
 
     assert len(scopes) == rag_pipeline.MAX_BROAD_INSPECTION_SCOPES
     for source_number, chunk in enumerate(chunks, start=1):
-        source_scopes = [
-            scope for scope in scopes if scope.source_number == source_number
-        ]
+        source_scopes = [scope for scope in scopes if scope.source_number == source_number]
         assert source_scopes[0].paragraph_start == chunk["paragraph_start"]
         assert source_scopes[-1].paragraph_end == chunk["paragraph_end"]
         assert all(
@@ -857,8 +835,7 @@ def test_broad_obligation_range_cap_can_reserve_answer_units_for_premises():
             "paragraph_start": (source_number * 10) + 1,
             "paragraph_end": (source_number * 10) + 10,
             "text": "\n\n".join(
-                f"Synthetic paragraph {paragraph_number}."
-                for paragraph_number in range(1, 11)
+                f"Synthetic paragraph {paragraph_number}." for paragraph_number in range(1, 11)
             ),
         }
         for source_number in range(1, 9)
@@ -1169,9 +1146,7 @@ def test_document_catalog_uses_bounded_role_tokens_without_sending_passages():
 
     catalog = rag_pipeline.build_document_catalog(chunks)
     planner_input = rag_pipeline.build_planner_input(
-        ResolvedTurn(
-            standalone_question="Trace the Harbor administration over time."
-        ),
+        ResolvedTurn(standalone_question="Trace the Harbor administration over time."),
         catalog,
     )
     payload = json.loads(planner_input)
@@ -1193,9 +1168,7 @@ def test_document_catalog_uses_bounded_role_tokens_without_sending_passages():
 def test_planner_input_declares_six_stages_for_book_spanning_causal_question():
     planner_input = rag_pipeline.build_planner_input(
         ResolvedTurn(
-            standalone_question=(
-                "How does the book treat conflict as an engine of central power?"
-            )
+            standalone_question=("How does the book treat conflict as an engine of central power?")
         ),
         (),
     )
@@ -1294,12 +1267,12 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
     def fake_parse(_client, *, operation, **request):
         calls.append({"operation": operation, **request})
         parsed = (
-                raw_plan
-                if operation == "query_planning"
-                else supported_obligation_answer(
-                    requirement_ids,
-                    obligation_scopes,
-                )
+            raw_plan
+            if operation == "query_planning"
+            else supported_obligation_answer(
+                requirement_ids,
+                obligation_scopes,
+            )
         )
         return SimpleNamespace(output_parsed=parsed, output=())
 
@@ -1336,9 +1309,7 @@ def test_complex_question_has_one_planner_call_and_one_answer_call(monkeypatch):
 
 def test_late_causal_origin_is_repaired_after_one_planner_call(monkeypatch):
     turn = ResolvedTurn(
-        standalone_question=(
-            "How does the book treat conflict as an engine of central power?"
-        ),
+        standalone_question=("How does the book treat conflict as an engine of central power?"),
     )
     role_by_band = (
         "charter",
@@ -1457,9 +1428,7 @@ def test_late_causal_origin_is_repaired_after_one_planner_call(monkeypatch):
 def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generation(
     monkeypatch,
 ):
-    question = (
-        "Trace the institutional lineage from Alpha Consortium to Omega Network."
-    )
+    question = "Trace the institutional lineage from Alpha Consortium to Omega Network."
     stage_specs = (
         (
             "Chartered venture",
@@ -1510,10 +1479,7 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
             "Omega Network",
         ),
     )
-    capacities = tuple(
-        f"synthetic capacity {index}"
-        for index in range(1, 10)
-    )
+    capacities = tuple(f"synthetic capacity {index}" for index in range(1, 10))
     chunks = [
         {
             **CHUNK,
@@ -1540,9 +1506,7 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
                 institutional_handoff=InstitutionalHandoff(
                     bearer=bearer,
                     inherited_capacity=capacities[index - 1],
-                    transfer_mechanism=(
-                        f"{bearer} transforms synthetic capacity"
-                    ),
+                    transfer_mechanism=(f"{bearer} transforms synthetic capacity"),
                     outgoing_capacity=capacities[index],
                 ),
             )
@@ -1556,10 +1520,7 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
                 facet_id=f"F{index}",
                 requirement_ids=(f"R{index}",),
                 role=role,
-                search_query=(
-                    f"{'Alpha Consortium' if index <= 4 else 'Omega Network'} "
-                    f"{query}"
-                ),
+                search_query=(f"{'Alpha Consortium' if index <= 4 else 'Omega Network'} {query}"),
                 document_hints=(f"lineage-{index}.md",),
             )
             for index, (_label, role, query, _bearer) in enumerate(
@@ -1577,10 +1538,7 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
         final_chunks=chunks,
         facet_source_numbers={
             "F0": tuple(range(1, 9)),
-            **{
-                f"F{index}": (index,)
-                for index in range(1, 9)
-            },
+            **{f"F{index}": (index,) for index in range(1, 9)},
         },
         trace={
             "schema": RETRIEVAL_TRACE_SCHEMA,
@@ -1589,21 +1547,16 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
             "generation_contract": {},
         },
         lane_by_chunk_id={
-            str(item["chunk_id"]): ("F0", f"F{index}")
-            for index, item in enumerate(chunks, start=1)
+            str(item["chunk_id"]): ("F0", f"F{index}") for index, item in enumerate(chunks, start=1)
         },
         broad_stage_anchor_chunk_ids={
-            f"F{index}": str(item["chunk_id"])
-            for index, item in enumerate(chunks, start=1)
+            f"F{index}": str(item["chunk_id"]) for index, item in enumerate(chunks, start=1)
         },
     )
     obligation_scopes = rag_pipeline._evidence_obligation_scopes(
         finalized,
         chunks,
-        {
-            f"F{index}": index
-            for index in range(1, 9)
-        },
+        {f"F{index}": index for index in range(1, 9)},
     )
     calls: list[str] = []
 
@@ -1618,9 +1571,7 @@ def test_long_institutional_lineage_keeps_all_eight_stage_roles_through_generati
         if operation == "answer_generation":
             assert '"orientation_only"' in _request["input"]
             assert '"bearer": "Alpha Consortium"' in _request["input"]
-            assert (
-                "planner search orientation only" in _request["input"]
-            )
+            assert "planner search orientation only" in _request["input"]
         parsed = (
             proposal
             if operation == "query_planning"
@@ -1699,9 +1650,7 @@ def test_pipeline_accepts_a_dedicated_transition_passage(monkeypatch):
 
     result = rag_pipeline.run_evidence_planned_answer(
         resolved_turn=ResolvedTurn(
-            standalone_question=(
-                "Trace Project Lumen from foundation to successor."
-            ),
+            standalone_question=("Trace Project Lumen from foundation to successor."),
         ),
         collection_handle=Collection(count=3),
         chunks=chunks,
@@ -1770,9 +1719,7 @@ def test_pipeline_rejects_a_stage_shortfall_before_answer_generation(
 
     result = rag_pipeline.run_evidence_planned_answer(
         resolved_turn=ResolvedTurn(
-            standalone_question=(
-                "Trace Project Lumen from foundation to successor."
-            ),
+            standalone_question=("Trace Project Lumen from foundation to successor."),
         ),
         collection_handle=Collection(count=3),
         chunks=chunks,
@@ -1783,14 +1730,8 @@ def test_pipeline_rejects_a_stage_shortfall_before_answer_generation(
 
     assert calls == []
     assert result.status == "generation_contract_failed"
-    assert (
-        result.diagnostics["generation"]["error_code"]
-        == "invalid_context"
-    )
-    assert (
-        result.diagnostics["generation"]["structured_generation_called"]
-        is False
-    )
+    assert result.diagnostics["generation"]["error_code"] == "invalid_context"
+    assert result.diagnostics["generation"]["structured_generation_called"] is False
     assert "answer_generation" not in result.diagnostics["stage_timings_ms"]
     validate_text_free_retrieval_trace(emitted_trace)
 
@@ -1799,9 +1740,7 @@ def test_pipeline_fails_closed_on_fallback_structural_core_shortfall(
     monkeypatch,
 ):
     turn = ResolvedTurn(
-        standalone_question=(
-            "How does the book treat conflict as an engine of central power?"
-        ),
+        standalone_question=("How does the book treat conflict as an engine of central power?"),
     )
     plan = deterministic_fallback_plan(
         turn,
@@ -1810,8 +1749,7 @@ def test_pipeline_fails_closed_on_fallback_structural_core_shortfall(
     planned = PlannedContext(
         final_chunks=[CHUNK],
         facet_source_numbers={
-            facet.facet_id: ((1,) if facet.facet_id != "F5" else ())
-            for facet in plan.facets
+            facet.facet_id: ((1,) if facet.facet_id != "F5" else ()) for facet in plan.facets
         },
         trace={
             "schema": RETRIEVAL_TRACE_SCHEMA,
@@ -1829,9 +1767,7 @@ def test_pipeline_fails_closed_on_fallback_structural_core_shortfall(
         },
         lane_by_chunk_id={
             str(CHUNK["chunk_id"]): tuple(
-                facet.facet_id
-                for facet in plan.facets
-                if facet.facet_id != "F5"
+                facet.facet_id for facet in plan.facets if facet.facet_id != "F5"
             ),
         },
         broad_stage_anchor_chunk_ids={
@@ -1883,14 +1819,10 @@ def test_pipeline_fails_closed_on_fallback_structural_core_shortfall(
     assert result.status == "insufficient_evidence"
     assert result.final_chunks == []
     assert result.evidence_decision == "indeterminate"
-    assert (
-        result.diagnostics["generation"]["structured_generation_called"]
-        is False
-    )
-    assert (
-        result.diagnostics["evidence"]["decision"]["rules_fired"]
-        == ["structural_stage_shortfall"]
-    )
+    assert result.diagnostics["generation"]["structured_generation_called"] is False
+    assert result.diagnostics["evidence"]["decision"]["rules_fired"] == [
+        "structural_stage_shortfall"
+    ]
     assert "answer_generation" not in result.diagnostics["stage_timings_ms"]
     validate_text_free_retrieval_trace(emitted_trace)
 
@@ -2079,7 +2011,8 @@ def test_planner_failure_preserves_only_exact_text_free_diagnostics(monkeypatch)
     }
     validate_text_free_retrieval_trace(emitted_trace)
     run_diagnostics = rag_pipeline.answer_run_diagnostics(result)
-    assert run_diagnostics["schema"] == "archivist.answer_run_diagnostics/2"
+    assert run_diagnostics["schema"] == "archivist.answer_run_diagnostics/3"
+    assert run_diagnostics["content_outcome"] == "valid_partial"
     assert run_diagnostics["planner"] == expected
     assert private_provider_message not in str(result.diagnostics)
     assert private_provider_message not in str(emitted_trace)
@@ -2169,9 +2102,7 @@ def test_absence_gate_is_not_overridden_by_an_untrusted_premise_plan():
         trusted_user_texts=(question,),
     )
     premise_plan = rag_pipeline.build_question_plan(turn)
-    defensive_plan = premise_plan.model_copy(
-        update={"traits": (RouteTrait.ABSENCE_SENSITIVE,)}
-    )
+    defensive_plan = premise_plan.model_copy(update={"traits": (RouteTrait.ABSENCE_SENSITIVE,)})
     planned = planned_context(defensive_plan, [absent_chunk])
 
     gate, _diagnostics, _target_label = rag_pipeline.apply_evidence_gate(
@@ -2305,6 +2236,7 @@ def test_trusted_related_tail_qualifies_bounded_near_match():
     assert gate.rules_fired == (
         "certified_direct_absence",
         "qualified_broader_material",
+        "trusted_bounded_relation_request",
         "trusted_related_tail_material",
     )
     assert diagnostics["broader_related"]["qualifying_pair_count"] == 1
@@ -2377,9 +2309,316 @@ def test_hinted_planner_relation_outranks_exact_tail_keyword_fallback():
         "certified_direct_absence",
         "qualified_broader_material",
         "planner_bounded_related_material",
+        "trusted_bounded_relation_request",
     )
     assert diagnostics["broader_related"]["qualifying_pair_count"] == 1
     assert target_label == "XR-37"
+
+
+def test_planner_hints_cannot_turn_plain_conjunction_into_an_analogue_request():
+    broader = {
+        **CHUNK,
+        "chunk_id": "broader_001",
+        "document": "broader.md",
+        "text": "Canadian policy appears in this synthetic record.",
+    }
+    probe = {
+        **CHUNK,
+        "chunk_id": "probe_001",
+        "document": "probe.md",
+        "paragraph_start": 2,
+        "paragraph_end": 2,
+        "text": "A fur trade appears in an unrelated synthetic record.",
+    }
+    hinted = {
+        **CHUNK,
+        "chunk_id": "hinted_001",
+        "document": "hinted.md",
+        "paragraph_start": 3,
+        "paragraph_end": 3,
+        "text": "A regional council allocated supplies in this synthetic record.",
+    }
+    question = "How does the book treat the Briar Council and the Canadian fur trade?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    local = rag_pipeline.build_question_plan(turn)
+    requirement_id = local.requirements[0].requirement_id
+    plan = QuestionPlan(
+        traits=local.traits,
+        requirements=local.requirements,
+        facets=(
+            local.facets[0],
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=(requirement_id,),
+                role=FacetRole.BROADER_RELATED,
+                search_query="broader: Canadian; related: fur trade",
+            ),
+            SearchFacet(
+                facet_id="F2",
+                requirement_ids=(requirement_id,),
+                role=FacetRole.MECHANISM,
+                search_query="Briar Council Canadian fur trade",
+                document_hints=("hinted.md",),
+            ),
+        ),
+        targets=local.targets,
+        planner_used=True,
+    )
+    chunks = [broader, probe, hinted]
+    planned = PlannedContext(
+        final_chunks=chunks,
+        facet_source_numbers={"F0": (1,), "F1": (1, 2), "F2": (3,)},
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={
+            "broader_001": ("F0", "F1"),
+            "probe_001": ("F1",),
+            "hinted_001": ("F2",),
+        },
+    )
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        chunks,
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=len(chunks),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "clean_abstention"
+    assert gate.allowed_source_numbers == ()
+    assert gate.suppressed_source_numbers == (1, 2, 3)
+    assert "planner_bounded_related_material" not in gate.rules_fired
+    assert diagnostics["broader_related"] is None
+    assert target_label == "Briar Council"
+
+
+def test_causal_planner_hint_requires_a_locally_certified_related_pair():
+    broader = {
+        **CHUNK,
+        "chunk_id": "broader_001",
+        "document": "broader.md",
+        "text": "Federal programs changed in this synthetic record.",
+    }
+    probe = {
+        **CHUNK,
+        "chunk_id": "probe_001",
+        "document": "probe.md",
+        "paragraph_start": 2,
+        "paragraph_end": 2,
+        "text": "Contracting expanded in an unrelated synthetic record.",
+    }
+    hinted = {
+        **CHUNK,
+        "chunk_id": "hinted_001",
+        "document": "hinted.md",
+        "paragraph_start": 3,
+        "paragraph_end": 3,
+        "text": "A worldwide pandemic exposed supply-chain risk and prompted reshoring.",
+    }
+    question = "What does the book say about XR-37 and its effect on federal contracting?"
+    turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    local = rag_pipeline.build_question_plan(turn)
+    requirement_id = local.requirements[0].requirement_id
+    plan = QuestionPlan(
+        traits=local.traits,
+        requirements=local.requirements,
+        facets=(
+            local.facets[0],
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=(requirement_id,),
+                role=FacetRole.MECHANISM,
+                search_query="XR-37 federal contracting",
+                document_hints=("hinted.md",),
+            ),
+        ),
+        targets=local.targets,
+        planner_used=True,
+    )
+    chunks = [broader, probe, hinted]
+    planned = PlannedContext(
+        final_chunks=chunks,
+        facet_source_numbers={"F0": (1, 2), "F1": (3,)},
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={
+            "broader_001": ("F0",),
+            "probe_001": ("F0",),
+            "hinted_001": ("F1",),
+        },
+    )
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        chunks,
+        trusted_user_texts=turn.trusted_user_texts,
+        collection_count=len(chunks),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "clean_abstention"
+    assert gate.allowed_source_numbers == ()
+    assert gate.suppressed_source_numbers == (1, 2, 3)
+    assert "planner_bounded_related_material" not in gate.rules_fired
+    assert diagnostics["broader_related"]["qualifying_pair_count"] == 0
+    assert target_label == "XR-37"
+
+
+def test_explicit_analogue_request_can_use_a_bounded_planner_hint():
+    broader = {
+        **CHUNK,
+        "chunk_id": "broader_001",
+        "document": "broader.md",
+        "text": "Canadian policy appears in this synthetic record.",
+    }
+    probe = {
+        **CHUNK,
+        "chunk_id": "probe_001",
+        "document": "probe.md",
+        "paragraph_start": 2,
+        "paragraph_end": 2,
+        "text": "A fur trade appears in an unrelated synthetic record.",
+    }
+    hinted = {
+        **CHUNK,
+        "chunk_id": "hinted_001",
+        "document": "hinted.md",
+        "paragraph_start": 3,
+        "paragraph_end": 3,
+        "text": "A regional council allocated supplies in this synthetic record.",
+    }
+    trusted_question = (
+        "If the Briar Council is absent, show an analogous institution in the Canadian fur trade."
+    )
+    local = rag_pipeline.build_question_plan(
+        ResolvedTurn(
+            standalone_question=(
+                "How does the book treat the Briar Council and the Canadian fur trade?"
+            ),
+            trusted_user_texts=(trusted_question,),
+        )
+    )
+    requirement_id = local.requirements[0].requirement_id
+    plan = QuestionPlan(
+        traits=local.traits,
+        requirements=local.requirements,
+        facets=(
+            local.facets[0],
+            SearchFacet(
+                facet_id="F1",
+                requirement_ids=(requirement_id,),
+                role=FacetRole.BROADER_RELATED,
+                search_query="broader: Canadian; related: fur trade",
+            ),
+            SearchFacet(
+                facet_id="F2",
+                requirement_ids=(requirement_id,),
+                role=FacetRole.MECHANISM,
+                search_query="Briar Council Canadian fur trade",
+                document_hints=("hinted.md",),
+            ),
+        ),
+        targets=local.targets,
+        planner_used=True,
+    )
+    chunks = [broader, probe, hinted]
+    planned = PlannedContext(
+        final_chunks=chunks,
+        facet_source_numbers={"F0": (1,), "F1": (1, 2), "F2": (3,)},
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={
+            "broader_001": ("F0", "F1"),
+            "probe_001": ("F1",),
+            "hinted_001": ("F2",),
+        },
+    )
+
+    gate, diagnostics, target_label = rag_pipeline.apply_evidence_gate(
+        plan,
+        planned,
+        chunks,
+        trusted_user_texts=(trusted_question,),
+        collection_count=len(chunks),
+        corpus_manifest=corpus_manifest(*chunks),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert gate.decision.value == "qualified_near_match"
+    assert gate.allowed_source_numbers == (3,)
+    assert gate.suppressed_source_numbers == (1, 2)
+    assert gate.rules_fired == (
+        "certified_direct_absence",
+        "qualified_broader_material",
+        "planner_bounded_related_material",
+        "trusted_analogue_request",
+    )
+    assert diagnostics["broader_related"]["qualifying_pair_count"] == 0
+    assert target_label == "Briar Council"
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        "What does the book say about the Parallel Council?",
+        ("Do not give me a similar example; what does the book say about the Briar Council?"),
+    ),
+)
+def test_analogue_permission_requires_an_affirmative_request(question):
+    assert rag_pipeline._trusted_near_match_intent((question,)) == "none"
+
+
+def test_direct_causal_permission_is_bound_to_the_known_subject():
+    assert (
+        rag_pipeline._trusted_near_match_intent(
+            ("How did XR-37 affect federal contracting?",),
+            subject_surfaces=("XR-37",),
+        )
+        == "bounded_relation"
+    )
+    assert (
+        rag_pipeline._trusted_near_match_intent(
+            ("How does the book treat the Affect Society?",),
+            subject_surfaces=("Affect Society",),
+        )
+        == "none"
+    )
+
+
+def test_near_match_permission_never_leaks_from_prior_turns():
+    assert (
+        rag_pipeline._trusted_near_match_intent(
+            (
+                "What does the book say about XR-37 and its effect on federal contracting?",
+                "How does the book treat the Briar Council and the Canadian fur trade?",
+            ),
+            subject_surfaces=("Briar Council",),
+        )
+        == "none"
+    )
 
 
 def test_related_looking_noncooccurring_material_preserves_clean_absence():
@@ -2418,7 +2657,7 @@ def test_related_looking_noncooccurring_material_preserves_clean_absence():
     assert gate.decision.value == "clean_abstention"
     assert gate.allowed_source_numbers == ()
     assert gate.suppressed_source_numbers == (1, 2)
-    assert diagnostics["broader_related"]["qualifying_pair_count"] == 0
+    assert diagnostics["broader_related"] is None
     assert target_label == "Briar Council"
 
 
@@ -2682,9 +2921,7 @@ def test_anchor_promotion_preserves_every_broad_requirement_lane():
         facets=(
             SearchFacet(
                 facet_id="F0",
-                requirement_ids=tuple(
-                    requirement.requirement_id for requirement in requirements
-                ),
+                requirement_ids=tuple(requirement.requirement_id for requirement in requirements),
                 role=FacetRole.ORIGINAL,
                 search_query="Trace four synthetic periods.",
             ),
@@ -2768,9 +3005,7 @@ def test_anchor_promotion_preserves_every_broad_requirement_lane():
     )
     integrity = rag_pipeline.assess_corpus_integrity(
         eligible_chunks,
-        manifest_eligible_chunk_ids=tuple(
-            str(chunk["chunk_id"]) for chunk in eligible_chunks
-        ),
+        manifest_eligible_chunk_ids=tuple(str(chunk["chunk_id"]) for chunk in eligible_chunks),
         expected_manifest_sha256=MANIFEST_SHA256,
         loaded_manifest_sha256=MANIFEST_SHA256,
         expected_collection_count=len(eligible_chunks),

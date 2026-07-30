@@ -16,6 +16,9 @@ from answer_coverage import (
     AnswerUnit,
     AnswerUnitRole,
     CitationLocalityFailureCode,
+    ContentCompletenessContext,
+    ContentCompletenessProfile,
+    ContentOutcome,
     CoverageContractError,
     CoverageOutcomeStatus,
     CoverageValidationErrorCode,
@@ -27,6 +30,7 @@ from answer_coverage import (
     EvidenceObligationFocus,
     EvidenceObligationKind,
     EvidenceObligationScope,
+    ExpectedStageTransition,
     GapReason,
     InterpretiveEvidenceCoverageAnswer,
     InterpretiveMove,
@@ -387,9 +391,7 @@ def test_interpretive_coverage_frames_the_factual_answer_with_subjective_prose()
         "Project Lumen deserves recognition as a meaningful achievement. "
         "Project Lumen turns pressure into a proving ground of durable capacity."
     )
-    assert paragraphs[-1] == (
-        "Project Lumen therefore stands as a meaningful accomplishment."
-    )
+    assert paragraphs[-1] == ("Project Lumen therefore stands as a meaningful accomplishment.")
     assert "A synthetic later point is bounded [Source 2, Source 3]." in result.answer
     assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
 
@@ -410,8 +412,7 @@ def test_answered_interpretive_coverage_fails_without_the_required_coda():
 
     assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
     assert (
-        result.diagnostics.error_code
-        is CoverageValidationErrorCode.MISSING_INTERPRETIVE_PARAGRAPH
+        result.diagnostics.error_code is CoverageValidationErrorCode.MISSING_INTERPRETIVE_PARAGRAPH
     )
 
 
@@ -438,8 +439,7 @@ def test_interpretive_frame_rejects_citations_and_wrong_sentence_counts():
     )
 
     assert (
-        cited.diagnostics.error_code
-        is CoverageValidationErrorCode.INTERPRETIVE_CITATION_FORBIDDEN
+        cited.diagnostics.error_code is CoverageValidationErrorCode.INTERPRETIVE_CITATION_FORBIDDEN
     )
     assert (
         too_short.diagnostics.error_code
@@ -483,8 +483,7 @@ def test_interpretive_frame_rejects_first_person_and_generic_subjectless_prose()
         is CoverageValidationErrorCode.INTERPRETIVE_FIRST_PERSON_FORBIDDEN
     )
     assert (
-        generic.diagnostics.error_code
-        is CoverageValidationErrorCode.INTERPRETIVE_SUBJECT_MISSING
+        generic.diagnostics.error_code is CoverageValidationErrorCode.INTERPRETIVE_SUBJECT_MISSING
     )
 
 
@@ -1058,9 +1057,9 @@ def test_locality_validation_does_not_guess_semantics_from_safe_punctuation(
 
 
 def test_answer_unit_schema_explicitly_requires_one_independently_checkable_claim():
-    text_schema = EvidenceCoverageAnswer.model_json_schema()["$defs"]["AnswerUnit"][
-        "properties"
-    ]["text"]
+    text_schema = EvidenceCoverageAnswer.model_json_schema()["$defs"]["AnswerUnit"]["properties"][
+        "text"
+    ]
     description = text_schema["description"]
 
     assert "one independently checkable factual claim" in description
@@ -1236,9 +1235,7 @@ def test_requirement_component_requires_its_source_bounded_material_layer():
                 obligation_id="O1",
                 dimensions=(
                     EvidenceDimensionCoverage(
-                        dimension=(
-                            EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE
-                        ),
+                        dimension=(EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE),
                         status=RequirementStatus.SUPPORTED,
                         unit_ids=("U1",),
                         source_numbers=(1,),
@@ -1277,9 +1274,7 @@ def test_requirement_component_rejects_multiple_requirements():
 
 def test_adjacent_stage_link_rejects_a_single_stage_requirement_mapping():
     answer = _adjacent_link_answer()
-    bad_unit = answer.answer_units[0].model_copy(
-        update={"requirement_ids": ("R2",)}
-    )
+    bad_unit = answer.answer_units[0].model_copy(update={"requirement_ids": ("R2",)})
     answer = answer.model_copy(update={"answer_units": (bad_unit,)})
 
     with pytest.raises(CoverageContractError) as captured:
@@ -1290,10 +1285,7 @@ def test_adjacent_stage_link_rejects_a_single_stage_requirement_mapping():
             source_count=2,
         )
 
-    assert (
-        captured.value.code
-        is CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
-    )
+    assert captured.value.code is CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
 
 
 @pytest.mark.parametrize(
@@ -1315,14 +1307,16 @@ def test_adjacent_stage_link_rejects_a_single_stage_requirement_mapping():
 def test_adjacent_stage_link_rejects_wrong_role_or_source(update, expected_code):
     answer = _adjacent_link_answer()
     bad_unit = answer.answer_units[0].model_copy(update=update)
-    link_dimension = answer.obligation_coverage[2].dimensions[0].model_copy(
-        update={
-            "source_numbers": bad_unit.source_numbers,
-        }
+    link_dimension = (
+        answer.obligation_coverage[2]
+        .dimensions[0]
+        .model_copy(
+            update={
+                "source_numbers": bad_unit.source_numbers,
+            }
+        )
     )
-    link_record = answer.obligation_coverage[2].model_copy(
-        update={"dimensions": (link_dimension,)}
-    )
+    link_record = answer.obligation_coverage[2].model_copy(update={"dimensions": (link_dimension,)})
     answer = answer.model_copy(
         update={
             "answer_units": (bad_unit,),
@@ -1331,9 +1325,7 @@ def test_adjacent_stage_link_rejects_wrong_role_or_source(update, expected_code)
                 link_record,
             ),
             "coverage": tuple(
-                record.model_copy(
-                    update={"source_numbers": bad_unit.source_numbers}
-                )
+                record.model_copy(update={"source_numbers": bad_unit.source_numbers})
                 for record in answer.coverage
             ),
         }
@@ -1485,10 +1477,7 @@ def test_each_obligation_link_must_individually_allow_every_unit_requirement():
             source_count=1,
         )
 
-    assert (
-        captured.value.code
-        is CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
-    )
+    assert captured.value.code is CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
 
 
 def test_incomplete_required_obligation_dimensions_downgrade_supported_to_partial():
@@ -1616,9 +1605,10 @@ def test_unsupported_adjacent_link_downgrades_both_stage_requirements():
         source_count=2,
     )
 
-    assert tuple(
-        record.status for record in result.diagnostics.coverage
-    ) == (RequirementStatus.PARTIAL, RequirementStatus.PARTIAL)
+    assert tuple(record.status for record in result.diagnostics.coverage) == (
+        RequirementStatus.PARTIAL,
+        RequirementStatus.PARTIAL,
+    )
 
 
 def test_broad_supplemental_unit_may_be_cited_without_synthesis_link():
@@ -1802,10 +1792,7 @@ def test_conflicting_coverage_requires_at_least_two_sources_and_cites_both():
         requirement_labels={"R1": "which account applies"},
     )
     assert rendered.count(unit.text) == 1
-    assert rendered.endswith(
-        "The retrieved sources conflict about this requested point "
-        "(which account applies) [Source 1, Source 2]."
-    )
+    assert rendered.endswith("The retrieved passages conflict on part of the requested answer.")
 
     one_source_unit = unit.model_copy(
         update={
@@ -1839,10 +1826,7 @@ def test_renderer_orders_paragraphs_and_realizes_each_unit_once_before_gaps():
     assert rendered.index("synthetic later point") < rendered.index("synthetic first point")
     assert rendered.count(answer.answer_units[0].text) == 1
     assert rendered.count(answer.answer_units[1].text) == 1
-    assert rendered.endswith(
-        "The retrieved passages only partially establish this requested point "
-        "(the unresolved synthetic relationship)."
-    )
+    assert rendered.endswith("The retrieved passages establish only part of the requested answer.")
 
 
 def test_gap_labels_cannot_inject_an_unvalidated_citation():
@@ -1851,9 +1835,321 @@ def test_gap_labels_cannot_inject_an_unvalidated_citation():
         requirement_labels={"R2": "a label [Source 99]\nwith a line break"},
     )
 
-    assert "[Source 99]" not in rendered
-    assert "(Source 99)" in rendered
+    assert "Source 99" not in rendered
     assert "\nwith a line break" not in rendered
+
+
+def _two_stage_completeness_context() -> ContentCompletenessContext:
+    return ContentCompletenessContext(
+        profile=ContentCompletenessProfile.BROAD_SYNTHESIS,
+        required_requirement_ids=("R1", "R2"),
+        expected_stage_requirement_ids=("R1", "R2"),
+        expected_stage_transitions=(
+            ExpectedStageTransition(
+                predecessor_requirement_id="R1",
+                successor_requirement_id="R2",
+            ),
+        ),
+        minimum_supported_obligation_ratio=1.0,
+        require_institutional_handoffs=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("expected_stages", "transitions"),
+    (
+        (
+            ("R2", "R1", "R3"),
+            (
+                ExpectedStageTransition(
+                    predecessor_requirement_id="R2",
+                    successor_requirement_id="R1",
+                ),
+                ExpectedStageTransition(
+                    predecessor_requirement_id="R1",
+                    successor_requirement_id="R3",
+                ),
+            ),
+        ),
+        (("R1", "R2", "R3"), ()),
+        (
+            ("R1", "R2", "R3"),
+            (
+                ExpectedStageTransition(
+                    predecessor_requirement_id="R1",
+                    successor_requirement_id="R3",
+                ),
+                ExpectedStageTransition(
+                    predecessor_requirement_id="R3",
+                    successor_requirement_id="R2",
+                ),
+            ),
+        ),
+    ),
+)
+def test_broad_completeness_requires_the_exact_ordered_stage_chain(
+    expected_stages,
+    transitions,
+):
+    with pytest.raises(ValidationError):
+        ContentCompletenessContext(
+            profile=ContentCompletenessProfile.BROAD_SYNTHESIS,
+            required_requirement_ids=("R1", "R2", "R3"),
+            expected_stage_requirement_ids=expected_stages,
+            expected_stage_transitions=transitions,
+            minimum_supported_obligation_ratio=1.0,
+            require_institutional_handoffs=False,
+        )
+
+
+def _two_stage_supported_answer(
+    *,
+    include_transition: bool,
+) -> tuple[EvidenceCoverageAnswer, tuple[EvidenceObligationScope, ...]]:
+    stage_scopes = (
+        EvidenceObligationScope(
+            obligation_id="O1",
+            source_number=1,
+            paragraph_start=1,
+            paragraph_end=1,
+            allowed_requirement_ids=("R1",),
+            focus=EvidenceObligationFocus.ORIGIN,
+            dimension_ids=(EvidenceDimension.STAGE_DEVELOPMENT,),
+            required_for_requirement_status=True,
+        ),
+        EvidenceObligationScope(
+            obligation_id="O2",
+            source_number=2,
+            paragraph_start=1,
+            paragraph_end=1,
+            allowed_requirement_ids=("R2",),
+            focus=EvidenceObligationFocus.ENDPOINT,
+            dimension_ids=(EvidenceDimension.STAGE_DEVELOPMENT,),
+            required_for_requirement_status=True,
+        ),
+    )
+    transition_scope = EvidenceObligationScope(
+        obligation_id="O3",
+        kind=EvidenceObligationKind.ADJACENT_STAGE_LINK,
+        source_number=2,
+        predecessor_source_number=1,
+        paragraph_start=1,
+        paragraph_end=1,
+        allowed_requirement_ids=("R1", "R2"),
+        focus=EvidenceObligationFocus.TRANSITION,
+        dimension_ids=(EvidenceDimension.ADJACENT_STAGE_LINK,),
+        required_for_requirement_status=True,
+    )
+    scopes = (*stage_scopes, *((transition_scope,) if include_transition else ()))
+    units = (
+        AnswerUnit(
+            unit_id="U1",
+            requirement_ids=("R1",),
+            role=AnswerUnitRole.EVENT,
+            text="The synthetic origin established the first stage [Source 1].",
+            source_numbers=(1,),
+            paragraph=1,
+            obligation_links=(
+                ObligationLink(
+                    obligation_id="O1",
+                    dimension=EvidenceDimension.STAGE_DEVELOPMENT,
+                ),
+            ),
+        ),
+        AnswerUnit(
+            unit_id="U2",
+            requirement_ids=("R2",),
+            role=AnswerUnitRole.EVENT,
+            text="The synthetic endpoint established the second stage [Source 2].",
+            source_numbers=(2,),
+            paragraph=2,
+            obligation_links=(
+                ObligationLink(
+                    obligation_id="O2",
+                    dimension=EvidenceDimension.STAGE_DEVELOPMENT,
+                ),
+            ),
+        ),
+        *(
+            (
+                AnswerUnit(
+                    unit_id="U3",
+                    requirement_ids=("R1", "R2"),
+                    role=AnswerUnitRole.CAUSE,
+                    text="The second stage inherited capacity from the first [Source 2].",
+                    source_numbers=(2,),
+                    paragraph=2,
+                    obligation_links=(
+                        ObligationLink(
+                            obligation_id="O3",
+                            dimension=EvidenceDimension.ADJACENT_STAGE_LINK,
+                        ),
+                    ),
+                ),
+            )
+            if include_transition
+            else ()
+        ),
+    )
+    coverage = (
+        _coverage(
+            "R1",
+            RequirementStatus.SUPPORTED,
+            ("U1", "U3") if include_transition else ("U1",),
+            (1, 2) if include_transition else (1,),
+            GapReason.NONE,
+        ),
+        _coverage(
+            "R2",
+            RequirementStatus.SUPPORTED,
+            ("U2", "U3") if include_transition else ("U2",),
+            (2,),
+            GapReason.NONE,
+        ),
+    )
+    obligation_coverage = tuple(
+        EvidenceObligationCoverage(
+            obligation_id=scope.obligation_id,
+            dimensions=tuple(
+                EvidenceDimensionCoverage(
+                    dimension=dimension,
+                    status=RequirementStatus.SUPPORTED,
+                    unit_ids=(
+                        ("U1",)
+                        if scope.obligation_id == "O1"
+                        else ("U2",)
+                        if scope.obligation_id == "O2"
+                        else ("U3",)
+                    ),
+                    source_numbers=(scope.source_number,),
+                    gap_reason=GapReason.NONE,
+                )
+                for dimension in scope.dimension_ids
+            ),
+        )
+        for scope in scopes
+    )
+    return (
+        EvidenceCoverageAnswer(
+            schema=EVIDENCE_COVERAGE_SCHEMA,
+            premise_decisions=(),
+            coverage=coverage,
+            obligation_coverage=obligation_coverage,
+            answer_units=units,
+        ),
+        scopes,
+    )
+
+
+def test_content_outcome_keeps_structural_validity_separate_from_completeness():
+    answer, scopes = _two_stage_supported_answer(include_transition=False)
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=scopes,
+        source_count=2,
+        completeness_context=_two_stage_completeness_context(),
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_PARTIAL
+    assert result.diagnostics.expected_stage_count == 2
+    assert result.diagnostics.realized_stage_count == 2
+    assert result.diagnostics.expected_transition_count == 1
+    assert result.diagnostics.realized_transition_count == 0
+    assert result.answer.count("establish only part") == 1
+    assert "required stages or connections" in result.answer
+
+
+def test_broad_content_is_complete_only_when_every_expected_link_is_realized():
+    answer, scopes = _two_stage_supported_answer(include_transition=True)
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=scopes,
+        source_count=2,
+        completeness_context=_two_stage_completeness_context(),
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_COMPLETE
+    assert result.diagnostics.required_obligation_dimension_count == 3
+    assert result.diagnostics.supported_required_obligation_dimension_count == 3
+    assert result.diagnostics.realized_transition_count == 1
+    assert "establish only part" not in result.answer
+
+
+def test_broad_content_reports_a_missing_stage_even_when_the_link_is_supported():
+    answer, scopes = _two_stage_supported_answer(include_transition=True)
+    without_stage_two = answer.model_copy(
+        update={
+            "answer_units": tuple(
+                unit.model_copy(update={"obligation_links": ()}) if unit.unit_id == "U2" else unit
+                for unit in answer.answer_units
+            ),
+            "obligation_coverage": tuple(
+                record.model_copy(
+                    update={
+                        "dimensions": tuple(
+                            dimension.model_copy(
+                                update={
+                                    "status": RequirementStatus.UNSUPPORTED,
+                                    "unit_ids": (),
+                                    "source_numbers": (),
+                                    "gap_reason": GapReason.NO_DIRECT_SUPPORT,
+                                }
+                            )
+                            for dimension in record.dimensions
+                        )
+                    }
+                )
+                if record.obligation_id == "O2"
+                else record
+                for record in answer.obligation_coverage
+            ),
+        }
+    )
+
+    result = process_evidence_coverage(
+        without_stage_two,
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=scopes,
+        source_count=2,
+        completeness_context=_two_stage_completeness_context(),
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED, result.diagnostics.error_code
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_PARTIAL
+    assert result.diagnostics.realized_stage_count == 1
+    assert result.diagnostics.realized_transition_count == 1
+    assert result.answer.count("establish only part") == 1
+
+
+def test_lineage_stages_require_supported_institutional_handoffs():
+    answer, scopes = _two_stage_supported_answer(include_transition=True)
+    lineage_context = _two_stage_completeness_context().model_copy(
+        update={
+            "profile": ContentCompletenessProfile.LONG_INSTITUTIONAL_LINEAGE,
+            "require_institutional_handoffs": True,
+        }
+    )
+
+    result = process_evidence_coverage(
+        answer,
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=scopes,
+        source_count=2,
+        completeness_context=lineage_context,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_PARTIAL
+    assert result.diagnostics.realized_stage_count == 0
+    assert result.diagnostics.realized_transition_count == 1
+    assert "required stages or handoffs" in result.answer
 
 
 def test_all_unsupported_and_no_sources_have_deterministic_messages():
@@ -1878,6 +2174,7 @@ def test_all_unsupported_and_no_sources_have_deterministic_messages():
     )
     assert result.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
     assert result.answer == ALL_UNSUPPORTED_MESSAGE
+    assert result.diagnostics.content_outcome is ContentOutcome.INSUFFICIENT_EVIDENCE
 
     no_sources = process_evidence_coverage(
         {"unvalidated": "prose that must never be shown"},
@@ -1887,6 +2184,7 @@ def test_all_unsupported_and_no_sources_have_deterministic_messages():
     assert no_sources.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
     assert no_sources.answer == NO_SOURCES_MESSAGE
     assert no_sources.diagnostics.validation_result is DiagnosticValidationResult.NOT_RUN
+    assert no_sources.diagnostics.content_outcome is ContentOutcome.INSUFFICIENT_EVIDENCE
 
 
 def test_refusal_and_invalid_payload_fail_closed_with_stable_codes():
@@ -1963,6 +2261,7 @@ def test_process_normalizes_only_order_and_redundant_derived_mappings():
     )
 
     assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_COMPLETE
     assert result.answer == factual_text
     assert result.diagnostics.repair_applied is True
     assert result.diagnostics.repair_codes == (
@@ -2048,9 +2347,7 @@ def test_empty_ungrounded_requirement_mapping_downgrades_to_unsupported():
     assert result.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
     assert result.answer == ALL_UNSUPPORTED_MESSAGE
     assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
-    assert result.diagnostics.repair_codes == (
-        CoverageValidationErrorCode.STATUS_UNIT_MISMATCH,
-    )
+    assert result.diagnostics.repair_codes == (CoverageValidationErrorCode.STATUS_UNIT_MISMATCH,)
     record = result.diagnostics.coverage[0]
     assert record.status is RequirementStatus.UNSUPPORTED
     assert record.gap_reason is GapReason.NO_DIRECT_SUPPORT
@@ -2109,9 +2406,7 @@ def test_empty_ungrounded_obligation_mapping_downgrades_without_inventing_suppor
     assert dimension.unit_ids == ()
     assert dimension.source_numbers == ()
     assert result.diagnostics.coverage[0].status is RequirementStatus.PARTIAL
-    assert CoverageValidationErrorCode.STATUS_UNIT_MISMATCH in (
-        result.diagnostics.repair_codes
-    )
+    assert CoverageValidationErrorCode.STATUS_UNIT_MISMATCH in (result.diagnostics.repair_codes)
 
 
 def test_nonempty_invalid_mapping_still_fails_closed():
@@ -2225,9 +2520,7 @@ def test_process_derives_contradicted_premise_sources_from_its_correction_unit()
 
     assert result.status is CoverageOutcomeStatus.ANSWERED
     assert result.answer == f"{correction.text}\n\n{substantive.text}"
-    assert result.diagnostics.repair_codes == (
-        CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH,
-    )
+    assert result.diagnostics.repair_codes == (CoverageValidationErrorCode.PREMISE_SOURCE_MISMATCH,)
     assert result.diagnostics.premise_decisions[0].source_numbers == (1,)
     assert result.diagnostics.coverage[0].source_numbers == (2,)
 
@@ -2368,10 +2661,7 @@ def test_premise_decision_sources_must_equal_its_correction_sources():
     )
 
     assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
-    assert (
-        result.diagnostics.error_code
-        is CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID
-    )
+    assert result.diagnostics.error_code is CoverageValidationErrorCode.PREMISE_CORRECTION_INVALID
 
 
 @pytest.mark.parametrize(
@@ -2480,18 +2770,14 @@ def test_contradicted_premise_requires_a_retained_framing_source():
             source_count=3,
         )
 
-    assert (
-        captured.value.code
-        is CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
-    )
+    assert captured.value.code is CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
 
 
 def test_contradicted_premise_accepts_framing_plus_counter_provenance():
     correction = _unit(
         "U1",
         (),
-        "The proposed origin is too late and the manuscript begins earlier "
-        "[Source 2, Source 3].",
+        "The proposed origin is too late and the manuscript begins earlier [Source 2, Source 3].",
         (2, 3),
         role=AnswerUnitRole.PREMISE_CORRECTION,
     )
@@ -2573,10 +2859,7 @@ def test_supported_premise_must_use_its_support_lane():
             source_count=3,
         )
 
-    assert (
-        captured.value.code
-        is CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
-    )
+    assert captured.value.code is CoverageValidationErrorCode.PREMISE_PROVENANCE_MISMATCH
 
 
 def test_missing_premise_source_scope_fails_closed_as_invalid_context():

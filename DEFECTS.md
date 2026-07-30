@@ -57,13 +57,18 @@ Cause: contract implementation gap - structured-output validity, citation/source
 content completeness share one terminal success state. The contract can prove that an answer is
 well formed without requiring enough source-bounded obligations to justify presenting the broad
 answer as complete.
-Resolution and verification: unresolved, now selected from the complete ten-question
-distribution rather than G007 alone. The next offline cohort must separate structural validity
-from `valid_complete`, `valid_partial`, and `insufficient_evidence`; enforce route-specific
-minimum supported-obligation coverage; and require surviving protected stages and handoffs to
-appear or be bounded concisely. Synthetic regressions must cover broad synthesis, long lineage,
-absence, and ordinary focused answers. No extra source slot, model call, retry, critic, or
-development-answer hint is authorized.
+Resolution and verification: resolved offline in `evidence-planned-v25`. Structural validation
+still controls `answer_status`, while a separate content outcome reports `valid_complete`,
+`valid_partial`, or `insufficient_evidence`. The application preserves the pre-retrieval ordered
+requirements, requires the exact adjacent stage chain for broad routes, requires complete
+source-bounded obligation coverage, and requires institutional-handoff dimensions for long
+lineages. A structurally valid partial answer remains readable and receives one deterministic
+limitation, with conflict identified explicitly, rather than repeated requirement notices.
+Content outcome is propagated through the closed trace, API, frontend type, and locally migrated
+cost ledger. Synthetic regressions cover missing stages, missing transitions, missing handoffs,
+conflict, unsupported content, and ordinary focused answers. The complete offline suite passed
+598 tests with one intentional skip; repository-wide Ruff and the production frontend build
+passed. No provider call, retry, source slot, critic, or manuscript-specific hint was added.
 
 ## [2026-07-30] Absence handling supplied an unrequested analogue
 Phase/Brief: Phase 1 V24 unchanged ten-question development evaluation
@@ -74,10 +79,14 @@ behavior, although it did not fabricate that the analogue was the requested subj
 Cause: evidence-policy contract gap - `qualified_near_match` does not distinguish a useful bounded
 near match requested by the user from an unsolicited analogue after the planner establishes a
 corpus-level absence.
-Resolution and verification: unresolved and coupled narrowly to the completeness repair. A
-corpus-level absence must end in clean abstention unless the question requests analogues or the
-answer can explicitly ask permission to offer one. The existing useful bounded G009 near-match
-must remain valid.
+Resolution and verification: resolved offline in `evidence-planned-v25`. Near-match permission is
+derived only from the current raw user turn. A plain conjunction, stale earlier request, negated
+analogue request, or proper name containing words such as `Parallel` or `Affect` cannot authorize
+related evidence. Explicit analogue requests may use at most the already bounded,
+requirement-linked planner hints. Causal or relational requests additionally require a locally
+certified broader/probe pair, preserving the G009-shaped implication path while making the
+G008-shaped unsolicited analogue cleanly abstain. Synthetic regressions cover both directions.
+The evidence gate is versioned as `evidence-gate-v4`; no provider call or retry was added.
 
 ## [2026-07-30] Provider quota stopped the V24 cohort before its first embedding
 Phase/Brief: Phase 1 V24 unchanged ten-question development evaluation

@@ -79,7 +79,7 @@ export type ConversationHistoryTurn = {
 };
 
 export type AnswerRunDiagnostics = {
-  schema: "archivist.answer_run_diagnostics/2";
+  schema: "archivist.answer_run_diagnostics/3";
   cohort: {
     rag_policy_version: string;
     query_planner_prompt_version: string;
@@ -94,16 +94,26 @@ export type AnswerRunDiagnostics = {
   answer_status: string;
   evidence_decision: string;
   validation_result: "valid" | "invalid" | "not_run";
+  content_outcome: "valid_complete" | "valid_partial" | "insufficient_evidence" | null;
   validation_error_code: string | null;
   repair_applied: boolean;
   repair_codes: string[];
-  planner: {
-    schema: "archivist.planner_call_diagnostics/1";
-    status: "unknown" | "not_called" | "succeeded" | "failed";
-    failure_code: string | null;
-    exception_class: string | null;
-    exception_code: string | null;
-  };
+  planner:
+    | {
+        schema: "archivist.planner_call_diagnostics/1";
+        status: "unknown" | "not_called" | "succeeded" | "failed";
+        failure_code: string | null;
+        exception_class: string | null;
+        exception_code: string | null;
+      }
+    | {
+        schema: "archivist.planner_call_diagnostics/2";
+        status: "not_called" | "succeeded" | "failed";
+        failure_code: string | null;
+        planner_validation_code: string | null;
+        exception_class: string | null;
+        exception_code: string | null;
+      };
   stage_timings_ms: Record<string, number>;
 };
 
@@ -289,6 +299,7 @@ export async function askQuestion(
   return requestJson<{
     answer: string;
     answer_status: string;
+    content_outcome?: "valid_complete" | "valid_partial" | "insufficient_evidence" | null;
     evidence_decision?: string;
     run_diagnostics?: AnswerRunDiagnostics;
     resolved_query?: string;
