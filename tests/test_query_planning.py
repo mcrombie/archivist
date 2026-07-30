@@ -24,6 +24,9 @@ from query_planning import (
     build_question_plan,
     deterministic_fallback_plan,
     extract_trusted_targets,
+    is_numbered_narrative_document,
+    is_terminal_narrative_document,
+    narrative_span_document_bands,
     requires_planning,
     route_question,
     validate_question_plan,
@@ -358,6 +361,66 @@ def causal_span_catalog() -> tuple[DocumentCatalogEntry, ...]:
             role_terms=("conflict", "endpoint"),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ("08_Chapter 1_ Synthetic title.md", True),
+        ("08_Chapter_1: Synthetic title.md", True),
+        ("Chapter 20 - Synthetic title", True),
+        ("08_Chapter 1.md", True),
+        ("08_Subchapter 1_ Synthetic title.md", False),
+        ("08_Chapter 1A_ Synthetic title.md", False),
+    ],
+)
+def test_numbered_narrative_document_accepts_explicit_delimiters(
+    document,
+    expected,
+):
+    assert is_numbered_narrative_document(document) is expected
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ("28_Epilogue_ Synthetic endpoint.md", True),
+        ("29_Conclusion - Synthetic endpoint.md", True),
+        ("28_Epilogue.md", True),
+        ("28_Postepilogue_ Synthetic endpoint.md", False),
+        ("29_Conclusionary note.md", False),
+    ],
+)
+def test_terminal_narrative_document_accepts_explicit_delimiters(
+    document,
+    expected,
+):
+    assert is_terminal_narrative_document(document) is expected
+
+
+def test_production_shaped_catalog_builds_six_nonempty_narrative_bands():
+    documents = (
+        "05_Introduction.md",
+        *(
+            f"{index + 7:02}_Chapter {index}_ Synthetic title {index}.md"
+            for index in range(1, 21)
+        ),
+        "28_Epilogue_ Synthetic endpoint.md",
+    )
+
+    bands = narrative_span_document_bands(
+        documents,
+        structure_text=str,
+        stage_count=6,
+    )
+
+    assert len(bands) == 6
+    assert all(band for band in bands)
+    assert sum(len(band) for band in bands[:5]) == 20
+    assert bands[-1] == ("28_Epilogue_ Synthetic endpoint.md",)
+    assert "05_Introduction.md" not in {
+        document for band in bands for document in band
+    }
 
 
 def valid_causal_span_proposal(

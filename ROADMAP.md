@@ -19,9 +19,9 @@ Maps the sequence of briefs for Archivist, a retrieval-augmented QA system over 
 Archivist is already beyond the original implementation outline in several respects. Answer Mode
 uses versioned dense/BM25 reciprocal-rank fusion over the complete eligible manuscript, the public
 demo is live with bounded source disclosure, and per-answer stage timing and token/cost records
-exist. V23 is now a frozen, measured candidate that failed its reader-level release gate; the
-public deployment remains on V13 while a bounded structural filename-parser correction is the
-next candidate repair.
+exist. V23 is a frozen, measured candidate that failed its reader-level release gate; the public
+deployment remains on V13 while V24's bounded structural filename-parser correction has passed
+complete offline verification and awaits an exact freeze plus focused confirmation.
 Those are real engineering accomplishments, but they do not yet support the drafted numerical
 resume claims.
 
@@ -37,10 +37,11 @@ The next evidence-producing sequence is:
    failed closed with 0/7 strict claims and 0/5 public target groups. Its valid trace showed that
    the allocation safeguard worked, but the structural parser recognized a shortened
    `08_Chapter 1.md` fixture and rejected the production-shaped
-   `08_Chapter 1_ Sample title.md` because the trailing underscore is not a word boundary. Correct
-   only that delimiter grammar, add complete-shape band regressions, run full offline
-   verification, and freeze a new exact candidate before repeating G007. The ten-question
-   practical run and deployment remain blocked until that focused gate passes.
+   `08_Chapter 1_ Sample title.md` because the trailing underscore is not a word boundary. V24
+   corrects only that delimiter grammar; complete-shape regressions, private metadata checks,
+   580 offline tests, and Ruff now pass. Freeze V24 as a new exact candidate before repeating
+   G007. The ten-question practical run and deployment remain blocked until that focused gate
+   passes.
 2. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
    development-question registry, leakage and quotation audits, provenance binding, location
    carry-over check, and Git freeze validator are implemented. The owner must now supply the

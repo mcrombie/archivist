@@ -860,9 +860,9 @@ def test_five_noncausal_broad_stages_span_numbered_chapters_through_epilogue(
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-stage-narrative-span-v7"
+        == "broad-stage-narrative-span-v8"
     )
-    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v14"
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v15"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"
@@ -901,8 +901,11 @@ def test_six_stage_causal_span_protects_five_body_bands_and_terminal(
 ):
     documents = [
         "05_Introduction.md",
-        *(f"{index + 7:02}_Chapter {index}.md" for index in range(1, 21)),
-        "28_Epilogue.md",
+        *(
+            f"{index + 7:02}_Chapter {index}_ Synthetic title {index}.md"
+            for index in range(1, 21)
+        ),
+        "28_Epilogue_ Synthetic endpoint.md",
     ]
     text = (
         "conflict central power charter taxation mobilization procurement "
@@ -973,14 +976,14 @@ def test_six_stage_causal_span_protects_five_body_bands_and_terminal(
     )
     hints = (
         (
-            "08_Chapter 1.md",
+            "08_Chapter 1_ Synthetic title 1.md",
             "05_Introduction.md",
         ),
-        ("12_Chapter 5.md",),
-        ("16_Chapter 9.md",),
-        ("20_Chapter 13.md",),
-        ("24_Chapter 17.md",),
-        ("28_Epilogue.md",),
+        ("12_Chapter 5_ Synthetic title 5.md",),
+        ("16_Chapter 9_ Synthetic title 9.md",),
+        ("20_Chapter 13_ Synthetic title 13.md",),
+        ("24_Chapter 17_ Synthetic title 17.md",),
+        ("28_Epilogue_ Synthetic endpoint.md",),
     )
     facets = (
         facet(
@@ -1036,7 +1039,7 @@ def test_six_stage_causal_span_protects_five_body_bands_and_terminal(
         for facet_id, chunk_id in outcome.broad_stage_anchor_chunk_ids.items()
     }
     assert "05_Introduction.md" not in anchor_documents.values()
-    assert anchor_documents["F6"] == "28_Epilogue.md"
+    assert anchor_documents["F6"] == "28_Epilogue_ Synthetic endpoint.md"
     assert len(set(anchor_documents.values())) == 6
     assert len(outcome.final_chunks) <= 8
     assert outcome.trace["selection"]["stage_coverage_required_count"] == 6
@@ -1053,8 +1056,11 @@ def test_six_stage_fallback_reserves_in_core_candidates_before_intent_gate(
 ):
     documents = [
         "05_Introduction.md",
-        *(f"{index + 7:02}_Chapter {index}.md" for index in range(1, 21)),
-        "28_Epilogue.md",
+        *(
+            f"{index + 7:02}_Chapter {index}_ Synthetic title {index}.md"
+            for index in range(1, 21)
+        ),
+        "28_Epilogue_ Synthetic endpoint.md",
     ]
     chunks = [
         chunk(

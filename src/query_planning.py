@@ -666,11 +666,11 @@ _CAUSAL_DRIVER_NOISE_TOKENS = frozenset(
     }
 )
 _NUMBERED_NARRATIVE_DOCUMENT_PATTERN = re.compile(
-    r"(?<![^\W_])chapter[\s_:-]*\d+\b",
+    r"(?<![^\W_])chapter[\s_:-]*\d+(?=$|[\W_])",
     re.IGNORECASE,
 )
 _TERMINAL_NARRATIVE_DOCUMENT_PATTERN = re.compile(
-    r"(?<![^\W_])(?:conclusion|epilogue)\b",
+    r"(?<![^\W_])(?:conclusion|epilogue)(?=$|[\W_])",
     re.IGNORECASE,
 )
 _MAX_EARLY_ORIGIN_ROLE_MATCHES = 4

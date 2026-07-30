@@ -2701,6 +2701,30 @@ Useful blog lesson: failing closed is valuable even when the failure itself is m
 turned a hidden parser mismatch into a cheap, inspectable abstention—one planner and one embedding
 call—rather than spending more to generate a persuasive answer from an invalid structure.
 
+### 2026-07-29 - V24 tested the filename the application actually has
+
+- Replaced the regex word boundary after `Chapter N`, `Epilogue`, and `Conclusion` with an
+  explicit delimiter-or-end rule. Underscores, spaces, punctuation, and end-of-string now work;
+  alphanumeric continuations still do not.
+- Upgraded the six-stage tests from abbreviated filenames to the complete catalog shape, including
+  ordinal prefix, structural label, trailing underscore, and synthetic title. Added direct
+  negative cases for embedded labels and a catalog-level requirement that all six bands exist and
+  are nonempty.
+- Checked the private catalog metadata without manuscript prose. Its 20 numbered body documents
+  now divide evenly into five bands of four, followed by one terminal document in the sixth band:
+  4/4/4/4/4/1.
+- Versioned the change as policy V24, broad execution v8, and faceted retrieval v15. The prompt,
+  planner schema, eight-source ceiling, allocation rules, and call budget did not change.
+- Focused verification passed 219 tests. The complete offline suite passed 580 tests with one
+  intentional skip, and repository-wide Ruff passed. No API call was made.
+- The parser contract is repaired offline, but reader quality remains unclaimed. The next
+  evidence-producing action is still one unchanged G007 confirmation after an exact clean freeze;
+  only the original 2/7-claim plus 5/5-group gate can unlock the ten-question development run.
+
+Useful blog lesson: “production-shaped fixture” should mean the entire grammar, not merely the
+part of a filename a developer happened to be thinking about. The cheapest live failure in this
+sequence produced one of its clearest testing lessons.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

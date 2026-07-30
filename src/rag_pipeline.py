@@ -108,7 +108,7 @@ from document_roles import (
 )
 
 
-RAG_POLICY_VERSION = "evidence-planned-v23"
+RAG_POLICY_VERSION = "evidence-planned-v24"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"

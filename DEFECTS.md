@@ -56,14 +56,18 @@ the shape `08_Chapter 1_ Sample title.md`. The numbered-document regex still end
 `\b`; because a digit and underscore are both word characters, the real filename has no boundary
 there. All numbered body documents were excluded from structural-band construction. The terminal
 pattern has the same latent delimiter assumption.
-Resolution and verification: unresolved. The clean run at
+Resolution and verification: resolved offline in `evidence-planned-v24`. Numbered and terminal
+labels now require an explicit delimiter or end of string, accepting underscore, whitespace, and
+punctuation while rejecting alphanumeric continuations. Regressions use complete ordinal,
+structural-label, underscore, and title shapes; a direct catalog test requires six nonempty
+bands. The active private catalog metadata produces band sizes 4/4/4/4/4/1 without reading or
+emitting manuscript prose. Focused verification passed 219 tests; the complete offline suite
+passed 580 tests with one intentional skip, and repository-wide Ruff passed. No paid API call was
+made. The prior clean V23 run at
 `d89f4332b21f0e41cb445780abe10f997b52626c` made one planner call and one batched embedding
 call, then failed closed before generation. It completed in 24.655 seconds for an estimated
 `$0.08430031`; the trace was valid, but the reader gate scored 0/7 claims and 0/5 public target
-groups. Replace the trailing word boundary with an explicit delimiter-or-end assertion, add
-complete-shape numbered and terminal filename regressions plus a six-nonempty-band assertion, and
-repeat full offline verification before another exact freeze. The ten-question run remains
-blocked.
+groups. V24 is not yet reader-confirmed, so the ten-question run remains blocked.
 
 ## [2026-07-29] Six fallback stages produced only one protected anchor
 Phase/Brief: Phase 1 evidence-planned-v22 unchanged G007 confirmation

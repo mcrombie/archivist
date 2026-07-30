@@ -1,8 +1,9 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v23 implemented, frozen, and measured; its unchanged G007 confirmation
+Status: evidence-planned-v24 implemented and verified offline; V23's unchanged G007 confirmation
 failed closed because the structural filename parser rejected the corpus's trailing underscore,
-so the practical ten-question rerun remains blocked
+and V24 now needs an exact freeze plus the same focused confirmation before the practical
+ten-question rerun can proceed
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -2042,3 +2043,35 @@ whitespace, or punctuation for both numbered and terminal structural documents. 
 use the complete filename shape and prove six nonempty bands. No prompt, ranking, source cap,
 planner call, embedding call, or generation policy needs to change. After full offline
 verification and a new exact freeze, the same unchanged G007 gate remains the next paid action.
+
+## V24 offline repair: structural labels use explicit delimiters
+
+V24 replaces the trailing word boundary in numbered and terminal structural-document recognition
+with an explicit delimiter-or-end assertion. `Chapter 1`, `Chapter 1_`, `Chapter 1.`, and
+`Chapter 1:` are recognized; an alphanumeric continuation such as `Chapter 1A` is not.
+`Epilogue` and `Conclusion` follow the same rule. The leading assertion remains bounded to a
+start, underscore, or nonword delimiter, so embedded strings such as `Subchapter` and
+`Postepilogue` do not become structural labels.
+
+The regression surface now reproduces the complete catalog grammar rather than the shortened V23
+fixture:
+
+- numbered body files include both the ordinal prefix and the underscore-title suffix;
+- terminal files include the same suffix shape;
+- the six-stage retrieval tests run through those production-shaped names;
+- a direct catalog test requires six nonempty bands, excludes the Introduction, assigns all 20
+  numbered body documents to the first five bands, and places the terminal document alone in the
+  sixth.
+
+A metadata-only check against the private active-project catalog produced six nonempty bands of
+sizes 4, 4, 4, 4, 4, and 1. No manuscript prose was read into the test or emitted. The repair is
+versioned as policy `evidence-planned-v24`, broad canonical execution
+`broad-stage-narrative-span-v8`, and faceted retrieval `faceted-hybrid-rrf-v15`. Planner prompt
+v11, retrieval-trace schema 12, source ceiling eight, allocation logic, and model-call boundaries
+are unchanged.
+
+Focused verification passed 219 tests. The complete offline suite passed 580 tests with one
+intentional skip, and repository-wide Ruff passed. No paid API call was made. This is still
+contract evidence rather than reader evidence: after an exact clean freeze, the next paid action
+remains one unchanged, no-retry G007 confirmation under the original 2/7 strict-claim plus 5/5
+target-group gate.

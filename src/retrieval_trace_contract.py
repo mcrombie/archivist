@@ -856,6 +856,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "broad-stage-role-eligibility-v5",
             "broad-stage-narrative-span-v6",
             "broad-stage-narrative-span-v7",
+            "broad-stage-narrative-span-v8",
             "not_applicable",
         }
     ),
@@ -1083,6 +1084,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v21",
             "evidence-planned-v22",
             "evidence-planned-v23",
+            "evidence-planned-v24",
         }
     ),
     "prompt_version": frozenset(
@@ -1132,6 +1134,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v12",
             "faceted-hybrid-rrf-v13",
             "faceted-hybrid-rrf-v14",
+            "faceted-hybrid-rrf-v15",
             "hybrid-bm25-rrf-v1",
         }
     ),
