@@ -55,13 +55,19 @@ the deterministic six-stage fallback. Structural cores constrained which candida
 anchors, but the existing distinctive-intent threshold could still reject every in-core
 candidate. Five of six stage lanes therefore protected no anchor. Global and transition filling
 then occupied all eight source positions and hid the structural shortfall behind a full context.
-Resolution and verification: unresolved. The clean run at
-`0691b3da9a4926097c7d013d79266eee62f7de9b` made one planner call, one batched embedding
-call, and one generation call with no retry; it completed in 95.735 seconds for an estimated
-`$0.25207406`. The next bounded repair must make each exact fallback core a source-allocation
-obligation: select its best available candidate before applying distinctive-intent thresholds to
-optional alternatives and transitions, or fail closed with an explicit structural-stage
-shortfall when the core is empty. The ten-question run remains blocked.
+The structural filename recognizer also used a word boundary that did not match underscore-prefixed
+corpus names, so an empty computed core could bypass the conditional exact-core filter.
+Resolution and verification: resolved offline in `evidence-planned-v23`. Deterministic six-stage
+fallback now allocates one best available candidate from each exact core before optional
+thresholds or supplements. Exact-core filtering remains active for an empty core; an unresolved
+shortfall suppresses optional and neighbor filling and returns an explicit
+`structural_stage_shortfall` result before generation. The filename recognizer now accepts
+underscore-prefixed numbered and terminal documents. Focused verification passed 207 tests; the
+complete offline suite passed 568 tests with one intentional skip, and repository-wide Ruff
+passed. No paid API call was made. V22's clean run at
+`0691b3da9a4926097c7d013d79266eee62f7de9b` remains the measured failure: one planner call,
+one batched embedding call, one generation call, no retry, 95.735 seconds, and estimated
+`$0.25207406`. V23 is not yet frozen or reader-confirmed, so the ten-question run remains blocked.
 
 ## [2026-07-29] V22 opened a six-stage narrative-span contract
 Phase/Brief: Phase 1 evidence-planned-v22 offline repair

@@ -2640,6 +2640,39 @@ Useful blog lesson: restricting an anchor to the correct shelf is not the same a
 seat. A robust context window needs both boundaries and allocation guarantees—and diagnostics
 that reveal when a later fill step makes a broken allocation look complete.
 
+### 2026-07-29 - V23 gave every required stage a seat at the table
+
+- V22 drew six chronological boxes, but it did not reserve six source positions. The paid trace
+  showed that five boxes contained usable candidates whose generic fallback wording failed an
+  older intent threshold. Global filling then occupied the context and made the broken allocation
+  look complete.
+- V23 turns each exact core in the deterministic six-stage fallback into an allocation
+  obligation. The best available in-core candidate is selected before optional alternatives,
+  transition evidence, or global supplementation compete for the remaining positions. The
+  threshold still ranks optional evidence; it no longer gets to delete a required historical
+  stage.
+- Building the regression revealed a small but consequential parser bug. A regular-expression
+  word boundary does not occur between `_` and `Chapter`, so real filenames such as
+  `08_Chapter 1.md` could fail structural classification. Numbered and terminal documents now
+  recognize the underscore-prefixed shape used by the corpus.
+- A truly empty stage now stays visibly empty. Retrieval stops optional and neighbor filling, and
+  the pipeline returns a text-free `structural_stage_shortfall` insufficiency before generation
+  instead of producing a confident answer from a cosmetically full context.
+- The repair adds no planner retry, critic, embedding request, generation request, source slot,
+  manuscript-specific name, or gold-derived location. Strict provider-authored plans keep their
+  existing role and intent checks; the relaxed allocation rule is limited to the deterministic
+  structural fallback.
+- Versioned the cohort as policy V23, broad execution v7, and faceted retrieval v14. Focused
+  verification passed 207 tests; the complete offline suite passed 568 tests with one intentional
+  skip, and repository-wide Ruff passed. No paid API call was made.
+- Reader quality is deliberately still unclaimed. The next step is to freeze an exact V23 commit
+  and repeat the same unchanged, no-retry G007 confirmation under the original 2/7-claim plus
+  5/5-group gate. Only a pass unlocks the ten-question development evaluation.
+
+Useful blog lesson: an elegant context window needs both a seating plan and an honest fire alarm.
+Every required role needs a reserved place, and a missing role should stop the performance rather
+than be hidden by filling the empty chair with unrelated evidence.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

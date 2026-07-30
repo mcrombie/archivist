@@ -819,6 +819,7 @@ _RULE_CODES = frozenset(
         "requested_relationship_not_established",
         "source_backed_premise_contradiction",
         "some_subject_targets_direct",
+        "structural_stage_shortfall",
         "trusted_related_tail_material",
     }
 )
@@ -854,6 +855,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "broad-stage-role-eligibility-v4",
             "broad-stage-role-eligibility-v5",
             "broad-stage-narrative-span-v6",
+            "broad-stage-narrative-span-v7",
             "not_applicable",
         }
     ),
@@ -1080,6 +1082,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v20",
             "evidence-planned-v21",
             "evidence-planned-v22",
+            "evidence-planned-v23",
         }
     ),
     "prompt_version": frozenset(
@@ -1128,6 +1131,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "faceted-hybrid-rrf-v11",
             "faceted-hybrid-rrf-v12",
             "faceted-hybrid-rrf-v13",
+            "faceted-hybrid-rrf-v14",
             "hybrid-bm25-rrf-v1",
         }
     ),

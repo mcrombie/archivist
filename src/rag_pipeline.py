@@ -108,7 +108,7 @@ from document_roles import (
 )
 
 
-RAG_POLICY_VERSION = "evidence-planned-v22"
+RAG_POLICY_VERSION = "evidence-planned-v23"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/2"
@@ -138,6 +138,10 @@ ANSWER_STAGE_TIMING_KEYS = frozenset(
 CORPUS_INTEGRITY_FAILED_MESSAGE = (
     "The manuscript index could not be verified against its promoted corpus "
     "snapshot. Rebuild or restore the index before asking another question."
+)
+STRUCTURAL_STAGE_SHORTFALL_MESSAGE = (
+    "I could not assemble manuscript evidence from every required historical "
+    "stage, so I cannot produce a complete source-grounded answer."
 )
 
 INTERPRETIVE_STRUCTURED_OUTPUT_RULES = """\
@@ -2593,6 +2597,34 @@ def _clean_abstention(target_label: str | None) -> str:
     )
 
 
+def _deterministic_structural_stage_shortfall_count(
+    resolved_turn: ResolvedTurn,
+    plan: QuestionPlan,
+    planned: PlannedContext,
+) -> int:
+    """Return the recorded exact-core shortfall for the six-stage fallback."""
+
+    if (
+        plan.planner_used
+        or RouteTrait.BROAD_SYNTHESIS not in plan.traits
+        or RouteTrait.LONG_INSTITUTIONAL_LINEAGE in plan.traits
+        or not requires_broad_narrative_span(resolved_turn)
+    ):
+        return 0
+    selection = planned.trace.get("selection")
+    if not isinstance(selection, Mapping):
+        return 0
+    required_count = selection.get("canonical_core_required_count")
+    shortfall_count = selection.get("canonical_core_shortfall_count")
+    if (
+        required_count != BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+        or not isinstance(shortfall_count, int)
+        or isinstance(shortfall_count, bool)
+    ):
+        return 0
+    return max(0, shortfall_count)
+
+
 def _generation_trace(
     coverage: EvidenceCoverageResult | None,
     *,
@@ -2781,6 +2813,60 @@ def run_evidence_planned_answer(
             "planner_call": _planner_trace_diagnostic(planner_call_diagnostics),
         }
     )
+    structural_stage_shortfall_count = (
+        _deterministic_structural_stage_shortfall_count(
+            resolved_turn,
+            plan,
+            planned,
+        )
+    )
+    if structural_stage_shortfall_count:
+        requirement_ids = tuple(
+            requirement.requirement_id
+            for requirement in plan.requirements
+        )
+        coverage = process_evidence_coverage(
+            None,
+            requirement_ids=requirement_ids,
+            source_count=0,
+        )
+        gate_diagnostics = {
+            "schema": EVIDENCE_DIAGNOSTICS_SCHEMA,
+            "policy_version": EVIDENCE_POLICY_VERSION,
+            "corpus": integrity.as_diagnostics(),
+            "targets": [],
+            "decision": {
+                "value": EvidenceDecision.INDETERMINATE.value,
+                "certified_direct_absence": False,
+                "premise_correction_required": False,
+                "relationship_chunk_ids": [],
+                "allowed_source_numbers": [],
+                "suppressed_source_numbers": list(
+                    range(1, len(planned.final_chunks) + 1)
+                ),
+                "skip_answer_generation": True,
+                "rules_fired": ["structural_stage_shortfall"],
+            },
+        }
+        generation_diagnostics = _generation_trace(
+            coverage,
+            status=coverage.status.value,
+            structured_generation_called=False,
+        )
+        planned.trace["evidence"] = gate_diagnostics
+        planned.trace["generation_contract"] = generation_diagnostics
+        emit_retrieval_trace(planned.trace)
+        return AnswerModeResult(
+            answer=STRUCTURAL_STAGE_SHORTFALL_MESSAGE,
+            final_chunks=[],
+            status=coverage.status.value,
+            plan=plan,
+            evidence_decision=EvidenceDecision.INDETERMINATE.value,
+            diagnostics=result_diagnostics(
+                gate_diagnostics,
+                generation_diagnostics,
+            ),
+        )
     gate_started_ns = perf_counter_ns()
     gate, gate_diagnostics, target_label = apply_evidence_gate(
         plan,

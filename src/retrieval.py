@@ -61,10 +61,10 @@ LEXICAL_WEIGHT = 1.0
 MAX_PRIMARY_PER_DOCUMENT = 3
 DIVERSITY_MIN_SCORE_RATIO = 0.75
 HYBRID_RETRIEVAL_VERSION = "hybrid-bm25-rrf-v1"
-FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v13"
+FACETED_RETRIEVAL_VERSION = "faceted-hybrid-rrf-v14"
 BROAD_MECHANISM_LEXICAL_VERSION = "role-scoped-mechanism-lexical-v1"
 BROAD_MECHANISM_CANDIDATE_LIMIT = 20
-BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-narrative-span-v6"
+BROAD_CANONICAL_EXECUTION_VERSION = "broad-stage-narrative-span-v7"
 BROAD_TRANSITION_LANE_VERSION = "adjacent-pair-transition-v3"
 LONG_LINEAGE_CONTRACT_VERSION = "long-institutional-lineage-v2"
 LONG_LINEAGE_TRANSITION_CAPACITY_POLICY = (
@@ -1927,8 +1927,11 @@ def _ranked_broad_stage_anchor_candidates(
     """Rank eligible protected anchors by agreement across three routes.
 
     Canonical, mechanism, and provider-relevance ranks are deliberately kept
-    as independent votes. Stage-intent and historical-role eligibility is an
-    earlier hard boundary: consensus can rank candidates only inside it.
+    as independent votes. Accepted provider plans treat stage-intent and
+    historical-role eligibility as a hard selection boundary. A deterministic
+    six-stage causal fallback may instead reserve this ranking's best
+    structural-core candidate before applying those thresholds to optional
+    alternatives.
     """
 
     candidate_pools = (
@@ -2222,6 +2225,10 @@ def retrieve_plan_from_collection(
         and not long_lineage
         and requires_broad_narrative_span(original_query)
     )
+    mandatory_structural_stage_allocation = (
+        broad_narrative_span
+        and not bool(_plan_value(plan, "planner_used", False))
+    )
     requirements = tuple(_plan_value(plan, "requirements", ()) or ())
     requirement_by_id = {
         str(_plan_value(requirement, "requirement_id", "")): requirement
@@ -2249,6 +2256,13 @@ def retrieve_plan_from_collection(
         )
         if broad
         else []
+    )
+    mandatory_structural_stage_allocation = (
+        mandatory_structural_stage_allocation
+        and len(broad_stage_facets)
+        == BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+        and len(requirements)
+        == BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
     )
     canonical_query_specs: list[tuple[str, str]] = []
     if broad:
@@ -2639,7 +2653,13 @@ def retrieve_plan_from_collection(
             if broad and role in _BROAD_STAGE_ROLES
             else []
         )
-        if structural_anchor_scope:
+        structural_anchor_constrained = (
+            broad_narrative_span
+            and stage_position is not None
+            and stage_position[1]
+            == BROAD_NARRATIVE_SPAN_STAGE_REQUIREMENTS
+        )
+        if structural_anchor_constrained:
             structural_anchor_documents = set(structural_anchor_scope)
             ranked_stage_anchor_candidates = [
                 candidate
@@ -2657,7 +2677,10 @@ def retrieve_plan_from_collection(
         lane["stage_anchor_candidates"] = [
             candidate
             for candidate in ranked_stage_anchor_candidates
-            if bool(candidate.get("stage_anchor_eligible"))
+            if (
+                mandatory_structural_stage_allocation
+                or bool(candidate.get("stage_anchor_eligible"))
+            )
         ]
         lanes.append(lane)
 
@@ -2808,9 +2831,11 @@ def retrieve_plan_from_collection(
                 str(lane["facet_id"]),
             ),
         )
-        # Protect one role-eligible candidate for every narrative stage, then
-        # rank only those candidates by cross-route agreement. No ineligible
-        # fallback may silently stand in for a missing historical function.
+        # Protect one candidate for every narrative stage before any optional
+        # source can consume capacity. Accepted provider plans still require
+        # role eligibility. The deterministic six-stage causal fallback
+        # reserves the best available exact-core candidate even when its
+        # generic fallback wording misses the distinctive-intent threshold.
         for lane in stage_lanes:
             if len(selected_chunks) >= max_final_sources:
                 break
@@ -2828,12 +2853,25 @@ def retrieve_plan_from_collection(
                     str(candidate["chunk_id"])
                 )
 
+        structural_stage_selection_shortfall = (
+            mandatory_structural_stage_allocation
+            and any(
+                not stage_anchor_selected_by_facet[str(lane["facet_id"])]
+                for lane in stage_lanes
+            )
+        )
+        broad_optional_source_limit = (
+            len(selected_chunks)
+            if structural_stage_selection_shortfall
+            else max_final_sources
+        )
+
         # Preserve any non-stage verification lane before optional broad refill.
         for lane in ordered_lanes:
             if (
                 lane["role"] == "original"
                 or lane["role"] in _BROAD_STAGE_ROLES
-                or len(selected_chunks) >= max_final_sources
+                or len(selected_chunks) >= broad_optional_source_limit
             ):
                 continue
             candidate = _pick_first_lane_candidate(
@@ -2848,7 +2886,7 @@ def retrieve_plan_from_collection(
         # The final narrative document is an application-owned structural
         # anchor, retrieved with the canonical endpoint query.
         for lane in stage_lanes:
-            if len(selected_chunks) >= max_final_sources:
+            if len(selected_chunks) >= broad_optional_source_limit:
                 break
             candidate = _pick_first_lane_candidate(
                 lane["endpoint_anchor_candidates"],
@@ -2866,7 +2904,7 @@ def retrieve_plan_from_collection(
         pre_transition_selected_ids = set(selected_ids)
         transition_extra_source_capacity_count = max(
             0,
-            max_final_sources - len(selected_chunks),
+            broad_optional_source_limit - len(selected_chunks),
         )
         transition_options = sorted(
             (
@@ -2914,7 +2952,7 @@ def retrieve_plan_from_collection(
             chunk_id = str(candidate.get("chunk_id") or "")
             if (
                 chunk_id not in selected_ids
-                and len(selected_chunks) >= max_final_sources
+                and len(selected_chunks) >= broad_optional_source_limit
             ):
                 continue
             accept_for_facets(candidate, pair)
@@ -2950,7 +2988,7 @@ def retrieve_plan_from_collection(
                     chunk_id in selected_ids
                     for chunk_id in eligible_chunk_ids
                 )
-                and len(selected_chunks) >= max_final_sources
+                and len(selected_chunks) >= broad_optional_source_limit
             ):
                 transition_capacity_limited_count += 1
             else:
@@ -2962,7 +3000,7 @@ def retrieve_plan_from_collection(
             lanes,
             document_ordinal_by_id=document_ordinal_by_id,
         )
-        while len(selected_chunks) < max_final_sources:
+        while len(selected_chunks) < broad_optional_source_limit:
             available = [
                 option
                 for option in supplemental_options
@@ -3029,10 +3067,14 @@ def retrieve_plan_from_collection(
             if not made_progress:
                 break
 
-    expanded = expand_with_neighbors(
-        selected_chunks,
-        lookup=lookup,
-        primary_first=True,
+    expanded = (
+        list(selected_chunks)
+        if broad and structural_stage_selection_shortfall
+        else expand_with_neighbors(
+            selected_chunks,
+            lookup=lookup,
+            primary_first=True,
+        )
     )
     final_chunks = expanded[:max_final_sources]
     if broad:

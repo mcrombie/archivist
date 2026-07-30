@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import retrieval
+from query_planning import deterministic_fallback_plan
 from retrieval import retrieve_plan_from_collection
 from retrieval_trace_contract import validate_text_free_retrieval_trace
 
@@ -859,9 +860,9 @@ def test_five_noncausal_broad_stages_span_numbered_chapters_through_epilogue(
     )
     assert (
         outcome.trace["parameters"]["broad_execution_version"]
-        == "broad-stage-narrative-span-v6"
+        == "broad-stage-narrative-span-v7"
     )
-    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v13"
+    assert outcome.trace["retrieval_version"] == "faceted-hybrid-rrf-v14"
     assert (
         outcome.trace["parameters"]["broad_mechanism_lexical_version"]
         == "role-scoped-mechanism-lexical-v1"
@@ -1044,6 +1045,183 @@ def test_six_stage_causal_span_protects_five_body_bands_and_terminal(
         outcome.trace["selection"]["transition_extra_source_capacity_count"]
         == 2
     )
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_six_stage_fallback_reserves_in_core_candidates_before_intent_gate(
+    monkeypatch,
+):
+    documents = [
+        "05_Introduction.md",
+        *(f"{index + 7:02}_Chapter {index}.md" for index in range(1, 21)),
+        "28_Epilogue.md",
+    ]
+    chunks = [
+        chunk(
+            f"fallback_{index:03}",
+            document,
+            (
+                "Conflict changed public authority because institutions "
+                "financed administration and persisted."
+            ),
+            1,
+        )
+        for index, document in enumerate(documents)
+    ]
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: [
+            [float(index)] for index in range(len(queries))
+        ],
+    )
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            where = request.get("where")
+            if where is None:
+                return semantic_results([chunks[0]])
+            document_filter = where["document"]
+            selected_documents = (
+                set(document_filter["$in"])
+                if isinstance(document_filter, dict)
+                else {document_filter}
+            )
+            return semantic_results(
+                [
+                    item
+                    for item in chunks
+                    if item["document"] in selected_documents
+                ]
+            )
+
+    question = (
+        "How does the book treat conflict as an engine of central power?"
+    )
+    fallback_plan = deterministic_fallback_plan(
+        question,
+        fallback_reason="invalid_planner_output",
+    )
+
+    outcome = retrieve_plan_from_collection(
+        fallback_plan,
+        Collection(),
+        chunks,
+        max_final_sources=8,
+    )
+
+    lanes = {
+        lane["facet_id"]: lane
+        for lane in outcome.trace["lanes"]
+        if lane["facet_id"] != "F0"
+    }
+    assert set(outcome.broad_stage_anchor_chunk_ids) == {
+        f"F{index}" for index in range(1, 7)
+    }
+    assert all(
+        lanes[facet_id]["stage_anchor_selected_chunk_ids"]
+        for facet_id in lanes
+    )
+    assert any(
+        not candidate["eligible"]
+        for lane in lanes.values()
+        for candidate in lane["stage_anchor_consensus_candidates"]
+        if candidate["chunk_id"]
+        in lane["stage_anchor_selected_chunk_ids"]
+    )
+    assert outcome.trace["selection"]["canonical_core_required_count"] == 6
+    assert outcome.trace["selection"]["canonical_core_satisfied_count"] == 6
+    assert outcome.trace["selection"]["canonical_core_shortfall_count"] == 0
+    assert (
+        outcome.trace["selection"]["transition_extra_source_capacity_count"]
+        == 2
+    )
+    validate_text_free_retrieval_trace(outcome.trace)
+
+
+def test_empty_fallback_structural_core_stops_optional_global_fill(
+    monkeypatch,
+):
+    documents = [
+        *(f"{index:02}_Chapter {index}.md" for index in range(1, 5)),
+        "05_Epilogue.md",
+    ]
+    chunks = [
+        chunk(
+            f"sparse_{index:03}",
+            document,
+            (
+                "Conflict changed public authority because institutions "
+                "financed administration and persisted."
+            ),
+            1,
+        )
+        for index, document in enumerate(documents)
+    ]
+    monkeypatch.setattr(
+        retrieval,
+        "embed_queries",
+        lambda queries, embedding_client=None: [
+            [float(index)] for index in range(len(queries))
+        ],
+    )
+
+    class Collection:
+        configuration = {"hnsw": {"space": "l2"}}
+
+        def count(self):
+            return len(chunks)
+
+        def query(self, **request):
+            where = request.get("where")
+            if where is None:
+                return semantic_results(chunks)
+            document_filter = where["document"]
+            selected_documents = (
+                set(document_filter["$in"])
+                if isinstance(document_filter, dict)
+                else {document_filter}
+            )
+            return semantic_results(
+                [
+                    item
+                    for item in chunks
+                    if item["document"] in selected_documents
+                ]
+            )
+
+    fallback_plan = deterministic_fallback_plan(
+        "How does the book treat conflict as an engine of central power?",
+        fallback_reason="invalid_planner_output",
+    )
+
+    outcome = retrieve_plan_from_collection(
+        fallback_plan,
+        Collection(),
+        chunks,
+        max_final_sources=8,
+    )
+
+    selection = outcome.trace["selection"]
+    assert selection["canonical_core_required_count"] == 6
+    assert selection["canonical_core_satisfied_count"] == 5
+    assert selection["canonical_core_shortfall_count"] == 1
+    assert selection["stage_coverage_shortfall_count"] == 1
+    assert selection["transition_extra_source_capacity_count"] == 0
+    assert len(outcome.broad_stage_anchor_chunk_ids) == 5
+    assert len(outcome.final_chunks) == 5
+    missing_lane = next(
+        lane
+        for lane in outcome.trace["lanes"]
+        if not lane.get("stage_anchor_consensus_candidates")
+        and lane["facet_id"] != "F0"
+    )
+    assert missing_lane["stage_anchor_selected_chunk_ids"] == []
     validate_text_free_retrieval_trace(outcome.trace)
 
 

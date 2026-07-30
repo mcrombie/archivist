@@ -1,7 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v22 implemented, frozen, and measured; its unchanged G007 confirmation
-failed the predeclared reader gate, so the practical ten-question rerun remains blocked
+Status: evidence-planned-v23 implemented and verified offline; V22's unchanged G007 confirmation
+failed the predeclared reader gate, and V23 still needs an exact freeze and the same focused
+confirmation before the practical ten-question rerun can proceed
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1965,3 +1966,44 @@ This remains a corpus-agnostic allocation rule. It requires no new provider call
 slot, gold location, expected-answer phrase, or manuscript-specific historical name. After
 zero-call regression and complete offline verification, the next candidate again needs only the
 same unchanged G007 confirmation before the ten-question run can proceed.
+
+## V23 offline repair: structural cores became allocation obligations
+
+V23 implements the narrow repair isolated by the V22 trace. For the deterministic six-stage
+causal fallback, retrieval now selects the best available candidate from each exact structural
+core before optional alternatives, transition evidence, or global supplementation may compete
+for the remaining source positions. The older distinctive-intent threshold still helps rank
+candidates, but it can no longer erase a required fallback stage. Provider-authored plans retain
+their stricter role and intent eligibility rules.
+
+The repair also closed two ways a structural vacancy could be concealed:
+
+- exact-core filtering now applies even when the computed core is empty, rather than conditionally
+  skipping the filter and admitting overlap candidates;
+- if any required core remains empty, retrieval freezes optional filling and neighbor expansion,
+  and the pipeline returns an explicit `structural_stage_shortfall` insufficiency before answer
+  generation. It reports no public answer sources and makes no generation call.
+
+Regression construction exposed a related filename-recognition defect. The numbered-body and
+terminal-document patterns used a word boundary before `Chapter`, `Conclusion`, or `Epilogue`.
+That boundary does not exist after the underscore in real corpus filenames such as
+`08_Chapter 1.md`. The parser now recognizes underscore-prefixed document names without encoding
+any manuscript title, chapter number, historical name, or gold location.
+
+The change is versioned as policy `evidence-planned-v23`, broad canonical execution
+`broad-stage-narrative-span-v7`, and faceted retrieval `faceted-hybrid-rrf-v14`. Planner prompt
+v11, retrieval-trace schema 12, the eight-source ceiling, and the bounded one-planner,
+one-batched-embedding, one-generation call shape are unchanged. A structural shortfall uses the
+existing trace shape with a newly allowlisted evidence rule; it does not require a schema bump.
+
+Zero-call regressions cover five usable in-core stages plus one genuinely empty stage, six
+in-core candidates whose generic fallback wording does not pass the optional intent threshold,
+the underscore-prefixed filename shapes, suppressed global and neighbor filling, and the
+pipeline's no-generation fail-closed result. Focused verification passed 207 tests. The complete
+offline suite passed 568 tests with one intentional skip, and repository-wide Ruff passed. No
+paid API call was made.
+
+This is contract evidence, not reader evidence. V23 must be committed as an exact clean candidate
+and receive one unchanged, no-retry G007 confirmation under the existing 2/7 strict-claim plus
+5/5 target-group gate. Only a passing result licenses the unchanged ten-question development
+evaluation.

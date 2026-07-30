@@ -19,8 +19,9 @@ Maps the sequence of briefs for Archivist, a retrieval-augmented QA system over 
 Archivist is already beyond the original implementation outline in several respects. Answer Mode
 uses versioned dense/BM25 reciprocal-rank fusion over the complete eligible manuscript, the public
 demo is live with bounded source disclosure, and per-answer stage timing and token/cost records
-exist. V21 is now a frozen, measured candidate that failed its reader-level release gate; the
-public deployment remains on V13 while the next bounded development repair is designed.
+exist. V22 is now a frozen, measured candidate that failed its reader-level release gate; the
+public deployment remains on V13 while the V23 allocation repair has passed complete offline
+verification and awaits an exact freeze plus one unchanged focused confirmation.
 Those are real engineering accomplishments, but they do not yet support the drafted numerical
 resume claims.
 
@@ -31,14 +32,15 @@ finishing the current RAG cohort.
 
 The next evidence-producing sequence is:
 
-1. **Stabilize the candidate release.** The narrow V21 repair is frozen and reproducible at
-   `bf424c880bca4728a8d13225f85978e27a8d8dcf`, but its unchanged no-retry G007 confirmation
-   reached only 1/7 strict claims and 3/5 target groups against a 2/7 plus 5/5 gate. The reader
-   answer and closed trace were valid, but the provider plan passed without invoking V21 salvage,
-   used an Introduction overview as its origin, and omitted the Civil War group. Keep V21 frozen
-   as a failed measured candidate; make the next repair offline and general, then freeze a new
-   exact candidate before another focused confirmation. The unchanged ten-question practical
-   run and deployment remain blocked until that focused gate passes.
+1. **Stabilize the candidate release.** V22 is frozen and reproducible at
+   `0691b3da9a4926097c7d013d79266eee62f7de9b`, but its unchanged no-retry G007 confirmation
+   reached only 1/7 strict claims and 4/5 target groups against a 2/7 plus 5/5 gate. Its six-stage
+   fallback declared six structural cores while protecting only one anchor; optional filling hid
+   the shortfall behind eight sources. V23 now makes each fallback core an allocation obligation,
+   recognizes the corpus's underscore-prefixed structural filenames, and fails before generation
+   when a core is truly empty. Complete offline verification passed. Freeze V23 as a new exact
+   candidate and repeat only the unchanged G007 confirmation. The ten-question practical run and
+   deployment remain blocked until that focused gate passes.
 2. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
    development-question registry, leakage and quotation audits, provenance binding, location
    carry-over check, and Git freeze validator are implemented. The owner must now supply the

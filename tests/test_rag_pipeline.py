@@ -40,6 +40,7 @@ from query_planning import (
     RouteTrait,
     SearchFacet,
     build_question_plan,
+    deterministic_fallback_plan,
 )
 from retrieval import PlannedContext, RETRIEVAL_TRACE_SCHEMA
 from retrieval_trace_contract import validate_text_free_retrieval_trace
@@ -1789,6 +1790,106 @@ def test_pipeline_rejects_a_stage_shortfall_before_answer_generation(
     assert (
         result.diagnostics["generation"]["structured_generation_called"]
         is False
+    )
+    assert "answer_generation" not in result.diagnostics["stage_timings_ms"]
+    validate_text_free_retrieval_trace(emitted_trace)
+
+
+def test_pipeline_fails_closed_on_fallback_structural_core_shortfall(
+    monkeypatch,
+):
+    turn = ResolvedTurn(
+        standalone_question=(
+            "How does the book treat conflict as an engine of central power?"
+        ),
+    )
+    plan = deterministic_fallback_plan(
+        turn,
+        fallback_reason="invalid_planner_output",
+    )
+    planned = PlannedContext(
+        final_chunks=[CHUNK],
+        facet_source_numbers={
+            facet.facet_id: ((1,) if facet.facet_id != "F5" else ())
+            for facet in plan.facets
+        },
+        trace={
+            "schema": RETRIEVAL_TRACE_SCHEMA,
+            "plan": {},
+            "selection": {
+                "canonical_core_required_count": 6,
+                "canonical_core_satisfied_count": 5,
+                "canonical_core_shortfall_count": 1,
+                "stage_coverage_required_count": 6,
+                "stage_coverage_satisfied_count": 5,
+                "stage_coverage_shortfall_count": 1,
+            },
+            "evidence": {},
+            "generation_contract": {},
+        },
+        lane_by_chunk_id={
+            str(CHUNK["chunk_id"]): tuple(
+                facet.facet_id
+                for facet in plan.facets
+                if facet.facet_id != "F5"
+            ),
+        },
+        broad_stage_anchor_chunk_ids={
+            facet.facet_id: str(CHUNK["chunk_id"])
+            for facet in plan.facets
+            if facet.facet_id not in {"F0", "F5"}
+        },
+    )
+    calls: list[str] = []
+    emitted_trace: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "plan_question",
+        lambda *_args, **_kwargs: plan,
+    )
+    monkeypatch.setattr(
+        rag_pipeline,
+        "retrieve_plan_from_collection",
+        lambda *_args, **_kwargs: planned,
+    )
+    monkeypatch.setattr(
+        rag_pipeline,
+        "emit_retrieval_trace",
+        lambda trace: emitted_trace.update(trace),
+    )
+
+    def unexpected_parse(_client, *, operation, **_request):
+        calls.append(operation)
+        raise AssertionError("structural shortfall reached generation")
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        unexpected_parse,
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=turn,
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+    )
+
+    assert calls == []
+    assert result.answer == rag_pipeline.STRUCTURAL_STAGE_SHORTFALL_MESSAGE
+    assert result.status == "insufficient_evidence"
+    assert result.final_chunks == []
+    assert result.evidence_decision == "indeterminate"
+    assert (
+        result.diagnostics["generation"]["structured_generation_called"]
+        is False
+    )
+    assert (
+        result.diagnostics["evidence"]["decision"]["rules_fired"]
+        == ["structural_stage_shortfall"]
     )
     assert "answer_generation" not in result.diagnostics["stage_timings_ms"]
     validate_text_free_retrieval_trace(emitted_trace)
