@@ -45,6 +45,40 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-30] Broad answers validated despite unsupported required content
+Phase/Brief: Phase 1 V24 unchanged ten-question development evaluation
+Symptom: all ten V24 outputs were structurally valid with resolvable citations, but G006 received
+only 2/8 strict claims despite covering 6/8 target document groups. Its trace reported all eight
+canonical stages, only 5/7 adjacent transitions, generation coverage of one supported, six
+partial, and one unsupported requirement, and additional partial or unsupported obligation
+dimensions. The generator still returned `valid` and appended seven repetitive insufficiency
+notices.
+Cause: contract implementation gap - structured-output validity, citation/source validity, and
+content completeness share one terminal success state. The contract can prove that an answer is
+well formed without requiring enough source-bounded obligations to justify presenting the broad
+answer as complete.
+Resolution and verification: unresolved, now selected from the complete ten-question
+distribution rather than G007 alone. The next offline cohort must separate structural validity
+from `valid_complete`, `valid_partial`, and `insufficient_evidence`; enforce route-specific
+minimum supported-obligation coverage; and require surviving protected stages and handoffs to
+appear or be bounded concisely. Synthetic regressions must cover broad synthesis, long lineage,
+absence, and ordinary focused answers. No extra source slot, model call, retry, critic, or
+development-answer hint is authorized.
+
+## [2026-07-30] Absence handling supplied an unrequested analogue
+Phase/Brief: Phase 1 V24 unchanged ten-question development evaluation
+Symptom: G008 correctly said the retrieved material did not directly establish treatment of the
+Hudson's Bay Company or Canadian fur trade, but then supplied Hudson Bay charter geography and
+Ohio Company material. It scored 0/2 strict claims and failed the expected clean-abstention
+behavior, although it did not fabricate that the analogue was the requested subject.
+Cause: evidence-policy contract gap - `qualified_near_match` does not distinguish a useful bounded
+near match requested by the user from an unsolicited analogue after the planner establishes a
+corpus-level absence.
+Resolution and verification: unresolved and coupled narrowly to the completeness repair. A
+corpus-level absence must end in clean abstention unless the question requests analogues or the
+answer can explicitly ask permission to offer one. The existing useful bounded G009 near-match
+must remain valid.
+
 ## [2026-07-30] Provider quota stopped the V24 cohort before its first embedding
 Phase/Brief: Phase 1 V24 unchanged ten-question development evaluation
 Symptom: after the V24 mechanical sentinel passed, the full development runner began G001 and
@@ -58,6 +92,11 @@ attempt and G001 artifact, and did not start G002. The cumulative ledger classif
 error with zero completed calls and records the operational cap separately from the owner's
 broader authorization. Resume the unchanged ten questions in a fresh isolated run only after the
 provider quota is available; no RAG repair is licensed by this incident.
+
+Follow-up verification: quota was restored without a RAG change. Fresh isolated run
+`evidence-planned-v24-clean-20260730-2` completed all ten items from exact clean commit
+`1b75e8676319ad89f5b09bb851c5df5fad184c6c` with zero retries, 28 completed API operations,
+187,228 priced tokens, 589.577 seconds of item latency, and estimated cost `$1.53158052`.
 
 ## [2026-07-30] An undocumented single-item quality gate suppressed broader development evidence
 Phase/Brief: Phase 1 candidate stabilization and practical development evaluation

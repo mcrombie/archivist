@@ -341,6 +341,59 @@
       "operations": []
     },
     {
+      "run_id": "evidence-planned-v24-clean-20260730-2",
+      "policy_version": "evidence-planned-v24",
+      "status": "completed",
+      "git_commit": "1b75e8676319ad89f5b09bb851c5df5fad184c6c",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "3.00",
+      "operational_hard_cap_usd": "3.00",
+      "owner_authorized_max_usd": "10.00",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G001",
+        "G002",
+        "G003",
+        "G004",
+        "G005",
+        "G006",
+        "G007",
+        "G008",
+        "G009",
+        "G010"
+      ],
+      "item_count": 10,
+      "total_elapsed_ms": 589577,
+      "calls": 28,
+      "tokens": 187228,
+      "estimated_cost_usd": "1.531580520",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 10,
+          "tokens": 97288,
+          "estimated_cost_usd": "1.013929250",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 10,
+          "tokens": 2276,
+          "estimated_cost_usd": "0.000045520",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 8,
+          "tokens": 87664,
+          "estimated_cost_usd": "0.517605750",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
       "run_id": "evidence-planned-v24-mechanical-g007-20260730-1",
       "policy_version": "evidence-planned-v24",
       "status": "completed",
@@ -567,62 +620,62 @@
     },
     {
       "policy_version": "evidence-planned-v24",
-      "run_count": 2,
-      "calls": 3,
-      "tokens": 27852,
-      "estimated_cost_usd": "0.314724060",
+      "run_count": 3,
+      "calls": 31,
+      "tokens": 215080,
+      "estimated_cost_usd": "1.846304580",
       "unpriced_events": 0,
       "operations": [
         {
           "operation": "answer_generation",
-          "calls": 1,
-          "tokens": 16188,
-          "estimated_cost_usd": "0.230513750",
+          "calls": 11,
+          "tokens": 113476,
+          "estimated_cost_usd": "1.244443000",
           "unpriced_events": 0
         },
         {
           "operation": "query_embedding",
-          "calls": 1,
-          "tokens": 578,
-          "estimated_cost_usd": "0.000011560",
+          "calls": 11,
+          "tokens": 2854,
+          "estimated_cost_usd": "0.000057080",
           "unpriced_events": 0
         },
         {
           "operation": "query_planning",
-          "calls": 1,
-          "tokens": 11086,
-          "estimated_cost_usd": "0.084198750",
+          "calls": 9,
+          "tokens": 98750,
+          "estimated_cost_usd": "0.601804500",
           "unpriced_events": 0
         }
       ]
     }
   ],
   "total": {
-    "run_count": 9,
-    "calls": 50,
-    "tokens": 306993,
-    "estimated_cost_usd": "3.280252250",
+    "run_count": 10,
+    "calls": 78,
+    "tokens": 494221,
+    "estimated_cost_usd": "4.811832770",
     "unpriced_events": 0,
     "operations": [
       {
         "operation": "answer_generation",
-        "calls": 16,
-        "tokens": 198595,
-        "estimated_cost_usd": "2.490605000",
+        "calls": 26,
+        "tokens": 295883,
+        "estimated_cost_usd": "3.504534250",
         "unpriced_events": 0
       },
       {
         "operation": "query_embedding",
-        "calls": 18,
-        "tokens": 6800,
-        "estimated_cost_usd": "0.000136000",
+        "calls": 28,
+        "tokens": 9076,
+        "estimated_cost_usd": "0.000181520",
         "unpriced_events": 0
       },
       {
         "operation": "query_planning",
-        "calls": 16,
-        "tokens": 101598,
-        "estimated_cost_usd": "0.789511250",
+        "calls": 24,
+        "tokens": 189262,
+        "estimated_cost_usd": "1.307117000",
         "unpriced_events": 0
       }
     ]

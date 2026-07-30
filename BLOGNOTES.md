@@ -2798,6 +2798,50 @@ Useful blog lesson: budget controls have two boundaries. The application's hard 
 experiment from itself; the provider's quota can still stop the experiment from outside. Recording
 both makes an interrupted cohort legible rather than mysterious.
 
+### 2026-07-30 - The full V24 cohort separated finding evidence from using it
+
+- Restored the provider quota and resumed without changing the RAG. Fresh isolated run
+  `evidence-planned-v24-clean-20260730-2` asserted exact clean commit
+  `1b75e8676319ad89f5b09bb851c5df5fad184c6c`, the unchanged ten questions and 58-claim practical
+  rubric, the same corpus and index hashes, neutral settings, eight-source ceiling, zero retries,
+  and a `$3.00` operational cap.
+- All ten questions completed. The run made 28 API operations across eight planner calls, ten
+  query embeddings, and ten answer generations; processed 187,228 priced tokens; took 589.577
+  seconds of summed item latency; and cost an estimated **`$1.53158052`**. All ten traces closed,
+  all outputs validated structurally, and all 72 citation tokens resolved.
+- Strict manual grading found **21/58 essential claims, 23/26 target document groups, 4/25 listed
+  failure modes, and 9/10 expected behaviors**. V18 had 19/58 claims, 22/26 groups, the same four
+  listed failures, and 10/10 behaviors. The two-point claim gain and one-group gain are
+  directional only; each cohort is one nondeterministic sample.
+- The most important result is the mismatch between retrieval success and answer realization.
+  G002 reached both target groups but ignored Appendix D's argumentative layer. G003 reached all
+  three target chapter groups but expressed only one of seven strict claims. G006 reached six of
+  eight target groups but expressed only two of eight strict claims.
+- G006 made the contract defect unusually visible. Its trace reported all eight canonical stages,
+  only five of seven transitions, and generation coverage of one supported, six partial, and one
+  unsupported requirement. The answer was still marked valid and appended seven separate
+  insufficiency notices. “Valid JSON with valid citations” had quietly become “valid answer,”
+  even though the system's own diagnostics knew the content was incomplete.
+- G008 found the other focused regression. It correctly qualified that the manuscript evidence
+  did not directly establish the Hudson's Bay Company or Canadian fur trade, then supplied
+  analogous Ohio Company material anyway. It did not fabricate an answer, but it failed the
+  requested clean-abstention behavior. G009's useful bounded pandemic/supply-chain near match
+  remained intact, so the repair must distinguish those two cases.
+- The cumulative text-free V18-V24 ledger now covers ten isolated attempts, 78 completed API
+  operations, 494,221 priced tokens, zero unpriced events, and **`$4.811832770`** in estimated
+  development API cost. The failed quota attempt remains visible as a zero-call error rather than
+  disappearing from the history.
+- Selected the next repair from the full distribution: separate structural validity from
+  `valid_complete`, `valid_partial`, and `insufficient_evidence`; enforce route-specific
+  source-bounded obligation coverage; require surviving broad stages and handoffs to appear or be
+  bounded concisely; and restore clean abstention after a corpus-level absence. No larger context,
+  extra model call, retry, critic, or gold-derived location is justified.
+
+Useful blog lesson: retrieval and generation are two different promises. Finding the right shelf
+does not mean the answer carried the right argument off it. The most valuable diagnostic was not a
+wrong citation; it was the application correctly reporting partial evidence internally and then
+calling the result complete anyway.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

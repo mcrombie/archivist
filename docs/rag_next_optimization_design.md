@@ -2130,3 +2130,57 @@ The runner stopped after 2.940 seconds, recorded no completed provider call and 
 and did not start G002. This is an external quota interruption, not a V24 quality result. The next
 action remains a fresh isolated run of the same ten unchanged questions after provider quota is
 available; no RAG change should intervene.
+
+## V24 complete ten-question development result
+
+After the provider quota was restored, the unchanged V24 runner started from exact clean commit
+`1b75e8676319ad89f5b09bb851c5df5fad184c6c` in fresh isolated run
+`evidence-planned-v24-clean-20260730-2`. The checkpoint contains the frozen V24 RAG plus the
+governance and text-free cost-lineage correction; it does not alter retrieval or generation.
+
+All ten questions completed exactly once with zero retries. The run made eight planner calls, ten
+batched query-embedding calls, and ten generation calls; processed 187,228 priced tokens; took
+589.577 seconds of summed item latency; and cost an estimated `$1.53158052` under its `$3.00`
+operational cap. All ten traces closed, all ten outputs validated structurally, and all 72
+citation tokens resolved without malformed mappings.
+
+Strict reader grading against the unchanged 58-claim practical rubric produced:
+
+- 21/58 essential claims, compared with 19/58 in V18;
+- 23/26 target document groups, compared with 22/26 in V18;
+- 4/25 listed failure modes, unchanged from V18; and
+- 9/10 expected behaviors, compared with 10/10 in V18.
+
+These are single nondeterministic development samples, not a formal improvement claim. The
+complete distribution does show that V24's dominant remaining problem is no longer structural
+trace validity or source-number mapping. It is the gap between target-bearing context and
+source-bounded answer realization.
+
+G006 is the clearest contract witness. Retrieval recorded all eight canonical stages and six of
+eight expected target groups, but only five of seven transitions. Generation diagnostics marked
+one requirement supported, six partial, and one unsupported, yet returned a valid answer with
+seven insufficiency notices and only 2/8 strict claims. G002 and G003 show the same pattern at
+smaller scale: the intended target groups reached final context while major composite claims were
+unused. G008 exposed a separate bounded-absence regression by qualifying the gap and then
+supplying an unrequested analogue.
+
+## Next bounded repair after V24
+
+Open V25 only for source-bounded completeness and absence semantics:
+
+1. Keep structural JSON validity and citation/source validity unchanged.
+2. Add a separate content outcome with `valid_complete`, `valid_partial`, and
+   `insufficient_evidence`.
+3. Define route-specific minimum supported-obligation coverage. A broad or long-lineage answer
+   cannot be `valid_complete` when required stages or handoffs remain unsupported.
+4. Require every protected stage and required handoff that survives retrieval either to appear in
+   the answer or to be represented by one concise bounded limitation. Do not append one
+   repetitive notice per requirement.
+5. When a planner establishes corpus-level absence, return clean abstention unless the user asks
+   for analogues. Preserve G009-shaped qualified near matches where the manuscript directly
+   supports bounded implications.
+6. Add only synthetic offline fixtures shaped like G003, G006, G008, and an ordinary focused
+   answer. Add no manuscript name, chapter location, expected claim, ninth source, retry, critic,
+   or provider call.
+7. Freeze the repaired candidate and rerun all ten unchanged development questions once. G007
+   remains descriptive and mechanically useful but cannot regain a reader-quality veto.

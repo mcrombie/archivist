@@ -19,13 +19,14 @@ Maps the sequence of briefs for Archivist, a retrieval-augmented QA system over 
 Archivist is already beyond the original implementation outline in several respects. Answer Mode
 uses versioned dense/BM25 reciprocal-rank fusion over the complete eligible manuscript, the public
 demo is live with bounded source disclosure, and per-answer stage timing and token/cost records
-exist. V24 is frozen at `67c735fff37d26288a2a887205b0a20682d9320d`; its unchanged G007
-mechanical sentinel passed all six structural stages, endpoint obligation, trace, mapping,
-call-boundary, and no-retry checks. Its descriptive reader score remained 1/7 strict claims and
-4/5 target groups. The public deployment remains on V13. The complete V24 development cohort was
-launched immediately but OpenAI stopped G001's first embedding with `429 insufficient_quota`
-before any completed call. Those are real engineering accomplishments, but they do not yet
-support the drafted numerical resume claims.
+exist. V24's RAG implementation was frozen at
+`67c735fff37d26288a2a887205b0a20682d9320d`; the complete unchanged development cohort ran from
+clean governance-and-cost checkpoint `1b75e8676319ad89f5b09bb851c5df5fad184c6c`, which did not
+change the RAG. All ten items completed once with zero retries, valid traces and mappings, and 72
+resolvable citation tokens. Strict manual grading found 21/58 essential claims, 23/26 target
+document groups, 4/25 listed failure modes, and 9/10 expected behaviors. The run took 589.577
+seconds and cost an estimated `$1.53158052`. The public deployment remains on V13. These are real
+engineering accomplishments, but they do not yet support the drafted numerical resume claims.
 
 The owner's existing ten-question practical set is now **development and calibration evidence**.
 It has repeatedly located defects and guided changes through V20, so it is no longer an unbiased
@@ -35,16 +36,20 @@ measurement of the complete practical cohort.
 
 The next evidence-producing sequence is:
 
-1. **Complete the candidate measurement.** V24's focused mechanical prerequisite has passed, so
-   G007 no longer holds the other nine questions. Restore the OpenAI API project/account quota,
-   then run all ten unchanged practical questions once in a fresh isolated directory with zero
-   retries and the predeclared operational cap. Do not change the RAG between the quota stop and
-   that rerun. Grade all ten against the unchanged practical rubric, publish the complete
-   development profile and cumulative cost, and choose any later repair from that distribution
-   rather than from G007 alone. The sentinel used deterministic fallback after a
-   `broad_narrative_gap`, so the separate risk of over-rejecting a valid overview-bearing live
-   plan remains open until the broader cohort exercises it.
-2. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
+1. **Enforce source-bounded completeness offline.** V24 often retrieves the intended chapters but
+   permits a broad answer to validate while its own diagnostics mark required stages and
+   transitions partial or unsupported. Separate structural JSON validity from content status;
+   define route-specific `valid_complete`, `valid_partial`, and `insufficient_evidence`
+   outcomes; require surviving protected stages and institutional handoffs to be realized or
+   concisely bounded; and restore clean abstention when a corpus-level absence is established and
+   the user did not ask for analogues. Use only synthetic fixtures and add no source slot, model
+   call, retry, critic, or development-answer hint.
+2. **Freeze and measure the repaired candidate once.** Run the unchanged ten development
+   questions in a fresh isolated directory with zero retries. Compare the complete distribution
+   with V24 rather than reinstating a G007 reader-quality veto. If the repair does not improve the
+   declared completeness and absence behaviors, retain V24's measured limitations or revise the
+   contract before calling the candidate final.
+3. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
    development-question registry, leakage and quotation audits, provenance binding, location
    carry-over check, and Git freeze validator are implemented. The owner must now supply the
    34–46 questions and exact relevance/support labels required by Brief 3 without running those
@@ -52,17 +57,17 @@ The next evidence-producing sequence is:
    manual questions remain development data. Private authoring may proceed while development
    uses only that registered development set, but the final provenance sidecar must be rebound to
    the next passing frozen candidate before the gold set is ingested or scored.
-3. **Run a retrieval-only controlled comparison.** Compare vector-only retrieval with the current
+4. **Run a retrieval-only controlled comparison.** Compare vector-only retrieval with the current
    dense/BM25 reciprocal-rank-fusion path using the same corpus, eligibility rules, question text,
    query embedding, and values of `k`. Generation is excluded.
-4. **Publish the reproducible evaluation artifacts.** Preserve the clean commit, corpus/index/gold
+5. **Publish the reproducible evaluation artifacts.** Preserve the clean commit, corpus/index/gold
    hashes, retrieval configurations, denominators, per-stratum results, limitations, and a
    text-free machine-readable result plus a human-readable report and rerun command.
-5. **Complete production observability and measure a live cohort.** Add privacy-safe request
+6. **Complete production observability and measure a live cohort.** Add privacy-safe request
    correlation and outcome records, aggregate the existing stage telemetry, then measure a frozen
    cohort of 30–50 successful warm production-like first turns. Report p50, p95, and error rate in
    seconds, with cold starts and follow-ups labelled separately.
-6. **Fill the resume only from those artifacts.** If hybrid retrieval does not improve the
+7. **Fill the resume only from those artifacts.** If hybrid retrieval does not improve the
    predeclared metric, revise the claim rather than tuning against the held-out set. Any later
    tuning requires a new holdout before another improvement claim.
 

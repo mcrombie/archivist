@@ -15,7 +15,7 @@ Included policy versions: V18–V24.
 | evidence-planned-v21 | 1 | 3 | 26508 | $0.298705430 | 0 |
 | evidence-planned-v22 | 1 | 3 | 25257 | $0.252074060 | 0 |
 | evidence-planned-v23 | 1 | 2 | 11667 | $0.084300310 | 0 |
-| evidence-planned-v24 | 2 | 3 | 27852 | $0.314724060 | 0 |
+| evidence-planned-v24 | 3 | 31 | 215080 | $1.846304580 | 0 |
 
 ## Run details
 
@@ -29,14 +29,15 @@ Included policy versions: V18–V24.
 | evidence-planned-v22-confirm-g007-20260729-1 | 0691b3da9a49 | completed | 1 | 0 | 95.735 | $0.50 | 3 | 25257 | $0.252074060 |
 | evidence-planned-v23-confirm-g007-20260729-1 | d89f4332b21f | completed | 1 | 0 | 24.655 | $0.50 | 2 | 11667 | $0.084300310 |
 | evidence-planned-v24-clean-20260730-1 | 67c735fff37d | error | 1 | 0 | 2.940 | $3.00 | 0 | 0 | $0.000000000 |
+| evidence-planned-v24-clean-20260730-2 | 1b75e8676319 | completed | 10 | 0 | 589.577 | $3.00 | 28 | 187228 | $1.531580520 |
 | evidence-planned-v24-mechanical-g007-20260730-1 | 67c735fff37d | completed | 1 | 0 | 108.851 | $0.50 | 3 | 27852 | $0.314724060 |
 
 ## Cumulative total
 
-- Runs: **9**
-- API operations: **50**
-- Priced tokens: **306993**
-- Estimated API cost: **$3.280252250**
+- Runs: **10**
+- API operations: **78**
+- Priced tokens: **494221**
+- Estimated API cost: **$4.811832770**
 - Unpriced events: **0**
 
 These are application estimates reconstructed from returned token usage. The provider invoice remains authoritative.
