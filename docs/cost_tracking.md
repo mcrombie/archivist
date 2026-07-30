@@ -47,6 +47,12 @@ cost, and cumulative totals. It never emits questions, answers, sources, or manu
 Duplicate provider response IDs across run directories are treated as an error rather than
 double-counted.
 
+Interrupted runs are included. When no final run summary exists, the report reads the paid-attempt
+artifact so an external error remains an error rather than being mislabeled as a partial result.
+It reports the operational hard cap actually passed to the runner separately from the broader
+amount the owner may have authorized. Only completed provider responses contribute tokens and
+estimated cost.
+
 ## Budget controls
 
 The cost panel can set a local monthly budget, warning percentage, and optional hard stop. The hard

@@ -14,16 +14,18 @@ Maps the sequence of briefs for Archivist, a retrieval-augmented QA system over 
 
 **The gate between phases is not "the answers are good."** Phase 1 is complete when Answer Mode is **measured, bounded, reproducible, and its limitations written down** (`B0_project_brief.md`, Success criterion).
 
-## Current state and resume-evidence sequence (2026-07-29)
+## Current state and resume-evidence sequence (2026-07-30)
 
 Archivist is already beyond the original implementation outline in several respects. Answer Mode
 uses versioned dense/BM25 reciprocal-rank fusion over the complete eligible manuscript, the public
 demo is live with bounded source disclosure, and per-answer stage timing and token/cost records
-exist. V23 is a frozen, measured candidate whose focused G007 diagnostic failed mechanically; the
-public deployment remains on V13 while V24's bounded structural filename-parser correction has
-passed complete offline verification and awaits an exact freeze plus focused confirmation.
-Those are real engineering accomplishments, but they do not yet support the drafted numerical
-resume claims.
+exist. V24 is frozen at `67c735fff37d26288a2a887205b0a20682d9320d`; its unchanged G007
+mechanical sentinel passed all six structural stages, endpoint obligation, trace, mapping,
+call-boundary, and no-retry checks. Its descriptive reader score remained 1/7 strict claims and
+4/5 target groups. The public deployment remains on V13. The complete V24 development cohort was
+launched immediately but OpenAI stopped G001's first embedding with `429 insufficient_quota`
+before any completed call. Those are real engineering accomplishments, but they do not yet
+support the drafted numerical resume claims.
 
 The owner's existing ten-question practical set is now **development and calibration evidence**.
 It has repeatedly located defects and guided changes through V20, so it is no longer an unbiased
@@ -33,18 +35,15 @@ measurement of the complete practical cohort.
 
 The next evidence-producing sequence is:
 
-1. **Stabilize the candidate release.** V23 is frozen and reproducible at
-   `d89f4332b21f0e41cb445780abe10f997b52626c`, but its unchanged no-retry G007 confirmation
-   failed closed with 0/7 strict claims and 0/5 public target groups. Its valid trace showed that
-   the allocation safeguard worked, but the structural parser recognized a shortened
-   `08_Chapter 1.md` fixture and rejected the production-shaped
-   `08_Chapter 1_ Sample title.md` because the trailing underscore is not a word boundary. V24
-   corrects only that delimiter grammar; complete-shape regressions, private metadata checks,
-   580 offline tests, and Ruff now pass. Freeze V24 as a new exact candidate before repeating
-   G007. That focused run checks mechanical integrity—six structural bands, protected allocation,
-   the endpoint obligation, valid traces and mappings, bounded calls, and no retry. Once those
-   mechanics pass, run all ten unchanged practical questions regardless of G007's reader-quality
-   score and choose any later repair from the complete profile.
+1. **Complete the candidate measurement.** V24's focused mechanical prerequisite has passed, so
+   G007 no longer holds the other nine questions. Restore the OpenAI API project/account quota,
+   then run all ten unchanged practical questions once in a fresh isolated directory with zero
+   retries and the predeclared operational cap. Do not change the RAG between the quota stop and
+   that rerun. Grade all ten against the unchanged practical rubric, publish the complete
+   development profile and cumulative cost, and choose any later repair from that distribution
+   rather than from G007 alone. The sentinel used deterministic fallback after a
+   `broad_narrative_gap`, so the separate risk of over-rejecting a valid overview-bearing live
+   plan remains open until the broader cohort exercises it.
 2. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
    development-question registry, leakage and quotation audits, provenance binding, location
    carry-over check, and Git freeze validator are implemented. The owner must now supply the

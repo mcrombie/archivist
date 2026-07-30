@@ -1,0 +1,630 @@
+{
+  "schema": "archivist.development_cost_lineage/1",
+  "source": "isolated read-only runtime evaluation ledgers",
+  "privacy": "text-free; no questions, answers, sources, or manuscript passages",
+  "version_range": {
+    "minimum": 18,
+    "maximum": 24
+  },
+  "runs": [
+    {
+      "run_id": "evidence-planned-v18-clean-20260729-1",
+      "policy_version": "evidence-planned-v18",
+      "status": "completed",
+      "git_commit": "97ca2bc96fd1cb6408cc0d80f63ec6ffa54bd2dd",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "2.50",
+      "operational_hard_cap_usd": "2.50",
+      "owner_authorized_max_usd": "10.00",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G001",
+        "G002",
+        "G003",
+        "G004",
+        "G005",
+        "G006",
+        "G007",
+        "G008",
+        "G009",
+        "G010"
+      ],
+      "item_count": 10,
+      "total_elapsed_ms": 750837,
+      "calls": 27,
+      "tokens": 122503,
+      "estimated_cost_usd": "1.322573510",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 9,
+          "tokens": 94613,
+          "estimated_cost_usd": "1.136423250",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 10,
+          "tokens": 1638,
+          "estimated_cost_usd": "0.000032760",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 8,
+          "tokens": 26252,
+          "estimated_cost_usd": "0.186117500",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "run_id": "evidence-planned-v19-confirm-g006-g007-20260729-1",
+      "policy_version": "evidence-planned-v19",
+      "status": "error",
+      "git_commit": "3c393103f08a06be924e3dc44be90f8f0957020f",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "0.75",
+      "operational_hard_cap_usd": "0.75",
+      "owner_authorized_max_usd": "0.75",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G006"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 280133,
+      "calls": 3,
+      "tokens": 21374,
+      "estimated_cost_usd": "0.262197370",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 15947,
+          "estimated_cost_usd": "0.209223750",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 931,
+          "estimated_cost_usd": "0.000018620",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 4496,
+          "estimated_cost_usd": "0.052955000",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "run_id": "evidence-planned-v19-continuation-g007-20260729-1",
+      "policy_version": "evidence-planned-v19",
+      "status": "completed",
+      "git_commit": "3c393103f08a06be924e3dc44be90f8f0957020f",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "0.48780263",
+      "operational_hard_cap_usd": "0.48780263",
+      "owner_authorized_max_usd": "0.48780263",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G007"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 86160,
+      "calls": 3,
+      "tokens": 18555,
+      "estimated_cost_usd": "0.208358040",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 14544,
+          "estimated_cost_usd": "0.181070250",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 352,
+          "estimated_cost_usd": "0.000007040",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 3659,
+          "estimated_cost_usd": "0.027280750",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "run_id": "evidence-planned-v20-confirm-g006-g007-20260729-1",
+      "policy_version": "evidence-planned-v20",
+      "status": "completed",
+      "git_commit": "f13534a85d410a1889cb035b2ce7dac20fe42872",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "0.90",
+      "operational_hard_cap_usd": "0.90",
+      "owner_authorized_max_usd": "0.90",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G006",
+        "G007"
+      ],
+      "item_count": 2,
+      "total_elapsed_ms": 173728,
+      "calls": 6,
+      "tokens": 53277,
+      "estimated_cost_usd": "0.537319470",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 2,
+          "tokens": 28604,
+          "estimated_cost_usd": "0.349026500",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 2,
+          "tokens": 1686,
+          "estimated_cost_usd": "0.000033720",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 2,
+          "tokens": 22987,
+          "estimated_cost_usd": "0.188259250",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "run_id": "evidence-planned-v21-confirm-g007-20260729-1",
+      "policy_version": "evidence-planned-v21",
+      "status": "completed",
+      "git_commit": "bf424c880bca4728a8d13225f85978e27a8d8dcf",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "0.40",
+      "operational_hard_cap_usd": "0.40",
+      "owner_authorized_max_usd": "0.40",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G007"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 104985,
+      "calls": 3,
+      "tokens": 26508,
+      "estimated_cost_usd": "0.298705430",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 15123,
+          "estimated_cost_usd": "0.216993750",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 459,
+          "estimated_cost_usd": "0.000009180",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 10926,
+          "estimated_cost_usd": "0.081702500",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "run_id": "evidence-planned-v22-confirm-g007-20260729-1",
+      "policy_version": "evidence-planned-v22",
+      "status": "completed",
+      "git_commit": "0691b3da9a4926097c7d013d79266eee62f7de9b",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "0.50",
+      "operational_hard_cap_usd": "0.50",
+      "owner_authorized_max_usd": "0.50",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G007"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 95735,
+      "calls": 3,
+      "tokens": 25257,
+      "estimated_cost_usd": "0.252074060",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 13576,
+          "estimated_cost_usd": "0.167353750",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 578,
+          "estimated_cost_usd": "0.000011560",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 11103,
+          "estimated_cost_usd": "0.084708750",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "run_id": "evidence-planned-v23-confirm-g007-20260729-1",
+      "policy_version": "evidence-planned-v23",
+      "status": "completed",
+      "git_commit": "d89f4332b21f0e41cb445780abe10f997b52626c",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "0.50",
+      "operational_hard_cap_usd": "0.50",
+      "owner_authorized_max_usd": "0.50",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G007"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 24655,
+      "calls": 2,
+      "tokens": 11667,
+      "estimated_cost_usd": "0.084300310",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 578,
+          "estimated_cost_usd": "0.000011560",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 11089,
+          "estimated_cost_usd": "0.084288750",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "run_id": "evidence-planned-v24-clean-20260730-1",
+      "policy_version": "evidence-planned-v24",
+      "status": "error",
+      "git_commit": "67c735fff37d26288a2a887205b0a20682d9320d",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "3.00",
+      "operational_hard_cap_usd": "3.00",
+      "owner_authorized_max_usd": "10.00",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G001"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 2940,
+      "calls": 0,
+      "tokens": 0,
+      "estimated_cost_usd": "0.000000000",
+      "unpriced_events": 0,
+      "operations": []
+    },
+    {
+      "run_id": "evidence-planned-v24-mechanical-g007-20260730-1",
+      "policy_version": "evidence-planned-v24",
+      "status": "completed",
+      "git_commit": "67c735fff37d26288a2a887205b0a20682d9320d",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "0.50",
+      "operational_hard_cap_usd": "0.50",
+      "owner_authorized_max_usd": "0.50",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G007"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 108851,
+      "calls": 3,
+      "tokens": 27852,
+      "estimated_cost_usd": "0.314724060",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 16188,
+          "estimated_cost_usd": "0.230513750",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 578,
+          "estimated_cost_usd": "0.000011560",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 11086,
+          "estimated_cost_usd": "0.084198750",
+          "unpriced_events": 0
+        }
+      ]
+    }
+  ],
+  "versions": [
+    {
+      "policy_version": "evidence-planned-v18",
+      "run_count": 1,
+      "calls": 27,
+      "tokens": 122503,
+      "estimated_cost_usd": "1.322573510",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 9,
+          "tokens": 94613,
+          "estimated_cost_usd": "1.136423250",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 10,
+          "tokens": 1638,
+          "estimated_cost_usd": "0.000032760",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 8,
+          "tokens": 26252,
+          "estimated_cost_usd": "0.186117500",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "policy_version": "evidence-planned-v19",
+      "run_count": 2,
+      "calls": 6,
+      "tokens": 39929,
+      "estimated_cost_usd": "0.470555410",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 2,
+          "tokens": 30491,
+          "estimated_cost_usd": "0.390294000",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 2,
+          "tokens": 1283,
+          "estimated_cost_usd": "0.000025660",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 2,
+          "tokens": 8155,
+          "estimated_cost_usd": "0.080235750",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "policy_version": "evidence-planned-v20",
+      "run_count": 1,
+      "calls": 6,
+      "tokens": 53277,
+      "estimated_cost_usd": "0.537319470",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 2,
+          "tokens": 28604,
+          "estimated_cost_usd": "0.349026500",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 2,
+          "tokens": 1686,
+          "estimated_cost_usd": "0.000033720",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 2,
+          "tokens": 22987,
+          "estimated_cost_usd": "0.188259250",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "policy_version": "evidence-planned-v21",
+      "run_count": 1,
+      "calls": 3,
+      "tokens": 26508,
+      "estimated_cost_usd": "0.298705430",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 15123,
+          "estimated_cost_usd": "0.216993750",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 459,
+          "estimated_cost_usd": "0.000009180",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 10926,
+          "estimated_cost_usd": "0.081702500",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "policy_version": "evidence-planned-v22",
+      "run_count": 1,
+      "calls": 3,
+      "tokens": 25257,
+      "estimated_cost_usd": "0.252074060",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 13576,
+          "estimated_cost_usd": "0.167353750",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 578,
+          "estimated_cost_usd": "0.000011560",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 11103,
+          "estimated_cost_usd": "0.084708750",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "policy_version": "evidence-planned-v23",
+      "run_count": 1,
+      "calls": 2,
+      "tokens": 11667,
+      "estimated_cost_usd": "0.084300310",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 578,
+          "estimated_cost_usd": "0.000011560",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 11089,
+          "estimated_cost_usd": "0.084288750",
+          "unpriced_events": 0
+        }
+      ]
+    },
+    {
+      "policy_version": "evidence-planned-v24",
+      "run_count": 2,
+      "calls": 3,
+      "tokens": 27852,
+      "estimated_cost_usd": "0.314724060",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 16188,
+          "estimated_cost_usd": "0.230513750",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_embedding",
+          "calls": 1,
+          "tokens": 578,
+          "estimated_cost_usd": "0.000011560",
+          "unpriced_events": 0
+        },
+        {
+          "operation": "query_planning",
+          "calls": 1,
+          "tokens": 11086,
+          "estimated_cost_usd": "0.084198750",
+          "unpriced_events": 0
+        }
+      ]
+    }
+  ],
+  "total": {
+    "run_count": 9,
+    "calls": 50,
+    "tokens": 306993,
+    "estimated_cost_usd": "3.280252250",
+    "unpriced_events": 0,
+    "operations": [
+      {
+        "operation": "answer_generation",
+        "calls": 16,
+        "tokens": 198595,
+        "estimated_cost_usd": "2.490605000",
+        "unpriced_events": 0
+      },
+      {
+        "operation": "query_embedding",
+        "calls": 18,
+        "tokens": 6800,
+        "estimated_cost_usd": "0.000136000",
+        "unpriced_events": 0
+      },
+      {
+        "operation": "query_planning",
+        "calls": 16,
+        "tokens": 101598,
+        "estimated_cost_usd": "0.789511250",
+        "unpriced_events": 0
+      }
+    ]
+  }
+}

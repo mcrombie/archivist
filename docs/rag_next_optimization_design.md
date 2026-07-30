@@ -2096,3 +2096,37 @@ The 2/7 and 5/5 figures remain visible historical comparators, not mechanical cr
 measurement path is valid, the unchanged ten-question development evaluation proceeds even when
 G007's reader-quality score remains poor. Only a mechanically invalid run or cost-safety stop
 holds it. The complete cohort—not G007 alone—selects the next repair.
+
+## V24 mechanical confirmation and interrupted complete cohort
+
+The clean V24 candidate
+`67c735fff37d26288a2a887205b0a20682d9320d` received the unchanged no-retry G007 sentinel on
+2026-07-30. It made one planner call, one batched embedding call, and one generation call; used
+eight sources; emitted 18 valid citation tokens; completed in 108.851 seconds; and cost an
+estimated `$0.31472406`.
+
+The mechanical contract passed:
+
+- six canonical cores were required and six were satisfied;
+- six protected stages were required and six were satisfied, with no structural shortfall;
+- terminal requirement R6 reached the generation contract and was supported;
+- generation validation, the closed retrieval trace, source remapping, and citations were valid;
+  and
+- no automatic retry occurred.
+
+The provider plan was rejected with `broad_narrative_gap`, so the successful path used the
+deterministic six-stage fallback. This confirms the production-shaped filename parser and fallback
+allocation mechanics. It does not settle the V20/V21 oscillation risk for an otherwise valid live
+plan containing overview material, because that acceptance boundary was not exercised in this
+run.
+
+Descriptive manual grading found 1/7 strict claims and 4/5 target document groups. The
+Hamiltonian debt-consolidation claim was present; the Civil War group remained absent. Per the
+corrected contract, those quality figures were recorded but did not veto the complete cohort.
+
+The unchanged ten-question runner then started immediately under a `$3.00` operational cap and
+zero-retry policy. OpenAI returned `429 insufficient_quota` on G001's first embedding request.
+The runner stopped after 2.940 seconds, recorded no completed provider call and no estimated spend,
+and did not start G002. This is an external quota interruption, not a V24 quality result. The next
+action remains a fresh isolated run of the same ten unchanged questions after provider quota is
+available; no RAG change should intervene.

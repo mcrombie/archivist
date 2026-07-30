@@ -212,3 +212,55 @@ def test_ignores_versions_outside_requested_range(tmp_path: Path) -> None:
 
     assert report["total"]["run_count"] == 1
     assert report["total"]["estimated_cost_usd"] == "0.100000000"
+
+
+def test_reports_failed_attempt_status_cap_and_retry_policy(tmp_path: Path) -> None:
+    root = tmp_path / "evaluations"
+    run_dir = _write_run(
+        root,
+        "evidence-planned-v24-clean-1",
+        response_prefix="unused",
+        costs=(),
+        tokens=(),
+        operations=(),
+    )
+    (run_dir / "run_summary.json").unlink()
+    (run_dir / "attempt.json").write_text(
+        json.dumps(
+            {
+                "status": "error",
+                "authorized_max_usd": "3.00",
+                "automatic_retries": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "preflight.json").write_text(
+        json.dumps(
+            {
+                "worktree": {
+                    "git_commit": "b" * 40,
+                    "working_tree": "clean",
+                },
+                "cost_estimate": {
+                    "proposed_hard_cap_usd": "3.00",
+                    "owner_authorized_max_usd": "10.00",
+                },
+                "development_cohort": {"automatic_retries": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_development_cost_lineage(
+        root,
+        min_version=24,
+        max_version=24,
+    )
+
+    run = report["runs"][0]
+    assert run["status"] == "error"
+    assert run["operational_hard_cap_usd"] == "3.00"
+    assert run["owner_authorized_max_usd"] == "10.00"
+    assert run["authorized_max_usd"] == "3.00"
+    assert run["automatic_retries"] == 0

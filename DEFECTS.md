@@ -45,6 +45,20 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-30] Provider quota stopped the V24 cohort before its first embedding
+Phase/Brief: Phase 1 V24 unchanged ten-question development evaluation
+Symptom: after the V24 mechanical sentinel passed, the full development runner began G001 and
+OpenAI returned `429 insufficient_quota` on the first embedding request. The attempt ended after
+2.940 seconds with no completed metered operation and no answer.
+Cause: other - external OpenAI account/project quota. Archivist's preflight was clean, its
+`$3.00` operational cap had not been approached, and the error is not evidence about retrieval or
+answer quality.
+Resolution and verification: the zero-retry runner stopped immediately, retained the error
+attempt and G001 artifact, and did not start G002. The cumulative ledger classifies this as an
+error with zero completed calls and records the operational cap separately from the owner's
+broader authorization. Resume the unchanged ten questions in a fresh isolated run only after the
+provider quota is available; no RAG repair is licensed by this incident.
+
 ## [2026-07-30] An undocumented single-item quality gate suppressed broader development evidence
 Phase/Brief: Phase 1 candidate stabilization and practical development evaluation
 Symptom: successive V19–V24 notes required G007 to reach 2/7 strict claims and 5/5 target groups
@@ -63,6 +77,13 @@ unchanged practical cohort proceeds regardless of claim or target score. G001–
 development-only and cannot become held-out gold or formal §8 release thresholds. The prior
 practical runs remain historical development observations; no formal baseline or run of record
 existed to invalidate.
+
+Follow-up verification: clean V24 commit
+`67c735fff37d26288a2a887205b0a20682d9320d` passed the predeclared G007 mechanical sentinel.
+Its trace satisfied six of six canonical cores and six of six stage obligations with no
+structural shortfall; terminal R6 was supported; the one-planner, one-embedding, one-generation,
+zero-retry call shape held; and all 18 citations resolved. Descriptive reader grading remained
+1/7 strict claims and 4/5 target groups, but correctly did not block launch of the full cohort.
 
 ## [2026-07-29] Structural filename fixture omitted the trailing title delimiter
 Phase/Brief: Phase 1 evidence-planned-v23 unchanged G007 confirmation

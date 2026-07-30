@@ -99,6 +99,7 @@ def _summary_items(
 def _run_metadata(run_dir: Path) -> dict[str, object]:
     summary = _load_json_object(run_dir / "run_summary.json")
     preflight = _load_json_object(run_dir / "preflight.json")
+    attempt = _load_json_object(run_dir / "attempt.json")
     item_ids, elapsed_ms = _summary_items(run_dir, summary)
 
     run_identity = summary.get("run_identity") if summary is not None else None
@@ -107,32 +108,52 @@ def _run_metadata(run_dir: Path) -> dict[str, object]:
         run_identity = worktree if isinstance(worktree, Mapping) else None
 
     cost_estimate = preflight.get("cost_estimate") if preflight is not None else None
-    authorized_max = (
+    operational_hard_cap = (
         _safe_string(summary.get("authorized_max_usd"))
         if summary is not None
         else None
     )
-    if authorized_max is None and isinstance(cost_estimate, Mapping):
-        authorized_max = _safe_string(cost_estimate.get("owner_authorized_max_usd"))
+    if operational_hard_cap is None and attempt is not None:
+        operational_hard_cap = _safe_string(attempt.get("authorized_max_usd"))
+    if operational_hard_cap is None and isinstance(cost_estimate, Mapping):
+        operational_hard_cap = _safe_string(
+            cost_estimate.get("proposed_hard_cap_usd")
+        )
+    owner_authorized_max = (
+        _safe_string(cost_estimate.get("owner_authorized_max_usd"))
+        if isinstance(cost_estimate, Mapping)
+        else None
+    )
 
     retries = (
         _safe_nonnegative_int(summary.get("automatic_retries"))
         if summary is not None
         else None
     )
+    if retries is None and attempt is not None:
+        retries = _safe_nonnegative_int(attempt.get("automatic_retries"))
     if retries is None and preflight is not None:
-        for key in ("mechanical_sentinel", "confirmation_gate", "focused_gate", "integrated_gate"):
+        for key in (
+            "mechanical_sentinel",
+            "development_cohort",
+            "confirmation_gate",
+            "focused_gate",
+            "integrated_gate",
+        ):
             gate = preflight.get(key)
             if isinstance(gate, Mapping):
                 retries = _safe_nonnegative_int(gate.get("automatic_retries"))
                 if retries is not None:
                     break
 
+    attempt_status = (
+        _safe_string(attempt.get("status")) if attempt is not None else None
+    )
     return {
         "status": (
             _safe_string(summary.get("status"))
             if summary is not None
-            else ("partial" if item_ids else "metadata_only")
+            else (attempt_status or ("partial" if item_ids else "metadata_only"))
         ),
         "git_commit": (
             _safe_string(run_identity.get("git_commit"))
@@ -150,7 +171,9 @@ def _run_metadata(run_dir: Path) -> dict[str, object]:
             and isinstance(summary.get("formal_run_of_record"), bool)
             else False
         ),
-        "authorized_max_usd": authorized_max,
+        "authorized_max_usd": operational_hard_cap,
+        "operational_hard_cap_usd": operational_hard_cap,
+        "owner_authorized_max_usd": owner_authorized_max,
         "automatic_retries": retries,
         "item_ids": item_ids,
         "item_count": len(item_ids),
@@ -387,7 +410,7 @@ def render_development_cost_markdown(report: Mapping[str, object]) -> str:
             "",
             (
                 "| Run | Commit | Status | Items | Retries | Latency (s) | "
-                "Authorized max | Calls | Tokens | Estimated USD |"
+                "Operational cap | Calls | Tokens | Estimated USD |"
             ),
             "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
@@ -400,7 +423,7 @@ def render_development_cost_markdown(report: Mapping[str, object]) -> str:
             f"{int(elapsed) / 1000:.3f}" if isinstance(elapsed, int) else "—"
         )
         retries = run.get("automatic_retries")
-        authorized = run.get("authorized_max_usd")
+        operational_cap = run.get("operational_hard_cap_usd")
         commit = run.get("git_commit")
         lines.append(
             "| {run_id} | {commit} | {status} | {items} | {retries} | {elapsed} | "
@@ -411,7 +434,11 @@ def render_development_cost_markdown(report: Mapping[str, object]) -> str:
                 items=run.get("item_count", 0),
                 retries=retries if isinstance(retries, int) else "—",
                 elapsed=elapsed_seconds,
-                authorized=f"${authorized}" if isinstance(authorized, str) else "—",
+                authorized=(
+                    f"${operational_cap}"
+                    if isinstance(operational_cap, str)
+                    else "—"
+                ),
                 calls=run["calls"],
                 tokens=run["tokens"],
                 cost=run["estimated_cost_usd"],

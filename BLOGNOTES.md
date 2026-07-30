@@ -2759,6 +2759,45 @@ prove that a repaired measurement path works and reveal a severe weakness, but l
 the rest of the experiment trades a broader diagnosis for increasingly elaborate attention to one
 familiar failure.
 
+### 2026-07-30 - V24 passed its mechanical sentinel, then the provider stopped the cohort
+
+- Froze the governance-corrected V24 candidate at clean commit
+  `67c735fff37d26288a2a887205b0a20682d9320d` and ran the unchanged G007 question once with no
+  retry. It made one planner call, one batched embedding call, and one generation call; completed
+  in 108.851 seconds; used eight sources; emitted 18 well-formed, resolvable citations; and cost an
+  estimated `$0.31472406`.
+- The predeclared mechanical sentinel passed. The trace required and satisfied all six canonical
+  cores and all six protected stages, recorded no structural-stage shortfall, carried the terminal
+  R6 endpoint into a supported generation obligation, and closed with a valid generation contract
+  and source/citation mapping.
+- The provider planner proposal failed local validation with `broad_narrative_gap`, after which
+  the deterministic six-stage fallback completed correctly. This proves the repaired parser and
+  fallback allocation path, but it does **not** resolve the separate V20/V21 concern about whether
+  rejecting overview material can over-reject an otherwise valid live plan.
+- Reader quality remained weak and is reported without acting as a veto: 1/7 strict claims and 4/5
+  target document groups. The one credited claim was the Revolutionary-debt/Hamiltonian federal
+  consolidation mechanism; the Civil War target group remained absent.
+- In accordance with the corrected contract, immediately launched the complete unchanged
+  ten-question development cohort. OpenAI rejected G001's first embedding request with
+  `429 insufficient_quota`. The runner stopped in 2.940 seconds, made no automatic retry, recorded
+  zero completed provider operations and `$0.000000000` for that cohort attempt, and preserved an
+  explicit error artifact. This was an external account/project quota stop, not Archivist's
+  `$3.00` operational cap and not a retrieval-quality result.
+- Materialized the first committed, text-free V18-V24 cost lineage. Across nine isolated run
+  attempts it records 50 completed API operations, 306,993 priced tokens, zero unpriced events,
+  and **$3.280252250** estimated cumulative development spend. Failed attempts now retain their
+  actual status, no-retry policy, and operational hard cap instead of being mislabeled as a
+  partial run or displaying the broader owner authorization ceiling.
+- The unchanged ten-question measurement remains the next action. Resume it in a new isolated run
+  only after the OpenAI quota is available; do not treat the quota error as a failed question or
+  tune V24 from it.
+- Four focused cost-lineage tests passed. The complete offline suite passed **584 tests with one
+  intentional skip**, repository-wide Ruff passed, and the diff integrity check passed.
+
+Useful blog lesson: budget controls have two boundaries. The application's hard stop protects the
+experiment from itself; the provider's quota can still stop the experiment from outside. Recording
+both makes an interrupted cohort legible rather than mysterious.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
