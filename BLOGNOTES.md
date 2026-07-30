@@ -2673,6 +2673,34 @@ Useful blog lesson: an elegant context window needs both a seating plan and an h
 Every required role needs a reserved place, and a missing role should stop the performance rather
 than be hidden by filling the empty chair with unrelated evidence.
 
+### 2026-07-29 - V23's fire alarm worked, and found the wrong fire
+
+- Froze V23 at exact clean commit `d89f4332b21f0e41cb445780abe10f997b52626c` after 568
+  offline tests passed with one intentional skip and repository-wide Ruff passed.
+- Ran the unchanged G007 confirmation once with no retry. It made one planner call and one
+  batched embedding call, finishing in 24.655 seconds for an estimated `$0.08430031`. The trace
+  was closed, text-free, and valid.
+- V23 failed closed before generation because it believed all six structural stages were empty.
+  That behavior was safer than V22's globally filled but incomplete answer, but it still failed
+  the reader gate: no answer, 0/7 claims, and 0/5 public target groups. The ten-question run
+  remains held.
+- The trace separated retrieval from classification. Candidate lanes contained numbered-chapter
+  results, yet structural-band construction produced zero exact cores. The regression had tested
+  a shortened filename such as `08_Chapter 1.md`; the real catalog shape continues with an
+  underscore and title, such as `08_Chapter 1_ Sample title.md`.
+- The parser accepted the underscore before `Chapter` but still required a regular-expression
+  word boundary after the number. A digit and underscore are both word characters, so that
+  boundary does not exist. A fixture meant to mirror production had reproduced only half of the
+  filename grammar.
+- The next repair is correspondingly small: recognize underscore, whitespace, punctuation, or
+  end-of-string after numbered and terminal structural labels, test the complete filename shape,
+  and assert that the catalog yields six nonempty bands. No prompt, ranking, source cap, or API
+  call budget needs to move.
+
+Useful blog lesson: failing closed is valuable even when the failure itself is mistaken. It
+turned a hidden parser mismatch into a cheap, inspectable abstention—one planner and one embedding
+call—rather than spending more to generate a persuasive answer from an invalid structure.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

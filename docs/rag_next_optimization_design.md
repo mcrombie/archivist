@@ -1,8 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v23 implemented and verified offline; V22's unchanged G007 confirmation
-failed the predeclared reader gate, and V23 still needs an exact freeze and the same focused
-confirmation before the practical ten-question rerun can proceed
+Status: evidence-planned-v23 implemented, frozen, and measured; its unchanged G007 confirmation
+failed closed because the structural filename parser rejected the corpus's trailing underscore,
+so the practical ten-question rerun remains blocked
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -2007,3 +2007,38 @@ This is contract evidence, not reader evidence. V23 must be committed as an exac
 and receive one unchanged, no-retry G007 confirmation under the existing 2/7 strict-claim plus
 5/5 target-group gate. Only a passing result licenses the unchanged ten-question development
 evaluation.
+
+## V23 reader confirmation: fail-closed exposed a filename-shape mismatch
+
+The exact clean V23 candidate
+`d89f4332b21f0e41cb445780abe10f997b52626c` received one unchanged, no-retry G007
+confirmation on 2026-07-29. It retained the frozen question, seven-claim rubric, five target
+document groups, corpus and index identity, neutral settings, GPT-5.6 Sol runtime model,
+eight-source ceiling, and original 2/7 plus 5/5 gate.
+
+The run made one planner call and one batched embedding call. V23 detected a six-stage structural
+shortfall and correctly stopped before generation, so there was no generation call, answer source,
+or citation token. It completed in 24.655 seconds for an estimated `$0.08430031`, well below the
+`$0.50` hard stop. Its trace was closed, text-free, and valid, but the reader result was an
+insufficient-evidence response with 0/7 strict claims and 0/5 public target groups. The gate
+failed, and the ten-question development evaluation remains blocked.
+
+The failure is narrower than the allocation defect. V23's regression fixture proved
+`08_Chapter 1.md`, while the corpus catalog uses the shape
+`08_Chapter 1_ Sample title.md`. The numbered-document pattern accepted the leading underscore
+but still ended the chapter number with `\b`. A digit and underscore are both regular-expression
+word characters, so no boundary exists between `1` and `_`. The structural-band builder
+therefore classified no numbered body documents, constructed no exact cores, and reported:
+
+- six required canonical cores, zero satisfied, six short;
+- six required stage anchors, zero satisfied, six short;
+- zero optional or neighbor-filled sources;
+- no structured generation call.
+
+This result confirms that V23's transparent shortfall behavior works, but also that the test
+fixture did not reproduce the complete production filename grammar. The next bounded repair is
+to replace the trailing word boundary with a delimiter-or-end assertion that accepts underscore,
+whitespace, or punctuation for both numbered and terminal structural documents. Regression must
+use the complete filename shape and prove six nonempty bands. No prompt, ranking, source cap,
+planner call, embedding call, or generation policy needs to change. After full offline
+verification and a new exact freeze, the same unchanged G007 gate remains the next paid action.

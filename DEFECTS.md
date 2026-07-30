@@ -45,6 +45,26 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] Structural filename fixture omitted the trailing title delimiter
+Phase/Brief: Phase 1 evidence-planned-v23 unchanged G007 confirmation
+Symptom: the exact frozen V23 candidate returned an explicit structural-stage insufficiency with
+zero sources and no generation call. Its valid closed trace reported six required canonical
+cores, zero satisfied cores, and six short, even though the retrieval lanes contained candidates
+from numbered chapters.
+Cause: test-fixture and parser-contract gap - V23 tested `08_Chapter 1.md`, but the corpus uses
+the shape `08_Chapter 1_ Sample title.md`. The numbered-document regex still ended its number with
+`\b`; because a digit and underscore are both word characters, the real filename has no boundary
+there. All numbered body documents were excluded from structural-band construction. The terminal
+pattern has the same latent delimiter assumption.
+Resolution and verification: unresolved. The clean run at
+`d89f4332b21f0e41cb445780abe10f997b52626c` made one planner call and one batched embedding
+call, then failed closed before generation. It completed in 24.655 seconds for an estimated
+`$0.08430031`; the trace was valid, but the reader gate scored 0/7 claims and 0/5 public target
+groups. Replace the trailing word boundary with an explicit delimiter-or-end assertion, add
+complete-shape numbered and terminal filename regressions plus a six-nonempty-band assertion, and
+repeat full offline verification before another exact freeze. The ten-question run remains
+blocked.
+
 ## [2026-07-29] Six fallback stages produced only one protected anchor
 Phase/Brief: Phase 1 evidence-planned-v22 unchanged G007 confirmation
 Symptom: the exact frozen V22 candidate produced a valid eight-source answer and valid closed
@@ -67,7 +87,9 @@ complete offline suite passed 568 tests with one intentional skip, and repositor
 passed. No paid API call was made. V22's clean run at
 `0691b3da9a4926097c7d013d79266eee62f7de9b` remains the measured failure: one planner call,
 one batched embedding call, one generation call, no retry, 95.735 seconds, and estimated
-`$0.25207406`. V23 is not yet frozen or reader-confirmed, so the ten-question run remains blocked.
+`$0.25207406`. V23 subsequently froze and confirmed the allocation shortfall now fails closed,
+but its reader gate exposed the separate trailing-delimiter parser defect above. The ten-question
+run remains blocked.
 
 ## [2026-07-29] V22 opened a six-stage narrative-span contract
 Phase/Brief: Phase 1 evidence-planned-v22 offline repair
