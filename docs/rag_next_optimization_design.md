@@ -1,8 +1,7 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v22 implemented and verified offline, but not yet frozen or measured;
-V21's unchanged G007 confirmation failed the predeclared reader gate, so the practical
-ten-question rerun remains blocked pending one unchanged V22 G007 confirmation
+Status: evidence-planned-v22 implemented, frozen, and measured; its unchanged G007 confirmation
+failed the predeclared reader gate, so the practical ten-question rerun remains blocked
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -1927,3 +1926,42 @@ bound to the frozen V21 candidate until V22 itself is clean, fully verified, and
 paid action is one unchanged, no-retry G007 confirmation against that exact V22 commit. The
 existing 2/7 strict-claim plus 5/5 target-group gate remains unchanged; only a passing result
 licenses the practical ten-question development evaluation.
+
+## V22 reader confirmation: the structural fallback did not protect its stages
+
+The exact clean V22 candidate
+`0691b3da9a4926097c7d013d79266eee62f7de9b` received one unchanged, no-retry G007
+confirmation on 2026-07-29. It retained the frozen question, seven-claim rubric, five target
+document groups, corpus and index identity, neutral settings, GPT-5.6 Sol runtime model,
+eight-source ceiling, and the original 2/7 plus 5/5 gate.
+
+The run made one planner call, one batched embedding call, and one generation call. It completed
+in 95.735 seconds for an estimated `$0.25207406`, below its `$0.30–$0.42` estimate and `$0.50`
+hard stop. The reader answer was valid, all 11 citation tokens resolved, the trace was closed and
+text-free, and no retry or judge call occurred.
+
+Frozen manual grading credited 1/7 strict claims and 4/5 target document groups. The early body,
+Revolutionary, twentieth-century, and terminal groups were present; the Civil War group was
+absent. V22 therefore improved V21's 3/5 target breadth but failed both substantive thresholds.
+The unchanged ten-question development evaluation remains blocked.
+
+The trace isolates the remaining defect:
+
+- the provider proposal was rejected locally with `broad_narrative_gap`;
+- the deterministic fallback correctly declared six requirements;
+- retrieval recorded six required canonical cores but only one satisfied protected anchor;
+- five stage lanes contained in-band candidates that failed the existing distinctive-intent
+  eligibility threshold;
+- global and transition supplementation then filled all eight source positions, making a full
+  context conceal the five-stage protected-anchor shortfall.
+
+The next repair is not another prompt expansion. For the deterministic six-stage causal fallback,
+each exact structural core must be a source-allocation obligation. Retrieval should select the
+best available in-core candidate for every stage before applying distinctive-intent thresholds to
+optional alternatives or transitions. If a core genuinely has no candidate, it should fail
+closed with an explicit structural-stage shortfall instead of globally filling the vacancy.
+
+This remains a corpus-agnostic allocation rule. It requires no new provider call, retry, source
+slot, gold location, expected-answer phrase, or manuscript-specific historical name. After
+zero-call regression and complete offline verification, the next candidate again needs only the
+same unchanged G007 confirmation before the ten-question run can proceed.

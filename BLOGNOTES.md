@@ -2612,6 +2612,34 @@ Useful blog lesson: an elegant context window is not just a collection of releva
 is an allocation of scarce attention in which every narrative role has a protected seat, while
 flexible overlap is reserved for discovering the connections between them.
 
+### 2026-07-29 - V22 found the difference between a boundary and a guarantee
+
+- Froze V22 at exact commit `0691b3da9a4926097c7d013d79266eee62f7de9b` after 565
+  offline tests passed with one intentional skip and repository-wide Ruff passed.
+- Ran the unchanged G007 reader confirmation once with no retry. It made one planner call, one
+  batched embedding call, and one generation call, finishing in 95.735 seconds for an estimated
+  `$0.25207406`. Its answer was valid, all 11 citations resolved, and its text-free trace passed.
+- The score improved but missed the frozen gate: 1/7 strict claims and 4/5 target document groups,
+  versus the required 2/7 and 5/5. V22 recovered the early body history that V21 had lost and
+  retained the terminal Epilogue, but skipped the Civil War span.
+- The trace showed why. The live planner proposal violated the new narrative-gap rule, so the
+  deterministic six-stage fallback took over. That fallback declared six chronological stages,
+  yet only one received a protected anchor. Five stages had candidates in the correct structural
+  bands, but those candidates failed an older distinctive-intent threshold. The general ranking
+  pass then filled all eight source slots, making the context look complete while five structural
+  obligations were empty.
+- The next repair is narrower than another planner or prompt change. In the deterministic causal
+  fallback, the best available candidate from each exact structural core must be selected before
+  optional relevance thresholds and transition evidence compete for the remaining slots. A truly
+  empty core should produce an explicit failure instead of a cosmetically full context.
+- The practical ten-question evaluation remains held. The frozen gate did its job again: it
+  prevented a source count of eight, a valid answer, and a visibly broader result from being
+  mistaken for the six-stage guarantee the code claimed to provide.
+
+Useful blog lesson: restricting an anchor to the correct shelf is not the same as reserving it a
+seat. A robust context window needs both boundaries and allocation guarantees—and diagnostics
+that reveal when a later fill step makes a broken allocation look complete.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

@@ -45,6 +45,24 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-29] Six fallback stages produced only one protected anchor
+Phase/Brief: Phase 1 evidence-planned-v22 unchanged G007 confirmation
+Symptom: the exact frozen V22 candidate produced a valid eight-source answer and valid closed
+trace, but reached only 1/7 strict claims and 4/5 target document groups against the unchanged
+2/7 plus 5/5 gate. The Civil War group remained absent despite the six-stage contract.
+Cause: contract implementation gap - the provider plan failed `broad_narrative_gap`, activating
+the deterministic six-stage fallback. Structural cores constrained which candidates could become
+anchors, but the existing distinctive-intent threshold could still reject every in-core
+candidate. Five of six stage lanes therefore protected no anchor. Global and transition filling
+then occupied all eight source positions and hid the structural shortfall behind a full context.
+Resolution and verification: unresolved. The clean run at
+`0691b3da9a4926097c7d013d79266eee62f7de9b` made one planner call, one batched embedding
+call, and one generation call with no retry; it completed in 95.735 seconds for an estimated
+`$0.25207406`. The next bounded repair must make each exact fallback core a source-allocation
+obligation: select its best available candidate before applying distinctive-intent thresholds to
+optional alternatives and transitions, or fail closed with an explicit structural-stage
+shortfall when the core is empty. The ten-question run remains blocked.
+
 ## [2026-07-29] V22 opened a six-stage narrative-span contract
 Phase/Brief: Phase 1 evidence-planned-v22 offline repair
 Symptom: the frozen V21 reader confirmation showed that a formally valid five-stage broad plan
