@@ -176,3 +176,17 @@ def test_web_index_generation_uses_central_generator_settings(monkeypatch):
     assert {
         key: captured[key] for key in ("model", "reasoning", "text")
     } == GENERATOR_SETTINGS.responses_create_kwargs()
+
+
+def test_full_context_generator_is_a_distinct_object_with_matching_settings():
+    from model_config import FULL_CONTEXT_GENERATOR_SETTINGS, GENERATOR_SETTINGS
+
+    # Distinct so retuning full-context generation cannot silently move the RAG
+    # cohort, identical so a strategy comparison holds the model constant.
+    assert FULL_CONTEXT_GENERATOR_SETTINGS is not GENERATOR_SETTINGS
+    assert FULL_CONTEXT_GENERATOR_SETTINGS.model == GENERATOR_SETTINGS.model
+    assert (
+        FULL_CONTEXT_GENERATOR_SETTINGS.reasoning_effort == GENERATOR_SETTINGS.reasoning_effort
+    )
+    assert FULL_CONTEXT_GENERATOR_SETTINGS.verbosity == GENERATOR_SETTINGS.verbosity
+    assert FULL_CONTEXT_GENERATOR_SETTINGS.role != GENERATOR_SETTINGS.role

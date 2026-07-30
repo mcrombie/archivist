@@ -29,12 +29,14 @@ import {
   AppConfig,
   ApiRequestError,
   AnswerFacets,
+  AnswerStrategy,
   AnswerVoice,
   AnswerWorldview,
   CandidateTerm,
   CostSettings,
   CostSummary,
   DEFAULT_ANSWER_FACETS,
+  DEFAULT_ANSWER_STRATEGY,
   DisplayGroup,
   HistoriographicalLens,
   Project,
@@ -816,6 +818,10 @@ type ChatTurn = {
   id: string;
   question: string;
   facets: AnswerFacets;
+  // What was requested, and what the server reports actually ran. They differ if
+  // a request is rejected, so the badge reads the second one.
+  requestedStrategy: AnswerStrategy;
+  answerStrategy?: AnswerStrategy;
   status: ChatTurnStatus;
   answer: string;
   answerStatus?: string;
@@ -1490,6 +1496,10 @@ function QuestionMode({
   const publicDemo = config.exposure_profile === "public_demo";
   const [question, setQuestion] = useState("");
   const [facets, setFacets] = useState<AnswerFacets>({ ...DEFAULT_ANSWER_FACETS });
+  // Per-turn, exactly like the interpretive facets, so a reader can compare the
+  // two scopes inside one conversation instead of starting a new thread.
+  const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>(DEFAULT_ANSWER_STRATEGY);
+  const fullContextAvailable = config.features.full_context_answers === true;
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState(createConversationId);
@@ -1558,7 +1568,8 @@ function QuestionMode({
     turnQuestion: string,
     turnFacets: AnswerFacets,
     history: Array<{ question: string; answer: string }>,
-    allowOverBudget = false
+    allowOverBudget = false,
+    turnStrategy: AnswerStrategy = DEFAULT_ANSWER_STRATEGY
   ) {
     try {
       const result = await askQuestion(
@@ -1571,7 +1582,8 @@ function QuestionMode({
           conversationId,
           turnId,
           allowOverBudget,
-          publicDemo
+          publicDemo,
+          answerStrategy: turnStrategy
         }
       );
       if (result.costs) setCostSummary(result.costs);
@@ -1583,6 +1595,7 @@ function QuestionMode({
         status: pipelineFailed ? "error" : "complete",
         answer: pipelineFailed ? "" : result.answer,
         answerStatus: result.answer_status,
+        answerStrategy: result.answer_strategy ?? DEFAULT_ANSWER_STRATEGY,
         resolvedQuery: result.resolved_query,
         facets: {
           historiographicalLens: result.historiographical_lens,
@@ -1633,6 +1646,7 @@ function QuestionMode({
       id: turnId,
       question: trimmedQuestion,
       facets: { ...facets },
+      requestedStrategy: answerStrategy,
       status: "pending",
       answer: "",
       sources: [],
@@ -1643,7 +1657,7 @@ function QuestionMode({
     setTurns((current) => [...current, nextTurn]);
     setQuestion("");
     scrollToTurn(turnId, firstTurn);
-    await runTurn(turnId, trimmedQuestion, facets, history);
+    await runTurn(turnId, trimmedQuestion, facets, history, false, answerStrategy);
   }
 
   async function retryTurn(turnId: string, allowOverBudget = false) {
@@ -1670,7 +1684,14 @@ function QuestionMode({
       budgetBlocked: false
     } : candidate));
     scrollToTurn(turnId, false);
-    await runTurn(turnId, turn.question, turn.facets, history, allowOverBudget);
+    await runTurn(
+      turnId,
+      turn.question,
+      turn.facets,
+      history,
+      allowOverBudget,
+      turn.requestedStrategy ?? DEFAULT_ANSWER_STRATEGY
+    );
   }
 
   async function approveTurn(turnId: string) {
@@ -1795,10 +1816,13 @@ function QuestionMode({
                 project={project}
                 question={question}
                 facets={facets}
+                answerStrategy={answerStrategy}
+                fullContextAvailable={fullContextAvailable}
                 pending={pending}
                 inputRef={landingQuestionRef}
                 onQuestionChange={setQuestion}
                 onFacetsChange={setFacets}
+                onAnswerStrategyChange={setAnswerStrategy}
                 onSubmit={submit}
               />
               <OpeningGuidance
@@ -1870,9 +1894,12 @@ function QuestionMode({
               project={project}
               question={question}
               facets={facets}
+              answerStrategy={answerStrategy}
+              fullContextAvailable={fullContextAvailable}
               pending={pending}
               onQuestionChange={setQuestion}
               onFacetsChange={setFacets}
+              onAnswerStrategyChange={setAnswerStrategy}
               onSubmit={submit}
             />
           </div>
@@ -1898,20 +1925,26 @@ function ConversationComposer({
   project,
   question,
   facets,
+  answerStrategy,
+  fullContextAvailable,
   pending,
   inputRef,
   onQuestionChange,
   onFacetsChange,
+  onAnswerStrategyChange,
   onSubmit
 }: {
   location: "landing" | "thread";
   project: Project;
   question: string;
   facets: AnswerFacets;
+  answerStrategy: AnswerStrategy;
+  fullContextAvailable: boolean;
   pending: boolean;
   inputRef?: RefObject<HTMLTextAreaElement>;
   onQuestionChange: (question: string) => void;
   onFacetsChange: (facets: AnswerFacets) => void;
+  onAnswerStrategyChange: (strategy: AnswerStrategy) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const settingsDisclosureRef = useRef<HTMLDetailsElement>(null);
@@ -1920,7 +1953,55 @@ function ConversationComposer({
   const voiceId = `archivist-voice-${location}`;
   const worldviewId = `archivist-worldview-${location}`;
   const facetDescriptionId = `archivist-facet-description-${location}`;
+  const scopeDescriptionId = `archivist-scope-description-${location}`;
+  const scopeName = `archivist-evidence-scope-${location}`;
   const groundingId = `question-grounding-note-${location}`;
+  const evidenceScopeSettings = (
+    <fieldset className="chat-evidence-scope" aria-describedby={scopeDescriptionId}>
+      <legend>Evidence scope</legend>
+      <p id={scopeDescriptionId}>
+        Which part of the manuscript Archivist reads before answering. This does not
+        change the lens, voice, or worldview.
+      </p>
+      <div className="chat-evidence-scope-options">
+        <label>
+          <input
+            type="radio"
+            name={scopeName}
+            value="rag"
+            checked={answerStrategy === "rag"}
+            disabled={pending}
+            onChange={() => onAnswerStrategyChange("rag")}
+          />
+          <span>
+            <strong>Retrieved passages</strong>
+            <small>Fast and inexpensive. Retrieves the most relevant passages.</small>
+          </span>
+        </label>
+        <label
+          title={fullContextAvailable
+            ? undefined
+            : "Not enabled on this deployment"}
+        >
+          <input
+            type="radio"
+            name={scopeName}
+            value="full_context"
+            checked={answerStrategy === "full_context"}
+            disabled={pending || !fullContextAvailable}
+            onChange={() => onAnswerStrategyChange("full_context")}
+          />
+          <span>
+            <strong>Full book</strong>
+            <small>
+              Experimental. Slower and more expensive. Gives the model the complete
+              searchable manuscript instead of a retrieved excerpt.
+            </small>
+          </span>
+        </label>
+      </div>
+    </fieldset>
+  );
   const answerSettings = (
     <fieldset className="chat-answer-settings" aria-describedby={facetDescriptionId}>
       <legend>Interpretive settings</legend>
@@ -2006,14 +2087,19 @@ function ConversationComposer({
             </span>
             <ChevronDown size={14} aria-hidden="true" />
           </summary>
-          {answerSettings}
+          <div className="chat-answer-settings-panel">
+            {evidenceScopeSettings}
+            {answerSettings}
+          </div>
         </details>
 
         <div className="chat-composer-submit">
           <span id={groundingId}>
             <i aria-hidden="true" />
             {pending
-              ? "You can draft the next question while Archivist works"
+              ? answerStrategy === "full_context"
+                ? "Reading the full manuscript — this takes noticeably longer"
+                : "You can draft the next question while Archivist works"
               : `${project.stats.searchable_chunks.toLocaleString()} searchable manuscript passages`}
           </span>
           <button type="submit" disabled={pending || !question.trim()}>
@@ -2200,6 +2286,9 @@ function ConversationTurn({
                 </details>
               ) : null}
               <div className="turn-response-actions">
+                {turn.answerStrategy === "full_context" ? (
+                  <span className="turn-strategy-chip">Full book</span>
+                ) : null}
                 {turn.turnCostUsd !== undefined ? (
                   <span className="turn-cost-chip">Est. {formatTurnCost(turn.turnCostUsd)}</span>
                 ) : null}

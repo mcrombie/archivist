@@ -1,0 +1,1824 @@
+# Full-Context Answer Strategy — Design
+
+## 1. Title, status, date, repository commit, and working-tree state
+
+**Title:** Full-Context Answer Strategy — an alternative to Retrieval-Augmented Generation (RAG)
+for Archivist's Answer Mode.
+
+**Status:** DESIGN ONLY. Nothing described here is implemented. This document is the only file
+this brief is permitted to create or change.
+
+**Date:** 2026-07-30.
+
+**Repository commit at time of writing:** `51d4746882a5215182915ef2e080fbee5a874e5c` ("V25's next
+repair"), branch `main`, up to date with `origin/main`.
+
+**Working-tree state:** clean (`git status --porcelain` returned nothing). The task brief that
+requested this document assumed there was an in-flight, uncommitted "V22" retrieval candidate that
+had to be left undisturbed. That was not the observed state of the repository at the time of this
+analysis — the tree was clean at V25 (see `ROADMAP.md`'s 2026-07-30 "Current state" section and
+`BLOGNOTES.md`'s "V25 separated a valid answer from a complete answer" entry). Nothing was found
+that needed to be preserved beyond the ordinary rule of not touching anything, and nothing was
+touched. This document does not change that: it is the only file added by this task, and it was
+authored without cleaning, staging, or committing anything.
+
+Current RAG cohort identity, verified by direct inspection of `src/rag_pipeline.py` rather than
+recalled from `BLOGNOTES.md`:
+
+| Constant | Value | Location |
+|---|---|---|
+| `RAG_POLICY_VERSION` | `evidence-planned-v25` | `src/rag_pipeline.py:116` |
+| `QUERY_PLANNER_PROMPT_VERSION` | `query-planner-v11` | `src/rag_pipeline.py:121` |
+| `EVIDENCE_COVERAGE_PROMPT_VERSION` | `evidence-coverage-v9` | `src/rag_pipeline.py:122` |
+| `ANSWER_RUN_DIAGNOSTICS_SCHEMA` | `archivist.answer_run_diagnostics/3` | `src/rag_pipeline.py:119` |
+| `EVIDENCE_COVERAGE_SCHEMA` | `archivist.evidence_coverage/5` | `src/answer_coverage.py:83` |
+| `RETRIEVAL_TRACE_SCHEMA` | `archivist.retrieval_trace/13` | `src/retrieval_trace_contract.py:19` |
+| `MAX_FINAL_SOURCES` | `8` | `src/retrieval.py:48` |
+| `MAX_SOURCES` (structured-output field cap) | `8` | `src/answer_coverage.py:91` |
+| Generator model | `gpt-5.6-sol` (undated alias) | `src/model_config.py:20,56` |
+| Eligible/total chunks | `481` / `910` | verified locally, §13 |
+
+---
+
+## 2. Executive recommendation
+
+Add **full context** as a second, independent answer strategy selected per-request by a new
+`answer_strategy` field (`"rag"` default, `"full_context"` opt-in), implemented as a new module
+pair — `src/full_context_pipeline.py` (orchestration, mirroring `src/rag_pipeline.py`) and
+`src/full_context_coverage.py` (structured schema, local validation, rendering, mirroring
+`src/answer_coverage.py`) — that share the corpus-identity preflight, conversation resolution,
+interpretive-settings machinery, cost ledger, and public-disclosure minimization already used by
+RAG, and that build **no** dependency on the RAG planner, retrieval ranking, evidence gate, or
+stage/obligation contracts, because none of those concepts are meaningful once the model is shown
+the complete eligible manuscript.
+
+The full-context citation contract is: **the model cites by stable `chunk_id`, in a structured
+per-claim array field (not an inline bracket, and not an integer), validated locally against the
+exact 481-member eligible-chunk-ID set, then remapped — entirely offline, no second model call —
+into the same `[Source N]` / ordered-`final_chunks` shape RAG already produces.** That convergence
+is the load-bearing design decision: it means every downstream consumer that already exists for
+RAG — `public_sources.public_source_payload`, `web_project.source_payload`,
+`web_project.citation_label`, the frontend's `DisplayGroup` rendering, the verbatim-overlap guard —
+needs **no changes** to serve full-context answers, because by the time those functions run,
+a full-context answer looks exactly like a RAG answer: a short, ordered list of *cited* chunk
+dicts, never all 481.
+
+Full context is initially gated off everywhere (a new `ARCHIVIST_FULL_CONTEXT_ENABLED` server flag,
+default false) and, when enabled, is dev-only until cost, latency, and citation-validity are
+measured; public availability is a distinct, separately-gated later phase (§24). This document
+takes no position on whether full context will out-perform RAG — §22 designs a controlled
+comparison specifically because the honest answer is not yet known, and the token-budget analysis
+in §13/§17 shows a full-context call is neither free nor prohibitively expensive: a cold call is
+expensive (crosses OpenAI's long-context surcharge threshold, roughly $3 in current pricing, see
+§17), a warm cached call is not (roughly $0.20–$0.30, comparable to or cheaper than a RAG turn),
+and which regime a given deployment actually lives in is a measurement question, not a design
+question.
+
+---
+
+## 3. Problem statement
+
+Archivist's Answer Mode currently has exactly one way to answer a question: retrieve a bounded set
+of chunks (`MAX_FINAL_SOURCES = 8`) via `retrieval.retrieve_plan_from_collection`, gate them
+through `evidence_policy`/`rag_pipeline.apply_evidence_gate`, and generate a structured,
+obligation-tracked answer via `answer_coverage.EvidenceCoverageAnswer`. This is deliberately
+narrow — AGENTS.md calls it "one retrieval core" — and it is heavily instrumented (`BLOGNOTES.md`
+documents 25 versions of it, V1 through V25, each closing one measured gap).
+
+What it cannot do is show the model the whole book at once. That is sometimes the right tradeoff
+(broad thematic questions may need material RAG's eight-source cap structurally cannot admit even
+after the sixteen-source broad-ceiling experiment recorded in
+`docs/rag_next_optimization_design.md` "Design boundaries" section) and sometimes the wrong one
+(full context is slower, likely more expensive per cold call, and removes none of the risk that
+the model still has to be checked rather than trusted). Nobody has measured which. The project has
+no way to ask "is retrieval actually helping, or is it mostly getting in the way for this
+question?" because there is no second arm to compare against.
+
+This document designs that second arm as a first-class, comparably-rigorous answer strategy —
+not a debug mode, not a cap raised until it swallows the corpus, and not a second prompt bolted
+onto the RAG pipeline behind a flag.
+
+---
+
+## 4. Current architecture findings
+
+Read directly from source, not from `BLOGNOTES.md`'s narrative, though the two agree.
+
+**Request entry points** (`src/web_api.py`):
+- `POST /api/projects/{project_id}/question` — development `QuestionRequest` (`n_results`,
+  `historiographical_lens`, `voice`, `worldview`, `perspective`, `history`, `conversation_id`,
+  `turn_id`, `allow_over_budget`). Calls `web_project.answer_project_question_result`.
+- `POST /api/projects/current/question` on the **separate** public FastAPI app built by
+  `_create_public_app` — fixed `PublicQuestionRequest` (`model_config = ConfigDict(extra="forbid")`,
+  no `n_results`, no `allow_over_budget`). Calls `_run_public_question`, which enforces the public
+  budget, the public-only `answer_result.status` gate
+  (`generation_contract_failed`/`corpus_integrity_failed` → `PublicSourceError`), the
+  verbatim-overlap guard (`public_sources.answer_has_extended_verbatim_overlap`), and then builds
+  the response through `public_sources.public_source_payload`.
+
+**Orchestration** (`src/web_project.py:answer_project_question_result`): for `project_id ==
+"current"` it (1) opens the Chroma collection, (2) computes `corpus_trace` (chunks/manifest
+hashes, `hnsw_space`), (3) runs `rag_pipeline.preflight_answer_corpus` — the **corpus-identity
+preflight** referenced throughout `AGENTS.md` and `docs/rag_next_optimization_design.md` — (4) if
+it passed, resolves the turn via `web_project.resolve_conversation_turn` (structured call to
+`ResolvedTurn` using `FOLLOWUP_RESOLVER_SETTINGS`; **prior assistant prose is never sent to this
+resolver**, only `prior_user_questions` and `current_question`, see
+`build_conversation_query_input`), then (5) calls `rag_pipeline.run_evidence_planned_answer`. Every
+branch returns a `rag_pipeline.AnswerModeResult`. `project_id != "current"` (an uploaded/custom
+project) takes an intentionally separate, simpler `answer_project_question_legacy` path because
+custom projects do not yet persist the per-chunk identity manifest the preflight requires — this is
+the "generic multi-project stack," explicitly out of scope for Phase 1 per `AGENTS.md`'s "Settled"
+list.
+
+**The RAG pipeline proper** (`src/rag_pipeline.py:run_evidence_planned_answer`, ~430 lines): after
+the preflight, it builds a document catalog (`build_document_catalog`), calls the structured query
+planner (`query_planning.py`, `plan_question`, model settings `QUERY_PLANNER_SETTINGS`), retrieves
+a planned, ranked, faceted, deduplicated, at-most-8-chunk context
+(`retrieval.retrieve_plan_from_collection`), applies the evidence gate
+(`rag_pipeline.apply_evidence_gate`, backed by `evidence_policy.py`'s corpus scanner and lane
+classification), and — unless the gate short-circuits to `clean_abstention` or the plan is
+structurally shortfall — calls one structured generation
+(`costs.tracked_responses_parse`, schema `answer_coverage.EvidenceCoverageAnswer` or its
+interpretive subclass), validates it (`answer_coverage.process_evidence_coverage`), and returns an
+`AnswerModeResult`.
+
+**The answer-result abstraction** is `rag_pipeline.AnswerModeResult`
+(`@dataclass(frozen=True, slots=True)`, `src/rag_pipeline.py:552-581`):
+
+```python
+@dataclass(frozen=True, slots=True)
+class AnswerModeResult:
+    answer: str
+    final_chunks: list[dict[str, Any]]
+    status: str
+    plan: QuestionPlan
+    evidence_decision: str
+    diagnostics: dict[str, Any]
+
+    @property
+    def resolved_question(self) -> str: ...
+    @property
+    def content_outcome(self) -> str | None: ...
+```
+
+This is the object `web_api.py` and the public endpoint both consume (`answer_result.answer`,
+`.final_chunks`, `.status`, `getattr(answer_result, "content_outcome", None)`,
+`.evidence_decision`, `rag_pipeline.answer_run_diagnostics(answer_result)`). Every downstream
+component — `source_payload`, `public_source_payload`, cost-ledger diagnostics recording — takes
+this shape or `final_chunks` alone. `plan: QuestionPlan` is RAG-specific (facets, requirements,
+premises); nothing outside `rag_pipeline.py`/`query_planning.py` reads `plan` except
+`AnswerModeResult.resolved_question`, which walks `plan.facets` for the `FacetRole.ORIGINAL` facet.
+
+**Content-outcome contract** (added in V25, per `answer_coverage.py`): `CoverageOutcomeStatus`
+(`answered` / `insufficient_evidence` / `generation_contract_failed`) is the *structural* result;
+`ContentOutcome` (`valid_complete` / `valid_partial` / `insufficient_evidence`) is the newer,
+separate *content-adequacy* judgment, computed by
+`answer_coverage._assess_content_outcome` from the requirement/obligation coverage ledger and
+exposed via `AnswerModeResult.content_outcome`. These are genuinely different axes (a structurally
+valid answer can still be content-partial) and both are RAG-facing today; §15 designs the
+full-context analogue.
+
+**Corpus-identity preflight** (`rag_pipeline.preflight_answer_corpus` /
+`assess_answer_corpus_integrity`, `src/rag_pipeline.py:927-1123`): compares the loaded chunk list,
+`fixtures/corpus_manifest.json`, and the live Chroma collection's ids/metadata/text hashes against
+each other; on any mismatch it fails closed with a specific `CorpusIntegrity` failure code (never a
+generic exception) and the caller returns `status="corpus_integrity_failed"` without spending on
+anything. This function does not touch retrieval, ranking, or the model at all — it is pure
+corpus/store identity — which is exactly why it is safe and correct to reuse unmodified for
+full context (§11).
+
+**Public disclosure minimization** (`src/public_sources.py`): `public_source_payload(answer,
+chunks, locator_path, manifest_path)` iterates the **supplied `chunks` list** (assumed to already
+be the small, cited, ordered `final_chunks` list — this is an important constraint, see §14),
+resolves each to its `edition_locators` page range via `load_locator_index`, and attaches a
+claim-local excerpt (`claim_local_excerpt`, ≤280 chars, ≤2 sentences, ≤3 excerpted sources, ≤700
+total excerpted chars) only for chunks actually cited in the answer text. It never emits a
+`text` field. `answer_has_extended_verbatim_overlap` is a separate 45-word contiguous-overlap
+guard run before `public_source_payload` is even called. **`public_source_payload` was not written
+to be safe against being handed all 481 chunks** — it would build a locator+excerpt entry for every
+one of them, which is wrong both for cost (481 locator lookups) and for the "browser must never
+receive the complete manuscript" invariant if that ever grew to include unclaimed excerpts. Full
+context must therefore reduce to a small `final_chunks` list before this function runs (§14 shows
+exactly how).
+
+**Exposure profiles** (`src/exposure_profile.py`): `ExposureSettings.from_env()` reads
+`ARCHIVIST_EXPOSURE_PROFILE` (`development` / `public_demo`) once at process startup;
+`web_api.create_app` picks `_development_app` or `_create_public_app(settings)` accordingly. This
+is the only existing "two behaviors behind a server flag" precedent in the codebase, and it is the
+template §10/§18 follow for gating full context.
+
+**Cost ledger** (`src/costs.py`): `TokenUsage` already has `cached_tokens` and
+`cache_write_tokens` fields; `UsageLedger`'s SQLite schema already has `cached_tokens`/
+`cache_write_tokens` columns (`src/costs.py:587-588`); `ModelPricing` already has
+`cached_input_usd_per_million` and `cache_write_multiplier`; `MODEL_PRICING["gpt-5.6-sol"]` is
+already priced at input $5/M, cached-input $0.50/M, output $30/M, cache-write multiplier 1.25
+(`src/costs.py:129`). **`calculate_cost_nano_usd` does not implement OpenAI's long-context pricing
+surcharge** — its own comment says why: *"Archivist inputs are bounded below the GPT-5.6 long-context
+surcharge threshold"* (`src/costs.py:330-331`). That comment is true today and will stop being true
+the moment full context ships (§13/§17/§18 show the corpus alone is above that threshold), so this
+is a concrete, named required change, not a hypothetical one.
+
+**Model configuration** (`src/model_config.py`): `GENERATOR_SETTINGS`, `FOLLOWUP_RESOLVER_SETTINGS`,
+`QUERY_PLANNER_SETTINGS` are three named `ResponseModelSettings` instances, all currently pointed
+at `GPT_5_6_SOL_MODEL = "gpt-5.6-sol"` — an **undated alias**, logged as a defect in `DEFECTS.md`
+under "[2026-07-23] Official GPT-5.6 Sol identifier does not satisfy the dated-snapshot contract."
+Full context inherits that same defect; it is not new, and it means full context, like RAG today,
+cannot produce a formal run of record until a dated snapshot exists.
+
+---
+
+## 5. Goals
+
+1. A reader can choose, per the existing answer-settings surface, between "Retrieved passages"
+   (RAG, default) and "Full book" (full context, experimental) as an **evidence scope**, distinct
+   from historiographical lens/voice/worldview.
+2. Full context sees the complete eligible substantive manuscript (currently 481 chunks) in
+   canonical order, not a larger retrieval cap.
+3. Full-context citations are validated against real chunk IDs and reduced to the same compact,
+   ordered, cited-only source shape RAG already emits, so every existing public-disclosure and
+   presentation component keeps working unmodified.
+4. Every answer, from either strategy, records which strategy and strategy version produced it.
+5. Full context is auditable: text-free diagnostics, cost accounting (including cache state), and
+   an evaluation plan capable of actually comparing the two strategies head to head.
+6. RAG's existing behavior, prompts, schemas, and cohort identity are unchanged unless a shared
+   abstraction is deliberately and explicitly extracted (three such extractions are named in §7).
+7. The manuscript never reaches the browser, in either strategy, in either exposure profile.
+
+## 6. Non-goals
+
+1. Not implementing anything — this is a design document.
+2. Not deciding, in this document, that full context is better or worse than RAG. §22 designs the
+   experiment that will decide it.
+3. Not adding automatic strategy routing ("pick RAG or full context based on the question"). §22/§24
+   explicitly defer this to a later, separately measured project.
+4. Not extending the generic multi-project upload stack (`web_project.py`'s non-`"current"` path).
+   Full context, like the rest of Phase 1, targets the built-in corpus only (§12).
+5. Not adding a second paid model call anywhere (no draft/critic pair, no judge-in-the-loop
+   correction, no automatic retry).
+6. Not raising `MAX_FINAL_SOURCES` or `answer_coverage.MAX_SOURCES`. Those stay RAG's numbers.
+7. Not touching the CLI (`src/ask.py`) beyond noting, in §25, that it could gain the same strategy
+   parameter later at negligible cost, using the same shared pipeline.
+8. Not changing `EVAL_CONTRACT.md`'s locked §§1–5 definitions. §22 adds a comparison design that
+   consumes those definitions unchanged; it does not redefine recall, citation accuracy, or
+   completeness.
+
+## 7. Design principles and invariants
+
+1. **Two strategies, one shared application interface, one `AnswerModeResult` shape.** A caller in
+   `web_api.py` should not need to know which strategy produced a result to render it.
+2. **Reuse the corpus-agnostic, retrieval-agnostic parts; do not reuse the retrieval-shaped
+   parts.** Concretely reusable as-is: `rag_pipeline.preflight_answer_corpus`,
+   `web_project.resolve_conversation_turn`/`query_planning.ResolvedTurn`,
+   `perspectives.build_interpretive_prompt_block` and the `HistoriographicalLens`/`AnswerVoice`/
+   `Worldview` enums, `costs.tracked_responses_parse`/`UsageLedger`, `filters.should_skip_document`,
+   `public_sources.public_source_payload` (once fed a small cited list), `web_project.source_payload`
+   /`citation_label`/`merge_adjacent_chunks`. Not reusable, and not to be forced: `query_planning`'s
+   planner/route/facet machinery, `retrieval.py`'s ranking/fusion/neighbor-expansion/faceted
+   retrieval, `evidence_policy.apply_evidence_gate`'s lane classification and direct-anchor
+   promotion, `answer_coverage.py`'s stage/obligation/requirement ledger. None of those concepts
+   have a referent once there is no retrieval step — there is nothing to rank, no facets to satisfy,
+   no "certified absence via bounded neighbor scan" because the model already saw every neighbor.
+3. **Three, and only three, shared abstractions are extracted, named explicitly, and are the only
+   RAG-code changes this design licenses:**
+   - `rag_pipeline.AnswerModeResult` gains two new fields, `answer_strategy: str` and
+     `answer_strategy_version: str`, both defaulted so every existing RAG call site is unchanged
+     (`answer_strategy = "rag"`, `answer_strategy_version = RAG_POLICY_VERSION`). This mirrors how
+     `content_outcome` was added in V25 as a backward-compatible nullable addition (see
+     `BLOGNOTES.md`'s V25 entry: *"a backward-compatible nullable column in the local cost
+     ledger... Historical rows remain readable with no invented completeness judgment"*).
+   - `rag_pipeline._required_interpretive_moves` (pure function of lens/worldview, no plan
+     dependency, `src/rag_pipeline.py:191-202`) is promoted to a public name (or moved to
+     `perspectives.py`, its more natural home) so full context does not fork the
+     lens/worldview→`InterpretiveMove` mapping.
+   - `costs.calculate_cost_nano_usd` gains an OpenAI long-context surcharge branch (>272K input
+     tokens → 2x input / 1.5x output for the whole request, per §17's verified research), because
+     the code comment asserting current inputs stay under that threshold stops being true the
+     moment any full-context request is priced. This is additive — it changes the computed cost for
+     any future request that happens to cross 272K input tokens, which no current RAG request does
+     (RAG's ceiling is 8 chunks, a few thousand tokens), so it is a **behavior-preserving** change
+     for every existing cohort.
+
+   Everything else full context needs, it owns in its own two new modules. No other RAG file is
+   touched.
+4. **The full-context corpus serializer is not a fourth copy of a retrieval primitive.**
+   `AGENTS.md`'s "one retrieval core" rule exists because `get_filtered_primary_chunks`/
+   `expand_with_neighbors`/context-building were duplicated three ways with silent parameter drift.
+   Full context's serializer has no filtering, no ranking, no neighbor expansion, and no truncation
+   to fork — it prints the entire eligible, already-canonically-ordered chunk list once. It is a
+   new, single function, in the new module, not a variant of `retrieval.build_context`.
+5. **Application-owned validation, not model self-report, decides content adequacy.** "The model
+   saw the whole book" is not proof it used it correctly; §14/§15 design a local check that can
+   contradict and downgrade the model's own completeness/absence claims.
+6. **No client, public or development, can ever receive the full 481-chunk context or the full
+   prompt.** Only cited chunks appear in any HTTP response, in either exposure profile.
+7. **Evidence scope and interpretive settings are independent axes**, both in the request schema
+   and in the pipeline call signature: `historiographical_lens`/`voice`/`worldview` are passed
+   through to full context exactly as they are passed to RAG today, and neither pipeline branches
+   on the other's setting.
+
+---
+
+## 8. Proposed two-strategy architecture
+
+```text
+src/rag_pipeline.py                         src/full_context_pipeline.py   (NEW)
+  AnswerStrategy(StrEnum)      <──────────────── imported, not duplicated
+    RAG = "rag"
+    FULL_CONTEXT = "full_context"
+  AnswerModeResult             <──────────────── imported, not duplicated
+    + answer_strategy
+    + answer_strategy_version
+  preflight_answer_corpus()    <──────────────── imported, not duplicated
+  without_automatic_retries()  <──────────────── imported, not duplicated
+  run_evidence_planned_answer()               run_full_context_answer()   (NEW, sibling shape)
+
+src/answer_coverage.py                      src/full_context_coverage.py  (NEW)
+  EvidenceCoverageAnswer                       FullContextCoverageAnswer
+  process_evidence_coverage()                  process_full_context_coverage()
+  ContentOutcome, PremiseStatus,  <──────────────── imported, not duplicated (retrieval-agnostic
+  AnswerUnitRole (enums)                          enums; shared vocabulary aids comparison, §22)
+
+Shared, unmodified, imported by both pipelines:
+  web_project.resolve_conversation_turn / query_planning.ResolvedTurn
+  perspectives.build_interpretive_prompt_block / HistoriographicalLens / AnswerVoice / Worldview
+  costs.tracked_responses_parse / UsageLedger / usage_scope
+  filters.should_skip_document
+  evidence_policy.tokenize_anchor / scan_evidence_target (local corpus scan, reused — see §15)
+  query_planning.extract_trusted_targets / normalize_search_query (trusted-text extraction)
+  public_sources.public_source_payload / answer_has_extended_verbatim_overlap
+  web_project.source_payload / citation_label / merge_adjacent_chunks
+```
+
+`web_project.answer_project_question_result` grows a strategy dispatch immediately after the shared
+preflight and conversation resolution:
+
+```python
+if answer_strategy is AnswerStrategy.FULL_CONTEXT:
+    result = full_context_pipeline.run_full_context_answer(
+        resolved_turn=turn, chunks=chunks, client=..., corpus_trace=..., ...,
+        historiographical_lens=..., voice=..., worldview=...,
+    )
+else:
+    result = run_evidence_planned_answer(...)   # unchanged call, unchanged behavior
+```
+
+This is the one new branch point. Everything before it (preflight, conversation resolution) and
+everything after it (stage timings, `answer_run_diagnostics`, ledger recording, response building
+in `web_api.py`) is strategy-agnostic and untouched.
+
+---
+
+## 9. Architecture diagram
+
+```text
+                              private manuscript chunks (output/chunks.json, gitignored)
+                                                |
+                                                v
+                          private Chroma embedding index (RAG only; full context never queries it)
+                                                |
+                    +---------------------------+---------------------------+
+                    |                                                       |
+        answer_strategy = "rag" (default)                     answer_strategy = "full_context"
+                    |                                                       |
+                    v                                                       v
+       query planning, faceted retrieval,                    full eligible-corpus serialization
+       evidence gate (rag_pipeline.py,                       in canonical chunk_id order
+       query_planning.py, retrieval.py,                      (full_context_pipeline.py)
+       evidence_policy.py)                                                  |
+                    |                                                       |
+                    v                                                       v
+       EvidenceCoverageAnswer, one structured        FullContextCoverageAnswer, one structured
+       generation call, [Source N] inline,           generation call, structured cited_chunk_ids
+       8-source schema cap                           per claim, no source-count cap in the schema
+                    |                                                       |
+                    v                                                       v
+       answer_coverage validation, [Source N]        full_context_coverage validation: chunk_id
+       already reader-facing                         pattern + eligibility check, then LOCAL
+                    |                                remap to compact [Source N] over only the
+                    |                                cited chunks (no second model call)
+                    |                                                       |
+                    +---------------------------+---------------------------+
+                                                |
+                                    AnswerModeResult (shared shape)
+                                answer_strategy + answer_strategy_version recorded
+                                                |
+                                                v
+                          shared: cost ledger, text-free diagnostics, public disclosure boundary
+                                                |
+                          +--------------------------------------+
+                          |                                      |
+              development: full diagnostic passages     public_demo: page locators + bounded
+              for BOTH strategies, gated by              excerpts for cited sources only, for
+              ARCHIVIST_FULL_CONTEXT_ENABLED             BOTH strategies, gated additionally by
+                                                          ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED
+```
+
+---
+
+## 10. Request, response, and configuration contracts
+
+**Naming check.** `AnswerPerspective`, `HistoriographicalLens`, `AnswerVoice`, `Worldview` are the
+existing `StrEnum`s in `src/perspectives.py`; none uses "strategy" or "scope." `rag_pipeline.py`
+has no existing `AnswerStrategy` symbol. `"rag"` and `"full_context"` do not collide with any
+existing enum value in the codebase (checked against every `class *(StrEnum)` in `src/*.py`). The
+names are adopted as proposed in the brief.
+
+```python
+# src/rag_pipeline.py (new, small addition near RagPolicy)
+class AnswerStrategy(StrEnum):
+    RAG = "rag"
+    FULL_CONTEXT = "full_context"
+```
+
+**Development request** (`web_api.QuestionRequest`): add
+`answer_strategy: AnswerStrategy = AnswerStrategy.RAG`. A request that omits the field behaves
+byte-identically to today (Pydantic default). `n_results` and `allow_over_budget` keep their
+current meaning for RAG and are **ignored** (not rejected — see §26 backward compatibility) when
+`answer_strategy == FULL_CONTEXT`, because full context has no retrieval depth to tune and the
+existing hard-cost-limit check (`ledger.budget_state()`) already covers the "allow this expensive
+thing over budget" case generically.
+
+**Public request** (`web_api.PublicQuestionRequest`, `model_config = ConfigDict(extra="forbid")`):
+add the same field, same default. Because `extra="forbid"` is already set, a public client that
+sends `answer_strategy: "full_context"` when the server has not enabled it produces a clean,
+explicit rejection point in `_run_public_question` (below) rather than a silently-ignored field.
+
+**Server-side availability gate** (`src/exposure_profile.py`, `ExposureSettings`): two new fields,
+both read from environment at startup, both defaulting to disabled:
+
+```python
+full_context_enabled: bool = False                 # ARCHIVIST_FULL_CONTEXT_ENABLED
+public_full_context_enabled: bool = False           # ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED
+```
+
+Effective availability for a given request is `full_context_enabled and (profile is DEVELOPMENT or
+public_full_context_enabled)` — i.e. the public flag can never enable full context on its own; it
+only widens an already-enabled capability to the public surface. This mirrors the existing
+`ARCHIVIST_EXPOSURE_PROFILE` / `ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD` precedent of startup-only,
+environment-driven, fail-closed configuration (`ExposureSettings.from_env`,
+`ExposureConfigurationError`).
+
+`GET /api/config` (`_development_config`/`_public_project_config`) gains
+`features.full_context_answers: bool`, computed from the check above for the app's own profile, so
+the frontend can decide whether to offer the "Full book" option at all — this is a **progressive
+disclosure** decision (§20), separate from the **explicit rejection** requirement below (a client
+that ignores the feature flag and asks anyway must still get a clear error, not a silent
+downgrade).
+
+**Rejection, not downgrade, when disabled.** In `web_project.answer_project_question_result`
+(development) and `_run_public_question` (public), a request for `AnswerStrategy.FULL_CONTEXT`
+when the effective availability check is false raises before any OpenAI call:
+
+- Development: `HTTPException(422, {"code": "full_context_disabled", "message": "Full-context
+  answers are not enabled on this server."})`.
+- Public: the same code inside the existing `_public_safe_error` shape, `503` (consistent with the
+  existing `public_usage_limit`/`public_answer_unavailable` public-safe error family, which already
+  uses `503` for "this capability is not currently available" rather than exposing internal
+  configuration state via `422`/`403`).
+
+**Why explicit rejection over silent downgrade:** a reader who deliberately chose the more
+expensive, slower "Full book" option has a specific expectation (see full evidence, possibly
+different coverage); silently substituting a RAG answer under the same request would look
+identical to a successful full-context answer, hiding both the cost/latency difference and the
+possibility that RAG and full context disagree — exactly the comparison this whole project exists
+to make visible. No evidence in the codebase or in `AGENTS.md`'s emphasis on measured, legible
+behavior supports doing this quietly. If a future owner decision reverses this (§29), the response
+must carry an explicit `strategy_downgraded: true` / `requested_strategy` pair so the frontend can
+say so — never a silent substitution.
+
+**Response payload** (both `web_api.question` and `_run_public_question`): add two fields at the
+same top level as `answer_status`/`content_outcome`/`evidence_decision`:
+
+```python
+"answer_strategy": result.answer_strategy,
+"answer_strategy_version": result.answer_strategy_version,
+```
+
+**Frontend types** (`frontend/src/api.ts`): add
+`export type AnswerStrategy = "rag" | "full_context";`, extend `AppConfig.features` with
+`full_context_answers: boolean`, extend the `askQuestion` request body construction and its return
+type with `answer_strategy?: AnswerStrategy` and `answer_strategy_version?: string`. `AppConfig`,
+`DevelopmentSource`, `PublicSource`, `SourceReference`, `DisplayGroup` are unchanged — full
+context's reduced `final_chunks` list is shaped exactly like RAG's, so it serializes through the
+existing `source_payload`/`public_source_payload` unchanged (§14).
+
+**Cost ledger** (`src/costs.py`): `UsageLedger`'s `record_answer_run_diagnostics` and its answer-run
+table gain one new backward-compatible nullable column, `answer_strategy TEXT`, following the exact
+precedent of the V25 `content_outcome` column (`BLOGNOTES.md`: *"a backward-compatible nullable
+column in the local cost ledger. Historical rows remain readable with no invented completeness
+judgment"*). Historical rows read back as `NULL`/absent, never backfilled as `"rag"` — that would be
+inventing information the row never recorded. `ANSWER_RUN_COHORT_KEYS` gains
+`answer_strategy`/`answer_strategy_version` alongside the existing `rag_policy_version` key so a
+cohort comparison can group by strategy.
+
+**Evaluation artifacts** (`docs/development_cost_lineage.json`/`.md`,
+`scripts/report_evaluation_costs.py`): the per-run identity object gains `answer_strategy` and, for
+full context, its own version string (`FULL_CONTEXT_POLICY_VERSION`, analogous to
+`RAG_POLICY_VERSION`), so a lineage report can be filtered or split by strategy without inventing a
+join key after the fact.
+
+---
+
+## 11. RAG-path preservation
+
+Every existing RAG file, prompt string, schema, and cohort constant is unchanged by this design
+except the three named extractions in §7.3. Concretely:
+
+- `src/rag_pipeline.py`: `run_evidence_planned_answer`'s body, `EVIDENCE_COVERAGE_INSTRUCTIONS`,
+  `RAG_POLICY_VERSION`, `QUERY_PLANNER_PROMPT_VERSION`, and every private helper are byte-for-byte
+  unchanged. `AnswerModeResult` gains two defaulted fields (§7.3) — every existing construction
+  site (`return AnswerModeResult(answer=..., final_chunks=..., status=..., plan=..., ...)`) compiles
+  and behaves identically without being touched, because the two new fields fall back to their
+  class defaults.
+- `src/query_planning.py`, `src/retrieval.py`, `src/evidence_policy.py`, `src/answer_coverage.py`:
+  untouched. In particular `retrieval.build_context`/`retrieval._build_numbered_context` (RAG's
+  `[Source N]`-numbered, ranked, 8-chunk-bounded prompt serializer) is not modified, not
+  parameterized, and not reused — full context's serializer (§12/§13) is deliberately a new,
+  separate function for the reasons in §7.4.
+- `src/prompts.py` (the legacy CLI/simple-web prompt path used by `ask.answer_question_legacy` and
+  `web_project.answer_project_question_legacy`) is untouched; it is not part of either the RAG or
+  full-context evidence-planned strategy and stays exactly as it is for the custom-project legacy
+  path (§12's "built-in project only" scope).
+- `EVAL_CONTRACT.md` §§1–5 (locked) are not edited by this design. §22 adds a comparison design that
+  consumes those definitions unmodified.
+- `tests/test_rag_pipeline.py`, `tests/test_answer_coverage.py`, `tests/test_query_planning.py`,
+  `tests/test_hybrid_retrieval.py`, `tests/test_faceted_retrieval.py`, `tests/test_evidence_policy.py`
+  all continue to exercise exactly what they exercise today; the only new assertion any of them
+  needs is that `AnswerModeResult(...)` without the two new kwargs still constructs with
+  `answer_strategy == "rag"` (one new, additive test, not a modification of an existing one).
+
+---
+
+## 12. Full-context pipeline
+
+**Where routing belongs:** `web_project.answer_project_question_result`, immediately after the
+shared preflight and conversation-turn resolution and before either pipeline is invoked (§8). This
+is the one place that already knows the corpus is verified and the turn is resolved, and it is
+already the sole caller of `run_evidence_planned_answer` for the built-in project, so it is the
+correct, minimal branch point — not `web_api.py` (which should stay a thin HTTP/DTO layer) and not
+a new dispatcher module (which would just be an extra indirection around one `if`).
+
+**New module `src/full_context_pipeline.py` owns:**
+- `FullContextPolicy` (`@dataclass(frozen=True, slots=True)`, mirrors `RagPolicy`): `version: str =
+  FULL_CONTEXT_POLICY_VERSION`.
+- `FULL_CONTEXT_POLICY_VERSION = "full-context-v1"`.
+- `FULL_CONTEXT_GENERATOR_SETTINGS` in `src/model_config.py` (new `ResponseModelSettings`, role
+  `"full_context_generator"`, same model/reasoning/verbosity as `GENERATOR_SETTINGS` initially — a
+  distinct object, not a shared reference, so it can diverge later without silently changing RAG,
+  but identical values at launch so §22's comparison holds "same model snapshot/reasoning/verbosity"
+  per `EVAL_CONTRACT.md`'s cross-arm requirement).
+- `serialize_full_context_corpus(eligible_chunks) -> str`: the corpus serializer (§13).
+- `build_full_context_input(resolved_turn, eligible_chunks, historiographical_lens, voice,
+  worldview) -> str`: assembles the per-request structured-call input (§17 prompt layout).
+- `run_full_context_answer(...)`: the orchestrator, same keyword-argument shape as
+  `run_evidence_planned_answer` (`resolved_turn`, `collection_handle` — unused, kept only so the
+  two orchestrators are drop-in-compatible for the caller and future tooling; a lint-visible
+  `del collection_handle` or an explicit "full context does not query the vector index" docstring
+  note documents why it is accepted but ignored — `chunks`, `client`, `corpus_trace`,
+  `corpus_manifest`, `corpus_manifest_sha256`, `corpus_integrity`, `require_store_identity`,
+  `historiographical_lens`, `voice`, `worldview`, `policy`) returning `rag_pipeline.AnswerModeResult`.
+
+**What it explicitly does not own or call:** `query_planning.plan_question`,
+`query_planning.route_question`, `query_planning.requires_planning`,
+`retrieval.retrieve_plan_from_collection`, `retrieval.build_hybrid_results`,
+`evidence_policy.apply_evidence_gate`/`decide_evidence`/`classify_evidence_lanes`,
+`evidence_policy.split_compound_named_anchor`, any `EvidenceObligationScope`/
+`ExpectedStageTransition`/`InstitutionalHandoff` construction. None of these has a referent: there
+is no ranked candidate set to gate, no "protected stage anchor" because there is no retrieval
+ordering imposed by search, and no "certified absence via bounded neighbor scan" because the model
+was handed every neighbor already (its absence judgment is checked a different way — §15).
+
+**Corpus serialization, canonical order (§13 has the numbers):** `eligible_chunks` is exactly
+`[c for c in chunks if not should_skip_document(c["document"])]`, in the order it already comes out
+of `output/chunks.json` — the same list `rag_pipeline.preflight_answer_corpus` already certifies
+matches `fixtures/corpus_manifest.json`'s `chunks[]` order chunk-for-chunk
+(`assess_answer_corpus_integrity`'s `manifest_chunk_order_mismatch` check). No additional sort is
+needed or performed; canonical order is document order (by the numeric filename prefix,
+`05_Introduction.md` through the appendices) then paragraph order within a document, which is how
+`ingest.build_chunks_for_file` assigns `chunk_id` in the first place (`EVAL_CONTRACT.md` §2.1).
+
+**Parsing/validating into `AnswerModeResult`:** the structured response
+(`FullContextCoverageAnswer`, §14) is validated by `full_context_coverage.process_full_context_coverage`,
+which returns a small result object analogous to `answer_coverage.EvidenceCoverageResult`
+(`status`, `answer`, `final_chunks`, `content_outcome`, diagnostics fields). `run_full_context_answer`
+wraps that into `AnswerModeResult(answer=..., final_chunks=..., status=..., plan=None,
+evidence_decision=<full-context vocabulary, §12.1>, diagnostics=..., answer_strategy="full_context",
+answer_strategy_version=FULL_CONTEXT_POLICY_VERSION)`. `plan: QuestionPlan` becomes
+`plan: QuestionPlan | None = None` on `AnswerModeResult` (part of the §7.3 extraction); the
+`resolved_question` property is updated to read a new `resolved_question: str | None = None` field
+directly when `plan is None`, falling back to its existing `plan.facets` walk otherwise. This is the
+minimum change that keeps `AnswerModeResult.resolved_question` meaningful for both strategies
+without giving full context a fake single-facet `QuestionPlan` just to satisfy a type.
+
+### 12.1 Full-context evidence-decision vocabulary
+
+`AnswerModeResult.evidence_decision` is typed `str`, not `evidence_policy.EvidenceDecision` — it
+always has been a free string field consumed only for display/diagnostics. Full context uses its
+own, clearly-prefixed values so they cannot be confused with RAG's `EvidenceDecision` members:
+
+| Value | Meaning |
+|---|---|
+| `full_context_answered` | model produced at least one valid, cited claim |
+| `full_context_insufficient_evidence` | model (or local validation) found nothing citable |
+| `full_context_indeterminate` | corpus-integrity or budget-precondition failure before generation |
+
+No `full_context_clean_abstention`/`qualified_near_match` analogue is proposed for v1: RAG's
+`clean_abstention` exists specifically to *skip paying for generation* once a bounded local scan
+certifies absence ahead of time — a retrieval-time optimization. Full context has already paid for
+retrieval (there is none) by the time it would know this, and its own local scan (§15) runs *after*
+generation, as a cross-check, not a pre-generation skip. Skipping generation pre-emptively for
+full context based only on the local scan is deliberately not proposed for v1 (§29): it would mean
+the expensive path never actually asks the model in the one case — apparent total absence — where
+comparing the model's full-context judgment against the scan is most interesting.
+
+### 12.2 Built-in project only
+
+`AGENTS.md` and `BLOGNOTES.md` are explicit that the generic multi-project upload stack
+(`web_project.py`'s `project_id != "current"` branch) is "deferred, not deleted and not extended...
+out of scope for every Phase 1 brief" (`AGENTS.md`, "Settled" list). Full context requires the
+per-chunk identity manifest the preflight checks — exactly the artifact custom projects do not yet
+persist (`web_project.answer_project_question_result`'s existing comment: *"Custom projects do not
+yet persist the independent per-chunk identity manifest required to certify a whole-corpus
+absence"*). `run_full_context_answer` is therefore only ever called for `project_id == "current"`;
+`answer_project_question_result` continues to route any other `project_id` to
+`answer_project_question_legacy` regardless of the requested `answer_strategy` (silently ignoring
+`answer_strategy` for custom projects is acceptable here — unlike the public full-context gate, this
+is an existing, already-adopted feature ceiling, not a new server policy someone might mistake for a
+downgrade of a request they explicitly made).
+
+---
+
+## 13. Corpus serialization and token-budget analysis
+
+All counts below are computed locally, read-only, from `output/chunks.json` (private, gitignored,
+already present in this environment) filtered by `filters.should_skip_document`, using only
+Python's built-in `len()`/`str.split()` — **no manuscript text appears below or anywhere in this
+document**, only aggregate counts. `tiktoken` was checked and is **not installed**
+(`ModuleNotFoundError: No module named 'tiktoken'`) and is not a dependency in `pyproject.toml` or
+`uv.lock`; per the task's constraint against adding dependencies, no tokenizer-exact count is
+available. All token figures below are **character-based approximations (chars ÷ 4, a standard
+rough estimator for English prose)**, cross-checked against a word-based estimate, and are marked
+**requires verification** against a real (owner-authorized, budgeted) API call before any cost
+commitment is made from them.
+
+| Quantity | Value |
+|---|---|
+| Total chunks in `output/chunks.json` | 910 |
+| Retrieval-eligible chunks (`not should_skip_document`) | **481** |
+| Eligible documents | 29 |
+| Total characters across eligible chunk text | 1,049,507 |
+| Total words across eligible chunk text | 155,697 |
+| Average chunk size | 2,181.9 chars / chunk |
+| Smallest / largest eligible chunk | 116 / 4,136 chars |
+| Chunk-ID string total length (481 IDs) | 23,753 chars (avg 49.4 chars/ID) |
+
+**Proposed per-chunk serialization overhead** (a header block keyed by `chunk_id`, modeled on
+`retrieval._build_numbered_context`'s field set but keyed by the stable identifier instead of a
+positional index — see §7.4/§14 for why this is a new function, not a reuse of that one):
+
+```text
+[Chunk {chunk_id}]
+Document: {document}
+Chapter: {chapter_title}
+Paragraphs: {paragraph_start}-{paragraph_end}
+Text:
+{text}
+```
+
+| Quantity | Value |
+|---|---|
+| Total header overhead (481 chunks) | 93,281 chars (avg 193.9 chars/chunk) |
+| Total serialized corpus, headers + text | **1,142,788 chars** |
+
+**Token estimates** (character-based, ÷4; word-based cross-check, words × 1.33, shown for
+sanity — the two should bracket a real tokenizer's count for English prose with light structural
+markup):
+
+| Basis | Estimate |
+|---|---|
+| Char-based (÷4), text only | ≈ 262,377 tokens |
+| Char-based (÷4), text + serialization headers | **≈ 285,697 tokens** |
+| Word-based (×1.33) cross-check, text only | ≈ 207,077 tokens |
+
+Adopting the higher, header-inclusive estimate (**≈ 286,000 tokens**) as the conservative planning
+figure for the corpus body alone, before instructions, catalog, conversation history, question, or
+schema/output overhead.
+
+**Model ceiling.** Per verified current OpenAI documentation (§17 cites sources), `gpt-5.6-sol`'s
+context window is **922,000 maximum input tokens**, with **128,000 max output tokens**. A ≈286,000
+token corpus leaves ≈636,000 tokens of headroom before hitting the hard context ceiling — full
+context is **not** at risk of exceeding the model's usable window with the current 481-chunk corpus,
+even with generous headroom for instructions (a few hundred to low thousands of tokens, based on
+`EVIDENCE_COVERAGE_INSTRUCTIONS`' comparable length), conversation history (bounded to
+`MAX_CONVERSATION_CONTEXT_CHARS = 16,000` chars ≈ 4,000 tokens by
+`web_project.bounded_conversation_history`, shared unchanged), the question itself (≤4,000 chars
+per `QuestionRequest.question`), and the structured-output schema/response.
+
+**But the corpus alone is already above OpenAI's long-context pricing threshold** — verified current
+documentation states prompts over 272,000 input tokens are priced at 2x input / 1.5x output *for
+the full request* (§17, §18). A full-context request is therefore reliably in the surcharged
+pricing tier on every cold (uncached) call, and likely still is on most warm calls too, depending on
+exactly how the surcharge interacts with cached-token pricing (flagged **requires verification**,
+§17/§29). This is the central, quantified fact that should drive every cost-control decision in
+§18: full context is not "somewhat more expensive," it is reliably in a different OpenAI pricing
+tier than every RAG request the system has ever made.
+
+**Fail-safe for exceeding the usable window:** even though the current 481-chunk corpus fits
+comfortably, the serializer must not assume it always will (a future, larger manuscript is exactly
+the kind of corpus-agnostic case `AGENTS.md` insists the plumbing handle correctly). Before calling
+the model, `run_full_context_answer` computes the same character-based estimate as above over the
+*current* corpus and instructions/schema overhead and compares it against a configured ceiling
+(e.g. 85% of the selected model's documented max input tokens, leaving headroom for output and
+avoiding relying on an unverified exact tokenizer count). If the estimate exceeds the ceiling, the
+request fails closed with `status="full_context_indeterminate"`/a new diagnostic code
+(`context_budget_exceeded`) **before any OpenAI call is made** — never a truncated, silently-partial
+corpus. This is a deliberately conservative, cheap, local check, not a tokenizer-exact one; §29
+lists getting an exact tokenizer count as a "requires local measurement" open item, not a blocker
+to writing this safeguard.
+
+---
+
+## 14. Full-context citation and validation contract
+
+### Evaluated options
+
+**B — numeric labels `[Source 1]…[Source 481]` up front.** Rejected. It burns the entire ordinal
+space on chunks that will almost never be cited (a typical answer cites a handful of the 481), gives
+the model no advantage over option A in exchange for that cost, and — critically — does not
+naturally produce a small, reader-safe list; every response would need a second pass to compute
+which of the 481 were actually used before it could be handed to `public_sources.public_source_payload`
+at all, which is exactly the "local remap" step option A performs by design.
+
+**A raw JSON-Schema `enum` of the 481 valid chunk IDs**, considered as a stricter variant of A.
+Rejected on a concrete, verified constraint: current OpenAI Structured Outputs documentation states
+that for a single string enum exceeding 250 values, the combined character length of its values may
+not exceed 15,000 characters (§17 cites the source). The 481 real chunk IDs total **23,753
+characters** (measured locally, §13) — over the limit by more than half. An enum-of-valid-IDs
+citation field is therefore not just undesirable, it is **schema-infeasible** for this corpus size
+under the currently-documented limits, which settles the question without needing a judgment call.
+
+**C — two-stage local mapping, no second paid call.** Not a distinct alternative in this design;
+it is the mechanism by which A is implemented (below). Presented separately in the brief as a third
+option, it converges with A once A is specified precisely enough to include its remap step, so this
+document adopts "A implemented via C's local, zero-cost remap" as one recommendation rather than
+three.
+
+### Recommendation: A, with citations as a structured per-claim field, not an inline bracket
+
+Each claim the model returns carries citations as a **structured array field of chunk-ID strings**,
+not as an inline `[Source ...]` token inside the claim's prose:
+
+```python
+# src/full_context_coverage.py
+ChunkIdStr = Annotated[str, Field(pattern=r"[^\r\n\x00-\x1f]{1,500}_[0-9]{3,}", min_length=1)]
+# same shape as retrieval_trace_contract._CHUNK_ID_PATTERN — reused for consistency, not imported
+# (that pattern is private to a diagnostics-contract module; duplicating one regex literal here is
+# preferable to reaching into a private trace-validation module for an unrelated purpose)
+
+class FullContextClaim(_ContractModel):
+    claim_id: str                                   # e.g. "C1", "C2", pattern-constrained
+    role: AnswerUnitRole                             # reused from answer_coverage.py (shared vocabulary)
+    text: str                                        # one sentence, plain prose, no bracket
+    cited_chunk_ids: tuple[ChunkIdStr, ...] = Field(min_length=1, max_length=6)
+    paragraph_group: int                             # local render grouping, mirrors AnswerUnit.paragraph
+```
+
+`pattern` is a documented, supported Structured Outputs string constraint (§17); it bounds *shape*,
+not *membership*. Membership — is this ID one of the 481 actually supplied — is checked **locally**,
+the same "trust the shape, verify the content" split already used everywhere else in this codebase
+(e.g. `query_planning.validate_question_plan` rejecting "unknown, duplicate, or dangling IDs" after
+the planner's own schema already constrained their *format*).
+
+**Why a structured field instead of reusing RAG's inline-bracket citation grammar:** RAG's
+`answer_coverage._citation_locality_failure`/`_normalize_pre_citation_terminal` exist to police a
+real risk — the model burying a citation mid-paragraph, or attaching one bracket to several
+sentences — for prose *it authored the punctuation of*. Asking the model to also correctly emit
+`[Source {chunk_id}]` inline (rather than `[Source N]`) would require either a new inline grammar
+keyed by a 16-57-character token instead of a short integer (worse for the model, harder to
+regex-validate reliably) or asking it to track a *provisional* numbering it cannot see the final
+value of (reintroducing exactly the "invented source numbers" risk option A exists to avoid). A
+structured `cited_chunk_ids` field sidesteps both problems and makes citation-locality **true by
+construction**: the renderer (not the model) attaches the visible bracket, so a full-context answer
+cannot produce a malformed or multi-group citation — a genuine mechanical reliability property of
+this design, not a claim about answer *correctness* (§22 stays neutral on that).
+
+### Local validation and remap (`full_context_coverage.process_full_context_coverage`)
+
+1. **Shape.** Structured Outputs already guarantees the Pydantic shape; reject (fail closed,
+   `generation_contract_failed`) on a refused/empty response, exactly as RAG does
+   (`_response_refused`, reused).
+2. **Chunk-ID membership.** For every `claim.cited_chunk_ids` entry, verify it is a member of the
+   exact `{chunk["chunk_id"] for chunk in eligible_chunks}` set built from the same `eligible_chunks`
+   passed into the prompt for *this* request. Any ID that is well-formed but not in that set (an
+   invented ID, or one from a stale/different corpus snapshot) fails the whole answer closed with a
+   new, specific error code, `unresolvable_chunk_id` — not a partial repair, matching RAG's existing
+   "invented source number" failure discipline (`CoverageValidationErrorCode.UNRESOLVABLE_CITATION`).
+3. **At-least-one-claim.** Zero claims (and no premise correction) is a hard `insufficient_evidence`
+   outcome, matching RAG's "no sources" failure behavior in spirit.
+4. **Local remap.** Collect the distinct chunk IDs across all validated claims, **in first-cited
+   order**, and assign each a 1-based integer — this is the *entire* mapping step, done once,
+   in-process, with no OpenAI call. Build `final_chunks: list[dict]` as those chunk dicts, in that
+   order (looked up from the same `eligible_chunks` list — a dict keyed by `chunk_id`, O(1) per
+   lookup). This list is typically small (a handful to a few dozen chunks) even though 481 were
+   supplied to the model, because it only contains what was actually cited.
+5. **Render.** Build the final answer string by joining claim texts, grouped by `paragraph_group`
+   into paragraphs/bullets in the order the model returned them, and — mechanically, not by the
+   model — appending `[Source N]` / `[Source N, Source M]` immediately after each claim's sentence,
+   using the remap from step 4. The output is therefore **indistinguishable in shape** from a RAG
+   answer: prose with inline `[Source N]` citations resolving 1-based into an ordered `final_chunks`
+   list.
+6. **Downstream.** Because step 4/5 already produced RAG-shaped `final_chunks` and RAG-shaped answer
+   text, `web_project.source_payload(chunks)`, `public_sources.public_source_payload(answer,
+   chunks, ...)`, `answer_has_extended_verbatim_overlap`, and the frontend's existing
+   `DisplayGroup`/`SourceReference` rendering all run **completely unmodified**. This is the
+   design's single most important property: the "public disclosure boundary" is not reimplemented
+   for full context, it is inherited for free, because full context's local pipeline ends by
+   producing exactly what the public/reader-facing layer already expects.
+
+**Preferred properties, checked against the recommendation:**
+
+| Property | Met by this design |
+|---|---|
+| Rejects invented/ineligible chunk IDs | yes — step 2, hard fail, no repair |
+| Validates every cited source was actually supplied | yes — membership check against the exact per-request `eligible_chunks` set |
+| Returns only cited source records to the client | yes — `final_chunks` is the cited-only remap, never all 481 |
+| Reuses the existing public locator system | yes — unmodified `public_source_payload` |
+| Supports claim-local citations | yes — one `cited_chunk_ids` array per claim |
+| Avoids leaking internal identifiers publicly | yes — chunk IDs never leave the server; only the remapped `[Source N]`/edition locator reaches any client, exactly like RAG today |
+| Compatible with formal evaluation grounded in stable chunk IDs | yes, and more directly than RAG: full-context citations *are* chunk IDs natively (`EVAL_CONTRACT.md` §2.1's only permitted ground-truth identifier), no ordinal-to-chunk resolution step needed for grading |
+
+---
+
+## 15. Completeness, premise, and absence semantics
+
+**Structural vs. content adequacy, mirrored from V25.** `full_context_coverage` reuses
+`answer_coverage.ContentOutcome` (`valid_complete` / `valid_partial` / `insufficient_evidence`) as
+its content-outcome vocabulary — a retrieval-agnostic enum, safe and useful to share verbatim so
+`AnswerModeResult.content_outcome` means the same thing for both strategies in diagnostics and in
+§22's comparison. But the *computation* is necessarily different: RAG's
+`answer_coverage._assess_content_outcome` reasons over a requirement/obligation ledger that has no
+full-context analogue (there is no pre-planned stage chain to check for gaps). Full context's
+content-outcome is computed from a **model-self-reported field, cross-checked locally**, never
+trusted blindly — this directly answers the brief's instruction that "the model saw the whole book"
+does not by itself prove completeness.
+
+```python
+class FullContextCoverageAnswer(_ContractModel):
+    schema_version: Literal["archivist.full_context_coverage/1"] = Field(alias="schema")
+    premise_finding: PremiseFinding | None
+    claims: tuple[FullContextClaim, ...] = Field(max_length=40)
+    absence_findings: tuple[AbsenceFinding, ...] = Field(default=(), max_length=3)
+    self_reported_content_outcome: ContentOutcome     # model's own judgment — an input, not the output
+```
+
+`PremiseFinding` reuses `answer_coverage.PremiseStatus` (`supported`/`contradicted`/`unresolved`/
+`not_applicable`) — the same four-way vocabulary RAG already uses, because a false-premise
+correction is conceptually identical work regardless of how evidence was assembled: state the
+correction, cite it, then answer the useful underlying question. Unlike RAG, full context has no
+separate premise-support/premise-counter/framing *facets* to validate a correction's sources
+against (`PremiseSourceScope`) — there is nothing to compare the correction's `cited_chunk_ids`
+against except the same membership check every other claim already gets (§14, step 2). This is
+strictly simpler than RAG's premise validation, not a weaker version of it: RAG's extra machinery
+exists to make sure a *retrieval-selected* framing chunk was actually available to cite; full
+context, having supplied the entire corpus, has no equivalent "was the right passage even in the
+context" failure mode to guard against.
+
+**Absence: the trust model genuinely changes, and this section says how.** RAG's absence
+certification (`evidence_policy.assess_corpus_integrity`/`scan_evidence_target`/
+`classify_evidence_lanes`) exists because retrieval might simply have failed to surface a passage
+that exists — the scanner is there to distinguish "not retrieved" from "not present." Full context
+removes that specific failure mode (nothing was filtered out before the model saw it), but it
+introduces a different one: **the model's claim "the manuscript does not address this" is now an
+unverifiable assertion about something it was shown in full**, and there is no external signal
+(like a retrieval miss) to be suspicious of. Trusting it uncritically would be a regression, not an
+improvement — a model that scans 481 chunks under time/attention pressure and misses one relevant
+paragraph is a completely ordinary failure mode, and nothing in "it had the text" prevents it.
+
+**Recommendation: the local corpus scanner stays, and becomes a cross-check rather than a
+pre-generation gate.** `evidence_policy.tokenize_anchor` and `evidence_policy.scan_evidence_target`
+operate purely on chunk text and a normalized target string — nothing about them is retrieval- or
+ranking-specific, so they are directly reusable. `query_planning.extract_trusted_targets` extracts
+conservative surface forms (quoted phrases, multi-token proper names, acronyms) from the user's own
+raw text — also retrieval-agnostic, also reusable unchanged. The full-context pipeline runs this
+scan, over the *entire* `eligible_chunks` list (which it already holds in memory — this is actually
+simpler for full context than for RAG, since there is no "immediate neighbor" bookkeeping needed;
+the whole corpus is the scan universe), for every trusted target extracted from the resolved
+question, **after** generation:
+
+- If the model reports an `AbsenceFinding` with status `not_addressed_in_corpus` for a target that
+  `scan_evidence_target` finds a **strong** (exact normalized token-sequence) hit for, the answer is
+  downgraded: `self_reported_content_outcome` is overridden to `valid_partial` at best, and a
+  text-free diagnostic code (`absence_claim_contradicted_by_scan`) is recorded. The model's prose is
+  not silently rewritten (that would put unreviewed, un-cited text in front of a reader) — the
+  content outcome is downgraded and the diagnostic is surfaced so the failure is visible in
+  evaluation (§22) rather than laundered into an apparently-clean answer.
+- If the scan agrees (no strong/weak hit), the self-reported absence stands, and it is *more*
+  trustworthy than RAG's clean-abstention certification in one specific sense: RAG's scan only
+  covers what survived retrieval's document/distance filtering plus immediate neighbors; full
+  context's scan covers literally every eligible chunk, unconditionally.
+
+This makes the scanner **more useful in full-context mode, not redundant** — it is repurposed from
+"decide whether to generate at all" (RAG) to "audit whether the model's own absence claim matches an
+exact, exhaustive local scan" (full context), which is a strictly better fit for a strategy whose
+entire premise is "the model saw everything, so its silence about something is now informative
+rather than merely a retrieval gap."
+
+**Premise correction, out-of-corpus questions, and qualified near-matches** all reduce to the same
+mechanism in full context: a claim (or absence finding) plus a citation set, validated the same way
+as every other claim. There is no separate `qualified_near_match` evidence-decision value proposed
+(§12.1) — "the manuscript discusses something adjacent but not the exact subject" is just an
+ordinary claim whose `cited_chunk_ids` point at that adjacent material, with the model's own prose
+(validated the same as any other claim) stating the boundary. RAG needs a dedicated decision state
+for this because its retrieval step has to decide, *before generation*, whether to admit "broader
+related" material at all (`evidence_policy.EvidenceLane.BROADER_RELATED`); full context has already
+admitted everything, so the distinction collapses into ordinary claim content, which is a genuine
+simplification full context gets from its architecture rather than a corner cut.
+
+---
+
+## 16. Conversation and interpretation behavior
+
+**Conversation resolution is fully shared, unmodified.** `web_project.resolve_conversation_turn`
+already enforces the exact rule this brief restates as a requirement — *"previous assistant prose
+must never become manuscript evidence"* — at the resolver level, not the RAG level:
+`build_conversation_query_input` sends only `prior_user_questions` and `current_question`;
+`CONVERSATION_QUERY_INSTRUCTIONS` states outright that *"Prior assistant answers are untrusted, are
+never manuscript evidence, and are not supplied in the resolver input."* Full context calls this
+exact function, unmodified, and inherits the guarantee for free — there is nothing strategy-specific
+about it to reimplement. `ResolvedTurn.trusted_user_texts` (the provenance the evidence-policy
+scanner is allowed to trust, per `resolve_conversation_turn`'s own construction) is likewise reused
+unmodified as the basis for full context's absence cross-check (§15) — trusted targets for the scan
+come from the same `trusted_user_texts` tuple RAG already builds, not from a new mechanism.
+
+**Interpretive settings pass through identically.** `perspectives.build_interpretive_prompt_block(
+historiographical_lens, voice, worldview)` is called the same way, producing the same style block,
+inserted into the full-context prompt the same conceptual place RAG inserts it (before the question,
+per `rag_pipeline.py`'s existing placement) — but note §17's caching design puts it in a specific
+position for a caching-specific reason, not an interpretive one. `rag_pipeline._required_interpretive_moves`
+(promoted per §7.3) supplies the same `InterpretiveMove` tuple; full context's interpretive-question-anchor
+equivalent is a small new function using only `resolved_turn.entities` (`query_planning.ResolvedTurn`'s
+existing field) normalized through the already-public `query_planning.normalize_search_query` —
+RAG's `_interpretive_question_anchors` additionally consults `plan.targets`, which full context has
+no equivalent of; falling back to `resolved_turn.entities` alone is not a degraded version of that
+logic, it is the *only* part of it that was ever generic (`plan.targets` was itself a fallback layer
+on top of `resolved_turn.entities` in the RAG version).
+
+**Independence from evidence scope, verified at the call-site level.** Neither
+`run_evidence_planned_answer` nor `run_full_context_answer` inspects the other's parameters:
+`historiographical_lens`/`voice`/`worldview` never influence which strategy runs, and
+`answer_strategy` never influences which lens/voice/worldview is applied. This is enforced by
+construction (the dispatch in §8 passes the same three interpretive arguments to whichever function
+it calls) rather than by a runtime check, which is the stronger guarantee.
+
+---
+
+## 17. Prompt layout and caching strategy
+
+### Verified current OpenAI documentation
+
+Sourced via `WebFetch` against `developers.openai.com` on **2026-07-30**. These are live-documentation
+lookups, not recalled training knowledge, per this task's instruction; each claim below is
+attributed to the page it came from.
+
+**`https://developers.openai.com/api/docs/models/gpt-5.6-sol`** (accessed 2026-07-30):
+- Maximum input tokens: **922,000**.
+- Maximum output tokens: **128,000**.
+- Supports Structured Outputs and prompt caching (both listed in the model's feature set).
+- Long-context pricing: **"Prompts with >272K input tokens are priced at 2x input and 1.5x output
+  for the full request."**
+
+**`https://developers.openai.com/api/docs/guides/prompt-caching`** (accessed 2026-07-30):
+- Automatic caching applies to prompts of **1,024 tokens or more**; below that, `cached_tokens` is
+  reported as zero.
+- The cached region is the longest previously-seen matching **prefix**, matched at the prefix level.
+- The Responses API supports optional explicit `prompt_cache_breakpoint` markers on a content block
+  to control which prefix is cached; it also places **implicit breakpoints by default on GPT-5.6
+  models**, so an explicit breakpoint is not required for a well-formed stable-prefix prompt to
+  benefit.
+- Cached-input tokens are reported at `usage.input_tokens_details.cached_tokens` (Responses API).
+- Cache-write tokens are reported, per this fetch, at **`usage.prompt_tokens_details.cache_write_tokens`**
+  "on GPT-5.6 and later models" — **flagged requires verification**: this field path looks like it
+  may conflate Chat-Completions-API (`prompt_tokens_details`) and Responses-API
+  (`input_tokens_details`) naming, and the currently-installed `openai==2.46.0` SDK's actual Responses
+  usage object should be inspected directly (or a real, budgeted, owner-authorized call made and its
+  raw `usage` object logged) before trusting this exact path. This matters concretely:
+  `costs.extract_token_usage` currently looks for `cache_write_tokens` only under
+  `usage.input_tokens_details` and then top-level `usage`, **not** under a `prompt_tokens_details`
+  key — if the real field lives there for the Responses API, the existing extractor (already used by
+  every RAG call today, not just full context) would silently record `cache_write_tokens=0` for any
+  cache-write event. This is worth fixing regardless of full context, but full context is what
+  makes it visible, since it is the first workload large enough to reliably trigger a cache write.
+- Cache lifetime: for GPT-5.6-family models, **"a cached prefix remains eligible for reuse for at
+  least 30 minutes, but OpenAI may retain it longer."** A changed prefix invalidates caching only for
+  the portion after the point of change; unchanged leading content can still hit cache.
+- Explicit guidance: **"Structure prompts with static or repeated content at the beginning and
+  dynamic, user-specific content at the end"** to maximize cache-hit rate.
+
+**`https://developers.openai.com/api/docs/guides/structured-outputs`** (accessed 2026-07-30):
+- Up to 5,000 object properties total, up to 10 levels of nesting.
+- Total string length of property names/enum values/const values across a schema ≤ 120,000 chars.
+- Enum size ≤ 1,000 values total; a single string enum with more than 250 values has a **15,000
+  character** combined-value-length limit (the constraint that rules out an enum-of-chunk-IDs, §14).
+- `pattern` and `format` string constraints **are** supported.
+- Root schema must be an `object` (not `anyOf`); `additionalProperties: false` is mandatory; every
+  field must be listed as required (optionality is expressed via `X | None`, already the pattern
+  this codebase uses throughout `answer_coverage.py`/`query_planning.py`).
+
+### Recommended prompt layout
+
+```text
+[instructions]  <- stable across every full-context request for a given policy version
+[document catalog / corpus identity marker]  <- stable per corpus manifest version
+[full serialized corpus, canonical chunk_id order]  <- stable per corpus manifest version, ~286K tokens
+------------------------------------------------------------------ (implicit/explicit cache breakpoint)
+[interpretive style block, if non-neutral]  <- varies per request
+[bounded conversation history]  <- varies per request/turn
+[resolved question]  <- varies per request
+```
+
+The instructions block and the entire serialized corpus go **first**, exactly matching OpenAI's
+documented guidance to put static/repeated content at the start. This is the single highest-leverage
+decision in this design for cost: as long as the instructions text and corpus serialization are
+byte-identical between two requests (same policy version, same corpus manifest), the ~286,000-token
+prefix is eligible to be served from cache on the **second and every subsequent** full-context
+request within the (≥30 minute, possibly longer) cache window — regardless of which reader asked,
+or what their question was, since the prefix does not depend on the question at all. This is a
+stronger caching win than a typical single-conversation system-prompt cache, because the entire
+corpus (not just instructions) is stable across *all* readers, not just across turns of one
+conversation.
+
+**Interpretive settings deliberately sit *after* the cache breakpoint, not before it.** Putting
+lens/voice/worldview in the stable prefix would fragment the cache into one prefix per
+lens×voice×worldview combination (currently up to 3×3×4 = 36 combinations, per
+`perspectives.py`'s enums) instead of one shared prefix for the entire corpus — a direct cost
+regression for no benefit, since interpretive settings do not change what evidence is available,
+only how it is voiced. Keeping them in the variable tail preserves one cache entry for the whole
+corpus regardless of how many different lens/voice/worldview combinations different readers select.
+
+**Follow-ups within one conversation reuse the same cache entry as any other request**, since the
+stable prefix does not depend on conversation history either — a follow-up is cheap on the *cache*
+axis for the same reason a first-time question from a different reader is: only the trailing,
+per-request block changed.
+
+**Corpus changes invalidate the cached prefix exactly once, deliberately.** A re-ingest that changes
+`fixtures/corpus_manifest.json` (new chunk boundaries, new manuscript edition) changes the serialized
+corpus text, which changes the prefix, which means the next full-context request after a re-ingest
+is unavoidably a cold, full-price call — correctly so, since serving a cached answer against a
+retired corpus snapshot would be exactly the kind of "presentation change that could move a metric"
+`AGENTS.md` singles out as a defect category. No special handling is needed beyond the fact that the
+serializer's output is a pure function of the loaded `eligible_chunks`, which the preflight (§4)
+already guarantees matches the current manifest before any of this runs.
+
+### Cost-ledger reporting
+
+`costs.calculate_cost_nano_usd` gains the long-context surcharge branch named in §7.3, applied when
+`usage.input_tokens > 272_000` (the documented threshold): 2x the standard-input-rate term, 1.5x the
+output-rate term, for the *entire* request — matching the documented "for the full request" language
+exactly rather than approximating it as a partial surcharge on only the excess tokens. The
+cached-input rate's interaction with that surcharge is not stated precisely enough in the fetched
+documentation to encode confidently (flagged in §29 as requires-verification); the conservative,
+explicitly-labeled interim approach is to apply the surcharge multiplier to the **standard-rate
+portion only** (mirroring how `calculate_cost_nano_usd` already separates `standard_input_tokens =
+input_tokens - cached_tokens - cache_write_tokens` before applying per-tier rates), and to comment
+this assumption in code exactly as the existing surcharge-threshold comment does today, so a future
+implementer sees the flag rather than inheriting a silent guess.
+
+**Cold vs. warm reporting.** The ledger already has `cached_tokens`/`cache_write_tokens` columns
+(§4); no schema change is needed there. What full context adds is a **derived, diagnostics-only**
+classification — not a new ledger column, since it's fully computable from existing columns —
+reported in `answer_run_diagnostics` (§21): `cache_state: "cold" | "warm" | "unknown"`, where `cold`
+means `cached_tokens == 0` on a request whose `input_tokens` was large enough that caching should
+have applied (≥1,024 tokens, per the documented minimum), `warm` means `cached_tokens > 0`, and
+`unknown` covers any response shape where the usage object did not report cache fields at all
+(defensive default, not an error).
+
+**Illustrative cost estimate** (explicitly an estimate built from the local character-based token
+approximation and the current `MODEL_PRICING["gpt-5.6-sol"]` table — not a measured number, and
+**requires verification** before being quoted anywhere as a commitment):
+
+- **Cold call:** ≈290,000 input tokens (corpus + instructions + catalog + question), all
+  standard-rate, crossing the 272K threshold → `290,000 × $5/M × 2 ≈ $2.90` input, plus a modest
+  structured-output answer (`≈2,000 output tokens × $30/M × 1.5 ≈ $0.09`) → **≈$3.00/turn**.
+- **Warm call** (cached prefix reused, interim assumption that the surcharge applies to the
+  standard-rate remainder only): `≈285,000 cached tokens × $0.50/M ≈ $0.14`, plus a small uncached
+  remainder (question/history/interpretive block, a few thousand tokens) at standard or surcharged
+  rate (≈$0.02–$0.05), plus the same ≈$0.09 output → **≈$0.20–$0.30/turn**.
+
+For comparison, `BLOGNOTES.md`'s clean V25 ten-question run cost an estimated `$1.53158052` total,
+≈$0.15/question. A warm full-context turn is therefore plausibly **comparable to or cheaper than** a
+RAG turn; a cold one is roughly **10–20x** a RAG turn. Which regime a real deployment lives in
+depends entirely on request frequency relative to the cache window — a question §18/§22 are designed
+to actually answer with measurement, not assume.
+
+---
+
+## 18. Cost controls and abuse resistance
+
+**Server startup flag.** `ARCHIVIST_FULL_CONTEXT_ENABLED` (default false) and
+`ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED` (default false, only meaningful under
+`ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED and full_context_enabled`), per §10.
+
+**Pre-request budget check, conservative-by-construction.** Before calling the model,
+`run_full_context_answer` computes the same conservative token estimate used for the fail-safe in
+§13 and converts it to an estimated **cold-case** cost using `costs.calculate_cost_nano_usd`'s new
+surcharge-aware logic (§17) — deliberately the cold estimate, not an optimistic warm one, because
+OpenAI's API gives no way to know in advance whether a given prefix is currently cached (`cached_tokens`
+is only known *after* the call completes). This estimate is checked against the existing
+`ledger.budget_state()`/hard-limit machinery (`costs.CostLimitExceeded`, already shared, unchanged)
+**before** the request is sent, exactly like RAG's existing pre-flight budget check in
+`web_api.question`/`_run_public_question` — reused, not reimplemented, just fed a strategy-aware
+estimate instead of always assuming a small RAG-sized call.
+
+**No automatic paid retry**, in either strategy, ever — an existing, unconditional project rule
+(`AGENTS.md`'s citation-contract discipline, `docs/rag_next_optimization_design.md`'s "no retry"
+repeated at every version). `full_context_pipeline.run_full_context_answer` calls
+`rag_pipeline.without_automatic_retries` on the client exactly as RAG does, reused unmodified.
+
+**Separate public limits.** `ExposureSettings` gains, alongside the existing
+`public_requests_per_minute`/`public_global_requests_per_minute`/`public_max_concurrent_requests`/
+`public_max_concurrent_per_client`, a full-context-specific tier:
+`public_full_context_requests_per_minute` (recommended default: 1 — stricter than the existing
+default-6 general rate, reflecting the ~10-20x cost multiplier of a cold call) and
+`public_full_context_max_concurrent_requests` (recommended default: 1, matching the existing
+general concurrency default, since the existing single-Starter-instance deployment already
+serializes everything through one in-memory `PublicRequestGate`). `PublicRequestGate` itself needs
+one additive change: an optional second, stricter `(requests_per_minute, max_concurrent)` pair keyed
+by a `category` string (`"question"` vs. `"full_context_question"`) passed into `try_enter`, so full
+context shares the *global* gate's bookkeeping (one instance, one lock, matching the existing
+"correct only for a one-instance design" documented limitation in
+`docs/public_deployment.md`) while getting its own tighter per-category ceiling.
+
+**Per-client cooldown.** The existing per-client rate window (60-second sliding window,
+`PublicRequestGate._expire`) already provides a cooldown mechanism; the full-context category simply
+uses a smaller `requests_per_minute` for that category, which is sufficient and avoids inventing a
+second, differently-shaped rate-limit mechanism.
+
+**Behavior near-exhausted monthly budget.** Reused unmodified: `_configure_public_budget` and
+`ledger.budget_state()["exceeded"]` already gate every public request generically
+(`CostLimitExceeded` → `503 public_usage_limit`); a full-context request is simply a request whose
+pre-flight estimated cost (§ above) is checked against the same remaining-budget number. No
+strategy-specific budget logic is needed — the existing mechanism, fed a larger conservative
+estimate, already does the right thing (rejects the expensive request first if it would tip the
+month over, rather than letting several cheap RAG requests exhaust a budget a full-context request
+would have blown through in one call anyway).
+
+**Dev-only detailed diagnostics; public-safe messaging.** The existing `_feature_flags`/exposure-based
+diagnostic redaction (`run_diagnostics` omitted entirely from public responses, per
+`docs/public_deployment.md`'s "Public-payload frontend regression" entry) covers full-context
+diagnostics for free, since `answer_run_diagnostics` (§21) is computed and attached the same way
+regardless of strategy, and the *public* response path (`_run_public_question`) never attaches
+`run_diagnostics` at all today — nothing new needs to be redacted, because nothing new is exposed
+that the existing redaction point does not already own.
+
+**Public-safe error message when a full-context request is over budget or over its stricter rate
+limit:** reuse the existing `_public_safe_error`/`GateDecision` shapes, with a new `code`
+(`full_context_usage_limit` / `full_context_rate_limit`) that never mentions dollar amounts, token
+counts, or cache state — matching the existing `public_usage_limit` message's studied vagueness
+("Archivist is busy. Please wait before trying again" / "has reached its current usage limit").
+
+**Phase placement.** Public full-context access is **phase 4** (§24), not phase 1 — it requires
+real cold/warm cost measurement (§17's numbers are estimates) and real citation-validity measurement
+(§14's contract is new and unexercised) before any public reader can trigger a ~$3 API call.
+
+---
+
+## 19. Public privacy and disclosure boundary
+
+**The complete full-context prompt and full chunk set must never reach the public API response, the
+frontend, browser logs, or client-visible error details — stated explicitly, and true by
+construction in this design, not by an added filter:**
+
+- The 481-chunk serialized corpus exists only inside `full_context_pipeline.run_full_context_answer`,
+  as a local Python string built immediately before the one `tracked_responses_parse` call, and is
+  never attached to `AnswerModeResult.diagnostics` (which is text-free by the same discipline
+  `retrieval_trace_contract.py` already enforces for RAG — §21's diagnostics schema explicitly
+  forbids a `"corpus_text"`/`"prompt"`-shaped field, mirroring `_FORBIDDEN_FIELDS` in
+  `retrieval_trace_contract.py`).
+- `AnswerModeResult.final_chunks` — the only chunk-bearing field any caller reads — is, after §14's
+  local remap, always the small *cited-only* list, never the 481-chunk supply set. There is no code
+  path in this design where the full 481-chunk list is assigned to `final_chunks`.
+- The public endpoint's `_run_public_question` calls `public_sources.public_source_payload(
+  answer_result.answer, answer_result.final_chunks, ...)` exactly as it does for RAG today — unchanged
+  code, and by the point it runs, `final_chunks` is already small and cited-only, so this function
+  behaves for full context exactly as it already behaves for RAG (§4/§14).
+- Sanitized errors: a full-context failure (context-budget-exceeded, generation-contract-failed,
+  disabled-by-server) raises the same `PublicSourceError`/`HTTPException` shapes RAG failures already
+  raise in `_run_public_question`, which are already caught and rendered as the existing
+  `public_answer_unavailable`/`public_request_failed` public-safe messages — no new exception type
+  needs bespoke public-facing text, it falls into the existing catch-all.
+- Route allowlisting, request-size limits, per-client/global rate limits, concurrency limits, the
+  monthly budget ceiling, security headers (`_with_public_security_headers`), and the disabled
+  `/docs`/`/openapi.json`/management routes are all already enforced at the public-app level
+  (`_create_public_app`) independent of which strategy a request selects — full context adds a
+  request *field*, not a new route, so it inherits every one of these unmodified.
+- Server-side API keys: `openai_client()` reads `OPENAI_API_KEY` from the environment exactly as it
+  does today; nothing about full context changes key handling.
+
+**Public excerpt bounds are unchanged and still binding.** `public_sources.MAX_EXCERPT_CHARACTERS`
+(280), `MAX_EXCERPT_SOURCES` (3), `MAX_TOTAL_EXCERPT_CHARACTERS` (700), and
+`answer_has_extended_verbatim_overlap`'s 45-word contiguous-overlap guard all apply to a full-context
+answer exactly as they apply to a RAG answer, because they operate on `(answer_text, final_chunks)`
+after the strategy-specific pipeline has already reduced to that shape. Full context does not get a
+looser public quotation budget merely because it "saw more" — the reader-facing boundary is about
+what leaves the server, not about how much evidence informed the answer behind it.
+
+**One new privacy consideration full context introduces and RAG does not: the *instructions and
+document-catalog* portion of the stable prefix (§17) is corpus-shaped but not corpus-text-shaped**
+(it lists document filenames/chapter titles/chunk-id patterns, similar to what
+`rag_pipeline.build_document_catalog` already sends the RAG planner today — an existing, already-
+accepted disclosure surface, not a new one). No manuscript prose is in that block, and it already
+exists today for RAG's planner; full context reuses the same catalog-building idea, not a new
+metadata surface.
+
+---
+
+## 20. Frontend interaction design
+
+**"Evidence scope" control**, placed inside the existing `chat-answer-settings-disclosure`
+("Answer style") panel in `frontend/src/App.tsx` (the `<fieldset className="chat-answer-settings">`
+around line 1925), but as its **own** `<fieldset>`, visually and semantically separate from the
+existing "Interpretive settings" fieldset that holds the Historiographical-lens/Voice/Worldview
+`FacetSelect` controls — satisfying the brief's "keep Evidence scope clearly separate from
+lens/voice/worldview" requirement structurally, not just by convention. Two options, radio-button or
+segmented-control styled (not a `FacetSelect` dropdown, since there are only two values and the
+tradeoff is worth surfacing directly rather than hiding behind a select):
+
+- **Retrieved passages** (default, selected) — copy: *"Fast, inexpensive, retrieves the most
+  relevant passages."*
+- **Full book** (experimental) — copy: *"Slower and more expensive. Gives the model the complete
+  searchable manuscript instead of a retrieved excerpt."* Rendered disabled with a tooltip
+  ("Not enabled on this deployment") when `AppConfig.features.full_context_answers` is false —
+  **progressive disclosure** (hide/disable the option client-side when the feature is off) is not
+  the same guarantee as the server's explicit-rejection requirement (§10): the disabled control is a
+  UX convenience for the 99% case (a reader who never manually crafts a request), while the server
+  check is the actual security/correctness boundary for the 1% case (a modified client, a stale
+  cached frontend build, or a direct API call).
+
+**Answer-level badge.** Every rendered answer (both in the message thread and in any "compare"
+view, below) shows a small badge reading "Retrieved passages" or "Full book," sourced from the
+response's `answer_strategy` field — not inferred from the request, since a request could in
+principle be rejected/downgraded and the badge must reflect what actually produced the answer, not
+what was asked for.
+
+**Scope is per-turn, not fixed per conversation**, matching how `historiographical_lens`/`voice`/
+`worldview` already behave (`AnswerFacets` is turn-scoped state in `App.tsx`, sent fresh on every
+`askQuestion` call, not locked at conversation start). This keeps the two axes consistent with each
+other and lets a reader compare strategies turn-by-turn without starting a new conversation, which
+directly enables the next feature:
+
+**"Ask again using full book" / "Compare evidence scopes."** A small action attached to each
+rendered RAG answer, visible whenever `features.full_context_answers` is true, that resubmits the
+exact same resolved question (reusing `resolved_query` already returned in the response, so the
+follow-up resolver does not have to re-resolve pronouns/context a second time) with
+`answer_strategy: "full_context"` and renders the second answer alongside the first as a labeled
+pair, rather than replacing it in the conversation thread. This directly supports §22's evaluation
+story and gives a reader/owner a fast, informal, un-scored way to see the two strategies diverge —
+explicitly **not** presented as a verdict (no "which is better" indicator anywhere in the UI; that
+judgment belongs to §22's measured comparison, not a client-side heuristic).
+
+**Pending-state copy for the slower path.** The existing pending copy in `App.tsx`
+("You can draft the next question while Archivist works") is strategy-generic and stays as the
+default; when `answer_strategy === "full_context"` is the active request, it is replaced with
+something that sets latency expectations explicitly (e.g. "Reading the full manuscript — this can
+take noticeably longer than a retrieved-passage answer"), since a cold full-context call plausibly
+takes tens of seconds longer than a RAG call (unmeasured, but the token volume alone — 286K+ input
+tokens vs. RAG's low thousands — makes a materially longer generation-call latency likely; §21 adds
+the diagnostics to actually confirm this once implemented).
+
+**Public unavailability/rate-limit messaging.** The disabled-tooltip case above covers "never
+available here"; a **transient** rejection (public full-context rate limit or budget-near-exhausted,
+§18) surfaces the existing public-safe error message pattern already used for the general
+`public_usage_limit`/`request_limit` cases, with wording specific to the full-context category
+(e.g. "Full-book answers are temporarily limited. Try a retrieved-passage answer, or try again in a
+moment.") — explicitly offering the RAG fallback in the message copy, since a public reader hitting
+this limit has an immediate, always-available alternative one click away.
+
+**Accessibility/mobile.** The new fieldset follows the existing `chat-facet-grid`/`FacetSelect`
+accessibility pattern already in place (labelled `<fieldset>`/`<legend>`, `aria-describedby` linking
+to an explanatory paragraph, keyboard-operable native form controls) — no new accessibility pattern
+is introduced, the existing one is extended with one more control group.
+
+---
+
+## 21. Diagnostics and observability
+
+`full_context_coverage.py` produces a text-free diagnostics dict following the exact discipline
+`retrieval_trace_contract.py` already enforces for RAG (`_FORBIDDEN_FIELDS`: no `answer`, `chunk`,
+`content`, `excerpt`, `manuscript_text`, `prompt`, `question`, `text`, etc.) — a new schema constant,
+`archivist.full_context_run_diagnostics/1`, versioned independently of RAG's
+`archivist.answer_run_diagnostics/3` so the two can evolve without forcing a shared-schema migration,
+but structurally parallel where the concepts genuinely correspond:
+
+| Field | RAG source | Full-context source |
+|---|---|---|
+| strategy + version | *(new)* | `answer_strategy`, `answer_strategy_version` |
+| corpus/manifest identity | `corpus_manifest_sha256`, `chunks_sha256` (via `corpus_trace`) | same, shared preflight |
+| model + settings | `cohort.generator_model`/`reasoning_effort`/`verbosity` | `FULL_CONTEXT_GENERATOR_SETTINGS` equivalents |
+| prompt/input tokens | `TokenUsage.input_tokens` (ledger) | same field, shared `extract_token_usage` |
+| cached-input/cache-write tokens | `TokenUsage.cached_tokens`/`cache_write_tokens` | same, plus derived `cache_state` (§17) |
+| output/reasoning tokens | `TokenUsage.output_tokens`/`reasoning_tokens` | same |
+| estimated cost | `calculate_cost_nano_usd` | same function, surcharge-aware (§17) |
+| latency, by stage | `stage_timings_ms` (`ANSWER_STAGE_TIMING_KEYS`) | `preflight`, `conversation_resolution`, `corpus_serialization` *(new stage)*, `answer_generation`, `answer_validation`, `total` |
+| eligible chunks supplied | *(implicit: always ≤8)* | explicit count, always 481 for the current corpus — worth recording because it is the one number that changes when the manuscript does |
+| chunks cited | `len(final_chunks)` | same, but meaningfully smaller-than-supplied for full context specifically |
+| answer status | `result.status` | same field, full-context vocabulary (§12.1) |
+| content outcome | `result.content_outcome` | same enum, cross-checked value (§15) |
+| validation result + failure code | `DiagnosticValidationResult`, `CoverageValidationErrorCode` | reused enums; full context adds one new code, `unresolvable_chunk_id`, plus `context_budget_exceeded` and `absence_claim_contradicted_by_scan` |
+| public vs. dev exposure profile | *(implicit: which app instance)* | same |
+| cold/warm/unknown cache state | *(not currently tracked; §7.3 makes it meaningful)* | `cache_state` field, §17 |
+| structured generation called | `generation.get("structured_generation_called")` | same pattern |
+| retry count | always 0 (no-retry policy) | always 0, same policy |
+
+**Never stored:** questions, answers, prompts, manuscript text, or full source passages — restated
+here as an explicit constraint on the new schema, verified the same way `test_public_api.py` and (by
+extension) a new `tests/test_full_context_pipeline.py` would verify it: a test asserting the
+diagnostics dict, JSON-serialized, contains none of the forbidden substrings, mirroring
+`retrieval_trace_contract.py`'s own `validate_text_free_retrieval_trace` mechanism (reused directly
+where possible, extended with the two or three full-context-specific field names where not).
+
+---
+
+## 22. Evaluation and RAG-versus-full-context comparison
+
+**The question this section answers is explicitly open, and this document does not pre-judge it:**
+is RAG actually more useful than sending the full eligible manuscript, for this corpus, at this
+model's current capability? §13/§17 establish that full context is *feasible* (fits the context
+window) and *not free* (reliably crosses the long-context pricing tier); neither fact says anything
+about answer quality.
+
+**Design constraint carried over unmodified from `EVAL_CONTRACT.md`:** the held-out gold set
+(§3, `archivist.gold/1`) is, per the current repository state, **still an unfilled scaffold** —
+`fixtures/gold_set.template.json` is a 169-byte template, and `ROADMAP.md`'s 2026-07-30 "Current
+state" section states the owner has not yet authored the 34–46 item held-out set. This design does
+not change that fact or work around it; it specifies the comparison that will run **once** that set
+exists, and explicitly reuses the existing development-only, never-held-out status of `G001`–`G010`
+(`EVAL_CONTRACT.md` §1.5) for implementation debugging only, exactly as the brief requires: *"Use
+existing development questions only to debug the implementation — never as held-out evidence."*
+
+**Arms:**
+
+1. **Frozen RAG** — the exact evidence-planned pipeline at whatever `RAG_POLICY_VERSION` is frozen
+   at comparison time (currently `evidence-planned-v25`), unchanged by this design.
+2. **Full context** — `full_context_pipeline.run_full_context_answer` at `FULL_CONTEXT_POLICY_VERSION
+   = "full-context-v1"`.
+3. **Oracle context (non-product diagnostic upper bound)** — the model is shown *only* the gold
+   item's owner-labelled `relevant_chunk_ids` (§`EVAL_CONTRACT.md` §3.3), serialized with full
+   context's own serializer (§13) and validated with full context's own citation contract (§14), but
+   with no retrieval, planning, or evidence-gating involved. This is genuinely useful and
+   **recommended for inclusion**: it isolates "can the generation step produce a good answer given
+   exactly the right evidence" from "can either retrieval or full-context inspection find the right
+   evidence in the first place." Oracle beating both RAG and full context by a wide margin would
+   mean the bottleneck is evidence *selection* (in both directions — RAG's ranking and full context's
+   in-context attention), not evidence *volume*; oracle barely beating full context would suggest
+   full context's "see everything" approach is already capturing most of what perfect retrieval
+   would offer. It must be clearly labeled a **diagnostic, not a fourth product arm** — a reader can
+   never select "oracle" as an evidence scope, and it does not appear in §20's UI.
+
+**Held constant across all three arms** (per `EVAL_CONTRACT.md`'s cross-cohort discipline, applied
+here to a cross-*strategy* comparison rather than a cross-*version* one): the same frozen corpus
+snapshot and manifest hash; the same held-out gold question set; the same generator model snapshot,
+reasoning effort, and verbosity (§12's `FULL_CONTEXT_GENERATOR_SETTINGS` is deliberately
+initialized identical to `GENERATOR_SETTINGS`); the same interpretive baseline (neutral —
+`HistoriographicalLens.EVIDENCE_FIRST`/`AnswerVoice.SCHOLARLY`/`Worldview.NONE` — for the formal
+comparison; non-neutral settings are a separate, later question); the same no-retry policy; the same
+claim-decomposition and citation-grammar definitions from `EVAL_CONTRACT.md` §5.1/§5.2 (full
+context's claims resolve to chunk IDs the same way RAG's `[Source N]` resolves to a chunk ID, once
+the §14 remap has run — this is precisely why §14's design keeps the two strategies'
+*evaluation-facing* output shape identical); the same length policy (no hard length cap is currently
+imposed on either strategy beyond `MAX_ANSWER_UNITS`-equivalents; a comparison should report answer
+length as a *measured* variable, not hold it artificially equal, since verbosity differences are
+themselves a real result).
+
+**Metrics** (all definitions per the locked `EVAL_CONTRACT.md` §§4–5 and the drafted-not-settled
+§§6–7, applied identically to both arms, computed from the arm's *cited-only* `final_chunks`/answer
+text — which, again, is why §14's remap producing RAG-shaped output for full context matters: every
+metric below is defined over that shape already):
+
+- essential-claim coverage (`essential_coverage_context`, §4.3, computed over each arm's own
+  `final_chunks`/cited set — full context's "retrieved set" for this metric's purposes is simply the
+  chunks it ended up citing, which is a fair and directly comparable definition to RAG's post-filter
+  `S_context`);
+- citation resolvability, groundedness, and completeness (§5.3, unmodified definitions — full
+  context's citations resolve into `final_chunks` exactly like RAG's, so the mechanical
+  resolvability check needs no adaptation at all);
+- faithfulness / unsupported-claim rate, once §6 settles (judged against the union of chunks each
+  arm actually placed in its own final prompt — for full context that is arguably "all 481," but the
+  more meaningful and comparison-fair definition is the union of *cited* chunks, matching how §5's
+  citation metrics already work; this document recommends judging faithfulness against the
+  cited-chunk union for both arms, flagged as a §6 "open question" this design resolves in the
+  comparison-fairness direction rather than the literal-context-window direction, and named
+  explicitly as an interpretation choice for the owner to ratify alongside §6's other settling
+  decisions);
+- contradiction rate (`must_not_claim` violations, §6.1, unmodified);
+- premise-correction behavior (§7's `adversarial_premise` third-outcome handling, unmodified
+  definition, applied to full context's `PremiseFinding`);
+- out-of-corpus abstention / false-abstention rate (§7, unmodified definition — a full-context
+  "clean decline" is `claims == () and self_reported_content_outcome ==
+  ContentOutcome.INSUFFICIENT_EVIDENCE`, the direct full-context analogue of RAG's abstention
+  classification);
+- qualified-near-match behavior (§15's collapsed-into-ordinary-claims design, still classifiable
+  against the gold set's expected-behavior field the same way);
+- answer length, cited-source count (both simply measured, per arm);
+- cold/warm latency and cold/cached cost (§17/§21's new `cache_state` diagnostic makes this
+  reportable per-item, not just in aggregate — critical, since a comparison run entirely inside one
+  30-minute window will make full context look artificially cheap/fast relative to a real
+  intermittent-traffic deployment; the run design should deliberately include both a "warm block"
+  — items run back-to-back — and at least one deliberately cold item after an idle gap, and report
+  them separately, exactly as the brief requires);
+- error/validation-failure rates, including the new full-context-specific codes from §21.
+
+**Stratified reporting**, per `EVAL_CONTRACT.md` §3.4's strata, with particular attention to
+`focused_*` vs. `broad_thematic` — the specific split the brief calls out and the one
+`docs/rag_next_optimization_design.md`'s own history suggests is most likely to diverge (RAG's
+eight-source cap was repeatedly shown, across V6–V25, to be the binding constraint specifically for
+broad questions; full context has no such cap by construction, so this is the stratum where a
+real difference is most plausible and least surprising if found).
+
+**All eight possible outcomes are treated as valid, reportable results, not failure states of the
+experiment:**
+
+| Outcome | What it would mean for the product |
+|---|---|
+| Full context wins overall | Consider widening default eligibility, still gated on cost |
+| RAG wins overall | Full context stays an experimental/comparison feature, not a future default |
+| Tied | Cost becomes the deciding factor; RAG stays default on cost alone |
+| Full context wins broad, RAG wins focused | Exactly the split this document predicted as most plausible (§3); motivates §24 phase 5 routing, *measured*, not assumed |
+| Oracle beats both | Bottleneck is evidence selection in both directions; motivates future retrieval/attention work over either strategy alone |
+| Full context better but unacceptable public cost | Stays dev/owner-only indefinitely; the product answer is "yes, but not yet affordable" |
+| RAG cheaper but materially worse quality | Motivates raising RAG's ceiling further or accepting full context's cost for a narrower question class |
+| No measurable difference within the noise floor (§`EVAL_CONTRACT.md` §1.4) | Report it as such; do not read a difference into noise |
+
+**Automatic routing is explicitly deferred**, per §6 non-goals and restated here: nothing in this
+evaluation design licenses a "pick the strategy automatically" feature. If the results above show a
+clean stratum split, that becomes the *input* to a future, separately-scoped, separately-measured
+routing project (§24 phase 5) — not something this comparison run implements as a side effect.
+
+---
+
+## 23. Testing strategy
+
+New test modules, mirroring the existing RAG test-file split so a reviewer already familiar with
+`tests/test_rag_pipeline.py`/`tests/test_answer_coverage.py` recognizes the shape immediately:
+
+- **`tests/test_full_context_pipeline.py`** (mirrors `test_rag_pipeline.py`): corpus-identity
+  preflight failure still short-circuits before any OpenAI call (reusing the exact fixture pattern
+  `test_rag_pipeline.py` already uses for `preflight_answer_corpus` failures); strategy dispatch in
+  `web_project.answer_project_question_result` routes to the right pipeline for each
+  `AnswerStrategy` value and defaults to RAG when the field is omitted; the context-budget fail-safe
+  (§13) trips correctly on a synthetic over-large corpus fixture *without* making a network call;
+  `AnswerModeResult`'s new fields default correctly for every existing RAG construction call site
+  (one additive assertion, per §11).
+- **`tests/test_full_context_coverage.py`** (mirrors `test_answer_coverage.py`): `ChunkIdStr` pattern
+  acceptance/rejection; membership-check rejection of a well-formed-but-ineligible chunk ID
+  (`unresolvable_chunk_id`); the first-cited-order remap producing a correctly-ordered, correctly
+  deduplicated `final_chunks`; rendering producing `[Source N]`/`[Source N, Source M]` tokens that
+  are mechanically well-formed *by construction* (a test that a maliciously-shaped
+  `FullContextClaim` still cannot produce a malformed inline citation, since the model never writes
+  the bracket at all); the absence-claim-vs-scan cross-check downgrade path (§15), using the same
+  kind of synthetic corpus fixture `tests/test_evidence_policy.py` already uses for
+  `scan_evidence_target`.
+- **Shared-abstraction regression tests**, added to the *existing* files, not new ones:
+  `tests/test_rag_pipeline.py` gains one test that `AnswerModeResult`'s two new fields default to
+  `("rag", RAG_POLICY_VERSION)`; `tests/test_costs.py` gains tests for the new long-context surcharge
+  branch in `calculate_cost_nano_usd` (a synthetic `TokenUsage` with `input_tokens > 272_000`,
+  asserting the 2x/1.5x multipliers apply, and a below-threshold case asserting the existing RAG-era
+  behavior is unchanged — this is the one place a bug in this design could silently move a number
+  for every existing RAG cost estimate, so it needs the most direct regression coverage of anything
+  in this plan).
+- **`tests/test_public_api.py`** gains: a public request with `answer_strategy: "full_context"`
+  against a server with the feature disabled returns the explicit-rejection shape (§10), not a
+  downgraded RAG answer; the public full-context rate/concurrency category (§18) is enforced
+  independently of the general category (two synthetic clients, one saturating each category,
+  asserting the other is unaffected — mirroring the existing
+  `test_public_gate_enforces_rate_and_concurrency_without_waiting` pattern).
+- **`tests/test_model_config.py`** gains: `FULL_CONTEXT_GENERATOR_SETTINGS` exists, is a distinct
+  object from `GENERATOR_SETTINGS` (not a shared reference — guards against a future accidental
+  edit to one silently changing the other), and currently has identical field values (documents the
+  §12/§22 "same settings for a fair comparison" invariant as an executable assertion, not just
+  prose).
+- **Frontend**: `npm run build` type-checks the extended `AppConfig`/`askQuestion` response shape
+  (mirroring the existing release-check discipline in `docs/public_deployment.md`'s "Public-payload
+  frontend regression" entry — a new optional field must not be dereferenced as required anywhere).
+- **No test in this plan makes a real OpenAI call.** Every test above is offline, exactly matching
+  the existing suite's discipline (`BLOGNOTES.md` repeatedly notes "No OpenAI request was made while
+  implementing..." as a checkpoint before any paid smoke) — paid verification is a separate,
+  explicitly-authorized step per phase (§24), not part of the implementation test suite.
+
+**Privacy/evaluation implications of the test suite itself:** none of the new fixtures may contain
+real manuscript text, matching the existing project rule; synthetic corpora (already the pattern in
+`tests/test_evidence_policy.py`/`tests/test_faceted_retrieval.py`) are reused for full-context tests
+too.
+
+---
+
+## 24. Deployment and rollout phases
+
+Following the brief's suggested sequence; nothing in the repository's current state (a clean tree
+at V25, an unfilled held-out gold set, an undated `gpt-5.6-sol` alias) argues for a different order.
+
+**Phase 1 — contracts behind a disabled flag.** Everything in §8–§21: both new modules, the request/
+response contract additions, the frontend "Evidence scope" control (rendered but disabled unless
+`ARCHIVIST_FULL_CONTEXT_ENABLED=true` locally), the full offline test suite (§23). No public access
+(`ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED` stays false regardless of the general flag — two
+independent switches, §10). Exit criterion: full offline suite green, `ruff` clean, frontend build
+green, exactly the bar every prior RAG version has cleared before its first paid smoke
+(`BLOGNOTES.md`'s recurring "no OpenAI request was made" checkpoint).
+
+**Phase 2 — development-set comparison, cache/cost measurement, validation hardening.** With
+`ARCHIVIST_FULL_CONTEXT_ENABLED=true` locally only, run the `G001`–`G010` development set through
+full context (debugging use only, per §22 — not scored as evidence), specifically to: confirm the
+§13/§17 token/cost estimates against real `usage` objects (resolving the §17 cache-write-tokens
+field-path flag with a real response inspected directly); confirm cold vs. warm latency and cost
+empirically; and harden §14/§15's validation against whatever malformed-but-plausible model outputs
+actually occur (mirroring exactly how RAG's citation-locality/obligation-mismatch validators were
+discovered and tightened version-over-version in `BLOGNOTES.md`). This phase is expected to produce
+its own small defect list, logged in `DEFECTS.md` the same way every prior RAG version's paid smoke
+did.
+
+**Phase 3 — frozen, held-out RAG-vs-full-context evaluation.** Blocked on the owner authoring the
+34–46 item held-out gold set (§22's stated precondition, unchanged by this design). Runs the §22
+comparison design (three arms, stratified, cold+warm both represented) exactly once against that
+frozen set, at whatever RAG and full-context policy versions are frozen at that time, and publishes
+the result the same way `docs/evaluation.md`'s replacement (Brief 7, per `AGENTS.md`) publishes RAG's
+formal baseline — reproducible run identity, text-free artifact, human-readable report.
+
+**Phase 4 — optional public full context**, gated on phase 3's cost/quality numbers actually
+supporting it, with the separate public rate/concurrency/budget controls from §18
+(`ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED=true`, stricter category limits). This is the first phase
+where a member of the public can trigger a full-context OpenAI call, and it is deliberately the
+*fourth* gate, not the first — three independent checks (offline correctness, real-cost measurement,
+formal quality comparison) must pass before a stranger on the internet can spend the project's
+budget on a ~$3 cold call.
+
+**Phase 5 — question-type routing or side-by-side comparison UX, only after measurement.**
+Explicitly speculative and explicitly not designed further here, per §6's non-goals — if phase 3
+shows a clean stratum split (§22's table), this is where that finding would be spent, as its own
+separately-scoped, separately-measured project.
+
+---
+
+## 25. File-by-file implementation plan
+
+Inventory only — no file below is edited by this document.
+
+| File | Current responsibility | Proposed change | Behavior change? | Tests required | Privacy/evaluation implications |
+|---|---|---|---|---|---|
+| `src/full_context_pipeline.py` | *(does not exist)* | **New.** Orchestrator: corpus serialization, prompt assembly, one structured call, dispatch into `full_context_coverage`, build `AnswerModeResult`. | New capability only (gated off) | `tests/test_full_context_pipeline.py` (new) | Must never place all-481-chunk `final_chunks` on the result; text-free diagnostics only |
+| `src/full_context_coverage.py` | *(does not exist)* | **New.** `FullContextCoverageAnswer`/`FullContextClaim`/`PremiseFinding`/`AbsenceFinding` schemas; local chunk-ID validation, remap, rendering (§14); content-outcome cross-check (§15). | New capability only | `tests/test_full_context_coverage.py` (new) | Chunk-ID membership check is the sole gate against invented/ineligible citations reaching a client |
+| `src/rag_pipeline.py` | RAG orchestration, `AnswerModeResult`, `RAG_POLICY_VERSION`, `preflight_answer_corpus`, `without_automatic_retries` | Add `AnswerStrategy` enum; add `answer_strategy`/`answer_strategy_version` (defaulted) and loosen `plan`/`resolved_question` to `| None` on `AnswerModeResult`; promote `_required_interpretive_moves` to public/shared (§7.3) | Additive/backward-compatible only; every existing construction site unchanged | One new assertion in `tests/test_rag_pipeline.py` (field defaults) | None — no diagnostic shape changes for existing RAG rows |
+| `src/model_config.py` | `GENERATOR_SETTINGS`, `FOLLOWUP_RESOLVER_SETTINGS`, `QUERY_PLANNER_SETTINGS` | Add `FULL_CONTEXT_GENERATOR_SETTINGS` (new, distinct object, same values initially) | Additive only | `tests/test_model_config.py` addition | Enables §22's "same settings across arms" comparison to be an assertion, not a convention |
+| `src/costs.py` | `calculate_cost_nano_usd`, `extract_token_usage`, `UsageLedger` schema/queries | Add long-context surcharge branch (>272K input); verify/extend `extract_token_usage`'s `cache_write_tokens` field search (§17 flag); add nullable `answer_strategy` ledger column; extend `ANSWER_RUN_COHORT_KEYS` | **Behavior-preserving for every existing RAG request** (none crosses 272K tokens); new behavior only for full-context-sized requests | `tests/test_costs.py` additions (surcharge threshold, cache-field extraction, new-column backward compatibility) | Historical ledger rows read back with `answer_strategy IS NULL`, never backfilled |
+| `src/exposure_profile.py` | `ExposureSettings`, profile/budget/rate-limit env parsing | Add `full_context_enabled`, `public_full_context_enabled`, `public_full_context_requests_per_minute`, `public_full_context_max_concurrent_requests` | Additive; all default to current (disabled) behavior | New `ExposureSettings` construction tests | Fail-closed defaults; no env var means full context stays off |
+| `src/public_request_gate.py` | `PublicRequestGate`, single global+per-client rate/concurrency | Add optional `category` parameter to `try_enter`, second stricter limit pair for `"full_context_question"` | Additive; default category behavior unchanged | Extend `test_public_gate_enforces_rate_and_concurrency_without_waiting` | Enforces the stricter public full-context ceiling from §18 |
+| `src/web_project.py` | `answer_project_question_result` orchestration for the built-in project | Add `answer_strategy` parameter and the dispatch branch (§8); custom (`!= "current"`) projects continue to ignore it (§12.2) | New branch only reachable when explicitly requested and enabled | `tests/test_...` additions covering dispatch, not a rewrite of existing RAG-path tests | None — legacy/custom-project path unchanged |
+| `src/web_api.py` | `QuestionRequest`/`PublicQuestionRequest`, `/api/config`, question endpoints, public app factory | Add `answer_strategy` to both request models; add `answer_strategy`/`answer_strategy_version` to both response payloads; add `features.full_context_answers` to `/api/config`; add explicit-rejection branch in dev and public question handlers | Additive fields; new rejection path only triggers on an explicit, currently-impossible request shape | `tests/test_public_api.py` additions | Public rejection message must not leak *why* (budget vs. flag vs. rate) beyond "not available" |
+| `frontend/src/api.ts` | Request/response TypeScript contracts | Add `AnswerStrategy` type, `answer_strategy(_version)` fields, `features.full_context_answers` | Additive, optional fields | `npm run build` type-check (existing release-check pattern) | None |
+| `frontend/src/App.tsx` | Answer-settings UI, facet controls, conversation rendering | New "Evidence scope" fieldset (§20), answer-level strategy badge, "Compare evidence scopes" action, strategy-aware pending copy | New UI surface only, gated by `features.full_context_answers` | Existing frontend build/type-check; manual verification per `docs/public_deployment.md`'s release-check discipline | Badge must read from the response, never the request, to avoid implying a downgrade succeeded silently |
+| `docs/cost_tracking.md` | Cost-meter documentation | Document the long-context surcharge, cold/warm cost ranges, `cache_state` diagnostic | Documentation only | n/a | n/a |
+| `docs/public_demo_design.md` | Public disclosure design | Document that full context reduces to the same disclosure shape before reaching this boundary (§14/§19) | Documentation only | n/a | n/a |
+| `EVAL_CONTRACT.md` | Locked measurement contract | **Not edited by this design.** A future owner-authored addendum could add a §9 "cross-strategy comparison," but that is an owner decision (§29), not part of this implementation plan | n/a | n/a | Any such edit would itself be a logged contract change per `AGENTS.md` |
+| `src/ask.py` | CLI answer path | *(Out of scope for phase 1; optional future addition of a `--evidence-scope` flag calling the same shared pipeline)* | None in phase 1 | n/a | n/a |
+
+---
+
+## 26. Migration and backward compatibility
+
+**Requests.** Any existing client — the current frontend build, a saved script, a stale mobile
+session — that sends a `QuestionRequest`/`PublicQuestionRequest` without `answer_strategy` continues
+to get exactly today's RAG behavior, because the new field defaults to `AnswerStrategy.RAG` at the
+Pydantic level; no request-shape migration is required and none is proposed.
+
+**`n_results`/`allow_over_budget` under full context.** These fields keep their exact current
+meaning and validation (`n_results: int = Field(default=5, ge=1, le=12)`) when `answer_strategy` is
+RAG or omitted. When `answer_strategy == "full_context"`, they are accepted but ignored rather than
+rejected with a `422` — accepting-and-ignoring is chosen over rejecting because `extra="forbid"` is
+not set on the *development* `QuestionRequest` model (only the public one), and a client that always
+sends `n_results` (the current frontend does) should not be forced to conditionally omit it based on
+which evidence scope the reader picked; the field simply has no effect for that request. This is
+documented explicitly in the field's docstring/description at implementation time so it is not
+mistaken for a bug.
+
+**Responses.** `answer_strategy`/`answer_strategy_version` are new, additive top-level fields. A
+client (old frontend, a third-party integration) that does not know about them ignores them, exactly
+as today's frontend already tolerates `content_outcome` being `null` (a V25-era addition) without
+crashing — `docs/public_deployment.md`'s "Public-payload frontend regression" entry is the concrete
+precedent for treating a new response field as strictly additive and defensively read on the
+frontend, and this design follows the same discipline.
+
+**Cost ledger.** The new `answer_strategy` column is nullable; existing rows are read back as
+`NULL`, never backfilled to `"rag"` — inventing a value for historical rows would misrepresent what
+was actually recorded at the time, exactly the reasoning `BLOGNOTES.md` gives for the analogous
+`content_outcome` column ("Historical rows remain readable with no invented completeness judgment").
+
+**Evaluation artifacts.** `docs/development_cost_lineage.json`/`.md` and
+`scripts/report_evaluation_costs.py` treat a missing `answer_strategy` in an older run's identity
+object as `"rag"` **only for display/filtering convenience**, never for scoring — every run recorded
+before this design shipped *was* a RAG run (full context did not exist), so this one specific
+backfill is safe in a way the ledger-row backfill above is not (it is reconstructing a fact that was
+always true, not inventing a judgment that was never made).
+
+**Server operators.** No environment variable is required to preserve current behavior — every new
+flag (`ARCHIVIST_FULL_CONTEXT_ENABLED`, `ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED`) defaults to
+disabled, matching the existing `ARCHIVIST_EXPOSURE_PROFILE` default-to-`development` precedent. An
+operator who does nothing gets identical behavior to today, including in production, before and
+after this design ships.
+
+---
+
+## 27. Risks and mitigations
+
+| Risk | Mitigation |
+|---|---|
+| A cold full-context call is expensive enough (§17, ≈$3) that a small number of them exhausts the public monthly budget quickly | Phase 4 only, after real measurement; stricter public rate/concurrency ceiling (§18); pre-request conservative (cold-case) budget check before every call |
+| The 272K long-context surcharge is misimplemented, silently under-pricing full-context calls and corrupting the budget check | Direct, isolated `tests/test_costs.py` coverage of the surcharge branch (§23); the existing surcharge-threshold *comment* in `costs.py` becomes an executable boundary, not just prose |
+| `extract_token_usage`'s `cache_write_tokens` field lookup misses the real Responses-API field path (§17 flag), silently under-counting cache-write cost | Phase 2's real-response inspection (§24) resolves this before any cost claim is trusted; flagged explicitly rather than assumed correct |
+| A model-invented chunk ID slips through and is presented as a real citation | Hard local membership check against the exact per-request eligible-ID set (§14 step 2); fails the whole answer closed, no partial repair |
+| The model's self-reported absence/completeness claims are trusted uncritically, regressing behind RAG's certified-absence discipline | Local corpus-scan cross-check reusing `evidence_policy.scan_evidence_target` (§15), downgrading rather than trusting silently |
+| Full context "wins" an informal comparison merely because it is novel/verbose, not because it is more correct | §22's formal three-arm, stratified, held-out comparison against locked `EVAL_CONTRACT.md` definitions; no UI-level "which is better" signal (§20) |
+| A future, larger manuscript pushes the serialized corpus past a model's usable context window | Explicit pre-call budget estimate and fail-closed rejection (§13), not a silent truncation |
+| Two independent "enabled" flags (general + public) are confusing to operate correctly | Public flag is structurally powerless unless the general flag is also true (§10); documented in `docs/public_deployment.md` alongside the existing `ARCHIVIST_EXPOSURE_PROFILE`/budget precedent |
+| `public_source_payload` is accidentally called with the full 481-chunk list somewhere down the line (a future refactor mistake) | The remap in §14 happens *inside* `full_context_coverage.process_full_context_coverage`, before `AnswerModeResult` is even constructed — there is no code path that could reach `web_api.py`/`public_sources.py` holding all 481 chunks in the first place, which is a stronger guarantee than a downstream check would be |
+| RAG's existing cohort/behavior regresses because of one of the three shared-abstraction extractions (§7.3) | Each extraction is additive/defaulted by construction (§11); the surcharge branch is the one with real risk of moving an existing number, and it is the one given dedicated regression tests (§23) precisely because of that risk |
+
+---
+
+## 28. Rejected alternatives
+
+- **Raise `MAX_FINAL_SOURCES`/`MAX_SOURCES` until it swallows the corpus.** Explicitly rejected by
+  the brief and by this design: it would not be a distinct strategy, it would silently change RAG's
+  cohort identity (`EVAL_CONTRACT.md` §1.3 treats `MAX_FINAL_SOURCES` as a cohort-opening parameter),
+  it would still run every retrieval-specific step (planning, ranking, evidence-gating) on a set that
+  is no longer meaningfully "retrieved," and it would not produce a comparison — it would just make
+  RAG slower and more expensive while remaining RAG.
+- **Numeric `[Source 1]…[Source 481]` labels up front (Option B).** Rejected, §14 — no advantage
+  over structured chunk-ID citation, and does not itself produce the small cited-only list every
+  downstream disclosure component requires.
+- **A JSON-Schema `enum` of all 481 valid chunk IDs.** Rejected on a verified, concrete constraint
+  (23,753 characters of chunk-ID text against a documented 15,000-character enum-value-length limit
+  for enums over 250 values, §14/§17) — not a stylistic preference, a schema-size infeasibility at
+  this corpus's current scale.
+- **A separate "two-stage local mapping" option (C) as a third, distinct design.** Folded into the
+  recommendation (§14) rather than presented as an alternative, because a correctly-specified Option
+  A already requires exactly that local, zero-cost remap step; treating it as a separate option
+  would have been a false trichotomy.
+- **Inline `[Source {chunk_id}]` citation tokens, mirroring RAG's grammar exactly.** Rejected in
+  favor of a structured `cited_chunk_ids` array field (§14) — reusing RAG's inline grammar verbatim
+  would require the model to correctly format a much longer, less error-tolerant token and would
+  still need the same local validation step afterward, with none of the "citation locality is true
+  by construction" benefit a structured field provides.
+- **A draft-then-critic two-call full-context pipeline** (generate an answer, then a second call to
+  check it against the corpus). Rejected for the same reason RAG's `docs/rag_next_optimization_design.md`
+  rejected it for RAG: it roughly doubles cost and latency (already full context's two weakest
+  points relative to RAG, §17), and gives the second call every opportunity to simply endorse the
+  first call's omissions rather than catching them — the local chunk-ID/membership/scan-cross-check
+  validation in §14/§15 catches the failure modes that matter without a second paid call, matching
+  this project's standing "no automatic second generation or retry call in version 1" rule.
+- **A brand-new `AnswerResult` protocol/ABC shared by both strategies, instead of extending
+  `AnswerModeResult` in place.** Considered and rejected as more disruptive than necessary: it would
+  require touching every existing RAG call site's type annotations and every consumer's type
+  signature (`web_api.py`, cost-ledger recording, diagnostics) for a benefit (formal structural
+  typing) the three targeted, additive `AnswerModeResult` field changes already deliver in practice,
+  given Python's dataclass defaults make the extension fully backward compatible without a protocol
+  layer.
+- **Fixing per-conversation evidence scope (locked at conversation start) instead of per-turn.**
+  Rejected for consistency with how `historiographical_lens`/`voice`/`worldview` already behave
+  (per-turn, §16/§20) and because it would block the "ask again using full book" comparison action
+  (§20) from working within one conversation thread.
+
+---
+
+## 29. Open questions requiring owner decision
+
+Split by what can resolve them, per the brief's instruction, with a recommended default for every
+item so nothing is left vague.
+
+**Resolvable from current code (answered in this document, restated here for visibility):**
+- Where routing belongs → `web_project.answer_project_question_result` (§8/§12).
+- Whether a new module is warranted → yes, two (`full_context_pipeline.py`, `full_context_coverage.py`,
+  §12).
+- What must not be reused → planner, retrieval ranking, evidence gate, stage/obligation contracts
+  (§7.2/§12).
+- The citation contract → Option A, structured chunk-ID field, local remap (§14).
+
+**Requires local measurement (a real, budgeted, owner-authorized API call — not performed by this
+document, which made zero paid calls):**
+- The exact real-token count of the serialized corpus and instructions via the actual `openai==2.46.0`
+  Responses tokenizer/usage object, replacing the char-based approximation in §13. **Recommended
+  default until measured:** keep using the conservative header-inclusive char-based estimate
+  (§13, ≈286,000 tokens) for the pre-call budget fail-safe, biased toward over- rather than
+  under-estimating.
+- The real cold and warm per-call cost and latency (§17's ≈$3.00 cold / ≈$0.20–$0.30 warm figures
+  are estimates). **Recommended default:** treat the cold estimate as the pre-request budget-check
+  basis (§18) until a measured warm-rate is available with enough repeated samples to trust it.
+- The exact field path for `cache_write_tokens` in a live Responses-API usage object for
+  `gpt-5.6-sol` (§17 flag). **Recommended default:** extend `extract_token_usage` to check both
+  `usage.input_tokens_details.cache_write_tokens` (current) and
+  `usage.prompt_tokens_details.cache_write_tokens` (per the fetched doc), taking whichever is
+  present, until a real response settles which one it actually is.
+
+**Requires current official OpenAI documentation beyond what was fetched here (fetched 2026-07-30;
+should be re-verified if implementation happens materially later, since this is a fast-moving area):**
+- Exactly how the >272K-token long-context surcharge interacts with already-cached-rate tokens on a
+  warm call (§17's "requires verification" flag — does the 2x apply to the cached-rate tokens too,
+  or only the standard-rate remainder?). **Recommended default:** the conservative interim
+  implementation in §17 (surcharge applied to the standard-rate portion only), clearly commented as
+  an assumption, not a verified fact.
+- Whether `gpt-5.6-sol`'s dated-snapshot form exists yet (the `DEFECTS.md` "[2026-07-23]" entry says
+  no official dated identifier was documented as of that date). **Recommended default:** full
+  context inherits RAG's existing undated-alias limitation unchanged; neither strategy can produce a
+  formal run of record until this resolves, and that is an existing, already-logged constraint, not
+  a new one introduced by this design.
+
+**Requires an owner/product decision:**
+- Should a disabled full-context request ever downgrade to RAG instead of being explicitly rejected?
+  **Recommended default: no** — explicit rejection (§10), for the reasons given there. Revisit only
+  if real users are confused by the rejection in practice, and if reversed, require a
+  `strategy_downgraded`/`requested_strategy` pair in the response rather than a silent substitution.
+- Should full context ever get its own, more permissive interpretive/verbosity defaults, given it
+  has categorically more evidence to draw on? **Recommended default: no, for the phase-3 formal
+  comparison** (§22 requires identical settings across arms for the comparison to mean anything);
+  free to diverge afterward, once a comparison exists to diverge *from*.
+- Exact numeric values for the public full-context rate/concurrency/budget ceilings (§18 proposes
+  1/minute, 1 concurrent, as a starting point). **Recommended default:** the proposed conservative
+  values, revisited after phase 2/3's real cost data exists — these are placeholders explicitly
+  meant to be tightened or loosened by measurement, not final numbers.
+- Whether the oracle-context diagnostic arm (§22) is worth the extra implementation/authoring cost
+  given it never ships as a product feature. **Recommended default: yes, include it** — it is cheap
+  relative to the rest of §22 (reuses full context's own serializer/validator, just fed a
+  pre-selected chunk list) and the interpretive value (separating evidence-selection failure from
+  evidence-volume failure) is high enough to be worth a modest authoring cost.
+- Whether `src/ask.py` (CLI) should gain a `--evidence-scope` flag in phase 1 or later.
+  **Recommended default: later** — the brief and this document scope full context to the web
+  surface first; the CLI path shares the same underlying pipeline function, so adding it later is
+  cheap and not blocked by anything in this design.
+
+---
+
+## 30. Acceptance criteria for a later implementation
+
+An implementation of this design is complete only when:
+
+1. `answer_strategy` defaults to `"rag"` everywhere a request omits it, and every existing RAG
+   behavior, prompt, schema, cohort constant, and test in `tests/test_rag_pipeline.py`,
+   `tests/test_answer_coverage.py`, `tests/test_query_planning.py`, `tests/test_hybrid_retrieval.py`,
+   `tests/test_faceted_retrieval.py`, `tests/test_evidence_policy.py` passes unmodified except for
+   the additive assertions named in §23.
+2. `src/full_context_pipeline.py`/`src/full_context_coverage.py` import nothing from
+   `query_planning.py`'s planner/route/facet machinery, `retrieval.py`'s ranking/fusion/expansion
+   functions, or `evidence_policy.py`'s gate/lane-classification functions — verifiable mechanically,
+   the same way `AGENTS.md`'s "one retrieval core" rule is already verified by a test that greps the
+   source tree for duplicated primitives (§4).
+3. A synthetic structured response containing an invented (well-formed but non-eligible) chunk ID is
+   rejected closed, with no partial answer rendered.
+4. A synthetic structured response citing 481 supplied chunks but only 3 distinct chunk IDs produces
+   a `final_chunks` list of exactly 3 entries, in first-cited order, with `[Source 1]`/`[Source 2]`/
+   `[Source 3]` resolving correctly — and `public_source_payload` fed that list produces exactly 3
+   locator entries, never 481.
+5. No response from either the development or public API, under any tested request, contains the
+   full serialized corpus, the full 481-chunk list, or raw manuscript text outside the existing
+   bounded-excerpt/full-diagnostic-passage boundaries already governing RAG.
+6. A public request for `answer_strategy: "full_context"` against a server with the feature disabled
+   returns an explicit rejection, never a RAG answer, and the response makes clear (via
+   `answer_strategy` in the error context or a documented error code) that this is what happened.
+7. `costs.calculate_cost_nano_usd`'s long-context surcharge branch has dedicated passing tests and
+   demonstrably does not change the computed cost for any existing (sub-272K-token) RAG request.
+8. The full offline test suite and `ruff` pass; `npm run build` passes with the extended frontend
+   types; no OpenAI API call is made anywhere in the implementation or its test suite (paid
+   verification is a separate, explicitly-authorized phase-2 step, §24).
+9. `git diff --check` is clean and the only files changed are those inventoried in §25 — no
+   unrelated RAG file is touched.
+
+---
+
+## 31. Documentation that would need updating after implementation
+
+- `README.MD` — the architecture diagram (currently RAG-only, "GPT-5.6 Sol answer generation" as a
+  single box) and the "Current product" bullet list would need a full-context/evidence-scope
+  mention, mirroring how it already documents historiographical lens/voice/worldview as reader
+  controls.
+- `ROADMAP.md` — the "Current state and resume-evidence sequence" section would need a new numbered
+  item once phase 3 (§24) actually runs, following the same evidence-sequence discipline the existing
+  seven items already use.
+- `EVAL_CONTRACT.md` — **only if** the owner ratifies a formal cross-strategy comparison addendum
+  (§29); not touched by this design itself, and any such edit is, by `AGENTS.md`'s own rule, a
+  logged contract change, not a routine documentation update.
+- `BLOGNOTES.md` — a new dated entry per phase (mirroring every prior RAG version's entry pattern:
+  what changed, what was verified offline, what a paid smoke found), starting with phase 1's
+  "implemented offline, zero OpenAI calls" checkpoint.
+- `DEFECTS.md` — any gap this document's own writing missed (per `AGENTS.md`'s "a gap in the brief
+  is a defect" rule, applied recursively to this design document once implementation actually starts
+  and finds one) and the existing undated-`gpt-5.6-sol`-alias defect entry, which now blocks two
+  strategies' formal run-of-record status instead of one.
+- `docs/cost_tracking.md` — the long-context surcharge, cold/warm cost ranges, and the new
+  `cache_state` diagnostic (§17/§21).
+- `docs/public_demo_design.md` — a short section confirming full context reduces to the same
+  disclosure shape before reaching the public boundary (§14/§19), keeping that document's existing
+  "Public API boundary" list accurate.
+- `docs/public_deployment.md` — the readiness/release-check list (currently ten numbered anonymous
+  checks) would gain full-context-specific checks once phase 4 (§24) is reached: the feature-disabled
+  rejection, the stricter public rate category, and a confirmation that `/api/config` reports
+  `features.full_context_answers` correctly for the deployed profile.
+- `docs/web_ui.md` — the "Evidence scope" control, badge, and comparison action (§20).
+- `docs/rag_next_optimization_design.md` — a short cross-reference noting that this document is the
+  sibling strategy, not a successor version of RAG, so a future reader does not mistake
+  `full-context-v1` for `evidence-planned-v26`.

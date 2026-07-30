@@ -131,6 +131,7 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
         voice,
         worldview,
         history,
+        answer_strategy="rag",
     ):
         calls.append(
             (

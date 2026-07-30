@@ -45,6 +45,42 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-30] Full-context answer strategy opened as a second evidence scope
+Phase/Brief: Phase 1 full-context answer strategy, phase 1 of
+`docs/full_context_answer_strategy_design.md`
+Symptom: cohort opening, not a fault. A reader can now choose an evidence scope, so an answer's
+identity needs a strategy as well as a policy version. Retrieval answers are unchanged and remain
+comparable to every prior cohort; full-context answers are a new cohort with no prior runs.
+Cause: cohort opening plus three spec gaps in the design document, listed under resolution.
+Resolution and verification: added `AnswerStrategy`, two defaulted `AnswerModeResult` fields, a
+strategy-aware answer-run cohort, `src/full_context_pipeline.py`, and
+`src/full_context_coverage.py`. Both switches (`ARCHIVIST_FULL_CONTEXT_ENABLED`,
+`ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED`) default to disabled, so an operator who does nothing keeps
+exactly today's behavior. The complete offline suite passed 637 tests with one intentional skip,
+repository-wide Ruff passed, and the frontend production build passed. No OpenAI call was made.
+
+Three design gaps required an invented mechanic and are recorded here because the invention is
+unreviewed by definition:
+
+1. The design specified a separate `archivist.full_context_run_diagnostics/1` schema in §21 while
+   §10 required one shared answer-run cohort and ledger column. Those are incompatible. One shared
+   `archivist.answer_run_diagnostics/3` record was kept, with RAG-only cohort fields reported as
+   `not-applicable` for full context, following the existing `legacy_answer` precedent. This is
+   what makes a cross-strategy comparison groupable in one table.
+2. The design did not state whether the long-context surcharge applies to models without a
+   documented long-context tier. Applying it globally silently doubled the estimate for a
+   1M-token embedding request, which the existing cost tests caught. The threshold is now
+   per-model data on `ModelPricing`, set only for the GPT-5.6 family.
+3. The design's §16 implies full interpretive parity, but the structured interpretive
+   preface/coda contract in `answer_coverage` is RAG-shaped and revalidating it for a second
+   schema is its own piece of work. Version 1 passes lens, voice, and worldview through the shared
+   style block only. A non-neutral setting therefore shapes a full-context answer's prose but does
+   not produce the separately validated framing paragraphs a retrieval answer gets. The §22 formal
+   comparison runs at the neutral baseline, so this does not block the measurement.
+
+Not yet evidence of anything about answer quality. No full-context request has been made, and the
+strategy cannot be reached without explicitly enabling it.
+
 ## [2026-07-30] Broad answers validated despite unsupported required content
 Phase/Brief: Phase 1 V24 unchanged ten-question development evaluation
 Symptom: all ten V24 outputs were structurally valid with resolvable citations, but G006 received

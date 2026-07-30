@@ -463,6 +463,7 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
         voice,
         worldview,
         history,
+        answer_strategy="rag",
     ):
         captured.update(
             project_id=project_id,

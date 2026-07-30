@@ -3283,3 +3283,21 @@ def test_trace_records_post_gate_source_number_remap(monkeypatch):
         },
     ]
     assert traces[0]["selection"]["generation_context"][1]["chunk_id"] == ("synthetic_003")
+
+
+def test_answer_mode_result_defaults_to_the_retrieval_strategy():
+    from rag_pipeline import RAG_POLICY_VERSION, AnswerStrategy
+
+    result = rag_pipeline.AnswerModeResult(
+        answer="A synthetic answer [Source 1].",
+        final_chunks=[],
+        status="answered",
+        plan=None,
+        evidence_decision="direct_answer",
+        diagnostics={},
+    )
+
+    # Every existing construction site omits the strategy fields and must keep
+    # reporting the retrieval cohort exactly as it did before they existed.
+    assert result.answer_strategy == AnswerStrategy.RAG.value
+    assert result.answer_strategy_version == RAG_POLICY_VERSION

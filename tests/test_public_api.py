@@ -4,11 +4,16 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import web_api
 from exposure_profile import ExposureConfigurationError, ExposureSettings
-from public_request_gate import PublicRequestGate
+from public_request_gate import (
+    DEFAULT_CATEGORY,
+    FULL_CONTEXT_CATEGORY,
+    PublicRequestGate,
+)
 from public_sources import (
     MAX_EXCERPT_CHARACTERS,
     MAX_EXCERPT_SOURCES,
@@ -308,3 +313,125 @@ def test_development_source_payload_still_contains_diagnostic_text():
 
     assert payload["sources"][0]["text"] == "Synthetic diagnostic text."
     assert payload["display_groups"][0]["text"] == "Synthetic diagnostic text."
+
+
+def test_public_full_context_request_is_rejected_when_the_server_disables_it():
+    settings = public_settings()
+    assert settings.full_context_available is False
+
+    try:
+        web_api._run_public_question(
+            web_api.PublicQuestionRequest(
+                question="What happened?",
+                answer_strategy="full_context",
+            ),
+            settings,
+        )
+    except HTTPException as exc:
+        # Explicit rejection, never a quiet retrieval answer wearing the same shape.
+        assert exc.status_code == 503
+        assert exc.detail["code"] == "full_context_disabled"
+    else:
+        raise AssertionError("a disabled strategy must not be answered")
+
+
+def test_public_full_context_needs_both_switches_and_is_off_by_default():
+    assert public_settings().full_context_available is False
+    assert public_settings(full_context_enabled=True).full_context_available is False
+    assert public_settings(public_full_context_enabled=True).full_context_available is False
+    assert public_settings(
+        full_context_enabled=True,
+        public_full_context_enabled=True,
+    ).full_context_available is True
+
+
+def test_public_config_reports_full_context_availability_for_its_own_profile():
+    disabled = web_api._feature_flags(web_api.ExposureProfile.PUBLIC_DEMO, public_settings())
+    enabled = web_api._feature_flags(
+        web_api.ExposureProfile.PUBLIC_DEMO,
+        public_settings(full_context_enabled=True, public_full_context_enabled=True),
+    )
+
+    assert disabled["full_context_answers"] is False
+    assert enabled["full_context_answers"] is True
+
+
+def test_full_context_category_is_limited_without_starving_ordinary_questions():
+    gate = PublicRequestGate(
+        requests_per_minute=6,
+        global_requests_per_minute=20,
+        max_concurrent_requests=4,
+        max_concurrent_per_client=4,
+        category_requests_per_minute={FULL_CONTEXT_CATEGORY: 1},
+        category_max_concurrent_requests={FULL_CONTEXT_CATEGORY: 1},
+    )
+
+    assert gate.try_enter("reader-a", now=100, category=FULL_CONTEXT_CATEGORY).allowed
+    # A second full-context request inside the window is refused by the stricter
+    # category rate, which is checked before the shared client and global limits.
+    assert (
+        gate.try_enter("reader-a", now=101, category=FULL_CONTEXT_CATEGORY).reason
+        == "category_rate_limit"
+    )
+    # An ordinary question from the same reader is unaffected by that ceiling.
+    assert gate.try_enter("reader-a", now=101, category=DEFAULT_CATEGORY).allowed
+    # The rate window is per client, so once the in-flight request finishes,
+    # another reader still gets their own allowance inside the same minute.
+    gate.leave("reader-a", category=FULL_CONTEXT_CATEGORY)
+    assert gate.try_enter("reader-b", now=101, category=FULL_CONTEXT_CATEGORY).allowed
+
+
+def test_full_context_concurrency_ceiling_is_enforced_separately_from_its_rate():
+    gate = PublicRequestGate(
+        requests_per_minute=6,
+        global_requests_per_minute=20,
+        max_concurrent_requests=4,
+        max_concurrent_per_client=4,
+        category_requests_per_minute={FULL_CONTEXT_CATEGORY: 6},
+        category_max_concurrent_requests={FULL_CONTEXT_CATEGORY: 1},
+    )
+
+    assert gate.try_enter("reader-a", now=100, category=FULL_CONTEXT_CATEGORY).allowed
+    # Concurrency is global for the category: a different reader is still blocked
+    # while one expensive request is in flight.
+    assert (
+        gate.try_enter("reader-b", now=100, category=FULL_CONTEXT_CATEGORY).reason
+        == "category_concurrency_limit"
+    )
+    assert gate.try_enter("reader-b", now=100, category=DEFAULT_CATEGORY).allowed
+    gate.leave("reader-a", category=FULL_CONTEXT_CATEGORY)
+    assert gate.try_enter("reader-b", now=100, category=FULL_CONTEXT_CATEGORY).allowed
+
+
+def test_development_endpoint_rejects_a_disabled_full_context_request(monkeypatch):
+    from exposure_profile import ExposureProfile
+
+    monkeypatch.setattr(
+        web_api,
+        "EXPOSURE_SETTINGS",
+        ExposureSettings.development(full_context_enabled=False),
+    )
+    called: list[str] = []
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: called.append("answered"),
+    )
+
+    try:
+        web_api.question(
+            "current",
+            web_api.QuestionRequest(question="What happened?", answer_strategy="full_context"),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert exc.detail["code"] == "full_context_disabled"
+    else:
+        raise AssertionError("a disabled strategy must not be answered")
+
+    # Rejected before any pipeline work, so nothing was spent.
+    assert called == []
+    assert web_api._feature_flags(
+        ExposureProfile.DEVELOPMENT,
+        ExposureSettings.development(full_context_enabled=True),
+    )["full_context_answers"] is True

@@ -2883,6 +2883,75 @@ well-formed, accurately cited, and still fail to carry the argument the question
 Treating those as separate contracts turns a vague quality complaint into a measurable system
 state.
 
+### 2026-07-30 - A second evidence scope, built to be compared rather than believed
+
+- Implemented phase 1 of `docs/full_context_answer_strategy_design.md`: a reader can now choose an
+  **evidence scope**, either the existing retrieved passages or the complete eligible manuscript.
+  Retrieval remains the default and its prompts, schemas, planner, ranking, evidence gate, and
+  policy version are unchanged.
+- The point is not that a bigger context is better. Nobody has measured whether retrieval helps or
+  gets in the way for this corpus, because there has never been a second arm to compare against.
+  This builds the arm; it claims nothing about which one wins.
+- Two new modules own the strategy: `src/full_context_pipeline.py` (serialization, prompt,
+  one structured call, budget fail-safe) and `src/full_context_coverage.py` (schema, validation,
+  remap, rendering). Neither imports the planner, retrieval ranking, or evidence gate, and a test
+  parses their imports to keep it that way. None of those concepts has a referent once there is
+  nothing to rank and nothing was filtered out before the model saw it.
+- The citation contract is the load-bearing decision. The model cites **stable chunk IDs** in a
+  structured per-claim field, never an inline bracket. Local code checks every ID against the exact
+  set supplied for that request, then remaps the distinct cited IDs, in first-cited order, to
+  compact `[Source N]` labels and attaches the brackets itself.
+- Two consequences follow from that, and both are the reason it was chosen. Citation locality is
+  true by construction, because the model never writes a bracket and cannot malform one. And a
+  full-context answer arrives at the disclosure boundary in exactly the shape a retrieval answer
+  has - prose with inline citations plus a short ordered list of cited chunks - so
+  `public_source_payload`, the excerpt caps, the verbatim-overlap guard, and the frontend renderer
+  all work unmodified and never see the whole corpus.
+- An enum of the valid chunk IDs was considered and is infeasible rather than merely undesirable:
+  481 chunk IDs total 23,753 characters against a documented 15,000-character limit for a string
+  enum over 250 values.
+- Absence changes character, so the corpus scanner was repurposed rather than retired. Retrieval
+  scans to distinguish "not retrieved" from "not present." Full context has no retrieval miss to be
+  suspicious of, which makes the model's claim that something is absent an unverifiable assertion
+  about text it was shown in full. The scan now runs after generation, over every eligible chunk,
+  searching only for surfaces the user themselves wrote, and a reported absence the scan
+  contradicts downgrades the content outcome. It does not rewrite the answer, because silently
+  editing prose would put unreviewed text in front of a reader.
+- Cost accounting had to move first. `costs.py` carried a comment asserting that Archivist inputs
+  stay below the GPT-5.6 long-context surcharge threshold; that stops being true on the first
+  full-context call. The surcharge is now implemented as per-model data, and the existing cost
+  tests caught the first attempt applying it to a large embedding request. How the surcharge
+  interacts with cached-rate tokens is not settled by the documentation and is commented as an
+  assumption rather than encoded as a fact.
+- Everything is off by default. `ARCHIVIST_FULL_CONTEXT_ENABLED` and
+  `ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED` are two independent switches, and the public one is
+  structurally powerless without the general one. A request for a disabled strategy is rejected
+  explicitly rather than downgraded to retrieval, because a silent substitution would look
+  identical to a successful full-context answer and would hide exactly the divergence the
+  comparison exists to expose.
+- Verification made no OpenAI call: 639 offline tests passed with one intentional skip,
+  repository-wide Ruff passed, and the frontend production build and type-check passed.
+- Confirmed the switch end to end without spending: with `ARCHIVIST_FULL_CONTEXT_ENABLED=true` the
+  development `/api/config` reports `full_context_answers: true` and the reader control becomes
+  selectable; with the variable absent it reports false and the control stays disabled. The
+  variable is read once at process start, so a server already running when it is set never sees
+  it - `--reload` watches files, not the environment.
+- One control from the design is deliberately **not** implemented yet and is the first thing to
+  add: §18's conservative pre-request budget check. The existing guard only refuses a call when the
+  monthly budget is *already* exceeded; it does not predict that one full-context request could
+  cross the remaining budget by itself. A retrieval turn costs about fifteen cents, so that
+  distinction never mattered before. A cold full-context turn is estimated near three dollars, so
+  now it does.
+- This is a contract, not a result. No full-context request has been made. The next step is phase 2:
+  enable the flag locally, run the development questions through it for debugging only, and measure
+  real cold and warm cost, latency, and cache behavior before anything is claimed.
+
+Useful blog lesson: the honest way to ask whether retrieval earns its complexity is to build the
+alternative properly and measure it, not to argue about it. The interesting engineering was not
+sending a big prompt - it was making the expensive path produce exactly the same auditable,
+cited-only, disclosure-safe object the cheap path already produces, so the two can be compared at
+all.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

@@ -14,6 +14,7 @@ import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from time import perf_counter_ns
 from typing import Any
 
@@ -71,6 +72,7 @@ from evidence_policy import (
     tokenize_anchor,
 )
 from filters import should_skip_document
+from full_context_coverage import FullContextValidationErrorCode
 from model_config import GENERATOR_SETTINGS, QUERY_PLANNER_SETTINGS
 from perspectives import (
     AnswerVoice,
@@ -134,6 +136,7 @@ ANSWER_STAGE_TIMING_KEYS = frozenset(
         "retrieval",
         "evidence_gate",
         "context_preparation",
+        "corpus_serialization",
         "answer_generation",
         "answer_validation",
         "pipeline_total",
@@ -188,10 +191,17 @@ _INTERPRETIVE_MOVE_BY_WORLDVIEW = {
 }
 
 
-def _required_interpretive_moves(
+def interpretive_moves_for_settings(
     historiographical_lens: HistoriographicalLens | str,
     worldview: Worldview | str,
 ) -> tuple[InterpretiveMove, ...]:
+    """Map lens and worldview onto the interpretive moves generation must make.
+
+    Shared by every answer strategy: this depends only on the reader's
+    interpretive settings, never on a plan, a retrieval result, or an
+    evidence scope.
+    """
+
     selected_lens = normalize_historiographical_lens(historiographical_lens)
     selected_worldview = normalize_worldview(worldview)
     moves: list[InterpretiveMove] = []
@@ -549,17 +559,37 @@ class RagPolicy:
     absence_gate: bool = True
 
 
+class AnswerStrategy(StrEnum):
+    """Which evidence scope assembled the context for one answer.
+
+    ``RAG`` retrieves a bounded ranked context; ``FULL_CONTEXT`` supplies the
+    complete eligible corpus.  The two are sibling strategies behind one result
+    shape, not successive versions of one pipeline.
+    """
+
+    RAG = "rag"
+    FULL_CONTEXT = "full_context"
+
+
 @dataclass(frozen=True, slots=True)
 class AnswerModeResult:
     answer: str
     final_chunks: list[dict[str, Any]]
     status: str
-    plan: QuestionPlan
+    plan: QuestionPlan | None
     evidence_decision: str
     diagnostics: dict[str, Any]
+    answer_strategy: str = AnswerStrategy.RAG.value
+    answer_strategy_version: str = RAG_POLICY_VERSION
+    # Only a strategy without a QuestionPlan supplies this directly. A planned
+    # result keeps deriving the resolved question from its own original facet so
+    # the two strategies cannot disagree about the same value.
+    resolved_question_text: str | None = None
 
     @property
     def resolved_question(self) -> str:
+        if self.plan is None:
+            return self.resolved_question_text or ""
         original = next(
             (facet.search_query for facet in self.plan.facets if facet.role is FacetRole.ORIGINAL),
             "",
@@ -592,7 +622,12 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     raw_timings = raw_timings if isinstance(raw_timings, Mapping) else {}
     raw_planner = diagnostics.get("planner")
     raw_planner = raw_planner if isinstance(raw_planner, Mapping) else {}
-    valid_error_codes = {code.value for code in CoverageValidationErrorCode}
+    # Both strategies report through this one record, so a full-context failure
+    # code has to survive here rather than being flattened to "no code" - which
+    # the ledger would then reject as an invalid result with no reason attached.
+    valid_error_codes = {code.value for code in CoverageValidationErrorCode} | {
+        code.value for code in FullContextValidationErrorCode
+    }
     valid_results = {value.value for value in DiagnosticValidationResult}
     valid_content_outcomes = {value.value for value in ContentOutcome}
 
@@ -650,8 +685,15 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
         "exception_class": planner_exception_class,
         "exception_code": planner_exception_code,
     }
+    strategy_cohort = {
+        "answer_strategy": str(getattr(result, "answer_strategy", AnswerStrategy.RAG.value)),
+        "answer_strategy_version": str(
+            getattr(result, "answer_strategy_version", RAG_POLICY_VERSION)
+        ),
+    }
     if result.status == "legacy_answer":
         cohort = {
+            **strategy_cohort,
             "rag_policy_version": LEGACY_RAG_POLICY_VERSION,
             "query_planner_prompt_version": NOT_APPLICABLE_COHORT_VALUE,
             "coverage_prompt_version": NOT_APPLICABLE_COHORT_VALUE,
@@ -662,8 +704,35 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
             "generator_reasoning_effort": GENERATOR_SETTINGS.reasoning_effort,
             "generator_verbosity": GENERATOR_SETTINGS.verbosity,
         }
+    elif strategy_cohort["answer_strategy"] == AnswerStrategy.FULL_CONTEXT.value:
+        # Full context has no planner, no retrieval policy, and no coverage
+        # normalizer. Reporting RAG's constants for those would misattribute a
+        # cohort, so they are explicitly not applicable rather than defaulted.
+        cohort = {
+            **strategy_cohort,
+            "rag_policy_version": NOT_APPLICABLE_COHORT_VALUE,
+            "query_planner_prompt_version": NOT_APPLICABLE_COHORT_VALUE,
+            "coverage_prompt_version": str(
+                generation.get("prompt_version") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "normalizer_version": NOT_APPLICABLE_COHORT_VALUE,
+            "coverage_instructions_sha256": str(
+                generation.get("instructions_sha256") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "coverage_schema_sha256": str(
+                generation.get("schema_sha256") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "generator_model": str(generation.get("generator_model") or GENERATOR_SETTINGS.model),
+            "generator_reasoning_effort": str(
+                generation.get("generator_reasoning_effort") or GENERATOR_SETTINGS.reasoning_effort
+            ),
+            "generator_verbosity": str(
+                generation.get("generator_verbosity") or GENERATOR_SETTINGS.verbosity
+            ),
+        }
     else:
         cohort = {
+            **strategy_cohort,
             "rag_policy_version": str(diagnostics.get("rag_policy_version") or RAG_POLICY_VERSION),
             "query_planner_prompt_version": QUERY_PLANNER_PROMPT_VERSION,
             "coverage_prompt_version": str(
@@ -2575,7 +2644,7 @@ def build_coverage_input(
         }
         for scope in premise_source_scopes
     ]
-    required_interpretive_moves = _required_interpretive_moves(
+    required_interpretive_moves = interpretive_moves_for_settings(
         historiographical_lens,
         worldview,
     )
@@ -3077,7 +3146,7 @@ def run_evidence_planned_answer(
         voice,
         worldview,
     )
-    required_interpretive_moves = _required_interpretive_moves(
+    required_interpretive_moves = interpretive_moves_for_settings(
         historiographical_lens,
         worldview,
     )
@@ -3222,8 +3291,10 @@ def run_evidence_planned_answer(
 
 __all__ = [
     "AnswerModeResult",
+    "AnswerStrategy",
     "EVIDENCE_PLANNED_POLICY",
     "EVIDENCE_COVERAGE_INSTRUCTIONS",
+    "NOT_APPLICABLE_COHORT_VALUE",
     "RAG_POLICY_VERSION",
     "RagPolicy",
     "answer_run_diagnostics",
@@ -3232,6 +3303,7 @@ __all__ = [
     "build_coverage_input",
     "build_document_catalog",
     "build_planner_input",
+    "interpretive_moves_for_settings",
     "plan_question",
     "preflight_answer_corpus",
     "run_evidence_planned_answer",
