@@ -19,16 +19,17 @@ Maps the sequence of briefs for Archivist, a retrieval-augmented QA system over 
 Archivist is already beyond the original implementation outline in several respects. Answer Mode
 uses versioned dense/BM25 reciprocal-rank fusion over the complete eligible manuscript, the public
 demo is live with bounded source disclosure, and per-answer stage timing and token/cost records
-exist. V23 is a frozen, measured candidate that failed its reader-level release gate; the public
-deployment remains on V13 while V24's bounded structural filename-parser correction has passed
-complete offline verification and awaits an exact freeze plus focused confirmation.
+exist. V23 is a frozen, measured candidate whose focused G007 diagnostic failed mechanically; the
+public deployment remains on V13 while V24's bounded structural filename-parser correction has
+passed complete offline verification and awaits an exact freeze plus focused confirmation.
 Those are real engineering accomplishments, but they do not yet support the drafted numerical
 resume claims.
 
 The owner's existing ten-question practical set is now **development and calibration evidence**.
 It has repeatedly located defects and guided changes through V20, so it is no longer an unbiased
-held-out benchmark and must not be presented as one. It remains the immediate regression gate for
-finishing the current RAG cohort.
+held-out benchmark and must not be presented as one. G007 remains a useful mechanical sentinel for
+the V24 parser/allocation path, but its repeatedly tuned claim and target scores no longer veto
+measurement of the complete practical cohort.
 
 The next evidence-producing sequence is:
 
@@ -40,8 +41,10 @@ The next evidence-producing sequence is:
    `08_Chapter 1_ Sample title.md` because the trailing underscore is not a word boundary. V24
    corrects only that delimiter grammar; complete-shape regressions, private metadata checks,
    580 offline tests, and Ruff now pass. Freeze V24 as a new exact candidate before repeating
-   G007. The ten-question practical run and deployment remain blocked until that focused gate
-   passes.
+   G007. That focused run checks mechanical integrity—six structural bands, protected allocation,
+   the endpoint obligation, valid traces and mappings, bounded calls, and no retry. Once those
+   mechanics pass, run all ten unchanged practical questions regardless of G007's reader-quality
+   score and choose any later repair from the complete profile.
 2. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
    development-question registry, leakage and quotation audits, provenance binding, location
    carry-over check, and Git freeze validator are implemented. The owner must now supply the

@@ -45,6 +45,25 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-30] An undocumented single-item quality gate suppressed broader development evidence
+Phase/Brief: Phase 1 candidate stabilization and practical development evaluation
+Symptom: successive V19–V24 notes required G007 to reach 2/7 strict claims and 5/5 target groups
+before the unchanged ten-question development cohort could run, but `EVAL_CONTRACT.md` neither
+defined that gate nor authorized one repeatedly tuned development item to veto broader
+measurement.
+Cause: owner-confirmed measurement-governance specification gap. A useful regression question was
+allowed to serve two incompatible roles: mechanical sentinel for known broad-synthesis defects and
+reader-quality promotion gate. Repeated repairs made G007 increasingly contaminated as development
+data while its veto reduced visibility into regressions and improvements on the other nine items.
+Resolution and verification: owner-authorized contract event. `EVAL_CONTRACT.md` §1.5 now
+distinguishes predeclared mechanical invalidity from reader-quality results. A focused sentinel may
+stop the broader development run only for invalid identity, calls/retries, traces, structural
+classification, identifier mapping, or cost safety. Once mechanically valid, the complete
+unchanged practical cohort proceeds regardless of claim or target score. G001–G010 remain
+development-only and cannot become held-out gold or formal §8 release thresholds. The prior
+practical runs remain historical development observations; no formal baseline or run of record
+existed to invalidate.
+
 ## [2026-07-29] Structural filename fixture omitted the trailing title delimiter
 Phase/Brief: Phase 1 evidence-planned-v23 unchanged G007 confirmation
 Symptom: the exact frozen V23 candidate returned an explicit structural-stage insufficiency with

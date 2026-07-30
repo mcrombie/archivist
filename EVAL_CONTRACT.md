@@ -91,6 +91,38 @@ Before any metric is first published, its run-to-run spread is established by ru
 
 Re-establish the noise floor whenever the generator snapshot, judge snapshot, or sampling parameters change.
 
+### 1.5 Development diagnostics and mechanical sentinels
+
+The owner's repeatedly used practical questions, identified as `G001` through `G010`, are
+**development data**. They may diagnose failures, compare candidate behavior directionally, and
+exercise the evaluation plumbing, but they are not held-out gold evidence and their scores are not
+the passing envelopes defined in §8.
+
+A focused development item may run before the complete practical cohort as a **mechanical
+sentinel**. Its preflight must declare, before the call:
+
+- the exact frozen question and rubric identity;
+- the clean candidate commit and corpus/index identity;
+- the intended pipeline boundary and text-free trace assertions;
+- the permitted operation count, retry count, and spending cap; and
+- which failures mean that the proposed measurement would itself be invalid.
+
+Only those predeclared mechanical failures may stop the broader development measurement. Examples
+include a mismatched frozen input, dirty candidate, unexpected retry or model call, invalid or
+missing required trace, broken structural classification, unmappable source/citation identifiers,
+or a cost-safety stop. A sentinel's claim coverage, target-document coverage, answer style, or
+other reader-quality score is a **result**, not a licence to suppress the rest of the cohort.
+
+After a mechanically valid sentinel, the complete unchanged practical cohort proceeds regardless
+of whether the sentinel's reader-quality score improved. The full profile, including regressions,
+is then used to choose later development work. A mechanically invalid sentinel is repaired and
+repeated only to establish that the measurement path works; it does not acquire a quality
+threshold through repetition.
+
+No repeatedly tuned practical item may become a formal release gate or be moved into the held-out
+gold set. Formal quality decisions use the owner-authored gold set, the metrics in §§4–7, the
+noise-floor rule in §1.4, and the envelopes written into §8 at the contracted time.
+
 ---
 
 ## 2. The corpus contract

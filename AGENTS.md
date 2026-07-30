@@ -110,6 +110,20 @@ This is not hypothetical. The current `docs/evaluation.md` reaches verdicts of e
 
 If a brief tests a behavior, it states the number: k for recall, the threshold that constitutes a hit, the rubric levels a judge may return, the agreement rate that qualifies a judge for use, the spread below which a delta is noise. A criterion that can't be computed can't fail, and a criterion that can't fail isn't testing anything.
 
+### Development sentinels do not hide the cohort
+
+The repeatedly used practical questions `G001`–`G010` are development data, not held-out gold.
+A focused item may run first to prove that a changed parser, allocator, trace, citation mapper, or
+other measurement boundary works. It may block the broader development run only on a
+**predeclared mechanical invalidity**: wrong frozen identity, dirty tree, unintended call or retry,
+invalid trace, broken identifier mapping, or cost-safety stop.
+
+Its answer-quality score is never a promotion veto. Once the focused measurement is mechanically
+valid, run the complete unchanged practical cohort and report the difficult item inside that
+profile, even when it misses a previously used claim-coverage or target-coverage threshold.
+Formal quality gates belong to the owner-authored held-out gold contract, its noise floor, and its
+predeclared §8 envelopes—not to one question repeatedly used to guide repairs.
+
 ## The corpus never leaves the machine
 
 The manuscript is a commercial product sold on Amazon. Three rules, all hard:

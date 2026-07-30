@@ -2,8 +2,8 @@
 
 Status: evidence-planned-v24 implemented and verified offline; V23's unchanged G007 confirmation
 failed closed because the structural filename parser rejected the corpus's trailing underscore,
-and V24 now needs an exact freeze plus the same focused confirmation before the practical
-ten-question rerun can proceed
+and V24 now needs an exact freeze plus one mechanical G007 confirmation followed by the complete
+unchanged ten-question development run
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -2071,7 +2071,28 @@ v11, retrieval-trace schema 12, source ceiling eight, allocation logic, and mode
 are unchanged.
 
 Focused verification passed 219 tests. The complete offline suite passed 580 tests with one
-intentional skip, and repository-wide Ruff passed. No paid API call was made. This is still
-contract evidence rather than reader evidence: after an exact clean freeze, the next paid action
-remains one unchanged, no-retry G007 confirmation under the original 2/7 strict-claim plus 5/5
-target-group gate.
+intentional skip, and repository-wide Ruff passed. No paid API call was made.
+
+## Evaluation-governance correction after V24
+
+The historical entries above accurately record why earlier iterations used G007's 2/7 strict-claim
+plus 5/5 target-group threshold as a veto on the ten-question development run. That policy is now
+retired rather than silently rewritten. G007 has guided too many repairs to serve as a release
+gate, and withholding the other nine development results encouraged sequential overfitting to one
+unusually difficult item.
+
+G007 remains the correct first paid check for V24 because V24 changed the exact parser and
+structural allocation path that G007 exercises. Its predeclared pass condition is now mechanical:
+
+1. the clean frozen V24 identity and unchanged G007 material match;
+2. the catalog forms six nonempty structural bands and the trace records six required protected
+   stages without a parser-owned shortfall;
+3. the protected endpoint flows into the existing generation-obligation contract;
+4. the run makes no automatic retry and stays inside its declared planner, embedding, generation,
+   and cost boundaries; and
+5. every emitted trace, source mapping, generation contract, and citation is structurally valid.
+
+The 2/7 and 5/5 figures remain visible historical comparators, not mechanical criteria. If the
+measurement path is valid, the unchanged ten-question development evaluation proceeds even when
+G007's reader-quality score remains poor. Only a mechanically invalid run or cost-safety stop
+holds it. The complete cohort—not G007 alone—selects the next repair.

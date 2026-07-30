@@ -26,6 +26,27 @@ The SQLite ledger lives under the ignored local `runtime/` directory by default.
 `ARCHIVIST_USAGE_DB` to an alternate file path if needed. The ledger begins with the first API call
 made after tracking is installed; it does not reconstruct earlier usage.
 
+### Cross-run development lineage
+
+Per-run isolation prevents one experiment's budget from contaminating another, but it also means
+the application's normal summary is not a cumulative experiment ledger. Generate the text-free
+cross-run report from the isolated databases with:
+
+```powershell
+uv run python scripts/report_evaluation_costs.py `
+  --evaluations-root runtime/evaluations `
+  --min-version 18 `
+  --max-version 24 `
+  --json-output docs/development_cost_lineage.json `
+  --markdown-output docs/development_cost_lineage.md
+```
+
+The report reads each SQLite database in read-only mode and records only run identity, policy
+version, completion metadata, operation counts, token counts, latency, retry policy, estimated
+cost, and cumulative totals. It never emits questions, answers, sources, or manuscript text.
+Duplicate provider response IDs across run directories are treated as an error rather than
+double-counted.
+
 ## Budget controls
 
 The cost panel can set a local monthly budget, warning percentage, and optional hard stop. The hard

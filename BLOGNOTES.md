@@ -2725,6 +2725,40 @@ Useful blog lesson: “production-shaped fixture” should mean the entire gramm
 part of a filename a developer happened to be thinking about. The cheapest live failure in this
 sequence produced one of its clearest testing lessons.
 
+### 2026-07-30 - The hardest question stopped hiding the other nine
+
+- Revisited the repeated G007 promotion rule before spending on V24. G007 is the seventh question
+  in the owner's unchanged practical set: how the book treats war as an engine of federal and
+  central power. It is a valuable stress test for a long causal argument, but repeated use from
+  V18 through V24 has made it development data rather than an unbiased release test.
+- Corrected an evaluation-governance gap with the owner's authorization. The formal contract had
+  never defined the notes' 2/7-claim plus 5/5-target threshold, even though that threshold had
+  repeatedly prevented measurement of the complete ten-question cohort.
+- Split the old gate into two concepts. G007 remains V24's first paid **mechanical sentinel**
+  because it exercises the repaired filename parser, six structural bands, protected allocation,
+  endpoint obligation, traces, mappings, call count, and no-retry boundary. Its claim and target
+  scores remain visible results but can no longer veto the other nine development questions.
+- Added the rule to `EVAL_CONTRACT.md`, the standing agent instructions, roadmap, defect log, and
+  active optimization design. Historical notes retain the old decisions rather than pretending
+  they were never made. No formal baseline was invalidated because the practical set was already
+  classified as development evidence and no run of record exists.
+- Added a text-free cross-run cost-lineage generator. It reads each ignored SQLite usage ledger in
+  read-only mode, rejects duplicate provider response IDs, and reports candidate commit, status,
+  items, retries, latency, authorized cap, calls, tokens, per-operation cost, and cumulative cost
+  without reading any question, answer, source, or manuscript field into its output.
+- The first reconstruction covered seven isolated V18–V23 run directories: 47 API operations,
+  279,141 priced tokens, zero unpriced events, and **$2.965528190** estimated cumulative spend.
+  V19's interrupted pair is represented by its original and continuation ledgers rather than a
+  manually copied subtotal.
+- Three focused cost-lineage tests passed. The complete offline suite then passed **583 tests with
+  one intentional skip**, repository-wide Ruff passed, and the diff integrity check passed. No
+  API request was made during this governance and tooling work.
+
+Useful blog lesson: a difficult regression question is a microscope, not a courthouse. It can
+prove that a repaired measurement path works and reveal a severe weakness, but letting it suppress
+the rest of the experiment trades a broader diagnosis for increasingly elaborate attention to one
+familiar failure.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
