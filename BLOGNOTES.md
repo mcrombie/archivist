@@ -2952,6 +2952,56 @@ sending a big prompt - it was making the expensive path produce exactly the same
 cited-only, disclosure-safe object the cheap path already produces, so the two can be compared at
 all.
 
+### 2026-07-30 - The first full-context call cost half the estimate and was thrown away
+
+- Ran one unchanged G007 question through the frozen full-context candidate at commit `c01ce00`,
+  clean tree, isolated ledger, `$4.00` authorized cap, no retries. G007 is development data that has
+  guided repairs since V6, so this is a debugging and measurement run and its content score is not
+  evidence about either strategy.
+- The measurement corrected the design's own arithmetic. Actual input was **249,176 tokens**, not
+  the roughly 286,000 the character-based estimate predicted - about 15 percent high. That matters
+  for more than tidiness: 249,176 is **below** the documented 272,000-token long-context threshold,
+  so the 2x input and 1.5x output surcharge never applied. The predicted `$2.50`-`$3.50` cold call
+  actually cost an estimated **`$1.62514625`** in 42.154 seconds.
+- A cold full-context turn is therefore roughly ten times a retrieval turn rather than twenty, and
+  the whole corpus sits close enough to the surcharge threshold that a modestly longer manuscript,
+  or a longer conversation history, would cross it. The threshold is not a comfortable distance
+  away; it is about 9 percent away.
+- Two cache readings disagree and the ledger took the expensive one. The live response reported
+  249,173 cache-write tokens, priced at the 1.25x cache-write rate; the same response retrieved
+  afterwards reports zero for both cache fields. At zero the call prices at `$1.31374000` instead.
+  The provider dashboard is authoritative and this is now a concrete thing to check rather than the
+  open question the design flagged. Either way the extractor is reading a real field rather than
+  silently recording zero, which was the actual worry.
+- The mechanical contract held on a live response, which is what the run was for. 481 eligible
+  chunks were supplied; the answer cited 14. All 15 citation tokens resolved inside the remapped
+  1-14 range, local validation passed with no error and no repair, and `final_chunks` carried 14
+  entries rather than 481. Chunk-ID citation, membership validation, and the offline remap all
+  survived contact with a real model.
+- Then the harness threw the answer away. The run exited non-zero **after** generating and
+  validating a good answer, because `evaluation_artifacts.SmokeArtifactRecorder` requires a
+  retrieval trace for every turn and full context performs no retrieval. This is the project's
+  familiar paid-but-discarded failure class, and it cost `$1.63` to rediscover in a new place.
+- The response was recovered read-only from its stored provider ID rather than regenerated,
+  following the precedent set when a client-side timeout stranded a paid G001 result. No second
+  generation call was made.
+- The fix needed no source change. The artifact contract already models a run with no traces as
+  `not_applicable`, built for the earlier resolver-only confirmation; the full-context runner now
+  uses that existing path, and fails closed in the other direction if a retrieval trace ever does
+  appear, since that would mean full context reached the retrieval core.
+- Source coverage is recorded as an observation and nothing more. The 14 cited chunks fall in
+  Chapters 4, 11, 14, 17, 18, and 20, with no Epilogue passage. Chapter 14 is the Civil War group
+  that the V21, V22, and V24 retrieval candidates repeatedly failed to reach. That is one
+  nondeterministic sample of one development question with no strict grading performed, and the
+  missing Epilogue is exactly as real as the present Civil War chapter.
+- Still unmeasured, and now the most valuable next number: a warm call. The entire cost case for
+  this strategy rests on prefix caching, and one cold call says nothing about it.
+
+Useful blog lesson: an estimate labelled unverified is not the same as an estimate that is wrong in
+a harmless direction, and this one was wrong twice over - too high on cost, and quietly close to a
+pricing cliff it had assumed it was already past. The cheapest part of the run was the answer; the
+expensive part was discovering that a validator written for one strategy silently assumed the other.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

@@ -45,6 +45,43 @@ Entries below, most recent first.
 
 ---
 
+## [2026-07-30] A paid full-context answer was discarded by a retrieval-only artifact rule
+Phase/Brief: Phase 1 full-context answer strategy, first paid G007 debugging run
+`full-context-v1-g007-20260730-1`
+Symptom: the run generated and locally validated a good full-context answer, then exited non-zero
+with `Turn 1 completed without a retrieval trace`. `G007.json` recorded `status: error`, and no run
+summary or grading artifact was produced. Estimated spend `$1.62514625` for a discarded result.
+Cause: spec gap. `evaluation_artifacts.SmokeArtifactRecorder._finish_capture` requires at least one
+retrieval trace per captured turn. That is correct for a retrieval strategy and unsatisfiable for a
+strategy that performs no retrieval. The full-context design specified diagnostics and artifacts but
+never stated what the paid-run artifact recorder should do with a turn that has no retrieval trace.
+Resolution and verification: no source change was needed. The artifact contract already models this
+as `not_applicable` via `attach_to_summary(require_retrieval_traces=False)`, added for the earlier
+resolver-only confirmation. The full-context runner now overrides the recorder to use that existing
+path, and fails closed in the opposite direction: if a retrieval trace ever is emitted during a
+full-context turn it raises, because that would mean the strategy reached the retrieval core. The
+already-paid response was recovered read-only from its stored provider ID rather than regenerated,
+so no second generation call was made. The repaired runner loads and its overrides are in place; it
+has not been re-run, because a re-run costs another paid call and none is authorized.
+
+## [2026-07-30] The full-context cost and token estimates were both wrong
+Phase/Brief: Phase 1 full-context answer strategy, first paid G007 debugging run
+Symptom: the design estimated roughly 286,000 input tokens and a `$2.50`-`$3.50` cold call. The
+measured call used 249,176 input tokens and cost an estimated `$1.62514625`.
+Cause: model error in the design, not in the code. The character-based token estimate (characters
+divided by four) over-counted by about 15 percent, and the design then reasoned from that inflated
+figure to the conclusion that every full-context request necessarily crosses the documented 272,000
+token long-context threshold. The real request sits about 9 percent below it, so the 2x input and
+1.5x output surcharge did not apply at all.
+Resolution and verification: the estimate was explicitly labelled unverified and the pre-call
+fail-safe deliberately biased high, so the error was in the safe direction and no code behaved
+incorrectly. `costs.calculate_cost_nano_usd` applied no surcharge, which was correct for a 249,176
+token request. The measured figures are recorded in the run's private assessment and in BLOGNOTES.
+Two consequences carry forward: the corpus is much closer to the surcharge threshold than the design
+assumed, so a longer manuscript or a long conversation history could cross it; and a live response
+reported 249,173 cache-write tokens while the same response retrieved afterwards reports zero, a
+`$0.31` difference on this one call that the provider dashboard must settle.
+
 ## [2026-07-30] Full-context answer strategy opened as a second evidence scope
 Phase/Brief: Phase 1 full-context answer strategy, phase 1 of
 `docs/full_context_answer_strategy_design.md`
