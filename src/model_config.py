@@ -72,6 +72,17 @@ QUERY_PLANNER_SETTINGS = ResponseModelSettings(
     verbosity="low",
 )
 
+# A distinct object from GENERATOR_SETTINGS holding identical values. Separate so
+# full-context generation can be retuned later without silently moving the RAG
+# cohort; identical at launch so a RAG-versus-full-context comparison holds the
+# model snapshot, reasoning effort, and verbosity constant across arms.
+FULL_CONTEXT_GENERATOR_SETTINGS = ResponseModelSettings(
+    role="full-context generator",
+    model=GPT_5_6_SOL_MODEL,
+    reasoning_effort="medium",
+    verbosity="medium",
+)
+
 
 def is_dated_model_snapshot(model: str) -> bool:
     """Return true only for a model identifier ending in a valid ISO date."""

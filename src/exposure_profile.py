@@ -21,6 +21,19 @@ class ExposureConfigurationError(ValueError):
     """Raised when a startup profile would create an unsafe public service."""
 
 
+def _boolean(environment: dict[str, str], name: str) -> bool:
+    """Read a startup switch that must fail closed on anything unrecognized."""
+
+    raw_value = environment.get(name, "").strip().casefold()
+    if not raw_value:
+        return False
+    if raw_value in {"1", "true", "yes", "on"}:
+        return True
+    if raw_value in {"0", "false", "no", "off"}:
+        return False
+    raise ExposureConfigurationError(f"{name} must be a boolean")
+
+
 def _positive_int(environment: dict[str, str], name: str, default: int) -> int:
     raw_value = environment.get(name, "").strip()
     if not raw_value:
@@ -46,13 +59,32 @@ class ExposureSettings:
     public_max_concurrent_per_client: int = 1
     public_n_results: int = 5
     public_max_request_bytes: int = 24_000
+    full_context_enabled: bool = False
+    public_full_context_enabled: bool = False
+    public_full_context_requests_per_minute: int = 1
+    public_full_context_max_concurrent_requests: int = 1
 
     @property
     def is_public(self) -> bool:
         return self.profile is ExposureProfile.PUBLIC_DEMO
 
+    @property
+    def full_context_available(self) -> bool:
+        """Whether this server may run a full-context answer at all.
+
+        The public switch cannot enable the strategy on its own; it only widens
+        an already-enabled capability to the public surface. Two independent
+        switches means turning the general one off disables public access too.
+        """
+
+        if not self.full_context_enabled:
+            return False
+        if self.profile is ExposureProfile.PUBLIC_DEMO:
+            return self.public_full_context_enabled
+        return True
+
     @classmethod
-    def development(cls) -> "ExposureSettings":
+    def development(cls, *, full_context_enabled: bool = False) -> "ExposureSettings":
         return cls(
             profile=ExposureProfile.DEVELOPMENT,
             data_root=BASE_DIR,
@@ -62,6 +94,7 @@ class ExposureSettings:
                 / "edition_locators"
                 / "typeset_pdf_0706.json"
             ),
+            full_context_enabled=full_context_enabled,
         )
 
     @classmethod
@@ -77,6 +110,10 @@ class ExposureSettings:
         max_concurrent_per_client: int = 1,
         n_results: int = 5,
         max_request_bytes: int = 24_000,
+        full_context_enabled: bool = False,
+        public_full_context_enabled: bool = False,
+        full_context_requests_per_minute: int = 1,
+        full_context_max_concurrent_requests: int = 1,
     ) -> "ExposureSettings":
         try:
             budget = Decimal(str(monthly_budget_usd))
@@ -93,6 +130,8 @@ class ExposureSettings:
             "max_concurrent_per_client": max_concurrent_per_client,
             "n_results": n_results,
             "max_request_bytes": max_request_bytes,
+            "full_context_requests_per_minute": full_context_requests_per_minute,
+            "full_context_max_concurrent_requests": full_context_max_concurrent_requests,
         }
         invalid = [name for name, value in positive_values.items() if value < 1]
         if invalid:
@@ -118,6 +157,12 @@ class ExposureSettings:
             public_max_concurrent_per_client=max_concurrent_per_client,
             public_n_results=n_results,
             public_max_request_bytes=max_request_bytes,
+            full_context_enabled=full_context_enabled,
+            public_full_context_enabled=public_full_context_enabled,
+            public_full_context_requests_per_minute=full_context_requests_per_minute,
+            public_full_context_max_concurrent_requests=(
+                full_context_max_concurrent_requests
+            ),
         )
 
     @classmethod
@@ -148,11 +193,13 @@ class ExposureSettings:
             / "edition_locators"
             / "typeset_pdf_0706.json"
         )
+        full_context_enabled = _boolean(env, "ARCHIVIST_FULL_CONTEXT_ENABLED")
         if profile is ExposureProfile.DEVELOPMENT:
             return cls(
                 profile=profile,
                 data_root=data_root.resolve(),
                 locator_artifact=locator.resolve(),
+                full_context_enabled=full_context_enabled,
             )
 
         raw_budget = env.get("ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD", "").strip()
@@ -189,5 +236,20 @@ class ExposureSettings:
                 env,
                 "ARCHIVIST_PUBLIC_MAX_REQUEST_BYTES",
                 24_000,
+            ),
+            full_context_enabled=full_context_enabled,
+            public_full_context_enabled=_boolean(
+                env,
+                "ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED",
+            ),
+            full_context_requests_per_minute=_positive_int(
+                env,
+                "ARCHIVIST_PUBLIC_FULL_CONTEXT_REQUESTS_PER_MINUTE",
+                1,
+            ),
+            full_context_max_concurrent_requests=_positive_int(
+                env,
+                "ARCHIVIST_PUBLIC_FULL_CONTEXT_MAX_CONCURRENT_REQUESTS",
+                1,
             ),
         )

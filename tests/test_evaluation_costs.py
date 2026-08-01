@@ -185,6 +185,207 @@ def test_rejects_duplicate_provider_response_ids(tmp_path: Path) -> None:
         )
 
 
+def test_mixed_strategies_keep_independent_version_namespaces(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "evaluations"
+    _write_run(
+        root,
+        "evidence-planned-v1-clean-1",
+        response_prefix="rag-v1",
+        costs=(100_000_000,),
+        tokens=(100,),
+        operations=("answer_generation",),
+    )
+    _write_run(
+        root,
+        "evidence-planned-v18-clean-1",
+        response_prefix="rag-v18",
+        costs=(200_000_000,),
+        tokens=(200,),
+        operations=("answer_generation",),
+    )
+    _write_run(
+        root,
+        "full-context-v1-g007-1",
+        response_prefix="full-context-v1",
+        costs=(300_000_000,),
+        tokens=(300,),
+        operations=("answer_generation",),
+    )
+
+    report = build_development_cost_lineage(
+        root,
+        min_version=1,
+        max_version=18,
+    )
+
+    assert [
+        (row["answer_strategy"], row["answer_strategy_version"])
+        for row in report["versions"]
+    ] == [
+        ("rag", "evidence-planned-v1"),
+        ("rag", "evidence-planned-v18"),
+        ("full_context", "full-context-v1"),
+    ]
+    assert [
+        (run["answer_strategy"], run["answer_strategy_version"])
+        for run in report["runs"]
+    ] == [
+        ("rag", "evidence-planned-v1"),
+        ("rag", "evidence-planned-v18"),
+        ("full_context", "full-context-v1"),
+    ]
+    assert report["runs"][2]["run_identity"] == {
+        "run_id": "full-context-v1-g007-1",
+        "answer_strategy": "full_context",
+        "answer_strategy_version": "full-context-v1",
+        "git_commit": "a" * 40,
+        "working_tree": "clean",
+    }
+    assert report["included_strategies"] == [
+        {
+            "answer_strategy": "rag",
+            "minimum_version": 1,
+            "maximum_version": 18,
+        },
+        {
+            "answer_strategy": "full_context",
+            "minimum_version": 1,
+            "maximum_version": 1,
+        },
+    ]
+    assert report["total"]["run_count"] == 3
+    assert report["total"]["estimated_cost_usd"] == "0.600000000"
+
+
+def test_full_context_is_included_outside_the_requested_rag_version_range(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "evaluations"
+    _write_run(
+        root,
+        "evidence-planned-v18-clean-1",
+        response_prefix="rag-v18",
+        costs=(100_000_000,),
+        tokens=(100,),
+        operations=("answer_generation",),
+    )
+    _write_run(
+        root,
+        "full-context-v1-g007-1",
+        response_prefix="full-context-v1",
+        costs=(200_000_000,),
+        tokens=(200,),
+        operations=("answer_generation",),
+    )
+
+    report = build_development_cost_lineage(
+        root,
+        min_version=18,
+        max_version=18,
+    )
+
+    assert [run["run_id"] for run in report["runs"]] == [
+        "evidence-planned-v18-clean-1",
+        "full-context-v1-g007-1",
+    ]
+    assert report["total"]["estimated_cost_usd"] == "0.300000000"
+
+
+def test_rejects_duplicate_provider_response_ids_across_strategies(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "evaluations"
+    _write_run(
+        root,
+        "evidence-planned-v18-clean-1",
+        response_prefix="same-provider-response",
+        costs=(1,),
+        tokens=(1,),
+        operations=("answer_generation",),
+    )
+    _write_run(
+        root,
+        "full-context-v1-g007-1",
+        response_prefix="same-provider-response",
+        costs=(1,),
+        tokens=(1,),
+        operations=("answer_generation",),
+    )
+
+    with pytest.raises(EvaluationCostError, match="more than one evaluation ledger"):
+        build_development_cost_lineage(
+            root,
+            min_version=18,
+            max_version=18,
+        )
+
+
+def test_mixed_strategy_json_and_markdown_remain_text_free(tmp_path: Path) -> None:
+    root = tmp_path / "evaluations"
+    _write_run(
+        root,
+        "evidence-planned-v18-clean-1",
+        response_prefix="rag",
+        costs=(1,),
+        tokens=(1,),
+        operations=("answer_generation",),
+    )
+    _write_run(
+        root,
+        "full-context-v1-g007-1",
+        response_prefix="full-context",
+        costs=(1,),
+        tokens=(1,),
+        operations=("answer_generation",),
+    )
+
+    report = build_development_cost_lineage(
+        root,
+        min_version=18,
+        max_version=18,
+    )
+    serialized = json.dumps(report)
+    markdown = render_development_cost_markdown(report)
+
+    assert "must not reach the report" not in serialized
+    assert "must not reach the report" not in markdown
+    assert "full_context" in serialized
+    assert "full_context" in markdown
+
+
+def test_markdown_renderer_accepts_pre_strategy_lineage_reports(tmp_path: Path) -> None:
+    root = tmp_path / "evaluations"
+    _write_run(
+        root,
+        "evidence-planned-v18-clean-1",
+        response_prefix="rag",
+        costs=(1,),
+        tokens=(1,),
+        operations=("answer_generation",),
+    )
+    report = build_development_cost_lineage(
+        root,
+        min_version=18,
+        max_version=18,
+    )
+    legacy_report = json.loads(json.dumps(report))
+    legacy_report["schema"] = "archivist.development_cost_lineage/1"
+    legacy_report.pop("included_strategies")
+    for row in legacy_report["runs"]:
+        row.pop("answer_strategy")
+        row.pop("answer_strategy_version")
+        row.pop("run_identity")
+    for row in legacy_report["versions"]:
+        row.pop("answer_strategy")
+        row.pop("answer_strategy_version")
+
+    markdown = render_development_cost_markdown(legacy_report)
+
+    assert "| rag | evidence-planned-v18 |" in markdown
+
+
 def test_ignores_versions_outside_requested_range(tmp_path: Path) -> None:
     root = tmp_path / "evaluations"
     _write_run(

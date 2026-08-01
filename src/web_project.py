@@ -44,8 +44,10 @@ from perspectives import (
 )
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
 from query_planning import ResolvedTurn, build_question_plan
+from full_context_pipeline import run_full_context_answer
 from rag_pipeline import (
     AnswerModeResult,
+    AnswerStrategy,
     preflight_answer_corpus,
     run_evidence_planned_answer,
     without_automatic_retries,
@@ -761,9 +763,15 @@ def answer_project_question_result(
     worldview: Worldview | str = Worldview.NONE,
     resolved_turn: ResolvedTurn | None = None,
     history: Sequence[Mapping[str, object]] = (),
+    answer_strategy: AnswerStrategy | str = AnswerStrategy.RAG,
 ) -> AnswerModeResult:
-    """Answer through the versioned evidence-planned pipeline."""
+    """Answer through the selected evidence scope's pipeline.
+
+    Both strategies share this function's preflight and conversation resolution
+    and return the same result shape; they diverge only at the one dispatch below.
+    """
     answer_run_started_ns = perf_counter_ns()
+    selected_strategy = AnswerStrategy(answer_strategy)
     if perspective is not None:
         legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(
             perspective
@@ -853,21 +861,41 @@ def answer_project_question_result(
             )
         )
     conversation_resolution_ms = _elapsed_ms(resolution_started_ns)
-    result = run_evidence_planned_answer(
-        resolved_turn=turn,
-        collection_handle=collection,
-        chunks=chunks,
-        client=openai_client() if integrity.passed else object(),
-        n_results=n_results,
-        corpus_trace=corpus_trace,
-        corpus_manifest=corpus_manifest,
-        corpus_manifest_sha256=corpus_manifest_sha256,
-        corpus_integrity=integrity,
-        require_store_identity=True,
-        historiographical_lens=historiographical_lens,
-        voice=voice,
-        worldview=worldview,
-    )
+    client = openai_client() if integrity.passed else object()
+    if selected_strategy is AnswerStrategy.FULL_CONTEXT:
+        # n_results has no referent here: full context has no retrieval depth to
+        # tune. It is ignored rather than rejected so an existing client need not
+        # conditionally omit a field based on the reader's evidence scope.
+        result = run_full_context_answer(
+            resolved_turn=turn,
+            collection_handle=collection,
+            chunks=chunks,
+            client=client,
+            corpus_trace=corpus_trace,
+            corpus_manifest=corpus_manifest,
+            corpus_manifest_sha256=corpus_manifest_sha256,
+            corpus_integrity=integrity,
+            require_store_identity=True,
+            historiographical_lens=historiographical_lens,
+            voice=voice,
+            worldview=worldview,
+        )
+    else:
+        result = run_evidence_planned_answer(
+            resolved_turn=turn,
+            collection_handle=collection,
+            chunks=chunks,
+            client=client,
+            n_results=n_results,
+            corpus_trace=corpus_trace,
+            corpus_manifest=corpus_manifest,
+            corpus_manifest_sha256=corpus_manifest_sha256,
+            corpus_integrity=integrity,
+            require_store_identity=True,
+            historiographical_lens=historiographical_lens,
+            voice=voice,
+            worldview=worldview,
+        )
     return _with_stage_timings(
         result,
         preflight=preflight_ms,

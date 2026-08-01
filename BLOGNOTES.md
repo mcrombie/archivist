@@ -2883,6 +2883,179 @@ well-formed, accurately cited, and still fail to carry the argument the question
 Treating those as separate contracts turns a vague quality complaint into a measurable system
 state.
 
+### 2026-07-30 - A second evidence scope, built to be compared rather than believed
+
+- Implemented phase 1 of `docs/full_context_answer_strategy_design.md`: a reader can now choose an
+  **evidence scope**, either the existing retrieved passages or the complete eligible manuscript.
+  Retrieval remains the default and its prompts, schemas, planner, ranking, evidence gate, and
+  policy version are unchanged.
+- The point is not that a bigger context is better. Nobody has measured whether retrieval helps or
+  gets in the way for this corpus, because there has never been a second arm to compare against.
+  This builds the arm; it claims nothing about which one wins.
+- Two new modules own the strategy: `src/full_context_pipeline.py` (serialization, prompt,
+  one structured call, budget fail-safe) and `src/full_context_coverage.py` (schema, validation,
+  remap, rendering). Neither imports the planner, retrieval ranking, or evidence gate, and a test
+  parses their imports to keep it that way. None of those concepts has a referent once there is
+  nothing to rank and nothing was filtered out before the model saw it.
+- The citation contract is the load-bearing decision. The model cites **stable chunk IDs** in a
+  structured per-claim field, never an inline bracket. Local code checks every ID against the exact
+  set supplied for that request, then remaps the distinct cited IDs, in first-cited order, to
+  compact `[Source N]` labels and attaches the brackets itself.
+- Two consequences follow from that, and both are the reason it was chosen. Citation locality is
+  true by construction, because the model never writes a bracket and cannot malform one. And a
+  full-context answer arrives at the disclosure boundary in exactly the shape a retrieval answer
+  has - prose with inline citations plus a short ordered list of cited chunks - so
+  `public_source_payload`, the excerpt caps, the verbatim-overlap guard, and the frontend renderer
+  all work unmodified and never see the whole corpus.
+- An enum of the valid chunk IDs was considered and is infeasible rather than merely undesirable:
+  481 chunk IDs total 23,753 characters against a documented 15,000-character limit for a string
+  enum over 250 values.
+- Absence changes character, so the corpus scanner was repurposed rather than retired. Retrieval
+  scans to distinguish "not retrieved" from "not present." Full context has no retrieval miss to be
+  suspicious of, which makes the model's claim that something is absent an unverifiable assertion
+  about text it was shown in full. The scan now runs after generation, over every eligible chunk,
+  searching only for surfaces the user themselves wrote, and a reported absence the scan
+  contradicts downgrades the content outcome. It does not rewrite the answer, because silently
+  editing prose would put unreviewed text in front of a reader.
+- Cost accounting had to move first. `costs.py` carried a comment asserting that Archivist inputs
+  stay below the GPT-5.6 long-context surcharge threshold; that stops being true on the first
+  full-context call. The surcharge is now implemented as per-model data, and the existing cost
+  tests caught the first attempt applying it to a large embedding request. How the surcharge
+  interacts with cached-rate tokens is not settled by the documentation and is commented as an
+  assumption rather than encoded as a fact.
+- Everything is off by default. `ARCHIVIST_FULL_CONTEXT_ENABLED` and
+  `ARCHIVIST_PUBLIC_FULL_CONTEXT_ENABLED` are two independent switches, and the public one is
+  structurally powerless without the general one. A request for a disabled strategy is rejected
+  explicitly rather than downgraded to retrieval, because a silent substitution would look
+  identical to a successful full-context answer and would hide exactly the divergence the
+  comparison exists to expose.
+- Verification made no OpenAI call: 639 offline tests passed with one intentional skip,
+  repository-wide Ruff passed, and the frontend production build and type-check passed.
+- Confirmed the switch end to end without spending: with `ARCHIVIST_FULL_CONTEXT_ENABLED=true` the
+  development `/api/config` reports `full_context_answers: true` and the reader control becomes
+  selectable; with the variable absent it reports false and the control stays disabled. The
+  variable is read once at process start, so a server already running when it is set never sees
+  it - `--reload` watches files, not the environment.
+- One control from the design is deliberately **not** implemented yet and is the first thing to
+  add: §18's conservative pre-request budget check. The existing guard only refuses a call when the
+  monthly budget is *already* exceeded; it does not predict that one full-context request could
+  cross the remaining budget by itself. A retrieval turn costs about fifteen cents, so that
+  distinction never mattered before. A cold full-context turn is estimated near three dollars, so
+  now it does.
+- This is a contract, not a result. No full-context request has been made. The next step is phase 2:
+  enable the flag locally, run the development questions through it for debugging only, and measure
+  real cold and warm cost, latency, and cache behavior before anything is claimed.
+
+Useful blog lesson: the honest way to ask whether retrieval earns its complexity is to build the
+alternative properly and measure it, not to argue about it. The interesting engineering was not
+sending a big prompt - it was making the expensive path produce exactly the same auditable,
+cited-only, disclosure-safe object the cheap path already produces, so the two can be compared at
+all.
+
+### 2026-07-30 - The first full-context call cost half the estimate and was thrown away
+
+- Ran one unchanged G007 question through the frozen full-context candidate at commit `c01ce00`,
+  clean tree, isolated ledger, `$4.00` authorized cap, no retries. G007 is development data that has
+  guided repairs since V6, so this is a debugging and measurement run and its content score is not
+  evidence about either strategy.
+- The measurement corrected the design's own arithmetic. Actual input was **249,176 tokens**, not
+  the roughly 286,000 the character-based estimate predicted - about 15 percent high. That matters
+  for more than tidiness: 249,176 is **below** the documented 272,000-token long-context threshold,
+  so the 2x input and 1.5x output surcharge never applied. The predicted `$2.50`-`$3.50` cold call
+  actually cost an estimated **`$1.62514625`** in 42.154 seconds.
+- A cold full-context turn is therefore roughly ten times a retrieval turn rather than twenty, and
+  the whole corpus sits close enough to the surcharge threshold that a modestly longer manuscript,
+  or a longer conversation history, would cross it. The threshold is not a comfortable distance
+  away; it is about 9 percent away.
+- Two cache readings disagree and the ledger took the expensive one. The live response reported
+  249,173 cache-write tokens, priced at the 1.25x cache-write rate; the same response retrieved
+  afterwards reports zero for both cache fields. At zero the call prices at `$1.31374000` instead.
+  The provider dashboard is authoritative and this is now a concrete thing to check rather than the
+  open question the design flagged. Either way the extractor is reading a real field rather than
+  silently recording zero, which was the actual worry.
+- The mechanical contract held on a live response, which is what the run was for. 481 eligible
+  chunks were supplied; the answer cited 14. All 15 citation tokens resolved inside the remapped
+  1-14 range, local validation passed with no error and no repair, and `final_chunks` carried 14
+  entries rather than 481. Chunk-ID citation, membership validation, and the offline remap all
+  survived contact with a real model.
+- Then the harness threw the answer away. The run exited non-zero **after** generating and
+  validating a good answer, because `evaluation_artifacts.SmokeArtifactRecorder` requires a
+  retrieval trace for every turn and full context performs no retrieval. This is the project's
+  familiar paid-but-discarded failure class, and it cost `$1.63` to rediscover in a new place.
+- The response was recovered read-only from its stored provider ID rather than regenerated,
+  following the precedent set when a client-side timeout stranded a paid G001 result. No second
+  generation call was made.
+- The fix needed no source change. The artifact contract already models a run with no traces as
+  `not_applicable`, built for the earlier resolver-only confirmation; the full-context runner now
+  uses that existing path, and fails closed in the other direction if a retrieval trace ever does
+  appear, since that would mean full context reached the retrieval core.
+- Source coverage is recorded as an observation and nothing more. The 14 cited chunks fall in
+  Chapters 4, 11, 14, 17, 18, and 20, with no Epilogue passage. Chapter 14 is the Civil War group
+  that the V21, V22, and V24 retrieval candidates repeatedly failed to reach. Strict manual
+  grading was performed later under the same G007 rules used for retrieval: the answer realized
+  **1/7 essential claims and 4/5 target groups** while self-reporting `valid_complete`. That is one
+  nondeterministic development sample, not evidence that either strategy is better, but the
+  mismatch is direct evidence that the application cannot treat a model completeness self-report
+  as its own verdict.
+- Still unmeasured, and now the most valuable next number: a warm call. The entire cost case for
+  this strategy rests on prefix caching, and one cold call says nothing about it.
+
+Useful blog lesson: an estimate labelled unverified is not the same as an estimate that is wrong in
+a harmless direction, and this one was wrong twice over - too high on cost, and quietly close to a
+pricing cliff it had assumed it was already past. The cheapest part of the run was the answer; the
+expensive part was discovering that a validator written for one strategy silently assumed the other.
+
+### 2026-08-01 - Full context became an audited experiment instead of a trusted long answer
+
+- Reviewed the first full-context implementation against its live G007 artifact rather than the
+  design's aspirations. The mechanical citation path was sound, but the application had accepted
+  the model's own `valid_complete` label despite later grading of 1/7 strict claims and 4/5 target
+  groups. It also let the model author absence subjects and reader-facing absence prose, accepted
+  any in-corpus chunk ID without binding named targets to direct evidence, and weakly bound premise
+  corrections.
+- Opened `full-context-v2` as a new experimental cohort while leaving frozen RAG V25 untouched.
+  Trusted targets are now extracted from the reader's own words and scanned exhaustively by the
+  application. A present target needs at least one cited direct-hit chunk. An absent target needs an
+  application-certified absence and an exact target-ID binding. Zero-claim insufficiency fails
+  closed unless every trusted target passes that proof. The application writes the narrow evidence
+  boundary sentence; the model does not. If no audited target has direct manuscript evidence, any
+  extra claim now fails closed as an unsolicited analogue rather than quietly substituting a
+  related subject. This also protects resolver-restored targets whose absence is deliberately not
+  certifiable. A future analogue mode would need its own application-owned permission contract.
+- Made completeness honest. Nonempty v2 answers can be grounded and readable, but they report
+  `valid_partial` until a future application-owned requirement ledger can prove that every part of
+  the question was answered. The model's completeness field is retained only as a diagnostic for
+  measuring overconfidence. Contradictory claim/outcome shapes and incorrectly bound premise
+  corrections fail the generation contract.
+- Closed a public-disclosure hole before enabling the feature. Full context supplies the private
+  manuscript but returns only cited chunks. The original public quotation guard inspected those
+  returned chunks, so verbatim copying from an uncited chunk could evade it. Public full-context
+  answers now audit against the complete eligible private corpus. Retrieval keeps the identical
+  established `final_chunks` path, with a regression proving it never loads the full corpus.
+- Added the pre-request hard-budget projection omitted from v1. Archivist prices maximum output
+  under both ordinary uncached-input and observed cache-write shapes, takes the larger estimate,
+  and refuses the call if it would cross the remaining monthly hard limit. The explicit
+  `allow_over_budget` development override still works; public callers have no such override.
+- Repaired cumulative cost accounting. The former report discovered only
+  `evidence-planned-vN` directories and silently excluded the paid full-context call. Schema `/2`
+  separates strategy from strategy version, rejects duplicate provider response IDs across both
+  lineages, and reports **11 runs, 79 completed API operations, 745,657 priced tokens, and
+  `$6.436979020` estimated cumulative development API cost**. The report remains text-free.
+- Split the structured response and run-diagnostic schema identifiers, which v1 had accidentally
+  made identical. Full-context response, prompt, renderer, and policy versions all advanced
+  together to v2; both public and general feature flags remain disabled by default.
+- Verification used no provider calls. The combined focused repair suite passed **120 tests**;
+  the complete offline suite passed **667 tests with one intentional skip**; repository-wide Ruff
+  lint passed; the production frontend TypeScript/Vite build passed; and whitespace integrity
+  passed. Ruff's repository-wide formatter check still reports the pre-existing 51-file formatting
+  baseline, so no unrelated mechanical reformat was mixed into this repair.
+
+Useful blog lesson: giving a model the whole book removes retrieval scarcity, not the need for
+contracts. The elegant context window is only half the system. The other half is deciding which
+claims the application itself can verify: what the reader actually named, where that name occurs,
+whether an absence is certifiable, whether a source was merely available or actually used, and
+whether an expensive request should be permitted before it is sent.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

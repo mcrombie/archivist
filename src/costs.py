@@ -25,6 +25,9 @@ PRICING_VERSION = "2026-07-22"
 CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
 TOKENS_PER_MILLION = Decimal("1000000")
+LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000
+LONG_CONTEXT_INPUT_MULTIPLIER = Decimal("2")
+LONG_CONTEXT_OUTPUT_MULTIPLIER = Decimal("1.5")
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 HISTORICAL_PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
@@ -37,6 +40,7 @@ ANSWER_RUN_TIMING_KEYS = frozenset(
         "retrieval",
         "evidence_gate",
         "context_preparation",
+        "corpus_serialization",
         "answer_generation",
         "answer_validation",
         "pipeline_total",
@@ -54,6 +58,15 @@ ANSWER_RUN_COHORT_KEYS = frozenset(
         "generator_model",
         "generator_reasoning_effort",
         "generator_verbosity",
+    }
+)
+# Optional because rows written before answer strategies existed do not carry
+# them. A missing key reads back as absent rather than being backfilled to
+# "rag", which would invent a distinction the row never recorded.
+ANSWER_RUN_STRATEGY_COHORT_KEYS = frozenset(
+    {
+        "answer_strategy",
+        "answer_strategy_version",
     }
 )
 ANSWER_RUN_PLANNER_V1_KEYS = frozenset(
@@ -86,6 +99,10 @@ _HISTORICAL_UNKNOWN_PLANNER_JSON = json.dumps(
 )
 _DIAGNOSTIC_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _COHORT_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+# Strategy identifiers are snake_case enum values, so they need the underscore
+# the older hyphenated version strings never used. Kept separate rather than
+# widening the shared pattern so version-string validation stays exactly as strict.
+_STRATEGY_COHORT_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/_-]{0,127}$")
 _EXCEPTION_CLASS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _HTTP_STATUS_CODE_PATTERN = re.compile(r"^[1-5][0-9]{2}$")
 SAFE_PLANNER_EXCEPTION_CODES = frozenset(
@@ -120,15 +137,43 @@ class ModelPricing:
     cached_input_usd_per_million: Decimal
     output_usd_per_million: Decimal
     cache_write_multiplier: Decimal = Decimal("1")
+    # Only the GPT-5.6 family documents a long-context tier. A model without a
+    # threshold is priced at one flat rate however large the request is, which is
+    # why this is per-model data rather than one global constant.
+    long_context_input_token_threshold: int | None = None
 
 
 MODEL_PRICING: dict[str, ModelPricing] = {
     "gpt-5": ModelPricing(Decimal("1.25"), Decimal("0.125"), Decimal("10")),
     "gpt-5-2025-08-07": ModelPricing(Decimal("1.25"), Decimal("0.125"), Decimal("10")),
-    "gpt-5.6": ModelPricing(Decimal("5"), Decimal("0.50"), Decimal("30"), Decimal("1.25")),
-    "gpt-5.6-sol": ModelPricing(Decimal("5"), Decimal("0.50"), Decimal("30"), Decimal("1.25")),
-    "gpt-5.6-terra": ModelPricing(Decimal("2.50"), Decimal("0.25"), Decimal("15"), Decimal("1.25")),
-    "gpt-5.6-luna": ModelPricing(Decimal("1"), Decimal("0.10"), Decimal("6"), Decimal("1.25")),
+    "gpt-5.6": ModelPricing(
+        Decimal("5"),
+        Decimal("0.50"),
+        Decimal("30"),
+        Decimal("1.25"),
+        LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
+    ),
+    "gpt-5.6-sol": ModelPricing(
+        Decimal("5"),
+        Decimal("0.50"),
+        Decimal("30"),
+        Decimal("1.25"),
+        LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
+    ),
+    "gpt-5.6-terra": ModelPricing(
+        Decimal("2.50"),
+        Decimal("0.25"),
+        Decimal("15"),
+        Decimal("1.25"),
+        LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
+    ),
+    "gpt-5.6-luna": ModelPricing(
+        Decimal("1"),
+        Decimal("0.10"),
+        Decimal("6"),
+        Decimal("1.25"),
+        LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
+    ),
     "text-embedding-3-small": ModelPricing(Decimal("0.02"), Decimal("0.02"), Decimal("0")),
     "text-embedding-3-large": ModelPricing(Decimal("0.13"), Decimal("0.13"), Decimal("0")),
 }
@@ -234,6 +279,11 @@ def extract_token_usage(response: object) -> TokenUsage | None:
 
     input_details = _value(usage, "input_tokens_details") or {}
     output_details = _value(usage, "output_tokens_details") or {}
+    # Responses reports cache detail under input_tokens_details; Chat Completions
+    # uses prompt_tokens_details. Both are searched because which one carries
+    # cache-write counts on a given model is not settled, and silently reading
+    # zero would understate the cost of the first full-context call.
+    prompt_details = _value(usage, "prompt_tokens_details") or {}
     raw_input_tokens = _first_int(usage, "input_tokens", "prompt_tokens")
     cached_tokens = _first_int(
         input_details,
@@ -241,6 +291,13 @@ def extract_token_usage(response: object) -> TokenUsage | None:
         "cache_read_input_tokens",
         "cached_input_tokens",
     )
+    if cached_tokens is None:
+        cached_tokens = _first_int(
+            prompt_details,
+            "cached_tokens",
+            "cache_read_input_tokens",
+            "cached_input_tokens",
+        )
     if cached_tokens is None:
         cached_tokens = _first_int(
             usage,
@@ -254,6 +311,13 @@ def extract_token_usage(response: object) -> TokenUsage | None:
         "cache_creation_tokens",
         "cache_creation_input_tokens",
     )
+    if cache_write_tokens is None:
+        cache_write_tokens = _first_int(
+            prompt_details,
+            "cache_write_tokens",
+            "cache_creation_tokens",
+            "cache_creation_input_tokens",
+        )
     if cache_write_tokens is None:
         cache_write_tokens = _first_int(
             usage,
@@ -319,16 +383,32 @@ def calculate_cost_nano_usd(model: str, usage: TokenUsage) -> int | None:
         0,
         usage.input_tokens - usage.cached_tokens - usage.cache_write_tokens,
     )
+    # Documented GPT-5.6 long-context tier: a prompt above the threshold is
+    # priced at 2x input and 1.5x output for the whole request. Every retrieval
+    # answer stays far below it; a full-context answer crosses it on every call.
+    threshold = pricing.long_context_input_token_threshold
+    over_long_context_threshold = threshold is not None and usage.input_tokens > threshold
+    input_multiplier = (
+        LONG_CONTEXT_INPUT_MULTIPLIER if over_long_context_threshold else Decimal("1")
+    )
+    output_multiplier = (
+        LONG_CONTEXT_OUTPUT_MULTIPLIER if over_long_context_threshold else Decimal("1")
+    )
+    # ASSUMPTION, not verified against OpenAI documentation: the surcharge is
+    # applied to standard-rate input only, leaving already-discounted cached
+    # reads at their cached rate. This is the conservative reading for a warm
+    # call; confirm against a real long-context response before quoting a
+    # cached-call cost. See docs/full_context_answer_strategy_design.md §17.
     cost_usd_per_million = (
-        Decimal(standard_input_tokens) * pricing.input_usd_per_million
+        Decimal(standard_input_tokens) * pricing.input_usd_per_million * input_multiplier
         + Decimal(usage.cached_tokens) * pricing.cached_input_usd_per_million
         + Decimal(usage.cache_write_tokens)
         * pricing.input_usd_per_million
         * pricing.cache_write_multiplier
-        + Decimal(usage.output_tokens) * pricing.output_usd_per_million
+        * input_multiplier
+        + Decimal(usage.output_tokens) * pricing.output_usd_per_million * output_multiplier
     )
     # Reasoning tokens are a subset of output tokens and are intentionally not added here.
-    # Archivist inputs are bounded below the GPT-5.6 long-context surcharge threshold.
     nano_usd = cost_usd_per_million * NANO_USD_PER_USD / TOKENS_PER_MILLION
     return int(nano_usd.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
@@ -403,7 +483,10 @@ def _normalized_answer_run_diagnostics(
         raise ValueError("answer-run diagnostics use an unsupported schema")
 
     raw_cohort = diagnostics.get("cohort")
-    if not isinstance(raw_cohort, Mapping) or set(raw_cohort) != ANSWER_RUN_COHORT_KEYS:
+    if (
+        not isinstance(raw_cohort, Mapping)
+        or set(raw_cohort) - ANSWER_RUN_STRATEGY_COHORT_KEYS != ANSWER_RUN_COHORT_KEYS
+    ):
         raise ValueError("answer-run diagnostics contain invalid cohort fields")
     cohort: dict[str, str] = {}
     for key, value in raw_cohort.items():
@@ -418,6 +501,8 @@ def _normalized_answer_run_diagnostics(
                 value in {"not-applicable", "unknown"}
                 or _SHA256_PATTERN.fullmatch(value) is not None
             )
+        elif key in ANSWER_RUN_STRATEGY_COHORT_KEYS:
+            valid_value = _STRATEGY_COHORT_VALUE_PATTERN.fullmatch(value) is not None
         else:
             valid_value = _COHORT_VALUE_PATTERN.fullmatch(value) is not None
         if not valid_value:
@@ -608,6 +693,7 @@ class UsageLedger:
                 evidence_decision TEXT NOT NULL,
                 validation_result TEXT NOT NULL,
                 content_outcome TEXT,
+                answer_strategy TEXT,
                 validation_error_code TEXT,
                 repair_applied INTEGER NOT NULL CHECK (repair_applied IN (0, 1)),
                 repair_codes_json TEXT NOT NULL,
@@ -660,6 +746,16 @@ class UsageLedger:
                 """
                 ALTER TABLE answer_run_diagnostics
                 ADD COLUMN content_outcome TEXT
+                """
+            )
+        if "answer_strategy" not in diagnostic_columns:
+            # Nullable and never backfilled: a row written before answer
+            # strategies existed did not record one, and writing "rag" now would
+            # assert an identity the run never carried.
+            connection.execute(
+                """
+                ALTER TABLE answer_run_diagnostics
+                ADD COLUMN answer_strategy TEXT
                 """
             )
         connection.execute(
@@ -750,9 +846,10 @@ class UsageLedger:
                 INSERT INTO answer_run_diagnostics (
                     run_id, recorded_at, project_id, conversation_id, turn_id,
                     answer_status, evidence_decision, validation_result,
-                    content_outcome, validation_error_code, repair_applied, repair_codes_json,
+                    content_outcome, answer_strategy,
+                    validation_error_code, repair_applied, repair_codes_json,
                     cohort_json, planner_json, stage_timings_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project_id, conversation_id, turn_id) DO UPDATE SET
                     run_id = excluded.run_id,
                     recorded_at = excluded.recorded_at,
@@ -760,6 +857,7 @@ class UsageLedger:
                     evidence_decision = excluded.evidence_decision,
                     validation_result = excluded.validation_result,
                     content_outcome = excluded.content_outcome,
+                    answer_strategy = excluded.answer_strategy,
                     validation_error_code = excluded.validation_error_code,
                     repair_applied = excluded.repair_applied,
                     repair_codes_json = excluded.repair_codes_json,
@@ -777,6 +875,7 @@ class UsageLedger:
                     normalized["evidence_decision"],
                     normalized["validation_result"],
                     normalized["content_outcome"],
+                    normalized["cohort"].get("answer_strategy"),
                     normalized["validation_error_code"],
                     int(bool(normalized["repair_applied"])),
                     json.dumps(normalized["repair_codes"], separators=(",", ":")),
@@ -810,7 +909,8 @@ class UsageLedger:
             row = connection.execute(
                 """
                 SELECT run_id, recorded_at, answer_status, evidence_decision,
-                       validation_result, content_outcome, validation_error_code, repair_applied,
+                       validation_result, content_outcome, answer_strategy,
+                       validation_error_code, repair_applied,
                        repair_codes_json, cohort_json, planner_json,
                        stage_timings_json
                 FROM answer_run_diagnostics
@@ -829,6 +929,9 @@ class UsageLedger:
             "validation_result": str(row["validation_result"]),
             "content_outcome": (
                 str(row["content_outcome"]) if row["content_outcome"] is not None else None
+            ),
+            "answer_strategy": (
+                str(row["answer_strategy"]) if row["answer_strategy"] is not None else None
             ),
             "validation_error_code": (
                 str(row["validation_error_code"])
@@ -1201,6 +1304,44 @@ def enforce_usage_budget(ledger: UsageLedger | None = None) -> None:
     budget = (ledger or UsageLedger()).budget_state()
     if budget["hard_limit_enabled"] and budget["exceeded"]:
         raise CostLimitExceeded(budget)
+
+
+def enforce_projected_usage_budget(
+    projected_cost_nano_usd: int,
+    ledger: UsageLedger | None = None,
+) -> None:
+    """Reject a request whose conservative estimate exceeds the remaining budget.
+
+    The ordinary pre-call check prevents spending after the monthly limit has
+    already been reached. Long-context requests also need this prospective
+    check because a single call can be materially larger than a retrieval-sized
+    answer.
+    """
+
+    if projected_cost_nano_usd < 0:
+        raise ValueError("projected_cost_nano_usd must be non-negative")
+    context = current_usage_context()
+    if not context.enforce_budget or context.allow_over_budget:
+        return
+
+    budget = (ledger or UsageLedger()).budget_state()
+    if not budget["hard_limit_enabled"]:
+        return
+
+    remaining_usd = budget.get("remaining_usd")
+    projected_exceeds_remaining = bool(
+        remaining_usd is not None
+        and projected_cost_nano_usd > _nano_from_usd(str(remaining_usd))
+    )
+    if budget["exceeded"] or projected_exceeds_remaining:
+        blocked_budget = dict(budget)
+        blocked_budget.update(
+            {
+                "projected_request_usd": _usd_from_nano(projected_cost_nano_usd),
+                "projected_exceeds_remaining": projected_exceeds_remaining,
+            }
+        )
+        raise CostLimitExceeded(blocked_budget)
 
 
 def tracked_responses_create(client: object, *, operation: str, **request: Any) -> object:

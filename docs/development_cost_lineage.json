@@ -1,15 +1,36 @@
 {
-  "schema": "archivist.development_cost_lineage/1",
+  "schema": "archivist.development_cost_lineage/2",
   "source": "isolated read-only runtime evaluation ledgers",
   "privacy": "text-free; no questions, answers, sources, or manuscript passages",
   "version_range": {
     "minimum": 18,
-    "maximum": 24
+    "maximum": 25
   },
+  "included_strategies": [
+    {
+      "answer_strategy": "rag",
+      "minimum_version": 18,
+      "maximum_version": 24
+    },
+    {
+      "answer_strategy": "full_context",
+      "minimum_version": 1,
+      "maximum_version": 1
+    }
+  ],
   "runs": [
     {
       "run_id": "evidence-planned-v18-clean-20260729-1",
       "policy_version": "evidence-planned-v18",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v18",
+      "run_identity": {
+        "run_id": "evidence-planned-v18-clean-20260729-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v18",
+        "git_commit": "97ca2bc96fd1cb6408cc0d80f63ec6ffa54bd2dd",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "97ca2bc96fd1cb6408cc0d80f63ec6ffa54bd2dd",
       "working_tree": "clean",
@@ -63,6 +84,15 @@
     {
       "run_id": "evidence-planned-v19-confirm-g006-g007-20260729-1",
       "policy_version": "evidence-planned-v19",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v19",
+      "run_identity": {
+        "run_id": "evidence-planned-v19-confirm-g006-g007-20260729-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v19",
+        "git_commit": "3c393103f08a06be924e3dc44be90f8f0957020f",
+        "working_tree": "clean"
+      },
       "status": "error",
       "git_commit": "3c393103f08a06be924e3dc44be90f8f0957020f",
       "working_tree": "clean",
@@ -107,6 +137,15 @@
     {
       "run_id": "evidence-planned-v19-continuation-g007-20260729-1",
       "policy_version": "evidence-planned-v19",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v19",
+      "run_identity": {
+        "run_id": "evidence-planned-v19-continuation-g007-20260729-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v19",
+        "git_commit": "3c393103f08a06be924e3dc44be90f8f0957020f",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "3c393103f08a06be924e3dc44be90f8f0957020f",
       "working_tree": "clean",
@@ -151,6 +190,15 @@
     {
       "run_id": "evidence-planned-v20-confirm-g006-g007-20260729-1",
       "policy_version": "evidence-planned-v20",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v20",
+      "run_identity": {
+        "run_id": "evidence-planned-v20-confirm-g006-g007-20260729-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v20",
+        "git_commit": "f13534a85d410a1889cb035b2ce7dac20fe42872",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "f13534a85d410a1889cb035b2ce7dac20fe42872",
       "working_tree": "clean",
@@ -196,6 +244,15 @@
     {
       "run_id": "evidence-planned-v21-confirm-g007-20260729-1",
       "policy_version": "evidence-planned-v21",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v21",
+      "run_identity": {
+        "run_id": "evidence-planned-v21-confirm-g007-20260729-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v21",
+        "git_commit": "bf424c880bca4728a8d13225f85978e27a8d8dcf",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "bf424c880bca4728a8d13225f85978e27a8d8dcf",
       "working_tree": "clean",
@@ -240,6 +297,15 @@
     {
       "run_id": "evidence-planned-v22-confirm-g007-20260729-1",
       "policy_version": "evidence-planned-v22",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v22",
+      "run_identity": {
+        "run_id": "evidence-planned-v22-confirm-g007-20260729-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v22",
+        "git_commit": "0691b3da9a4926097c7d013d79266eee62f7de9b",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "0691b3da9a4926097c7d013d79266eee62f7de9b",
       "working_tree": "clean",
@@ -284,6 +350,15 @@
     {
       "run_id": "evidence-planned-v23-confirm-g007-20260729-1",
       "policy_version": "evidence-planned-v23",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v23",
+      "run_identity": {
+        "run_id": "evidence-planned-v23-confirm-g007-20260729-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v23",
+        "git_commit": "d89f4332b21f0e41cb445780abe10f997b52626c",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "d89f4332b21f0e41cb445780abe10f997b52626c",
       "working_tree": "clean",
@@ -321,6 +396,15 @@
     {
       "run_id": "evidence-planned-v24-clean-20260730-1",
       "policy_version": "evidence-planned-v24",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v24",
+      "run_identity": {
+        "run_id": "evidence-planned-v24-clean-20260730-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v24",
+        "git_commit": "67c735fff37d26288a2a887205b0a20682d9320d",
+        "working_tree": "clean"
+      },
       "status": "error",
       "git_commit": "67c735fff37d26288a2a887205b0a20682d9320d",
       "working_tree": "clean",
@@ -343,6 +427,15 @@
     {
       "run_id": "evidence-planned-v24-clean-20260730-2",
       "policy_version": "evidence-planned-v24",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v24",
+      "run_identity": {
+        "run_id": "evidence-planned-v24-clean-20260730-2",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v24",
+        "git_commit": "1b75e8676319ad89f5b09bb851c5df5fad184c6c",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "1b75e8676319ad89f5b09bb851c5df5fad184c6c",
       "working_tree": "clean",
@@ -396,6 +489,15 @@
     {
       "run_id": "evidence-planned-v24-mechanical-g007-20260730-1",
       "policy_version": "evidence-planned-v24",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v24",
+      "run_identity": {
+        "run_id": "evidence-planned-v24-mechanical-g007-20260730-1",
+        "answer_strategy": "rag",
+        "answer_strategy_version": "evidence-planned-v24",
+        "git_commit": "67c735fff37d26288a2a887205b0a20682d9320d",
+        "working_tree": "clean"
+      },
       "status": "completed",
       "git_commit": "67c735fff37d26288a2a887205b0a20682d9320d",
       "working_tree": "clean",
@@ -436,11 +538,52 @@
           "unpriced_events": 0
         }
       ]
+    },
+    {
+      "run_id": "full-context-v1-g007-20260730-1",
+      "policy_version": "full-context-v1",
+      "answer_strategy": "full_context",
+      "answer_strategy_version": "full-context-v1",
+      "run_identity": {
+        "run_id": "full-context-v1-g007-20260730-1",
+        "answer_strategy": "full_context",
+        "answer_strategy_version": "full-context-v1",
+        "git_commit": "c01ce00177d6dbd66b3967932dde0119bdec7960",
+        "working_tree": "clean"
+      },
+      "status": "error",
+      "git_commit": "c01ce00177d6dbd66b3967932dde0119bdec7960",
+      "working_tree": "clean",
+      "formal_run_of_record": false,
+      "authorized_max_usd": "4.00",
+      "operational_hard_cap_usd": "4.00",
+      "owner_authorized_max_usd": "4.00",
+      "automatic_retries": 0,
+      "item_ids": [
+        "G007"
+      ],
+      "item_count": 1,
+      "total_elapsed_ms": 42154,
+      "calls": 1,
+      "tokens": 251436,
+      "estimated_cost_usd": "1.625146250",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 251436,
+          "estimated_cost_usd": "1.625146250",
+          "unpriced_events": 0
+        }
+      ]
     }
   ],
   "versions": [
     {
       "policy_version": "evidence-planned-v18",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v18",
       "run_count": 1,
       "calls": 27,
       "tokens": 122503,
@@ -472,6 +615,8 @@
     },
     {
       "policy_version": "evidence-planned-v19",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v19",
       "run_count": 2,
       "calls": 6,
       "tokens": 39929,
@@ -503,6 +648,8 @@
     },
     {
       "policy_version": "evidence-planned-v20",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v20",
       "run_count": 1,
       "calls": 6,
       "tokens": 53277,
@@ -534,6 +681,8 @@
     },
     {
       "policy_version": "evidence-planned-v21",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v21",
       "run_count": 1,
       "calls": 3,
       "tokens": 26508,
@@ -565,6 +714,8 @@
     },
     {
       "policy_version": "evidence-planned-v22",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v22",
       "run_count": 1,
       "calls": 3,
       "tokens": 25257,
@@ -596,6 +747,8 @@
     },
     {
       "policy_version": "evidence-planned-v23",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v23",
       "run_count": 1,
       "calls": 2,
       "tokens": 11667,
@@ -620,6 +773,8 @@
     },
     {
       "policy_version": "evidence-planned-v24",
+      "answer_strategy": "rag",
+      "answer_strategy_version": "evidence-planned-v24",
       "run_count": 3,
       "calls": 31,
       "tokens": 215080,
@@ -648,20 +803,39 @@
           "unpriced_events": 0
         }
       ]
+    },
+    {
+      "policy_version": "full-context-v1",
+      "answer_strategy": "full_context",
+      "answer_strategy_version": "full-context-v1",
+      "run_count": 1,
+      "calls": 1,
+      "tokens": 251436,
+      "estimated_cost_usd": "1.625146250",
+      "unpriced_events": 0,
+      "operations": [
+        {
+          "operation": "answer_generation",
+          "calls": 1,
+          "tokens": 251436,
+          "estimated_cost_usd": "1.625146250",
+          "unpriced_events": 0
+        }
+      ]
     }
   ],
   "total": {
-    "run_count": 10,
-    "calls": 78,
-    "tokens": 494221,
-    "estimated_cost_usd": "4.811832770",
+    "run_count": 11,
+    "calls": 79,
+    "tokens": 745657,
+    "estimated_cost_usd": "6.436979020",
     "unpriced_events": 0,
     "operations": [
       {
         "operation": "answer_generation",
-        "calls": 26,
-        "tokens": 295883,
-        "estimated_cost_usd": "3.504534250",
+        "calls": 27,
+        "tokens": 547319,
+        "estimated_cost_usd": "5.129680500",
         "unpriced_events": 0
       },
       {

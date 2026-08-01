@@ -70,8 +70,13 @@ export type AppConfig = {
     full_source_text: boolean;
     local_tools: boolean;
     public_page_locators: boolean;
+    full_context_answers?: boolean;
   };
 };
+
+export type AnswerStrategy = "rag" | "full_context";
+
+export const DEFAULT_ANSWER_STRATEGY: AnswerStrategy = "rag";
 
 export type ConversationHistoryTurn = {
   question: string;
@@ -90,6 +95,8 @@ export type AnswerRunDiagnostics = {
     generator_model: string;
     generator_reasoning_effort: string;
     generator_verbosity: string;
+    answer_strategy?: AnswerStrategy;
+    answer_strategy_version?: string;
   };
   answer_status: string;
   evidence_decision: string;
@@ -281,6 +288,7 @@ export async function askQuestion(
     turnId: string;
     allowOverBudget?: boolean;
     publicDemo?: boolean;
+    answerStrategy?: AnswerStrategy;
   }
 ) {
   const body: Record<string, unknown> = {
@@ -290,7 +298,8 @@ export async function askQuestion(
     worldview: facets.worldview,
     history,
     conversation_id: options.conversationId,
-    turn_id: options.turnId
+    turn_id: options.turnId,
+    answer_strategy: options.answerStrategy ?? DEFAULT_ANSWER_STRATEGY
   };
   if (!options.publicDemo) {
     body.n_results = nResults;
@@ -300,6 +309,8 @@ export async function askQuestion(
     answer: string;
     answer_status: string;
     content_outcome?: "valid_complete" | "valid_partial" | "insufficient_evidence" | null;
+    answer_strategy?: AnswerStrategy;
+    answer_strategy_version?: string | null;
     evidence_decision?: string;
     run_diagnostics?: AnswerRunDiagnostics;
     resolved_query?: string;

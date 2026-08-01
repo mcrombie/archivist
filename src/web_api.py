@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from collections.abc import Mapping
@@ -20,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from costs import CostLimitExceeded, UsageLedger, usage_scope
 from exposure_profile import ExposureProfile, ExposureSettings
+from full_context_pipeline import eligible_full_context_chunks
 from importers import chapter_title_from_text
 from perspectives import (
     AnswerPerspective,
@@ -28,8 +30,12 @@ from perspectives import (
     Worldview,
     settings_for_legacy_perspective,
 )
-from rag_pipeline import answer_run_diagnostics
-from public_request_gate import PublicRequestGate
+from rag_pipeline import AnswerStrategy, answer_run_diagnostics
+from public_request_gate import (
+    DEFAULT_CATEGORY,
+    FULL_CONTEXT_CATEGORY,
+    PublicRequestGate,
+)
 from public_sources import (
     PublicSourceError,
     answer_has_extended_verbatim_overlap,
@@ -102,6 +108,10 @@ class QuestionRequest(BaseModel):
         max_length=128,
     )
     allow_over_budget: bool = False
+    # Omitting this stays byte-identical to the retrieval behavior that predates
+    # evidence scopes. n_results keeps its meaning for "rag" and has no effect
+    # for "full_context", which has no retrieval depth to tune.
+    answer_strategy: AnswerStrategy = AnswerStrategy.RAG
 
     @field_validator("question")
     @classmethod
@@ -163,6 +173,7 @@ class PublicQuestionRequest(BaseModel):
         pattern=SAFE_USAGE_ID_PATTERN,
         max_length=128,
     )
+    answer_strategy: AnswerStrategy = AnswerStrategy.RAG
 
     @field_validator("question")
     @classmethod
@@ -173,21 +184,53 @@ class PublicQuestionRequest(BaseModel):
         return stripped
 
 
-def _feature_flags(profile: ExposureProfile) -> dict[str, bool]:
+def _feature_flags(
+    profile: ExposureProfile,
+    settings: ExposureSettings | None = None,
+) -> dict[str, bool]:
     public = profile is ExposureProfile.PUBLIC_DEMO
     return {
         "cost_ledger": not public,
         "full_source_text": not public,
         "local_tools": not public,
         "public_page_locators": public,
+        # Lets a client hide an option it cannot use. This is presentation only:
+        # the server still rejects an explicit request for a disabled strategy,
+        # because a stale or modified client must not be able to spend on one.
+        "full_context_answers": bool(settings is not None and settings.full_context_available),
     }
+
+
+def _require_full_context_available(
+    settings: ExposureSettings,
+    answer_strategy: AnswerStrategy,
+) -> None:
+    """Reject a disabled strategy outright rather than quietly answering another way.
+
+    A silent downgrade to retrieval would be indistinguishable from a successful
+    full-context answer, hiding both the cost difference and any disagreement
+    between the two strategies - which is the comparison this feature exists for.
+    """
+
+    if answer_strategy is not AnswerStrategy.FULL_CONTEXT:
+        return
+    if settings.full_context_available:
+        return
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "code": "full_context_disabled",
+            "message": "Full-context answers are not enabled on this server.",
+            "requested_strategy": answer_strategy.value,
+        },
+    )
 
 
 def _development_config() -> dict[str, object]:
     return {
         "exposure_profile": ExposureProfile.DEVELOPMENT.value,
         "project": load_manifest("current"),
-        "features": _feature_flags(ExposureProfile.DEVELOPMENT),
+        "features": _feature_flags(ExposureProfile.DEVELOPMENT, EXPOSURE_SETTINGS),
     }
 
 
@@ -289,6 +332,7 @@ def embed(project_id: str) -> dict[str, object]:
 
 @app.post("/api/projects/{project_id}/question")
 def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
+    _require_full_context_available(EXPOSURE_SETTINGS, request.answer_strategy)
     ledger = UsageLedger()
     budget = ledger.budget_state()
     if budget["hard_limit_enabled"] and budget["exceeded"] and not request.allow_over_budget:
@@ -320,6 +364,7 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
                 voice=request.voice,
                 worldview=request.worldview,
                 history=[turn.model_dump() for turn in request.history],
+                answer_strategy=request.answer_strategy,
             )
             resolved_query = answer_result.resolved_question
             answer = answer_result.answer
@@ -347,6 +392,16 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             "answer": answer,
             "answer_status": answer_result.status,
             "content_outcome": getattr(answer_result, "content_outcome", None),
+            "answer_strategy": getattr(
+                answer_result,
+                "answer_strategy",
+                AnswerStrategy.RAG.value,
+            ),
+            "answer_strategy_version": getattr(
+                answer_result,
+                "answer_strategy_version",
+                None,
+            ),
             "evidence_decision": answer_result.evidence_decision,
             "run_diagnostics": run_diagnostics,
             "resolved_query": resolved_query,
@@ -557,7 +612,7 @@ def _public_project_config(settings: ExposureSettings) -> dict[str, object]:
             "embedded_chunks": embedded_chunks,
             "is_builtin": True,
         },
-        "features": _feature_flags(ExposureProfile.PUBLIC_DEMO),
+        "features": _feature_flags(ExposureProfile.PUBLIC_DEMO, settings),
     }
 
 
@@ -625,12 +680,50 @@ def _configure_public_budget(
         )
 
 
+def _public_verbatim_audit_chunks(
+    *,
+    answer_strategy: AnswerStrategy,
+    final_chunks: list[dict[str, object]],
+) -> list[Mapping[str, object]]:
+    """Return the private evidence scope used by the public quotation guard.
+
+    Retrieval answers can reproduce manuscript prose only from their selected
+    context, so their established audit scope remains ``final_chunks``. A
+    full-context answer saw every eligible chunk even though its result exposes
+    only cited chunks; audit that complete private scope so omitting a citation
+    cannot bypass the public verbatim boundary.
+    """
+
+    if answer_strategy is not AnswerStrategy.FULL_CONTEXT:
+        return final_chunks
+
+    eligible_chunks = eligible_full_context_chunks(load_project_chunks("current"))
+    if not eligible_chunks:
+        raise PublicSourceError("private full-context corpus is not available")
+    return eligible_chunks
+
+
 def _run_public_question(
     request: PublicQuestionRequest,
     settings: ExposureSettings,
 ) -> dict[str, object]:
     request_id = uuid4().hex
     ledger = UsageLedger()
+    if (
+        request.answer_strategy is AnswerStrategy.FULL_CONTEXT
+        and not settings.full_context_available
+    ):
+        # 503 matches the existing public-safe family for "not currently
+        # available" and, unlike 422/403, does not disclose whether the cause is
+        # configuration, budget, or policy.
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "full_context_disabled",
+                "message": "Full-book answers are not available on this deployment.",
+                "request_id": request_id,
+            },
+        )
     try:
         _configure_public_budget(ledger, settings)
         budget = ledger.budget_state()
@@ -652,15 +745,20 @@ def _run_public_question(
                 voice=request.voice,
                 worldview=request.worldview,
                 history=[turn.model_dump() for turn in request.history],
+                answer_strategy=request.answer_strategy,
             )
             if answer_result.status in {
                 "generation_contract_failed",
                 "corpus_integrity_failed",
             }:
                 raise PublicSourceError("answer did not pass the public release gate")
+            audit_chunks = _public_verbatim_audit_chunks(
+                answer_strategy=request.answer_strategy,
+                final_chunks=answer_result.final_chunks,
+            )
             if answer_has_extended_verbatim_overlap(
                 answer_result.answer,
-                answer_result.final_chunks,
+                audit_chunks,
             ):
                 raise PublicSourceError("answer exceeded the public quotation boundary")
             sources = public_source_payload(
@@ -686,6 +784,16 @@ def _run_public_question(
             "answer": answer_result.answer,
             "answer_status": answer_result.status,
             "content_outcome": getattr(answer_result, "content_outcome", None),
+            "answer_strategy": getattr(
+                answer_result,
+                "answer_strategy",
+                AnswerStrategy.RAG.value,
+            ),
+            "answer_strategy_version": getattr(
+                answer_result,
+                "answer_strategy_version",
+                None,
+            ),
             "historiographical_lens": request.historiographical_lens.value,
             "voice": request.voice.value,
             "worldview": request.worldview.value,
@@ -736,7 +844,34 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
         global_requests_per_minute=settings.public_global_requests_per_minute,
         max_concurrent_requests=settings.public_max_concurrent_requests,
         max_concurrent_per_client=settings.public_max_concurrent_per_client,
+        category_requests_per_minute={
+            FULL_CONTEXT_CATEGORY: settings.public_full_context_requests_per_minute,
+        },
+        category_max_concurrent_requests={
+            FULL_CONTEXT_CATEGORY: settings.public_full_context_max_concurrent_requests,
+        },
     )
+
+    def _request_category(body: bytes) -> str:
+        """Classify a question by evidence scope before it reaches the route.
+
+        A body that cannot be parsed is treated as an ordinary request: the
+        route's own validation will reject it, and guessing the expensive
+        category from malformed input would let a bad body exhaust the stricter
+        ceiling for everyone.
+        """
+
+        if not body:
+            return DEFAULT_CATEGORY
+        try:
+            payload = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            return DEFAULT_CATEGORY
+        if not isinstance(payload, Mapping):
+            return DEFAULT_CATEGORY
+        if payload.get("answer_strategy") == AnswerStrategy.FULL_CONTEXT.value:
+            return FULL_CONTEXT_CATEGORY
+        return DEFAULT_CATEGORY
 
     @public_app.middleware("http")
     async def public_security_boundary(request: Request, call_next):
@@ -745,6 +880,7 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
         )
         client_id = request.client.host if request.client is not None else "unknown"
         entered_gate = False
+        category = DEFAULT_CATEGORY
         if is_question:
             content_length = request.headers.get("content-length")
             if content_length:
@@ -771,13 +907,28 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                         request_id=uuid4().hex,
                     )
                 )
-            decision = gate.try_enter(client_id)
+            category = _request_category(body)
+            decision = gate.try_enter(client_id, category=category)
             if not decision.allowed:
+                full_context_limited = (
+                    category == FULL_CONTEXT_CATEGORY
+                    and decision.reason
+                    in {"category_rate_limit", "category_concurrency_limit"}
+                )
                 return _with_public_security_headers(
                     _public_safe_error(
                         status_code=429,
-                        code="request_limit",
-                        message="Archivist is busy. Please wait before trying again.",
+                        code=(
+                            "full_context_rate_limit"
+                            if full_context_limited
+                            else "request_limit"
+                        ),
+                        message=(
+                            "Full-book answers are temporarily limited. Try a "
+                            "retrieved-passage answer, or try again in a moment."
+                            if full_context_limited
+                            else "Archivist is busy. Please wait before trying again."
+                        ),
                         request_id=uuid4().hex,
                         retry_after=decision.retry_after_seconds,
                     )
@@ -787,7 +938,7 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
             response = await call_next(request)
         finally:
             if entered_gate:
-                gate.leave(client_id)
+                gate.leave(client_id, category=category)
         return _with_public_security_headers(response)
 
     if FRONTEND_DIST.exists():

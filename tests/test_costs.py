@@ -923,6 +923,7 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
         voice,
         worldview,
         history,
+        answer_strategy="rag",
     ):
         captured.append(("answer", project_id, question, history, current_usage_context()))
         record_openai_response(
@@ -1172,6 +1173,56 @@ def test_tracked_calls_recheck_hard_limit_between_operations(monkeypatch):
     assert responses.calls == 1
 
 
+def test_projected_budget_blocks_a_long_request_before_it_crosses_the_limit():
+    from costs import enforce_projected_usage_budget
+
+    class NearlySpentLedger:
+        def budget_state(self):
+            return {
+                "hard_limit_enabled": True,
+                "exceeded": False,
+                "remaining_usd": 0.5,
+            }
+
+    with usage_scope(enforce_budget=True):
+        with pytest.raises(CostLimitExceeded) as exc_info:
+            enforce_projected_usage_budget(500_000_001, NearlySpentLedger())
+
+    assert exc_info.value.budget["projected_request_usd"] == 0.500000001
+    assert exc_info.value.budget["projected_exceeds_remaining"] is True
+
+
+def test_projected_budget_allows_exact_remaining_cost_and_explicit_override():
+    from costs import enforce_projected_usage_budget
+
+    class ExactLedger:
+        def __init__(self):
+            self.checks = 0
+
+        def budget_state(self):
+            self.checks += 1
+            return {
+                "hard_limit_enabled": True,
+                "exceeded": False,
+                "remaining_usd": 0.5,
+            }
+
+    ledger = ExactLedger()
+    with usage_scope(enforce_budget=True):
+        enforce_projected_usage_budget(500_000_000, ledger)
+    with usage_scope(enforce_budget=True, allow_over_budget=True):
+        enforce_projected_usage_budget(900_000_000, ledger)
+
+    assert ledger.checks == 1
+
+
+def test_projected_budget_rejects_negative_estimates():
+    from costs import enforce_projected_usage_budget
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        enforce_projected_usage_budget(-1)
+
+
 def test_explicit_budget_override_applies_to_every_tracked_operation(monkeypatch):
     monkeypatch.setattr(
         costs,
@@ -1253,3 +1304,115 @@ def test_request_and_settings_validation():
             warning_threshold_percent=80,
             hard_limit_enabled=False,
         )
+
+
+def test_long_context_surcharge_applies_only_above_the_documented_threshold():
+    from costs import LONG_CONTEXT_INPUT_TOKEN_THRESHOLD
+
+    below = TokenUsage(
+        input_tokens=LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
+        output_tokens=1_000,
+        total_tokens=LONG_CONTEXT_INPUT_TOKEN_THRESHOLD + 1_000,
+    )
+    above = TokenUsage(
+        input_tokens=LONG_CONTEXT_INPUT_TOKEN_THRESHOLD + 1,
+        output_tokens=1_000,
+        total_tokens=LONG_CONTEXT_INPUT_TOKEN_THRESHOLD + 1_001,
+    )
+
+    below_cost = calculate_cost_nano_usd("gpt-5.6-sol", below)
+    above_cost = calculate_cost_nano_usd("gpt-5.6-sol", above)
+
+    # $5/M input, $30/M output, unsurcharged.
+    assert below_cost == 272_000 * 5_000 + 1_000 * 30_000
+    # 2x input and 1.5x output, for the whole request.
+    assert above_cost == 272_001 * 5_000 * 2 + 1_000 * 30_000 * 3 // 2
+
+
+def test_existing_retrieval_sized_requests_keep_their_previous_estimate():
+    # The surcharge must not silently move any number in an existing cohort, so
+    # a RAG-sized request is priced exactly as it was before the branch existed.
+    usage = TokenUsage(input_tokens=20_000, output_tokens=4_000, total_tokens=24_000)
+
+    assert calculate_cost_nano_usd("gpt-5.6-sol", usage) == 20_000 * 5_000 + 4_000 * 30_000
+
+
+def test_models_without_a_documented_long_context_tier_are_never_surcharged():
+    huge = TokenUsage(input_tokens=1_000_000, total_tokens=1_000_000)
+
+    assert calculate_cost_nano_usd("text-embedding-3-small", huge) == 20_000_000
+    assert calculate_cost_nano_usd("gpt-5", huge) == 1_250_000_000
+
+
+def test_cache_detail_is_read_from_either_responses_or_chat_completions_shape():
+    responses_shape = extract_token_usage(
+        SimpleNamespace(
+            usage=SimpleNamespace(
+                input_tokens=1_000,
+                output_tokens=10,
+                total_tokens=1_010,
+                input_tokens_details=SimpleNamespace(
+                    cached_tokens=400,
+                    cache_write_tokens=200,
+                ),
+            )
+        )
+    )
+    completions_shape = extract_token_usage(
+        SimpleNamespace(
+            usage=SimpleNamespace(
+                input_tokens=1_000,
+                output_tokens=10,
+                total_tokens=1_010,
+                prompt_tokens_details=SimpleNamespace(
+                    cached_tokens=400,
+                    cache_write_tokens=200,
+                ),
+            )
+        )
+    )
+
+    assert responses_shape == completions_shape
+    assert responses_shape.cached_tokens == 400
+    assert responses_shape.cache_write_tokens == 200
+
+
+def test_answer_strategy_is_optional_in_the_cohort_and_nullable_in_the_ledger(ledger_path):
+    ledger = UsageLedger(ledger_path)
+
+    # A payload written before answer strategies existed still validates.
+    assert ledger.record_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-legacy",
+        turn_id="turn-1",
+        diagnostics=answer_run_diagnostics_payload(),
+    )
+    legacy = ledger.get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-legacy",
+        turn_id="turn-1",
+    )
+    assert legacy is not None
+    # Never backfilled to "rag": the row genuinely did not record a strategy.
+    assert legacy["answer_strategy"] is None
+
+    strategy_payload = answer_run_diagnostics_payload()
+    strategy_payload["cohort"] = {
+        **strategy_payload["cohort"],
+        "answer_strategy": "full_context",
+        "answer_strategy_version": "full-context-v1",
+    }
+    assert ledger.record_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-full-context",
+        turn_id="turn-1",
+        diagnostics=strategy_payload,
+    )
+    stored = ledger.get_answer_run_diagnostics(
+        project_id="current",
+        conversation_id="conversation-full-context",
+        turn_id="turn-1",
+    )
+    assert stored is not None
+    assert stored["answer_strategy"] == "full_context"
+    assert stored["cohort"]["answer_strategy_version"] == "full-context-v1"
