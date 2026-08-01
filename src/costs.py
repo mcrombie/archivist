@@ -1306,6 +1306,44 @@ def enforce_usage_budget(ledger: UsageLedger | None = None) -> None:
         raise CostLimitExceeded(budget)
 
 
+def enforce_projected_usage_budget(
+    projected_cost_nano_usd: int,
+    ledger: UsageLedger | None = None,
+) -> None:
+    """Reject a request whose conservative estimate exceeds the remaining budget.
+
+    The ordinary pre-call check prevents spending after the monthly limit has
+    already been reached. Long-context requests also need this prospective
+    check because a single call can be materially larger than a retrieval-sized
+    answer.
+    """
+
+    if projected_cost_nano_usd < 0:
+        raise ValueError("projected_cost_nano_usd must be non-negative")
+    context = current_usage_context()
+    if not context.enforce_budget or context.allow_over_budget:
+        return
+
+    budget = (ledger or UsageLedger()).budget_state()
+    if not budget["hard_limit_enabled"]:
+        return
+
+    remaining_usd = budget.get("remaining_usd")
+    projected_exceeds_remaining = bool(
+        remaining_usd is not None
+        and projected_cost_nano_usd > _nano_from_usd(str(remaining_usd))
+    )
+    if budget["exceeded"] or projected_exceeds_remaining:
+        blocked_budget = dict(budget)
+        blocked_budget.update(
+            {
+                "projected_request_usd": _usd_from_nano(projected_cost_nano_usd),
+                "projected_exceeds_remaining": projected_exceeds_remaining,
+            }
+        )
+        raise CostLimitExceeded(blocked_budget)
+
+
 def tracked_responses_create(client: object, *, operation: str, **request: Any) -> object:
     enforce_usage_budget()
     response = client.responses.create(**request)

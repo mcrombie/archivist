@@ -1173,6 +1173,56 @@ def test_tracked_calls_recheck_hard_limit_between_operations(monkeypatch):
     assert responses.calls == 1
 
 
+def test_projected_budget_blocks_a_long_request_before_it_crosses_the_limit():
+    from costs import enforce_projected_usage_budget
+
+    class NearlySpentLedger:
+        def budget_state(self):
+            return {
+                "hard_limit_enabled": True,
+                "exceeded": False,
+                "remaining_usd": 0.5,
+            }
+
+    with usage_scope(enforce_budget=True):
+        with pytest.raises(CostLimitExceeded) as exc_info:
+            enforce_projected_usage_budget(500_000_001, NearlySpentLedger())
+
+    assert exc_info.value.budget["projected_request_usd"] == 0.500000001
+    assert exc_info.value.budget["projected_exceeds_remaining"] is True
+
+
+def test_projected_budget_allows_exact_remaining_cost_and_explicit_override():
+    from costs import enforce_projected_usage_budget
+
+    class ExactLedger:
+        def __init__(self):
+            self.checks = 0
+
+        def budget_state(self):
+            self.checks += 1
+            return {
+                "hard_limit_enabled": True,
+                "exceeded": False,
+                "remaining_usd": 0.5,
+            }
+
+    ledger = ExactLedger()
+    with usage_scope(enforce_budget=True):
+        enforce_projected_usage_budget(500_000_000, ledger)
+    with usage_scope(enforce_budget=True, allow_over_budget=True):
+        enforce_projected_usage_budget(900_000_000, ledger)
+
+    assert ledger.checks == 1
+
+
+def test_projected_budget_rejects_negative_estimates():
+    from costs import enforce_projected_usage_budget
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        enforce_projected_usage_budget(-1)
+
+
 def test_explicit_budget_override_applies_to_every_tracked_operation(monkeypatch):
     monkeypatch.setattr(
         costs,

@@ -20,15 +20,31 @@ from evaluation_costs import (  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Aggregate text-free costs from isolated Archivist evaluation ledgers."
+        description=(
+            "Aggregate text-free costs from isolated Archivist RAG and full-context "
+            "evaluation ledgers."
+        )
     )
     parser.add_argument(
         "--evaluations-root",
         type=Path,
         default=PROJECT_ROOT / "runtime" / "evaluations",
     )
-    parser.add_argument("--min-version", type=int, required=True)
-    parser.add_argument("--max-version", type=int, required=True)
+    parser.add_argument(
+        "--min-version",
+        type=int,
+        required=True,
+        help="Minimum evidence-planned RAG version (full-context has its own namespace).",
+    )
+    parser.add_argument(
+        "--max-version",
+        type=int,
+        required=True,
+        help=(
+            "Maximum evidence-planned RAG version; all discovered full-context-vN "
+            "ledgers are also included."
+        ),
+    )
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
     return parser.parse_args()

@@ -5,13 +5,18 @@ import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 
-DEVELOPMENT_COST_LINEAGE_SCHEMA = "archivist.development_cost_lineage/1"
-_RUN_PATTERN = re.compile(r"^evidence-planned-v(?P<version>[0-9]+)(?:-|$)")
+DEVELOPMENT_COST_LINEAGE_SCHEMA = "archivist.development_cost_lineage/2"
+_LEGACY_DEVELOPMENT_COST_LINEAGE_SCHEMA = "archivist.development_cost_lineage/1"
+_RAG_RUN_PATTERN = re.compile(r"^evidence-planned-v(?P<version>[0-9]+)(?:-|$)")
+_FULL_CONTEXT_RUN_PATTERN = re.compile(
+    r"^full-context-v(?P<version>[0-9]+)(?:-|$)"
+)
 _ITEM_PATTERN = re.compile(r"^G[0-9]{3}\.json$")
 _NANO_USD_PER_USD = Decimal("1000000000")
 _REQUIRED_USAGE_COLUMNS = {
@@ -25,6 +30,70 @@ _REQUIRED_USAGE_COLUMNS = {
 
 class EvaluationCostError(RuntimeError):
     """Raised when isolated evaluation ledgers cannot be aggregated safely."""
+
+
+@dataclass(frozen=True)
+class _StrategyRunIdentity:
+    answer_strategy: str
+    answer_strategy_version: str
+    version_number: int
+
+    @property
+    def aggregate_key(self) -> tuple[str, str]:
+        # The strategy is intentionally part of the key. A future RAG V1 and
+        # full-context V1 are different systems, not two runs of one policy.
+        return self.answer_strategy, self.answer_strategy_version
+
+
+def _strategy_run_identity(
+    run_id: str,
+    *,
+    min_rag_version: int,
+    max_rag_version: int,
+) -> _StrategyRunIdentity | None:
+    rag_match = _RAG_RUN_PATTERN.match(run_id)
+    if rag_match is not None:
+        version = int(rag_match.group("version"))
+        if not min_rag_version <= version <= max_rag_version:
+            return None
+        return _StrategyRunIdentity(
+            answer_strategy="rag",
+            answer_strategy_version=f"evidence-planned-v{version}",
+            version_number=version,
+        )
+
+    full_context_match = _FULL_CONTEXT_RUN_PATTERN.match(run_id)
+    if full_context_match is not None:
+        version = int(full_context_match.group("version"))
+        return _StrategyRunIdentity(
+            answer_strategy="full_context",
+            answer_strategy_version=f"full-context-v{version}",
+            version_number=version,
+        )
+    return None
+
+
+def _display_strategy(row: Mapping[str, object]) -> str:
+    strategy = _safe_string(row.get("answer_strategy"))
+    if strategy is not None:
+        return strategy
+    # Reports generated before full-context existed did not carry the field.
+    # Every evidence-planned run was RAG, so this display-only backfill is a
+    # historical fact rather than an inferred quality judgment.
+    policy_version = _safe_string(row.get("policy_version"))
+    if policy_version is not None and policy_version.startswith("evidence-planned-v"):
+        return "rag"
+    if policy_version is not None and policy_version.startswith("full-context-v"):
+        return "full_context"
+    return "unknown"
+
+
+def _display_strategy_version(row: Mapping[str, object]) -> str:
+    return (
+        _safe_string(row.get("answer_strategy_version"))
+        or _safe_string(row.get("policy_version"))
+        or "unknown"
+    )
 
 
 def _usd_string(nano_usd: int) -> str:
@@ -282,32 +351,52 @@ def build_development_cost_lineage(
     min_version: int,
     max_version: int,
 ) -> dict[str, object]:
-    """Aggregate isolated text-free evaluation usage ledgers without double-counting."""
+    """Aggregate isolated text-free evaluation usage ledgers without double-counting.
+
+    ``min_version`` and ``max_version`` retain their original meaning: they
+    select the evidence-planned RAG lineage. Full-context versions use an
+    independent version namespace and all discovered ``full-context-vN-*``
+    ledgers are included. Keeping those namespaces separate prevents, for
+    example, RAG V1 and full-context V1 from being combined as one policy.
+    """
 
     if min_version < 1 or max_version < min_version:
         raise ValueError("Invalid evidence-planned version range")
     if not evaluations_root.is_dir():
         raise EvaluationCostError(f"Evaluations directory does not exist: {evaluations_root}")
 
-    matched: list[tuple[int, Path]] = []
+    matched: list[tuple[_StrategyRunIdentity, Path]] = []
     for path in evaluations_root.iterdir():
         if not path.is_dir():
             continue
-        match = _RUN_PATTERN.match(path.name)
-        if match is None:
+        identity = _strategy_run_identity(
+            path.name,
+            min_rag_version=min_version,
+            max_rag_version=max_version,
+        )
+        if identity is None:
             continue
-        version = int(match.group("version"))
-        if min_version <= version <= max_version and (path / "usage.sqlite3").is_file():
-            matched.append((version, path))
-    matched.sort(key=lambda item: (item[0], item[1].name))
+        if (path / "usage.sqlite3").is_file():
+            matched.append((identity, path))
+    strategy_order = {"rag": 0, "full_context": 1}
+    matched.sort(
+        key=lambda item: (
+            strategy_order.get(item[0].answer_strategy, 99),
+            item[0].version_number,
+            item[1].name,
+        )
+    )
     if not matched:
         raise EvaluationCostError("No matching evaluation usage ledgers were found")
 
     seen_response_ids: dict[str, str] = {}
     runs: list[dict[str, object]] = []
-    version_events: dict[int, list[dict[str, object]]] = defaultdict(list)
+    strategy_version_events: dict[
+        tuple[str, str], list[dict[str, object]]
+    ] = defaultdict(list)
     all_events: list[dict[str, object]] = []
-    for version, run_dir in matched:
+    strategy_identities: dict[tuple[str, str], _StrategyRunIdentity] = {}
+    for strategy_identity, run_dir in matched:
         events = _read_usage_events(run_dir)
         for event in events:
             response_id = str(event["response_id"])
@@ -320,16 +409,56 @@ def build_development_cost_lineage(
             seen_response_ids[response_id] = run_dir.name
         metadata = _run_metadata(run_dir)
         totals = _totals(events)
+        run_identity = {
+            "run_id": run_dir.name,
+            "answer_strategy": strategy_identity.answer_strategy,
+            "answer_strategy_version": strategy_identity.answer_strategy_version,
+            "git_commit": metadata.get("git_commit"),
+            "working_tree": metadata.get("working_tree"),
+        }
         runs.append(
             {
                 "run_id": run_dir.name,
-                "policy_version": f"evidence-planned-v{version}",
+                # policy_version remains as an alias for existing report
+                # consumers. New consumers should use the explicit pair.
+                "policy_version": strategy_identity.answer_strategy_version,
+                "answer_strategy": strategy_identity.answer_strategy,
+                "answer_strategy_version": (
+                    strategy_identity.answer_strategy_version
+                ),
+                "run_identity": run_identity,
                 **metadata,
                 **totals,
             }
         )
-        version_events[version].extend(events)
+        aggregate_key = strategy_identity.aggregate_key
+        strategy_identities[aggregate_key] = strategy_identity
+        strategy_version_events[aggregate_key].extend(events)
         all_events.extend(events)
+
+    ordered_strategy_keys = sorted(
+        strategy_version_events,
+        key=lambda key: (
+            strategy_order.get(key[0], 99),
+            strategy_identities[key].version_number,
+            key[1],
+        ),
+    )
+    included_strategies: list[dict[str, object]] = []
+    for strategy in ("rag", "full_context"):
+        included_versions = [
+            strategy_identities[key].version_number
+            for key in ordered_strategy_keys
+            if key[0] == strategy
+        ]
+        if included_versions:
+            included_strategies.append(
+                {
+                    "answer_strategy": strategy,
+                    "minimum_version": min(included_versions),
+                    "maximum_version": max(included_versions),
+                }
+            )
 
     return {
         "schema": DEVELOPMENT_COST_LINEAGE_SCHEMA,
@@ -339,18 +468,22 @@ def build_development_cost_lineage(
             "minimum": min_version,
             "maximum": max_version,
         },
+        "included_strategies": included_strategies,
         "runs": runs,
         "versions": [
             {
-                "policy_version": f"evidence-planned-v{version}",
+                "policy_version": strategy_version,
+                "answer_strategy": answer_strategy,
+                "answer_strategy_version": strategy_version,
                 "run_count": sum(
                     1
                     for run in runs
-                    if run["policy_version"] == f"evidence-planned-v{version}"
+                    if run["answer_strategy"] == answer_strategy
+                    and run["answer_strategy_version"] == strategy_version
                 ),
-                **_totals(version_events[version]),
+                **_totals(strategy_version_events[(answer_strategy, strategy_version)]),
             }
-            for version in sorted(version_events)
+            for answer_strategy, strategy_version in ordered_strategy_keys
         ],
         "total": {
             "run_count": len(runs),
@@ -360,7 +493,10 @@ def build_development_cost_lineage(
 
 
 def render_development_cost_markdown(report: Mapping[str, object]) -> str:
-    if report.get("schema") != DEVELOPMENT_COST_LINEAGE_SCHEMA:
+    if report.get("schema") not in {
+        DEVELOPMENT_COST_LINEAGE_SCHEMA,
+        _LEGACY_DEVELOPMENT_COST_LINEAGE_SCHEMA,
+    }:
         raise EvaluationCostError("Unsupported development cost lineage schema")
     version_range = report.get("version_range")
     runs = report.get("runs")
@@ -381,21 +517,29 @@ def render_development_cost_markdown(report: Mapping[str, object]) -> str:
         "no questions, answers, source passages, or manuscript text.",
         "",
         (
-            f"Included policy versions: V{version_range['minimum']}–"
-            f"V{version_range['maximum']}."
+            f"RAG selection window: V{version_range['minimum']}–"
+            f"V{version_range['maximum']}; matching RAG ledgers and all discovered "
+            "full-context ledgers are included in separate strategy namespaces."
         ),
         "",
-        "## Version totals",
+        "## Strategy-version totals",
         "",
-        "| Policy | Runs | Calls | Tokens | Estimated USD | Unpriced events |",
-        "|---|---:|---:|---:|---:|---:|",
+        (
+            "| Strategy | Policy | Runs | Calls | Tokens | Estimated USD | "
+            "Unpriced events |"
+        ),
+        "|---|---|---:|---:|---:|---:|---:|",
     ]
     for version in versions:
         if not isinstance(version, Mapping):
             raise EvaluationCostError("Invalid version row in cost lineage report")
         lines.append(
-            "| {policy} | {runs} | {calls} | {tokens} | ${cost} | {unpriced} |".format(
-                policy=version["policy_version"],
+            (
+                "| {strategy} | {policy} | {runs} | {calls} | {tokens} | "
+                "${cost} | {unpriced} |"
+            ).format(
+                strategy=_display_strategy(version),
+                policy=_display_strategy_version(version),
                 runs=version["run_count"],
                 calls=version["calls"],
                 tokens=version["tokens"],
@@ -409,10 +553,10 @@ def render_development_cost_markdown(report: Mapping[str, object]) -> str:
             "## Run details",
             "",
             (
-                "| Run | Commit | Status | Items | Retries | Latency (s) | "
-                "Operational cap | Calls | Tokens | Estimated USD |"
+                "| Run | Strategy | Policy | Commit | Status | Items | Retries | "
+                "Latency (s) | Operational cap | Calls | Tokens | Estimated USD |"
             ),
-            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for run in runs:
@@ -426,9 +570,11 @@ def render_development_cost_markdown(report: Mapping[str, object]) -> str:
         operational_cap = run.get("operational_hard_cap_usd")
         commit = run.get("git_commit")
         lines.append(
-            "| {run_id} | {commit} | {status} | {items} | {retries} | {elapsed} | "
-            "{authorized} | {calls} | {tokens} | ${cost} |".format(
+            "| {run_id} | {strategy} | {policy} | {commit} | {status} | {items} | "
+            "{retries} | {elapsed} | {authorized} | {calls} | {tokens} | ${cost} |".format(
                 run_id=run["run_id"],
+                strategy=_display_strategy(run),
+                policy=_display_strategy_version(run),
                 commit=str(commit)[:12] if isinstance(commit, str) else "—",
                 status=run.get("status") or "—",
                 items=run.get("item_count", 0),

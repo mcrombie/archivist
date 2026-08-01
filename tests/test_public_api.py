@@ -277,6 +277,115 @@ def test_public_answer_overlap_guard_detects_long_reproduction():
     )
 
 
+def test_public_full_context_rejects_long_reproduction_from_uncited_chunk(monkeypatch):
+    cited_chunks = synthetic_chunks(1)
+    copied_text = " ".join(f"privateword{index}" for index in range(55))
+    uncited_chunk = {
+        "chunk_id": "uncited_private_chunk",
+        "document": "Private Manuscript.md",
+        "chapter_title": "Private Manuscript",
+        "text": copied_text,
+    }
+
+    class FakeLedger:
+        def get_settings(self):
+            return {
+                "monthly_budget_usd": 5.0,
+                "warning_threshold_percent": 80,
+                "hard_limit_enabled": True,
+            }
+
+        def budget_state(self):
+            return {"exceeded": False}
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer=f"{copied_text} [Source 1]",
+            final_chunks=cited_chunks,
+            status="answered",
+        ),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "load_project_chunks",
+        lambda _project_id: [*cited_chunks, uncited_chunk],
+    )
+
+    try:
+        web_api._run_public_question(
+            web_api.PublicQuestionRequest(
+                question="What happened?",
+                answer_strategy="full_context",
+            ),
+            public_settings(
+                full_context_enabled=True,
+                public_full_context_enabled=True,
+            ),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert exc.detail["code"] == "public_answer_unavailable"
+    else:
+        raise AssertionError("uncited private prose escaped the public overlap guard")
+
+
+def test_public_rag_overlap_guard_still_uses_only_final_chunks(monkeypatch):
+    final_chunks = synthetic_chunks(1)
+    audited_chunks: list[object] = []
+
+    class FakeLedger:
+        def get_settings(self):
+            return {
+                "monthly_budget_usd": 5.0,
+                "warning_threshold_percent": 80,
+                "hard_limit_enabled": True,
+            }
+
+        def budget_state(self):
+            return {"exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer="A concise answer grounded in the selected evidence. [Source 1]",
+            final_chunks=final_chunks,
+            status="answered",
+        ),
+    )
+
+    def fail_if_full_corpus_is_loaded(_project_id):
+        raise AssertionError("ordinary RAG must not load the full corpus for this guard")
+
+    def capture_overlap_scope(_answer, chunks):
+        audited_chunks.append(chunks)
+        return False
+
+    monkeypatch.setattr(web_api, "load_project_chunks", fail_if_full_corpus_is_loaded)
+    monkeypatch.setattr(
+        web_api,
+        "answer_has_extended_verbatim_overlap",
+        capture_overlap_scope,
+    )
+
+    response = web_api._run_public_question(
+        web_api.PublicQuestionRequest(question="What happened?"),
+        public_settings(),
+    )
+
+    assert response["answer_status"] == "answered"
+    assert audited_chunks == [final_chunks]
+    assert audited_chunks[0] is final_chunks
+
+
 def test_public_gate_enforces_rate_and_concurrency_without_waiting():
     gate = PublicRequestGate(
         requests_per_minute=2,

@@ -14,9 +14,9 @@ Two properties are load-bearing:
   labels, so a full-context result reaching any caller looks exactly like a
   retrieval result and carries only *cited* chunks; and
 * seeing the whole corpus is not evidence of having used it, so an exhaustive
-  local scan still audits the model's own absence claims.
+  local scan owns target presence/absence and audits model bindings against it.
 
-Version 1 scope: the reader's lens, voice, and worldview shape the answer's
+Version 2 scope: the reader's lens, voice, and worldview shape the answer's
 prose through the shared style block, but the structured interpretive
 preface/coda expansion that :mod:`answer_coverage` validates for retrieval
 answers is not yet reproduced here. See DEFECTS.md.
@@ -32,15 +32,23 @@ from time import perf_counter_ns
 from typing import Any
 
 from answer_coverage import CoverageOutcomeStatus
-from costs import CostLimitExceeded, tracked_responses_parse
+from costs import (
+    CostLimitExceeded,
+    TokenUsage,
+    calculate_cost_nano_usd,
+    enforce_projected_usage_budget,
+    tracked_responses_parse,
+)
 from evidence_policy import CorpusIntegrity, scan_evidence_target
 from filters import should_skip_document
 from full_context_coverage import (
     FULL_CONTEXT_COVERAGE_PROMPT_VERSION,
     FULL_CONTEXT_COVERAGE_SCHEMA,
+    FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA,
     FullContextCoverageAnswer,
     FullContextCoverageResult,
     FullContextValidationErrorCode,
+    TrustedTargetAudit,
     process_full_context_coverage,
 )
 from model_config import FULL_CONTEXT_GENERATOR_SETTINGS
@@ -51,9 +59,9 @@ from perspectives import (
     build_interpretive_prompt_block,
 )
 from query_planning import (
+    EvidenceTarget,
     ResolvedTurn,
     extract_trusted_targets,
-    normalize_search_query,
 )
 from rag_pipeline import (
     AnswerModeResult,
@@ -68,13 +76,15 @@ __all__ = [
     "FULL_CONTEXT_POLICY_VERSION",
     "FullContextEvidenceDecision",
     "FullContextPolicy",
+    "eligible_full_context_chunks",
     "estimate_full_context_input_tokens",
+    "estimate_full_context_request_cost_nano_usd",
     "run_full_context_answer",
     "serialize_full_context_corpus",
 ]
 
 
-FULL_CONTEXT_POLICY_VERSION = "full-context-v1"
+FULL_CONTEXT_POLICY_VERSION = "full-context-v2"
 MAX_FULL_CONTEXT_OUTPUT_TOKENS = 12_000
 
 # Documented maximum input for the GPT-5.6 family. REQUIRES VERIFICATION against
@@ -133,15 +143,24 @@ Claim rules:
 Answering the whole question:
 - Because you can see the entire manuscript, search it thoroughly before
   concluding that something is missing. Absence is a strong claim.
-- Use absence_findings for a subject the question names that the manuscript does
-  not treat directly, with one uncited sentence stating the boundary. Do not
-  substitute material about a merely similar subject and present it as an answer.
+- The application supplies trusted Target IDs copied from the user's question.
+  Use an absence_finding only by copying one of those exact IDs. Do not invent,
+  paraphrase, or rename a target, and do not write absence prose; the application
+  renders any certified evidence boundary itself.
+- Do not substitute material about a merely similar subject and present it as an
+  answer. Every directly present trusted target must be supported by at least one
+  cited chunk that directly contains that target.
+- If the manuscript contains none of the trusted targets, return no claims. Add
+  absence_findings only for the supplied targets whose absence is checkable. Do
+  not add a related example or analogue unless a future application contract
+  explicitly authorizes it.
 - If the question asserts something the manuscript contradicts, set
   premise_finding.status to contradicted, correct it in the first claim, and
   reference that claim in premise_finding.correction_claim_id.
 - Set self_reported_content_outcome honestly: valid_complete only if the
   manuscript let you answer the whole question, valid_partial if you answered
-  part of it, insufficient_evidence if you could not answer it at all.
+  part of it, insufficient_evidence if you could not answer it at all. This is a
+  diagnostic self-report; application validation decides the final outcome.
 - If nothing in the manuscript supports an answer, return no claims rather than
   writing an unsupported one.
 """
@@ -157,9 +176,7 @@ def eligible_full_context_chunks(
     chunk-for-chunk.
     """
 
-    return [
-        chunk for chunk in chunks if not should_skip_document(str(chunk.get("document") or ""))
-    ]
+    return [chunk for chunk in chunks if not should_skip_document(str(chunk.get("document") or ""))]
 
 
 def serialize_full_context_corpus(
@@ -190,6 +207,46 @@ def estimate_full_context_input_tokens(*parts: str) -> int:
     return -(-total_characters // CHARACTERS_PER_TOKEN)
 
 
+def estimate_full_context_request_cost_nano_usd(estimated_input_tokens: int) -> int:
+    """Price the most expensive plausible uncached form of one request.
+
+    A first call may be billed either as ordinary uncached input or as a cache
+    write. The live v1 measurement observed the latter, so the pre-request guard
+    prices both shapes and uses the larger result. Maximum output is included;
+    a warm cached read can only be cheaper than this estimate.
+    """
+
+    if estimated_input_tokens < 0:
+        raise ValueError("estimated_input_tokens must be non-negative")
+    total_tokens = estimated_input_tokens + MAX_FULL_CONTEXT_OUTPUT_TOKENS
+    possible_costs = (
+        calculate_cost_nano_usd(
+            FULL_CONTEXT_GENERATOR_SETTINGS.model,
+            TokenUsage(
+                input_tokens=estimated_input_tokens,
+                output_tokens=MAX_FULL_CONTEXT_OUTPUT_TOKENS,
+                total_tokens=total_tokens,
+            ),
+        ),
+        calculate_cost_nano_usd(
+            FULL_CONTEXT_GENERATOR_SETTINGS.model,
+            TokenUsage(
+                input_tokens=estimated_input_tokens,
+                cache_write_tokens=estimated_input_tokens,
+                output_tokens=MAX_FULL_CONTEXT_OUTPUT_TOKENS,
+                total_tokens=total_tokens,
+            ),
+        ),
+    )
+    priced = tuple(cost for cost in possible_costs if cost is not None)
+    if not priced:
+        raise RuntimeError(
+            "Full-context generation model has no configured local pricing; "
+            "the request was not sent."
+        )
+    return max(priced)
+
+
 def context_token_ceiling() -> int:
     return int(DOCUMENTED_MAX_INPUT_TOKENS * CONTEXT_BUDGET_UTILIZATION)
 
@@ -198,6 +255,7 @@ def build_full_context_input(
     *,
     corpus_block: str,
     resolved_turn: ResolvedTurn,
+    trusted_targets: Sequence[EvidenceTarget] | None = None,
     historiographical_lens: HistoriographicalLens | str = (HistoriographicalLens.EVIDENCE_FIRST),
     voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
     worldview: Worldview | str = Worldview.NONE,
@@ -221,53 +279,53 @@ def build_full_context_input(
         )
     if resolved_turn.scope:
         sections.append(f"Requested scope: {resolved_turn.scope}")
+    targets = (
+        tuple(trusted_targets)
+        if trusted_targets is not None
+        else extract_trusted_targets(resolved_turn)
+    )
+    if targets:
+        sections.append(
+            "Application-issued trusted targets (copy Target ID exactly for any "
+            "absence_finding):\n"
+            + "\n".join(
+                f"Target ID: {target.target_id}\n"
+                f"User surface: {target.query_surface_span}\n"
+                f"Absence checkable: {str(target.absence_checkable).lower()}"
+                for target in targets
+            )
+        )
     sections.append(f"Question: {resolved_turn.standalone_question}")
     return "\n\n".join(sections)
 
 
-def _contradicted_absence_subjects(
-    payload: FullContextCoverageAnswer | None,
-    resolved_turn: ResolvedTurn,
+def _audit_trusted_targets(
+    targets: Sequence[EvidenceTarget],
     eligible_chunks: Sequence[Mapping[str, object]],
     integrity: CorpusIntegrity,
-) -> tuple[str, ...]:
-    """Audit reported absences against an exhaustive scan of the whole corpus.
+) -> tuple[TrustedTargetAudit, ...]:
+    """Produce application-owned strong+weak direct-evidence facts."""
 
-    The scan only ever searches for surfaces the user themselves wrote. The
-    model's reported subject is used to match those surfaces, never to authorize
-    a search of its own, so a model-invented alias cannot certify anything.
-    """
-
-    if payload is None:
-        return ()
-    reported_absent = {
-        normalize_search_query(finding.subject)
-        for finding in payload.absence_findings
-        if finding.status.value == "not_addressed_in_corpus"
-    }
-    reported_absent.discard("")
-    if not reported_absent:
-        return ()
-
-    contradicted: list[str] = []
-    for target in extract_trusted_targets(resolved_turn):
-        normalized = normalize_search_query(target.query_surface_span)
-        if normalized not in reported_absent:
-            continue
-        try:
-            scan = scan_evidence_target(
-                target.target_id,
-                target.query_surface_span,
-                eligible_chunks,
+    audits: list[TrustedTargetAudit] = []
+    for target in targets:
+        scan = scan_evidence_target(
+            target.target_id,
+            target.query_surface_span,
+            eligible_chunks,
+            absence_checkable=target.absence_checkable,
+            corpus_integrity=integrity,
+            role=target.role,
+        )
+        audits.append(
+            TrustedTargetAudit(
+                target_id=target.target_id,
+                query_surface_span=target.query_surface_span,
+                direct_chunk_ids=scan.direct_chunk_ids,
                 absence_checkable=target.absence_checkable,
-                corpus_integrity=integrity,
-                role=target.role,
+                certified_direct_absence=scan.certified_direct_absence,
             )
-        except (ValueError, TypeError):
-            continue
-        if scan.strong_chunk_ids:
-            contradicted.append(normalized)
-    return tuple(dict.fromkeys(contradicted))
+        )
+    return tuple(audits)
 
 
 def _generation_trace(
@@ -278,10 +336,12 @@ def _generation_trace(
     style_prompt_sha256: str | None = None,
     supplied_chunk_count: int = 0,
     estimated_input_tokens: int | None = None,
+    projected_request_cost_nano_usd: int | None = None,
 ) -> dict[str, Any]:
     contract: dict[str, Any] = {
+        "schema": FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA,
         "prompt_version": FULL_CONTEXT_COVERAGE_PROMPT_VERSION,
-        "request_schema": FULL_CONTEXT_COVERAGE_SCHEMA,
+        "response_schema": FULL_CONTEXT_COVERAGE_SCHEMA,
         "instructions_sha256": hashlib.sha256(
             FULL_CONTEXT_INSTRUCTIONS.encode("utf-8")
         ).hexdigest(),
@@ -298,6 +358,7 @@ def _generation_trace(
         "style_prompt_sha256": style_prompt_sha256,
         "supplied_chunk_count": supplied_chunk_count,
         "estimated_input_tokens": estimated_input_tokens,
+        "projected_request_cost_nano_usd": projected_request_cost_nano_usd,
         "structured_generation_called": structured_generation_called,
         "status": status,
     }
@@ -392,6 +453,12 @@ def run_full_context_answer(
         )
 
     serialization_started_ns = perf_counter_ns()
+    trusted_targets = extract_trusted_targets(resolved_turn)
+    trusted_target_audits = _audit_trusted_targets(
+        trusted_targets,
+        eligible_chunks,
+        integrity,
+    )
     corpus_block = serialize_full_context_corpus(eligible_chunks)
     style_block = build_interpretive_prompt_block(historiographical_lens, voice, worldview)
     style_prompt_sha256 = (
@@ -400,6 +467,7 @@ def run_full_context_answer(
     generation_input = build_full_context_input(
         corpus_block=corpus_block,
         resolved_turn=resolved_turn,
+        trusted_targets=trusted_targets,
         historiographical_lens=historiographical_lens,
         voice=voice,
         worldview=worldview,
@@ -442,6 +510,10 @@ def run_full_context_answer(
             ),
         )
 
+    projected_request_cost_nano_usd = estimate_full_context_request_cost_nano_usd(
+        estimated_input_tokens
+    )
+    enforce_projected_usage_budget(projected_request_cost_nano_usd)
     request_client = without_automatic_retries(client)
     generation_started_ns = perf_counter_ns()
     try:
@@ -464,16 +536,10 @@ def run_full_context_answer(
     stage_timings_ms["answer_generation"] = elapsed_ms(generation_started_ns)
 
     validation_started_ns = perf_counter_ns()
-    contradicted = _contradicted_absence_subjects(
-        parsed if isinstance(parsed, FullContextCoverageAnswer) else None,
-        resolved_turn,
-        eligible_chunks,
-        integrity,
-    )
     coverage = process_full_context_coverage(
         parsed if isinstance(parsed, FullContextCoverageAnswer) else None,
         eligible_chunks=eligible_chunks,
-        contradicted_absence_subjects=contradicted,
+        trusted_target_audits=trusted_target_audits,
         refused=refused,
     )
     stage_timings_ms["answer_validation"] = elapsed_ms(validation_started_ns)
@@ -492,6 +558,7 @@ def run_full_context_answer(
         style_prompt_sha256=style_prompt_sha256,
         supplied_chunk_count=len(eligible_chunks),
         estimated_input_tokens=estimated_input_tokens,
+        projected_request_cost_nano_usd=projected_request_cost_nano_usd,
     )
     return AnswerModeResult(
         answer=coverage.answer,

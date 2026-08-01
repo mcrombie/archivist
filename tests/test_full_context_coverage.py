@@ -4,11 +4,13 @@ from pydantic import ValidationError
 from answer_coverage import AnswerUnitRole, ContentOutcome, CoverageOutcomeStatus, PremiseStatus
 from full_context_coverage import (
     FULL_CONTEXT_COVERAGE_SCHEMA,
+    FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA,
     AbsenceFinding,
     AbsenceStatus,
     FullContextClaim,
     FullContextCoverageAnswer,
     FullContextValidationErrorCode,
+    TrustedTargetAudit,
     process_full_context_coverage,
 )
 
@@ -25,6 +27,23 @@ def chunk(chunk_id: str, text: str = "Synthetic manuscript prose.") -> dict[str,
 
 
 CORPUS = [chunk(f"10_Synthetic Chapter 1_ Title_{index:03d}") for index in range(1, 6)]
+
+
+def target_audit(
+    target_id: str = "T1",
+    *,
+    surface: str = "Synthetic Subject",
+    direct: tuple[str, ...] = (),
+    absence_checkable: bool = True,
+    certified_absent: bool = False,
+) -> TrustedTargetAudit:
+    return TrustedTargetAudit(
+        target_id=target_id,
+        query_surface_span=surface,
+        direct_chunk_ids=direct,
+        absence_checkable=absence_checkable,
+        certified_direct_absence=certified_absent,
+    )
 
 
 def claim(
@@ -167,20 +186,43 @@ def test_no_claims_is_a_clean_insufficient_evidence_outcome():
         (),
         absence_findings=(
             AbsenceFinding(
-                subject="Hudson's Bay Company",
+                target_id="T1",
                 status=AbsenceStatus.NOT_ADDRESSED_IN_CORPUS,
-                note="The manuscript does not treat this company.",
             ),
         ),
         self_reported=ContentOutcome.INSUFFICIENT_EVIDENCE,
     )
 
-    result = process_full_context_coverage(payload, eligible_chunks=CORPUS)
+    result = process_full_context_coverage(
+        payload,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=(
+            target_audit(surface="Hudson's Bay Company", certified_absent=True),
+        ),
+    )
 
     assert result.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
     assert result.content_outcome is ContentOutcome.INSUFFICIENT_EVIDENCE
     assert result.final_chunks == []
-    assert result.answer == "The manuscript does not treat this company."
+    assert result.answer == "The manuscript does not directly address Hudson's Bay Company."
+
+
+def test_indirect_model_status_cannot_create_an_uncited_positive_assertion():
+    payload = answer(
+        (),
+        absence_findings=(
+            AbsenceFinding(target_id="T1", status=AbsenceStatus.ADDRESSED_INDIRECTLY),
+        ),
+        self_reported=ContentOutcome.INSUFFICIENT_EVIDENCE,
+    )
+    result = process_full_context_coverage(
+        payload,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=(
+            target_audit(surface="Hudson's Bay Company", certified_absent=True),
+        ),
+    )
+    assert result.answer == "The manuscript does not directly address Hudson's Bay Company."
 
 
 def test_contradicted_premise_requires_a_first_position_correction():
@@ -227,31 +269,233 @@ def test_correction_claim_without_a_contradicted_premise_fails_closed():
     assert result.error_code is FullContextValidationErrorCode.PREMISE_CORRECTION_UNEXPECTED
 
 
-def test_a_scan_contradicting_a_reported_absence_downgrades_a_complete_claim():
+@pytest.mark.parametrize("with_claim", [False, True])
+def test_a_scan_contradicting_a_reported_absence_fails_closed(with_claim):
+    claims = (claim("C1", ("10_Synthetic Chapter 1_ Title_001",)),) if with_claim else ()
     payload = answer(
-        (claim("C1", ("10_Synthetic Chapter 1_ Title_001",)),),
+        claims,
         absence_findings=(
             AbsenceFinding(
-                subject="Ohio Company",
+                target_id="T1",
                 status=AbsenceStatus.NOT_ADDRESSED_IN_CORPUS,
-                note="The manuscript does not treat this company.",
             ),
         ),
-        self_reported=ContentOutcome.VALID_COMPLETE,
+        self_reported=(
+            ContentOutcome.VALID_COMPLETE if with_claim else ContentOutcome.INSUFFICIENT_EVIDENCE
+        ),
     )
 
-    trusted = process_full_context_coverage(payload, eligible_chunks=CORPUS)
-    assert trusted.content_outcome is ContentOutcome.VALID_COMPLETE
-
-    audited = process_full_context_coverage(
+    result = process_full_context_coverage(
         payload,
         eligible_chunks=CORPUS,
-        contradicted_absence_subjects=("ohio company",),
+        trusted_target_audits=(
+            target_audit(
+                surface="Ohio Company",
+                direct=("10_Synthetic Chapter 1_ Title_001",),
+            ),
+        ),
     )
-    # Downgraded, not rewritten: the reader still sees the model's own prose.
-    assert audited.content_outcome is ContentOutcome.VALID_PARTIAL
-    assert audited.answer == trusted.answer
-    assert audited.diagnostics["contradicted_absence_count"] == 1
+
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.error_code is FullContextValidationErrorCode.ABSENCE_TARGET_MISMATCH
+    assert "Ohio Company" not in result.answer
+    assert result.final_chunks == []
+
+
+def test_unknown_or_paraphrased_absence_targets_cannot_cross_the_binding_boundary():
+    unknown = answer(
+        (),
+        absence_findings=(
+            AbsenceFinding(
+                target_id="T99",
+                status=AbsenceStatus.NOT_ADDRESSED_IN_CORPUS,
+            ),
+        ),
+        self_reported=ContentOutcome.INSUFFICIENT_EVIDENCE,
+    )
+    result = process_full_context_coverage(
+        unknown,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=(target_audit(certified_absent=True),),
+    )
+    assert result.error_code is FullContextValidationErrorCode.UNKNOWN_ABSENCE_TARGET_ID
+
+    # Version 1's model-authored subject/note form cannot smuggle a paraphrase
+    # or uncited prose through the version 2 response schema.
+    with pytest.raises(ValidationError):
+        AbsenceFinding.model_validate(
+            {
+                "target_id": "T1",
+                "subject": "A paraphrased subject",
+                "status": AbsenceStatus.NOT_ADDRESSED_IN_CORPUS,
+                "note": "Model-authored absence prose.",
+            }
+        )
+
+
+def test_g008_style_near_match_cannot_pass_with_an_unrelated_valid_chunk():
+    payload = answer((claim("C1", ("10_Synthetic Chapter 1_ Title_002",)),))
+    result = process_full_context_coverage(
+        payload,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=(
+            target_audit(
+                surface="Ohio Company",
+                direct=("10_Synthetic Chapter 1_ Title_001",),
+            ),
+        ),
+    )
+    assert result.error_code is FullContextValidationErrorCode.TRUSTED_TARGET_EVIDENCE_MISSING
+    assert result.final_chunks == []
+
+
+def test_all_certified_absent_targets_reject_unsolicited_analogue_claims():
+    payload = answer(
+        (claim("C1", ("10_Synthetic Chapter 1_ Title_002",)),),
+        absence_findings=(
+            AbsenceFinding(
+                target_id="T1",
+                status=AbsenceStatus.NOT_ADDRESSED_IN_CORPUS,
+            ),
+        ),
+        self_reported=ContentOutcome.VALID_PARTIAL,
+    )
+    result = process_full_context_coverage(
+        payload,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=(
+            target_audit(surface="Ohio Company", certified_absent=True),
+        ),
+    )
+    assert result.error_code is FullContextValidationErrorCode.TRUSTED_TARGET_CLAIMS_UNSUPPORTED
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.final_chunks == []
+
+
+def test_uncheckable_target_without_direct_evidence_cannot_license_analogue_claims():
+    payload = answer(
+        (claim("C1", ("10_Synthetic Chapter 1_ Title_002",)),),
+        self_reported=ContentOutcome.VALID_PARTIAL,
+    )
+    result = process_full_context_coverage(
+        payload,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=(
+            target_audit(
+                surface="Resolver-restored subject",
+                absence_checkable=False,
+                certified_absent=False,
+            ),
+        ),
+    )
+    assert result.error_code is FullContextValidationErrorCode.TRUSTED_TARGET_CLAIMS_UNSUPPORTED
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.final_chunks == []
+
+
+def test_certified_absent_target_requires_a_bound_absence_finding():
+    payload = answer((), self_reported=ContentOutcome.INSUFFICIENT_EVIDENCE)
+    result = process_full_context_coverage(
+        payload,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=(target_audit(certified_absent=True),),
+    )
+    assert result.error_code is FullContextValidationErrorCode.TRUSTED_TARGET_ABSENCE_MISSING
+
+
+@pytest.mark.parametrize(
+    "audits",
+    [
+        (),
+        (
+            target_audit(
+                absence_checkable=False,
+                certified_absent=False,
+            ),
+        ),
+    ],
+)
+def test_zero_claims_cannot_turn_a_model_self_report_into_an_absence_certificate(audits):
+    payload = answer((), self_reported=ContentOutcome.INSUFFICIENT_EVIDENCE)
+    result = process_full_context_coverage(
+        payload,
+        eligible_chunks=CORPUS,
+        trusted_target_audits=audits,
+    )
+    assert result.error_code is FullContextValidationErrorCode.INSUFFICIENT_EVIDENCE_UNCERTIFIED
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+
+
+def test_model_complete_is_capped_at_partial_and_self_report_remains_diagnostic():
+    result = process_full_context_coverage(
+        answer((claim("C1", ("10_Synthetic Chapter 1_ Title_001",)),)),
+        eligible_chunks=CORPUS,
+    )
+    assert result.content_outcome is ContentOutcome.VALID_PARTIAL
+    assert result.diagnostics["self_reported_content_outcome"] == "valid_complete"
+
+
+@pytest.mark.parametrize(
+    ("claims", "self_reported"),
+    [
+        (
+            (claim("C1", ("10_Synthetic Chapter 1_ Title_001",)),),
+            ContentOutcome.INSUFFICIENT_EVIDENCE,
+        ),
+        ((), ContentOutcome.VALID_PARTIAL),
+    ],
+)
+def test_claim_presence_and_content_outcome_must_be_consistent(claims, self_reported):
+    result = process_full_context_coverage(
+        answer(claims, self_reported=self_reported),
+        eligible_chunks=CORPUS,
+    )
+    assert result.error_code is FullContextValidationErrorCode.CONTENT_OUTCOME_INCONSISTENT
+
+
+def test_premise_correction_must_be_exactly_one_bound_first_role():
+    correction_1 = claim(
+        "C1",
+        ("10_Synthetic Chapter 1_ Title_001",),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    correction_2 = claim(
+        "C2",
+        ("10_Synthetic Chapter 1_ Title_002",),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    multiple = process_full_context_coverage(
+        answer(
+            (correction_1, correction_2),
+            premise_finding={"status": PremiseStatus.CONTRADICTED, "correction_claim_id": "C1"},
+        ),
+        eligible_chunks=CORPUS,
+    )
+    assert multiple.error_code is FullContextValidationErrorCode.PREMISE_CORRECTION_COUNT_INVALID
+
+    ordinary = claim("C1", ("10_Synthetic Chapter 1_ Title_001",))
+    actual_correction = claim(
+        "C2",
+        ("10_Synthetic Chapter 1_ Title_002",),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+    )
+    mismatched = process_full_context_coverage(
+        answer(
+            (ordinary, actual_correction),
+            premise_finding={"status": PremiseStatus.CONTRADICTED, "correction_claim_id": "C1"},
+        ),
+        eligible_chunks=CORPUS,
+    )
+    assert mismatched.error_code is FullContextValidationErrorCode.PREMISE_CORRECTION_ID_MISMATCH
+
+    unexpected_id = process_full_context_coverage(
+        answer(
+            (ordinary,),
+            premise_finding={"status": PremiseStatus.SUPPORTED, "correction_claim_id": "C1"},
+        ),
+        eligible_chunks=CORPUS,
+    )
+    assert unexpected_id.error_code is FullContextValidationErrorCode.PREMISE_CORRECTION_UNEXPECTED
 
 
 def test_refusal_and_missing_payload_fail_closed_without_sources():
@@ -276,6 +520,8 @@ def test_diagnostics_carry_counts_only_and_no_manuscript_or_identifier_text():
     assert diagnostics["supplied_chunk_count"] == 5
     assert diagnostics["cited_chunk_count"] == 1
     assert diagnostics["claim_count"] == 1
+    assert diagnostics["schema"] == FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA
+    assert diagnostics["response_schema"] == FULL_CONTEXT_COVERAGE_SCHEMA
 
 
 def test_openai_strict_schema_conversion_preserves_the_chunk_id_constraint():

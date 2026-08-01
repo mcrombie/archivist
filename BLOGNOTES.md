@@ -2991,9 +2991,12 @@ all.
   appear, since that would mean full context reached the retrieval core.
 - Source coverage is recorded as an observation and nothing more. The 14 cited chunks fall in
   Chapters 4, 11, 14, 17, 18, and 20, with no Epilogue passage. Chapter 14 is the Civil War group
-  that the V21, V22, and V24 retrieval candidates repeatedly failed to reach. That is one
-  nondeterministic sample of one development question with no strict grading performed, and the
-  missing Epilogue is exactly as real as the present Civil War chapter.
+  that the V21, V22, and V24 retrieval candidates repeatedly failed to reach. Strict manual
+  grading was performed later under the same G007 rules used for retrieval: the answer realized
+  **1/7 essential claims and 4/5 target groups** while self-reporting `valid_complete`. That is one
+  nondeterministic development sample, not evidence that either strategy is better, but the
+  mismatch is direct evidence that the application cannot treat a model completeness self-report
+  as its own verdict.
 - Still unmeasured, and now the most valuable next number: a warm call. The entire cost case for
   this strategy rests on prefix caching, and one cold call says nothing about it.
 
@@ -3001,6 +3004,57 @@ Useful blog lesson: an estimate labelled unverified is not the same as an estima
 a harmless direction, and this one was wrong twice over - too high on cost, and quietly close to a
 pricing cliff it had assumed it was already past. The cheapest part of the run was the answer; the
 expensive part was discovering that a validator written for one strategy silently assumed the other.
+
+### 2026-08-01 - Full context became an audited experiment instead of a trusted long answer
+
+- Reviewed the first full-context implementation against its live G007 artifact rather than the
+  design's aspirations. The mechanical citation path was sound, but the application had accepted
+  the model's own `valid_complete` label despite later grading of 1/7 strict claims and 4/5 target
+  groups. It also let the model author absence subjects and reader-facing absence prose, accepted
+  any in-corpus chunk ID without binding named targets to direct evidence, and weakly bound premise
+  corrections.
+- Opened `full-context-v2` as a new experimental cohort while leaving frozen RAG V25 untouched.
+  Trusted targets are now extracted from the reader's own words and scanned exhaustively by the
+  application. A present target needs at least one cited direct-hit chunk. An absent target needs an
+  application-certified absence and an exact target-ID binding. Zero-claim insufficiency fails
+  closed unless every trusted target passes that proof. The application writes the narrow evidence
+  boundary sentence; the model does not. If no audited target has direct manuscript evidence, any
+  extra claim now fails closed as an unsolicited analogue rather than quietly substituting a
+  related subject. This also protects resolver-restored targets whose absence is deliberately not
+  certifiable. A future analogue mode would need its own application-owned permission contract.
+- Made completeness honest. Nonempty v2 answers can be grounded and readable, but they report
+  `valid_partial` until a future application-owned requirement ledger can prove that every part of
+  the question was answered. The model's completeness field is retained only as a diagnostic for
+  measuring overconfidence. Contradictory claim/outcome shapes and incorrectly bound premise
+  corrections fail the generation contract.
+- Closed a public-disclosure hole before enabling the feature. Full context supplies the private
+  manuscript but returns only cited chunks. The original public quotation guard inspected those
+  returned chunks, so verbatim copying from an uncited chunk could evade it. Public full-context
+  answers now audit against the complete eligible private corpus. Retrieval keeps the identical
+  established `final_chunks` path, with a regression proving it never loads the full corpus.
+- Added the pre-request hard-budget projection omitted from v1. Archivist prices maximum output
+  under both ordinary uncached-input and observed cache-write shapes, takes the larger estimate,
+  and refuses the call if it would cross the remaining monthly hard limit. The explicit
+  `allow_over_budget` development override still works; public callers have no such override.
+- Repaired cumulative cost accounting. The former report discovered only
+  `evidence-planned-vN` directories and silently excluded the paid full-context call. Schema `/2`
+  separates strategy from strategy version, rejects duplicate provider response IDs across both
+  lineages, and reports **11 runs, 79 completed API operations, 745,657 priced tokens, and
+  `$6.436979020` estimated cumulative development API cost**. The report remains text-free.
+- Split the structured response and run-diagnostic schema identifiers, which v1 had accidentally
+  made identical. Full-context response, prompt, renderer, and policy versions all advanced
+  together to v2; both public and general feature flags remain disabled by default.
+- Verification used no provider calls. The combined focused repair suite passed **120 tests**;
+  the complete offline suite passed **667 tests with one intentional skip**; repository-wide Ruff
+  lint passed; the production frontend TypeScript/Vite build passed; and whitespace integrity
+  passed. Ruff's repository-wide formatter check still reports the pre-existing 51-file formatting
+  baseline, so no unrelated mechanical reformat was mixed into this repair.
+
+Useful blog lesson: giving a model the whole book removes retrieval scarcity, not the need for
+contracts. The elegant context window is only half the system. The other half is deciding which
+claims the application itself can verify: what the reader actually named, where that name occurs,
+whether an absence is certifiable, whether a source was merely available or actually used, and
+whether an expensive request should be permitted before it is sent.
 
 ## Update convention
 

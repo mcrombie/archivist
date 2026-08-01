@@ -42,6 +42,8 @@ __all__ = [
     "FULL_CONTEXT_COVERAGE_PROMPT_VERSION",
     "FULL_CONTEXT_COVERAGE_RENDERER_VERSION",
     "FULL_CONTEXT_COVERAGE_SCHEMA",
+    "FULL_CONTEXT_RESPONSE_SCHEMA",
+    "FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA",
     "FULL_CONTEXT_GENERATION_FAILED_MESSAGE",
     "FULL_CONTEXT_NO_EVIDENCE_MESSAGE",
     "MAX_CITED_CHUNKS_PER_CLAIM",
@@ -53,22 +55,25 @@ __all__ = [
     "FullContextCoverageResult",
     "FullContextValidationErrorCode",
     "PremiseFinding",
+    "TrustedTargetAudit",
     "process_full_context_coverage",
     "render_full_context_answer",
 ]
 
 
-FULL_CONTEXT_COVERAGE_SCHEMA = "archivist.full_context_coverage/1"
-FULL_CONTEXT_COVERAGE_RENDERER_VERSION = "full-context-coverage-renderer/1"
-FULL_CONTEXT_COVERAGE_PROMPT_VERSION = "full-context-coverage-v1"
+FULL_CONTEXT_RESPONSE_SCHEMA = "archivist.full_context_coverage/2"
+# Compatibility name for callers that already import the generation contract.
+# Run diagnostics deliberately use a different identifier below.
+FULL_CONTEXT_COVERAGE_SCHEMA = FULL_CONTEXT_RESPONSE_SCHEMA
+FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA = "archivist.full_context_run_diagnostics/1"
+FULL_CONTEXT_COVERAGE_RENDERER_VERSION = "full-context-coverage-renderer/2"
+FULL_CONTEXT_COVERAGE_PROMPT_VERSION = "full-context-coverage-v2"
 
 MAX_FULL_CONTEXT_CLAIMS = 40
 MAX_CITED_CHUNKS_PER_CLAIM = 6
 MAX_ABSENCE_FINDINGS = 3
 MAX_CLAIM_TEXT_CHARACTERS = 2_000
 MAX_TOTAL_CLAIM_TEXT_CHARACTERS = 24_000
-MAX_ABSENCE_SUBJECT_CHARACTERS = 200
-MAX_ABSENCE_NOTE_CHARACTERS = 600
 
 FULL_CONTEXT_NO_EVIDENCE_MESSAGE = (
     "The manuscript does not provide enough evidence to answer this question."
@@ -134,6 +139,16 @@ class FullContextValidationErrorCode(StrEnum):
     UNKNOWN_CORRECTION_CLAIM_ID = "unknown_correction_claim_id"
     TEXT_LIMIT_EXCEEDED = "text_limit_exceeded"
     CONTEXT_BUDGET_EXCEEDED = "context_budget_exceeded"
+    UNKNOWN_ABSENCE_TARGET_ID = "unknown_absence_target_id"
+    DUPLICATE_ABSENCE_TARGET_ID = "duplicate_absence_target_id"
+    ABSENCE_TARGET_MISMATCH = "absence_target_mismatch"
+    TRUSTED_TARGET_EVIDENCE_MISSING = "trusted_target_evidence_missing"
+    TRUSTED_TARGET_ABSENCE_MISSING = "trusted_target_absence_missing"
+    TRUSTED_TARGET_CLAIMS_UNSUPPORTED = "trusted_target_claims_unsupported"
+    CONTENT_OUTCOME_INCONSISTENT = "content_outcome_inconsistent"
+    INSUFFICIENT_EVIDENCE_UNCERTIFIED = "insufficient_evidence_uncertified"
+    PREMISE_CORRECTION_COUNT_INVALID = "premise_correction_count_invalid"
+    PREMISE_CORRECTION_ID_MISMATCH = "premise_correction_id_mismatch"
 
 
 class _ContractModel(BaseModel):
@@ -184,28 +199,42 @@ class PremiseFinding(_ContractModel):
 
 
 class AbsenceFinding(_ContractModel):
-    subject: str = Field(
-        min_length=1,
-        max_length=MAX_ABSENCE_SUBJECT_CHARACTERS,
-        description="A subject named in the question that the manuscript does not treat directly.",
+    target_id: Identifier = Field(
+        description=(
+            "The exact application-issued Target ID for a requested subject whose "
+            "direct absence the complete-corpus scan can certify. Never paraphrase "
+            "or invent a target."
+        ),
     )
     status: AbsenceStatus
-    note: str = Field(
-        min_length=1,
-        max_length=MAX_ABSENCE_NOTE_CHARACTERS,
-        description="One uncited sentence stating the evidence boundary for this subject.",
-    )
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedTargetAudit:
+    """Application-owned evidence facts for one trusted user-surface target.
+
+    The model may refer to ``target_id`` but cannot create or alter this record.
+    ``direct_chunk_ids`` includes both strong and weak direct anchor matches from
+    the exhaustive local scan.
+    """
+
+    target_id: str
+    query_surface_span: str
+    direct_chunk_ids: tuple[str, ...]
+    absence_checkable: bool
+    certified_direct_absence: bool
 
 
 class FullContextCoverageAnswer(_ContractModel):
-    schema_version: Literal["archivist.full_context_coverage/1"] = Field(alias="schema")
+    schema_version: Literal["archivist.full_context_coverage/2"] = Field(alias="schema")
     premise_finding: PremiseFinding | None
     claims: tuple[FullContextClaim, ...] = Field(max_length=MAX_FULL_CONTEXT_CLAIMS)
     absence_findings: tuple[AbsenceFinding, ...] = Field(max_length=MAX_ABSENCE_FINDINGS)
     self_reported_content_outcome: ContentOutcome = Field(
         description=(
-            "Your own judgment of whether the manuscript let you answer the whole "
-            "question. This is checked against a local scan and can be overridden."
+            "Your diagnostic judgment of whether the manuscript let you answer "
+            "the whole question. Application validation owns the final outcome "
+            "and currently caps every nonempty answer at valid_partial."
         ),
     )
 
@@ -249,6 +278,9 @@ def _diagnostics(
     citation_count: int = 0,
     absence_finding_count: int = 0,
     contradicted_absence_count: int = 0,
+    trusted_target_count: int = 0,
+    direct_target_count: int = 0,
+    certified_absent_target_count: int = 0,
     premise_status: PremiseStatus | None = None,
 ) -> dict[str, Any]:
     """Build the text-free record of one full-context validation.
@@ -258,7 +290,8 @@ def _diagnostics(
     """
 
     return {
-        "schema": FULL_CONTEXT_COVERAGE_SCHEMA,
+        "schema": FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA,
+        "response_schema": FULL_CONTEXT_RESPONSE_SCHEMA,
         "renderer_version": FULL_CONTEXT_COVERAGE_RENDERER_VERSION,
         "validation_result": validation_result.value,
         "error_code": error_code.value if error_code is not None else None,
@@ -274,6 +307,9 @@ def _diagnostics(
         "citation_count": citation_count,
         "absence_finding_count": absence_finding_count,
         "contradicted_absence_count": contradicted_absence_count,
+        "trusted_target_count": trusted_target_count,
+        "direct_target_count": direct_target_count,
+        "certified_absent_target_count": certified_absent_target_count,
         "premise_status": premise_status.value if premise_status is not None else None,
     }
 
@@ -306,7 +342,7 @@ def _citation_token(source_numbers: Sequence[int]) -> str:
 def render_full_context_answer(
     claims: Sequence[FullContextClaim],
     source_numbers_by_claim: Mapping[str, tuple[int, ...]],
-    absence_findings: Sequence[AbsenceFinding] = (),
+    absence_statements: Sequence[str] = (),
 ) -> str:
     """Render validated claims as prose with mechanically attached citations.
 
@@ -323,24 +359,36 @@ def render_full_context_answer(
             citation = _citation_token(source_numbers_by_claim[claim.claim_id])
             sentences.append(f"{body} {citation}{terminator}")
         paragraphs.append(" ".join(sentences))
-    for finding in absence_findings:
-        paragraphs.append(finding.note.strip())
+    paragraphs.extend(statement.strip() for statement in absence_statements)
     return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
+
+
+def _application_absence_statement(
+    target: TrustedTargetAudit,
+    finding: AbsenceFinding,
+) -> str:
+    """Render an uncited evidence boundary without accepting model-authored prose."""
+
+    surface = " ".join(target.query_surface_span.split()).strip()
+    # The status is a model diagnostic, not evidence. Even when the model chose
+    # ``addressed_indirectly``, the application can certify only that this exact
+    # trusted target has no direct hit. Any positive analogue belongs in a cited
+    # claim, not in an uncited boundary sentence.
+    return f"The manuscript does not directly address {surface}."
 
 
 def process_full_context_coverage(
     payload: FullContextCoverageAnswer | None,
     *,
     eligible_chunks: Sequence[Mapping[str, object]],
-    contradicted_absence_subjects: Sequence[str] = (),
+    trusted_target_audits: Sequence[TrustedTargetAudit] = (),
     refused: bool = False,
 ) -> FullContextCoverageResult:
     """Validate one structured full-context response and reduce it to cited sources.
 
-    ``contradicted_absence_subjects`` carries the subjects an exhaustive local
-    scan found in the corpus after the model reported them absent. Their presence
-    downgrades the content outcome; it never rewrites the model's prose, because
-    silently editing an answer would put unreviewed text in front of a reader.
+    Trusted targets and their corpus-presence facts are application-owned. The
+    model can bind an absence to one of their IDs, but cannot supply the target,
+    the scan result, or reader-facing absence prose.
     """
 
     supplied = len(eligible_chunks)
@@ -360,6 +408,38 @@ def process_full_context_coverage(
         chunk_id = chunk.get("chunk_id")
         if isinstance(chunk_id, str) and chunk_id:
             chunks_by_id.setdefault(chunk_id, chunk)
+
+    target_by_id: dict[str, TrustedTargetAudit] = {}
+    for target in trusted_target_audits:
+        if target.target_id in target_by_id:
+            return _failure(
+                FullContextValidationErrorCode.INVALID_PAYLOAD,
+                supplied_chunk_count=supplied,
+            )
+        target_by_id[target.target_id] = target
+
+    absence_by_target_id: dict[str, AbsenceFinding] = {}
+    for finding in payload.absence_findings:
+        if finding.target_id in absence_by_target_id:
+            return _failure(
+                FullContextValidationErrorCode.DUPLICATE_ABSENCE_TARGET_ID,
+                supplied_chunk_count=supplied,
+            )
+        target = target_by_id.get(finding.target_id)
+        if target is None:
+            return _failure(
+                FullContextValidationErrorCode.UNKNOWN_ABSENCE_TARGET_ID,
+                supplied_chunk_count=supplied,
+            )
+        # A reported absence must agree with the exhaustive local scan. Strong
+        # and weak matches are both direct evidence; neither may be erased by a
+        # model-authored absence assertion.
+        if target.direct_chunk_ids or not target.certified_direct_absence:
+            return _failure(
+                FullContextValidationErrorCode.ABSENCE_TARGET_MISMATCH,
+                supplied_chunk_count=supplied,
+            )
+        absence_by_target_id[finding.target_id] = finding
 
     claims = payload.claims
     for claim in claims:
@@ -403,9 +483,19 @@ def process_full_context_coverage(
                 FullContextValidationErrorCode.PREMISE_CORRECTION_MISSING,
                 supplied_chunk_count=supplied,
             )
+        if len(correction_claims) != 1:
+            return _failure(
+                FullContextValidationErrorCode.PREMISE_CORRECTION_COUNT_INVALID,
+                supplied_chunk_count=supplied,
+            )
         if correction_id not in claim_ids:
             return _failure(
                 FullContextValidationErrorCode.UNKNOWN_CORRECTION_CLAIM_ID,
+                supplied_chunk_count=supplied,
+            )
+        if correction_claims[0].claim_id != correction_id:
+            return _failure(
+                FullContextValidationErrorCode.PREMISE_CORRECTION_ID_MISMATCH,
                 supplied_chunk_count=supplied,
             )
         # A correction that arrives after the answer it corrects has already been
@@ -415,20 +505,78 @@ def process_full_context_coverage(
                 FullContextValidationErrorCode.PREMISE_CORRECTION_NOT_FIRST,
                 supplied_chunk_count=supplied,
             )
-    elif correction_claims:
+    else:
+        correction_id = premise.correction_claim_id if premise is not None else None
+        if correction_claims or correction_id is not None:
+            return _failure(
+                FullContextValidationErrorCode.PREMISE_CORRECTION_UNEXPECTED,
+                supplied_chunk_count=supplied,
+            )
+
+    cited_chunk_ids = {chunk_id for claim in claims for chunk_id in claim.cited_chunk_ids}
+    for target in trusted_target_audits:
+        if target.direct_chunk_ids and cited_chunk_ids.isdisjoint(target.direct_chunk_ids):
+            return _failure(
+                FullContextValidationErrorCode.TRUSTED_TARGET_EVIDENCE_MISSING,
+                supplied_chunk_count=supplied,
+            )
+        if target.certified_direct_absence and target.target_id not in absence_by_target_id:
+            return _failure(
+                FullContextValidationErrorCode.TRUSTED_TARGET_ABSENCE_MISSING,
+                supplied_chunk_count=supplied,
+            )
+
+    if (
+        claims
+        and trusted_target_audits
+        and not any(target.direct_chunk_ids for target in trusted_target_audits)
+    ):
+        # Until the application owns an explicit analogue/qualification ledger,
+        # a citable but merely related claim cannot answer a question whose every
+        # trusted target lacks direct manuscript evidence. This also covers a
+        # resolver-restored target whose absence is deliberately non-certifiable:
+        # uncertainty cannot license substitution with another subject.
         return _failure(
-            FullContextValidationErrorCode.PREMISE_CORRECTION_UNEXPECTED,
+            FullContextValidationErrorCode.TRUSTED_TARGET_CLAIMS_UNSUPPORTED,
             supplied_chunk_count=supplied,
         )
 
+    if claims and payload.self_reported_content_outcome is ContentOutcome.INSUFFICIENT_EVIDENCE:
+        return _failure(
+            FullContextValidationErrorCode.CONTENT_OUTCOME_INCONSISTENT,
+            supplied_chunk_count=supplied,
+        )
+    if (
+        not claims
+        and payload.self_reported_content_outcome is not ContentOutcome.INSUFFICIENT_EVIDENCE
+    ):
+        return _failure(
+            FullContextValidationErrorCode.CONTENT_OUTCOME_INCONSISTENT,
+            supplied_chunk_count=supplied,
+        )
+    if not claims and (
+        not trusted_target_audits
+        or any(not target.certified_direct_absence for target in trusted_target_audits)
+    ):
+        # A model's empty answer is not an absence certificate. With no trusted
+        # target, or with any target the local scan cannot certify absent, the
+        # application has no basis for telling a reader that the corpus lacks an
+        # answer.
+        return _failure(
+            FullContextValidationErrorCode.INSUFFICIENT_EVIDENCE_UNCERTIFIED,
+            supplied_chunk_count=supplied,
+        )
+
+    absence_statements = tuple(
+        _application_absence_statement(target_by_id[finding.target_id], finding)
+        for finding in payload.absence_findings
+    )
+
     if not claims:
         outcome = ContentOutcome.INSUFFICIENT_EVIDENCE
-        absence_notes = "\n\n".join(
-            finding.note.strip() for finding in payload.absence_findings if finding.note.strip()
-        )
         return FullContextCoverageResult(
             status=CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE,
-            answer=absence_notes or FULL_CONTEXT_NO_EVIDENCE_MESSAGE,
+            answer="\n\n".join(absence_statements) or FULL_CONTEXT_NO_EVIDENCE_MESSAGE,
             final_chunks=[],
             content_outcome=outcome,
             error_code=None,
@@ -439,7 +587,14 @@ def process_full_context_coverage(
                 self_reported_content_outcome=payload.self_reported_content_outcome,
                 supplied_chunk_count=supplied,
                 absence_finding_count=len(payload.absence_findings),
-                contradicted_absence_count=len(contradicted_absence_subjects),
+                contradicted_absence_count=0,
+                trusted_target_count=len(trusted_target_audits),
+                direct_target_count=sum(
+                    bool(target.direct_chunk_ids) for target in trusted_target_audits
+                ),
+                certified_absent_target_count=sum(
+                    target.certified_direct_absence for target in trusted_target_audits
+                ),
                 premise_status=premise.status if premise is not None else None,
             ),
         )
@@ -465,15 +620,13 @@ def process_full_context_coverage(
     answer = render_full_context_answer(
         claims,
         source_numbers_by_claim,
-        payload.absence_findings,
+        absence_statements,
     )
 
-    content_outcome = payload.self_reported_content_outcome
-    if contradicted_absence_subjects and content_outcome is ContentOutcome.VALID_COMPLETE:
-        # An exhaustive local scan found a subject the model called absent. Seeing
-        # the whole corpus is not proof of having read all of it, so the claim of
-        # completeness is downgraded rather than accepted.
-        content_outcome = ContentOutcome.VALID_PARTIAL
+    # Until an application-owned requirement ledger exists, a model's report of
+    # completeness is diagnostic only. Local validation establishes grounding
+    # and target coverage, not that every requested requirement was satisfied.
+    content_outcome = ContentOutcome.VALID_PARTIAL
 
     return FullContextCoverageResult(
         status=CoverageOutcomeStatus.ANSWERED,
@@ -491,7 +644,14 @@ def process_full_context_coverage(
             claim_count=len(claims),
             citation_count=sum(len(claim.cited_chunk_ids) for claim in claims),
             absence_finding_count=len(payload.absence_findings),
-            contradicted_absence_count=len(contradicted_absence_subjects),
+            contradicted_absence_count=0,
+            trusted_target_count=len(trusted_target_audits),
+            direct_target_count=sum(
+                bool(target.direct_chunk_ids) for target in trusted_target_audits
+            ),
+            certified_absent_target_count=sum(
+                target.certified_direct_absence for target in trusted_target_audits
+            ),
             premise_status=premise.status if premise is not None else None,
         ),
     )

@@ -8,6 +8,7 @@ from answer_coverage import AnswerUnitRole, ContentOutcome, CoverageOutcomeStatu
 from evidence_policy import assess_corpus_integrity
 from full_context_coverage import (
     FULL_CONTEXT_COVERAGE_SCHEMA,
+    FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA,
     AbsenceFinding,
     AbsenceStatus,
     FullContextClaim,
@@ -19,6 +20,7 @@ from full_context_pipeline import (
     FullContextEvidenceDecision,
     build_full_context_input,
     eligible_full_context_chunks,
+    estimate_full_context_request_cost_nano_usd,
     run_full_context_answer,
     serialize_full_context_corpus,
 )
@@ -138,7 +140,9 @@ def test_serialized_corpus_is_keyed_by_chunk_id_in_canonical_order():
 
 
 def test_prompt_places_the_stable_corpus_before_the_variable_question():
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     prompt = build_full_context_input(
         corpus_block=serialize_full_context_corpus(CORPUS),
@@ -148,8 +152,24 @@ def test_prompt_places_the_stable_corpus_before_the_variable_question():
     assert prompt.index("Chunk ID:") < prompt.index("Question: What happened?")
 
 
+def test_prompt_exposes_application_issued_target_ids_after_the_corpus():
+    turn = ResolvedTurn(
+        standalone_question="How does the book treat the Ohio Company?",
+        trusted_user_texts=("How does the book treat the Ohio Company?",),
+    )
+    prompt = build_full_context_input(
+        corpus_block=serialize_full_context_corpus(CORPUS),
+        resolved_turn=turn,
+    )
+
+    assert prompt.index("Chunk ID:") < prompt.index("Target ID: T1")
+    assert "User surface: Ohio Company" in prompt
+
+
 def test_interpretive_settings_stay_after_the_cacheable_corpus_prefix():
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     prompt = build_full_context_input(
         corpus_block=serialize_full_context_corpus(CORPUS),
@@ -165,7 +185,9 @@ def test_interpretive_settings_stay_after_the_cacheable_corpus_prefix():
 
 def test_corpus_integrity_failure_short_circuits_before_any_model_call(patched_generation):
     client = patched_generation(None)
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     result = run_full_context_answer(
         resolved_turn=turn,
@@ -183,7 +205,9 @@ def test_corpus_integrity_failure_short_circuits_before_any_model_call(patched_g
 def test_oversized_corpus_fails_closed_before_any_model_call(monkeypatch, patched_generation):
     client = patched_generation(None)
     monkeypatch.setattr(full_context_pipeline, "DOCUMENTED_MAX_INPUT_TOKENS", 10)
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     result = run_full_context_answer(
         resolved_turn=turn,
@@ -202,6 +226,71 @@ def test_oversized_corpus_fails_closed_before_any_model_call(monkeypatch, patche
     assert result.final_chunks == []
 
 
+def test_projected_request_cost_uses_the_more_expensive_cold_or_cache_write_shape():
+    # The observed cache-write rate is the conservative input estimate on both
+    # sides of the long-context threshold under the current pricing assumption.
+    below = estimate_full_context_request_cost_nano_usd(249_000)
+    above = estimate_full_context_request_cost_nano_usd(300_000)
+
+    assert below == 249_000 * 6_250 + 12_000 * 30_000
+    assert above == 300_000 * 6_250 * 2 + 12_000 * 30_000 * 3 // 2
+
+
+def test_projected_request_cost_fails_closed_when_model_pricing_is_unknown(monkeypatch):
+    monkeypatch.setattr(full_context_pipeline, "calculate_cost_nano_usd", lambda *_args: None)
+
+    with pytest.raises(RuntimeError, match="no configured local pricing"):
+        estimate_full_context_request_cost_nano_usd(249_000)
+
+
+def test_projected_budget_is_checked_before_the_provider_call(monkeypatch, patched_generation):
+    parsed = coverage_answer(
+        (
+            FullContextClaim(
+                claim_id="C1",
+                role=AnswerUnitRole.MECHANISM,
+                text="A synthetic process occurred.",
+                cited_chunk_ids=("10_Synthetic Chapter 1_ Title_002",),
+                paragraph_group=1,
+            ),
+        )
+    )
+    client = patched_generation(parsed)
+    projected_costs: list[int] = []
+
+    def reject_projected_cost(projected_cost_nano_usd):
+        projected_costs.append(projected_cost_nano_usd)
+        raise full_context_pipeline.CostLimitExceeded(
+            {
+                "hard_limit_enabled": True,
+                "exceeded": False,
+                "projected_exceeds_remaining": True,
+            }
+        )
+
+    monkeypatch.setattr(
+        full_context_pipeline,
+        "enforce_projected_usage_budget",
+        reject_projected_cost,
+    )
+    turn = ResolvedTurn(
+        standalone_question="What happened?",
+        trusted_user_texts=("What happened?",),
+    )
+
+    with pytest.raises(full_context_pipeline.CostLimitExceeded):
+        run_full_context_answer(
+            resolved_turn=turn,
+            chunks=CORPUS,
+            client=client,
+            corpus_integrity=matching_integrity(CORPUS),
+        )
+
+    assert len(projected_costs) == 1
+    assert projected_costs[0] > 0
+    assert client.calls == []
+
+
 def test_one_generation_call_with_no_retry_produces_cited_only_sources(patched_generation):
     parsed = coverage_answer(
         (
@@ -215,7 +304,9 @@ def test_one_generation_call_with_no_retry_produces_cited_only_sources(patched_g
         )
     )
     client = patched_generation(parsed)
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     result = run_full_context_answer(
         resolved_turn=turn,
@@ -252,7 +343,9 @@ def test_the_full_corpus_never_reaches_the_result_or_its_diagnostics(patched_gen
         )
     )
     client = patched_generation(parsed)
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     result = run_full_context_answer(
         resolved_turn=turn,
@@ -267,7 +360,7 @@ def test_the_full_corpus_never_reaches_the_result_or_its_diagnostics(patched_gen
     assert len(result.final_chunks) < len(CORPUS)
 
 
-def test_a_reported_absence_the_corpus_contradicts_downgrades_the_outcome(patched_generation):
+def test_a_reported_absence_the_corpus_contradicts_fails_closed(patched_generation):
     corpus = [
         chunk(1, "The Ohio Company petitioned for a grant of land."),
         chunk(2, "A synthetic later development followed."),
@@ -284,9 +377,8 @@ def test_a_reported_absence_the_corpus_contradicts_downgrades_the_outcome(patche
         ),
         absence_findings=(
             AbsenceFinding(
-                subject="Ohio Company",
+                target_id="T1",
                 status=AbsenceStatus.NOT_ADDRESSED_IN_CORPUS,
-                note="The manuscript does not treat the Ohio Company.",
             ),
         ),
         self_reported=ContentOutcome.VALID_COMPLETE,
@@ -304,8 +396,49 @@ def test_a_reported_absence_the_corpus_contradicts_downgrades_the_outcome(patche
         corpus_integrity=matching_integrity(corpus),
     )
 
-    assert result.diagnostics["generation"]["content_outcome"] == ContentOutcome.VALID_PARTIAL.value
-    assert result.diagnostics["generation"]["contradicted_absence_count"] == 1
+    assert result.status == CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED.value
+    assert result.final_chunks == []
+    assert "Ohio Company" not in result.answer
+    assert (
+        result.diagnostics["generation"]["error_code"]
+        == FullContextValidationErrorCode.ABSENCE_TARGET_MISMATCH.value
+    )
+
+
+def test_weak_direct_target_hit_must_be_represented_by_a_cited_hit(patched_generation):
+    corpus = [
+        chunk(1, "Ohio representatives petitioned and the chartered Company responded."),
+        chunk(2, "A synthetic later development followed."),
+    ]
+    parsed = coverage_answer(
+        (
+            FullContextClaim(
+                claim_id="C1",
+                role=AnswerUnitRole.MECHANISM,
+                text="A synthetic later development followed.",
+                cited_chunk_ids=("10_Synthetic Chapter 1_ Title_002",),
+                paragraph_group=1,
+            ),
+        )
+    )
+    client = patched_generation(parsed)
+    turn = ResolvedTurn(
+        standalone_question="How does the book treat the Ohio Company?",
+        trusted_user_texts=("How does the book treat the Ohio Company?",),
+    )
+
+    result = run_full_context_answer(
+        resolved_turn=turn,
+        chunks=corpus,
+        client=client,
+        corpus_integrity=matching_integrity(corpus),
+    )
+
+    assert (
+        result.diagnostics["generation"]["error_code"]
+        == FullContextValidationErrorCode.TRUSTED_TARGET_EVIDENCE_MISSING.value
+    )
+    assert result.final_chunks == []
 
 
 def test_run_diagnostics_report_the_strategy_and_no_rag_cohort_values(patched_generation):
@@ -321,7 +454,9 @@ def test_run_diagnostics_report_the_strategy_and_no_rag_cohort_values(patched_ge
         )
     )
     client = patched_generation(parsed)
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     result = run_full_context_answer(
         resolved_turn=turn,
@@ -340,6 +475,9 @@ def test_run_diagnostics_report_the_strategy_and_no_rag_cohort_values(patched_ge
     assert cohort["query_planner_prompt_version"] == "not-applicable"
     assert cohort["normalizer_version"] == "not-applicable"
     assert diagnostics["planner"]["status"] == "not_called"
+    generation = result.diagnostics["generation"]
+    assert generation["schema"] == FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA
+    assert generation["response_schema"] == FULL_CONTEXT_COVERAGE_SCHEMA
 
 
 def test_full_context_run_diagnostics_are_accepted_by_the_usage_ledger(
@@ -360,7 +498,9 @@ def test_full_context_run_diagnostics_are_accepted_by_the_usage_ledger(
         )
     )
     client = patched_generation(parsed)
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
     result = run_full_context_answer(
         resolved_turn=turn,
         chunks=CORPUS,
@@ -398,7 +538,9 @@ def test_an_unresolvable_chunk_id_from_a_live_response_fails_the_turn_closed(pat
         )
     )
     client = patched_generation(parsed)
-    turn = ResolvedTurn(standalone_question="What happened?", trusted_user_texts=("What happened?",))
+    turn = ResolvedTurn(
+        standalone_question="What happened?", trusted_user_texts=("What happened?",)
+    )
 
     result = run_full_context_answer(
         resolved_turn=turn,

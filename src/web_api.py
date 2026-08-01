@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from costs import CostLimitExceeded, UsageLedger, usage_scope
 from exposure_profile import ExposureProfile, ExposureSettings
+from full_context_pipeline import eligible_full_context_chunks
 from importers import chapter_title_from_text
 from perspectives import (
     AnswerPerspective,
@@ -679,6 +680,29 @@ def _configure_public_budget(
         )
 
 
+def _public_verbatim_audit_chunks(
+    *,
+    answer_strategy: AnswerStrategy,
+    final_chunks: list[dict[str, object]],
+) -> list[Mapping[str, object]]:
+    """Return the private evidence scope used by the public quotation guard.
+
+    Retrieval answers can reproduce manuscript prose only from their selected
+    context, so their established audit scope remains ``final_chunks``. A
+    full-context answer saw every eligible chunk even though its result exposes
+    only cited chunks; audit that complete private scope so omitting a citation
+    cannot bypass the public verbatim boundary.
+    """
+
+    if answer_strategy is not AnswerStrategy.FULL_CONTEXT:
+        return final_chunks
+
+    eligible_chunks = eligible_full_context_chunks(load_project_chunks("current"))
+    if not eligible_chunks:
+        raise PublicSourceError("private full-context corpus is not available")
+    return eligible_chunks
+
+
 def _run_public_question(
     request: PublicQuestionRequest,
     settings: ExposureSettings,
@@ -728,9 +752,13 @@ def _run_public_question(
                 "corpus_integrity_failed",
             }:
                 raise PublicSourceError("answer did not pass the public release gate")
+            audit_chunks = _public_verbatim_audit_chunks(
+                answer_strategy=request.answer_strategy,
+                final_chunks=answer_result.final_chunks,
+            )
             if answer_has_extended_verbatim_overlap(
                 answer_result.answer,
-                answer_result.final_chunks,
+                audit_chunks,
             ):
                 raise PublicSourceError("answer exceeded the public quotation boundary")
             sources = public_source_payload(

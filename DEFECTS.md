@@ -45,6 +45,74 @@ Entries below, most recent first.
 
 ---
 
+## [2026-08-01] Full-context v1 trusted its own completeness and absence assertions
+Phase/Brief: Phase 1 full-context answer strategy, review after the first paid G007 debugging run
+Symptom: the live answer self-reported `valid_complete`, while subsequent strict manual grading
+found 1/7 essential claims and 4/5 target groups. Version 1 also accepted model-authored absence
+subjects and prose, allowed a zero-claim insufficiency answer without application proof, treated any
+eligible chunk ID as enough even when it did not directly support a named target, and permitted the
+premise correction ID to point somewhere other than the correction-role claim.
+Cause: contract implementation gap plus spec gaps. The design correctly separated cited chunks
+from the full corpus, but still treated the model as the authority on whether it had read enough of
+that corpus. It specified an absence cross-check as a downgrade rather than a fail-closed evidence
+contract, and it did not define application-owned target or completeness ledgers.
+Resolution and verification: opened the independent `full-context-v2` cohort without changing RAG
+V25. Application-issued target IDs now bind absence findings; exhaustive strong and weak direct
+matches own presence; certified absence owns absence; direct targets require a cited direct-hit
+chunk; and zero-claim insufficiency is valid only when every trusted target is certified absent and
+bound. When no audited target has direct manuscript evidence, any nonempty claim is rejected as an
+unsolicited analogue until an application-owned analogue contract exists; non-certifiable
+resolver-restored targets do not weaken that rule. Absence prose is deterministic application text.
+Premise correction now has an exact
+one-claim/one-ID/first-position contract. Nonempty answers are capped at `valid_partial` until an
+application-owned requirement ledger exists. Response, prompt, renderer, policy, and diagnostic
+schema identities were versioned consistently. Focused full-context and compatibility suites
+passed; no provider call was made.
+
+## [2026-08-01] The public quotation guard audited only cited full-context chunks
+Phase/Brief: Phase 4 disclosure boundary review performed while the public full-context flag remains
+disabled
+Symptom: a full-context model sees every eligible private manuscript chunk but returns only cited
+chunks. The public 45-word overlap guard inspected that returned list, so a response could copy a
+long passage from an uncited chunk and evade the check by omitting the citation.
+Cause: spec gap in the design. Converging full-context output to RAG's cited-only `final_chunks`
+shape was correct for disclosure, but the claim that every downstream guard needed no change was
+too broad: a guard over what the model could reproduce needs the private input scope, not merely the
+public output scope.
+Resolution and verification: the public full-context path reloads the current eligible corpus and
+audits the answer against all of it before source minimization. It fails closed if that private
+scope is unavailable. The RAG branch returns the identical existing `final_chunks` object and does
+not load the corpus. An adversarial uncited 55-word reproduction is rejected, and a separate RAG
+regression proves its path is unchanged. The public full-context flag remains disabled.
+
+## [2026-08-01] Full-context spend was absent from cumulative development cost lineage
+Phase/Brief: development-cost lineage review after the first paid full-context debugging call
+Symptom: the text-free cumulative report still showed `$4.811832770` after a separately metered
+`$1.625146250` full-context call, because discovery matched only `evidence-planned-vN` directories.
+Cause: contract implementation gap. A cost report keyed only by RAG policy version had no strategy
+dimension, so a second answer strategy was invisible and RAG V1 would collide conceptually with
+full-context V1.
+Resolution and verification: cost-lineage schema `/2` identifies each run by `answer_strategy` and
+`answer_strategy_version`, discovers both namespaces, groups them independently, and retains the
+cross-ledger provider-response duplicate check. Legacy `/1` reports remain renderable. The
+regenerated text-free lineage reports 11 runs, 79 calls, 745,657 priced tokens, and
+`$6.436979020` estimated cost. Focused mixed-strategy, duplicate-ID, legacy, and text-leak tests
+passed; no provider call was made.
+
+## [2026-08-01] Full-context requests could cross a remaining hard budget in one call
+Phase/Brief: Phase 1 full-context answer strategy, implementation review of design section 18
+Symptom: the existing pre-call guard stopped requests only after the monthly hard limit had already
+been reached. A full-context request could therefore begin while under budget and exceed the
+remaining amount by itself.
+Cause: contract implementation gap. The design required a conservative prospective check, but v1
+implemented only the ordinary current-spend check.
+Resolution and verification: a shared prospective guard now compares an estimated request cost to
+the remaining hard budget while preserving the explicit development override. Full context prices
+maximum output under both ordinary uncached-input and observed cache-write shapes and uses the
+larger estimate immediately before the provider call. Unknown pricing fails closed. Tests cover an
+over-remaining request, an exact-remaining request, override behavior, invalid estimates, pricing on
+both sides of the long-context threshold, and call ordering. No provider call was made.
+
 ## [2026-07-30] A paid full-context answer was discarded by a retrieval-only artifact rule
 Phase/Brief: Phase 1 full-context answer strategy, first paid G007 debugging run
 `full-context-v1-g007-20260730-1`
