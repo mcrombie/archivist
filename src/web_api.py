@@ -19,6 +19,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from archivist_modes import (
+    ArchivistMode,
+    archivist_mode_metadata,
+    settings_for_archivist_mode,
+)
 from costs import CostLimitExceeded, UsageLedger, usage_scope
 from exposure_profile import ExposureProfile, ExposureSettings
 from full_context_pipeline import eligible_full_context_chunks
@@ -87,11 +92,16 @@ if FRONTEND_DIST.exists():
 class ConversationTurn(BaseModel):
     question: str = Field(min_length=1, max_length=4_000)
     answer: str = Field(min_length=1, max_length=12_000)
+    archivist_mode: ArchivistMode | None = None
+    archivist_mode_version: str | None = Field(default=None, max_length=32)
+    influence_profile_id: str | None = Field(default=None, max_length=128)
+    influence_profile_version: str | None = Field(default=None, max_length=32)
 
 
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4_000)
     n_results: int = Field(default=5, ge=1, le=12)
+    archivist_mode: ArchivistMode = ArchivistMode.ESSENTIAL
     historiographical_lens: HistoriographicalLens = HistoriographicalLens.EVIDENCE_FIRST
     voice: AnswerVoice = AnswerVoice.SCHOLARLY
     worldview: Worldview = Worldview.NONE
@@ -123,15 +133,21 @@ class QuestionRequest(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def translate_legacy_perspective(cls, data: object) -> object:
-        if not isinstance(data, Mapping) or data.get("perspective") is None:
+    def resolve_interpretive_defaults(cls, data: object) -> object:
+        if not isinstance(data, Mapping):
             return data
 
         values = dict(data)
-        lens, voice, worldview = settings_for_legacy_perspective(values["perspective"])
-        values.setdefault("historiographical_lens", lens)
-        values.setdefault("voice", voice)
-        values.setdefault("worldview", worldview)
+        if values.get("perspective") is not None:
+            lens, voice, worldview = settings_for_legacy_perspective(values["perspective"])
+            values.setdefault("historiographical_lens", lens)
+            values.setdefault("voice", voice)
+            values.setdefault("worldview", worldview)
+        if "archivist_mode" in values:
+            lens, voice, worldview = settings_for_archivist_mode(values["archivist_mode"])
+            values.setdefault("historiographical_lens", lens)
+            values.setdefault("voice", voice)
+            values.setdefault("worldview", worldview)
         return values
 
 
@@ -151,6 +167,10 @@ class PublicConversationTurn(BaseModel):
 
     question: str = Field(min_length=1, max_length=1_500)
     answer: str = Field(min_length=1, max_length=6_000)
+    archivist_mode: ArchivistMode | None = None
+    archivist_mode_version: str | None = Field(default=None, max_length=32)
+    influence_profile_id: str | None = Field(default=None, max_length=128)
+    influence_profile_version: str | None = Field(default=None, max_length=32)
 
 
 class PublicQuestionRequest(BaseModel):
@@ -159,6 +179,7 @@ class PublicQuestionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=1_500)
+    archivist_mode: ArchivistMode = ArchivistMode.ESSENTIAL
     historiographical_lens: HistoriographicalLens = HistoriographicalLens.EVIDENCE_FIRST
     voice: AnswerVoice = AnswerVoice.SCHOLARLY
     worldview: Worldview = Worldview.NONE
@@ -182,6 +203,18 @@ class PublicQuestionRequest(BaseModel):
         if not stripped:
             raise ValueError("question cannot be blank")
         return stripped
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_mode_defaults(cls, data: object) -> object:
+        if not isinstance(data, Mapping) or "archivist_mode" not in data:
+            return data
+        values = dict(data)
+        lens, voice, worldview = settings_for_archivist_mode(values["archivist_mode"])
+        values.setdefault("historiographical_lens", lens)
+        values.setdefault("voice", voice)
+        values.setdefault("worldview", worldview)
+        return values
 
 
 def _feature_flags(
@@ -356,15 +389,22 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             enforce_budget=True,
             allow_over_budget=request.allow_over_budget,
         ):
+            answer_kwargs: dict[str, object] = {
+                "n_results": request.n_results,
+                "historiographical_lens": request.historiographical_lens,
+                "voice": request.voice,
+                "worldview": request.worldview,
+                "history": [
+                    turn.model_dump(exclude_none=True) for turn in request.history
+                ],
+                "answer_strategy": request.answer_strategy,
+            }
+            if "archivist_mode" in request.model_fields_set:
+                answer_kwargs["archivist_mode"] = request.archivist_mode
             answer_result = answer_project_question_result(
                 project_id,
                 request.question,
-                n_results=request.n_results,
-                historiographical_lens=request.historiographical_lens,
-                voice=request.voice,
-                worldview=request.worldview,
-                history=[turn.model_dump() for turn in request.history],
-                answer_strategy=request.answer_strategy,
+                **answer_kwargs,
             )
             resolved_query = answer_result.resolved_question
             answer = answer_result.answer
@@ -388,6 +428,7 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
         except Exception:
             logger.exception("Could not load the post-answer local cost summary")
             costs = None
+        mode_metadata = archivist_mode_metadata(request.archivist_mode)
         return {
             "answer": answer,
             "answer_status": answer_result.status,
@@ -407,6 +448,12 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             "resolved_query": resolved_query,
             "conversation_id": request.conversation_id,
             "turn_id": request.turn_id,
+            "archivist_mode": request.archivist_mode.value,
+            "archivist_mode_version": mode_metadata["archivist_mode_version"],
+            "influence_profile_id": mode_metadata["influence_profile_id"],
+            "influence_profile_version": mode_metadata["influence_profile_version"],
+            "influence_prompt_sha256": mode_metadata["influence_prompt_sha256"],
+            "influence_provenance": mode_metadata["influence_provenance"],
             "historiographical_lens": request.historiographical_lens.value,
             "voice": request.voice.value,
             "worldview": request.worldview.value,
@@ -737,15 +784,22 @@ def _run_public_question(
             enforce_budget=True,
             allow_over_budget=False,
         ):
+            answer_kwargs: dict[str, object] = {
+                "n_results": settings.public_n_results,
+                "historiographical_lens": request.historiographical_lens,
+                "voice": request.voice,
+                "worldview": request.worldview,
+                "history": [
+                    turn.model_dump(exclude_none=True) for turn in request.history
+                ],
+                "answer_strategy": request.answer_strategy,
+            }
+            if "archivist_mode" in request.model_fields_set:
+                answer_kwargs["archivist_mode"] = request.archivist_mode
             answer_result = answer_project_question_result(
                 "current",
                 request.question,
-                n_results=settings.public_n_results,
-                historiographical_lens=request.historiographical_lens,
-                voice=request.voice,
-                worldview=request.worldview,
-                history=[turn.model_dump() for turn in request.history],
-                answer_strategy=request.answer_strategy,
+                **answer_kwargs,
             )
             if answer_result.status in {
                 "generation_contract_failed",
@@ -780,6 +834,7 @@ def _run_public_question(
                 "Could not persist public answer diagnostics request_id=%s",
                 request_id,
             )
+        mode_metadata = archivist_mode_metadata(request.archivist_mode)
         return {
             "answer": answer_result.answer,
             "answer_status": answer_result.status,
@@ -794,6 +849,12 @@ def _run_public_question(
                 "answer_strategy_version",
                 None,
             ),
+            "archivist_mode": request.archivist_mode.value,
+            "archivist_mode_version": mode_metadata["archivist_mode_version"],
+            "influence_profile_id": mode_metadata["influence_profile_id"],
+            "influence_profile_version": mode_metadata["influence_profile_version"],
+            "influence_prompt_sha256": mode_metadata["influence_prompt_sha256"],
+            "influence_provenance": mode_metadata["influence_provenance"],
             "historiographical_lens": request.historiographical_lens.value,
             "voice": request.voice.value,
             "worldview": request.worldview.value,

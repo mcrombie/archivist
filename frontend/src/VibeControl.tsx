@@ -1,49 +1,36 @@
-import { Check, ChevronDown, Palette, RefreshCw } from "lucide-react";
+import { Check, ChevronDown, Palette } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-import {
-  DEFAULT_VIBE,
-  isVibeId,
-  VIBES,
-  VIBE_CHANGE_EVENT,
-  VIBE_STORAGE_KEY,
-  type VibeId
-} from "./vibes";
+import type { ArchivistModeId } from "./api";
+import { ARCHIVIST_MODES, archivistMode } from "./modes";
+import type { VibeId } from "./vibes";
 
-function setDocumentVibe(vibe: VibeId) {
-  document.documentElement.dataset.vibe = vibe;
-  window.dispatchEvent(new CustomEvent(VIBE_CHANGE_EVENT, { detail: vibe }));
+function setDocumentAppearance(appearance: VibeId) {
+  document.documentElement.dataset.vibe = appearance;
 }
 
-export function VibeControl({ compact = false }: { compact?: boolean }) {
-  const [vibe, setVibe] = useState<VibeId>(() => {
-    const documentVibe = document.documentElement.dataset.vibe;
-    return isVibeId(documentVibe) ? documentVibe : DEFAULT_VIBE;
-  });
+export function VibeControl({
+  mode,
+  appearance,
+  custom,
+  onModeChange,
+  compact = false
+}: {
+  mode: ArchivistModeId;
+  appearance: VibeId;
+  custom: boolean;
+  onModeChange: (mode: ArchivistModeId) => void;
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const pickerId = useId();
   const controlRef = useRef<HTMLDivElement>(null);
+  const current = archivistMode(mode);
 
   useEffect(() => {
-    const syncStoredVibe = (event: StorageEvent) => {
-      if (event.key !== VIBE_STORAGE_KEY) return;
-      const nextVibe = isVibeId(event.newValue) ? event.newValue : DEFAULT_VIBE;
-      setDocumentVibe(nextVibe);
-      setVibe(nextVibe);
-    };
-    const syncVisibleVibe = (event: Event) => {
-      const nextVibe = (event as CustomEvent<unknown>).detail;
-      if (isVibeId(nextVibe)) setVibe(nextVibe);
-    };
-
-    window.addEventListener("storage", syncStoredVibe);
-    window.addEventListener(VIBE_CHANGE_EVENT, syncVisibleVibe);
-    return () => {
-      window.removeEventListener("storage", syncStoredVibe);
-      window.removeEventListener(VIBE_CHANGE_EVENT, syncVisibleVibe);
-    };
-  }, []);
+    setDocumentAppearance(appearance);
+  }, [appearance]);
 
   useEffect(() => {
     if (!open) return;
@@ -61,20 +48,11 @@ export function VibeControl({ compact = false }: { compact?: boolean }) {
     };
   }, [open]);
 
-  const current = VIBES.find((option) => option.id === vibe) ?? VIBES[0];
-  const currentIndex = VIBES.findIndex((option) => option.id === current.id);
-  const next = VIBES[(currentIndex + 1) % VIBES.length] ?? VIBES[0];
-
-  function applyVibe(nextVibe: VibeId) {
-    const option = VIBES.find((candidate) => candidate.id === nextVibe) ?? VIBES[0];
-    setDocumentVibe(option.id);
-    setVibe(option.id);
-    setAnnouncement(`Appearance changed to ${option.label}.`);
-    try {
-      window.localStorage.setItem(VIBE_STORAGE_KEY, option.id);
-    } catch {
-      // The selected appearance still applies for this page when storage is unavailable.
-    }
+  function selectMode(nextMode: ArchivistModeId) {
+    const option = archivistMode(nextMode);
+    onModeChange(nextMode);
+    setAnnouncement(`Archivist mode changed to ${option.label}. The new mode applies to future answers.`);
+    setOpen(false);
   }
 
   return (
@@ -88,8 +66,8 @@ export function VibeControl({ compact = false }: { compact?: boolean }) {
       >
         <Palette size={16} aria-hidden="true" />
         <span>
-          <small>Change vibe</small>
-          <strong>{current.label}</strong>
+          <small>Archivist mode</small>
+          <strong>{current.shortLabel}{custom ? " · Custom" : ""}</strong>
         </span>
         <ChevronDown size={15} aria-hidden="true" />
       </button>
@@ -97,38 +75,34 @@ export function VibeControl({ compact = false }: { compact?: boolean }) {
       {open ? (
         <div className="vibe-menu" id={pickerId}>
           <div className="vibe-menu-heading">
-            <span>Appearance only</span>
-            <button
-              type="button"
-              onClick={() => applyVibe(next.id)}
-              title={`Try ${next.label}`}
-              aria-label={`Cycle to ${next.label}`}
-            >
-              <RefreshCw size={14} aria-hidden="true" />
-              Next
-            </button>
+            <span>Reading style and appearance</span>
           </div>
-          <div className="vibe-options" role="group" aria-label="Archivist appearance">
-            {VIBES.map((option) => (
+          <p className="vibe-menu-note">
+            Modes guide framing and atmosphere. Historical claims and citations still come from
+            <cite> Cradle of the Empire</cite>.
+          </p>
+          <div className="vibe-options" role="group" aria-label="Archivist mode">
+            {ARCHIVIST_MODES.map((option) => (
               <button
                 key={option.id}
                 type="button"
-                aria-pressed={option.id === vibe}
-                className={option.id === vibe ? "is-selected" : ""}
-                onClick={() => {
-                  applyVibe(option.id);
-                  setOpen(false);
-                }}
+                aria-pressed={option.id === mode}
+                className={option.id === mode ? "is-selected" : ""}
+                onClick={() => selectMode(option.id)}
               >
-                <i className={`vibe-swatch vibe-swatch-${option.id}`} aria-hidden="true" />
+                <i className={`vibe-swatch vibe-swatch-${option.appearance}`} aria-hidden="true" />
                 <span>
                   <strong>{option.label}</strong>
                   <small>{option.description}</small>
                 </span>
-                {option.id === vibe ? <Check size={15} aria-hidden="true" /> : null}
+                {option.id === mode ? <Check size={15} aria-hidden="true" /> : null}
               </button>
             ))}
           </div>
+          <p className="vibe-mode-disclosure">{current.disclosure}</p>
+          {appearance !== current.appearance ? (
+            <p className="vibe-appearance-override">Advanced appearance override active.</p>
+          ) : null}
         </div>
       ) : null}
 

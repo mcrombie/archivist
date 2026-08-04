@@ -81,6 +81,7 @@ export const DEFAULT_ANSWER_STRATEGY: AnswerStrategy = "rag";
 export type ConversationHistoryTurn = {
   question: string;
   answer: string;
+  archivist_mode?: ArchivistModeId;
 };
 
 export type AnswerRunDiagnostics = {
@@ -199,6 +200,8 @@ export type AnswerFacets = {
   worldview: AnswerWorldview;
 };
 
+export type ArchivistModeId = "professional" | "essential" | "forest";
+
 export const DEFAULT_ANSWER_FACETS: AnswerFacets = {
   historiographicalLens: "evidence_first",
   voice: "scholarly",
@@ -286,6 +289,7 @@ export async function askQuestion(
   options: {
     conversationId: string;
     turnId: string;
+    archivistMode: ArchivistModeId;
     allowOverBudget?: boolean;
     publicDemo?: boolean;
     answerStrategy?: AnswerStrategy;
@@ -299,6 +303,7 @@ export async function askQuestion(
     history,
     conversation_id: options.conversationId,
     turn_id: options.turnId,
+    archivist_mode: options.archivistMode,
     answer_strategy: options.answerStrategy ?? DEFAULT_ANSWER_STRATEGY
   };
   if (!options.publicDemo) {
@@ -314,6 +319,10 @@ export async function askQuestion(
     evidence_decision?: string;
     run_diagnostics?: AnswerRunDiagnostics;
     resolved_query?: string;
+    archivist_mode: ArchivistModeId;
+    archivist_mode_version?: string;
+    influence_profile_id?: string;
+    influence_profile_version?: string;
     historiographical_lens: HistoriographicalLens;
     voice: AnswerVoice;
     worldview: AnswerWorldview;

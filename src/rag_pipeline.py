@@ -74,11 +74,15 @@ from evidence_policy import (
 from filters import should_skip_document
 from full_context_coverage import FullContextValidationErrorCode
 from model_config import GENERATOR_SETTINGS, QUERY_PLANNER_SETTINGS
+from archivist_modes import (
+    ArchivistMode,
+    archivist_mode_metadata,
+    build_archivist_mode_prompt_block,
+)
 from perspectives import (
     AnswerVoice,
     HistoriographicalLens,
     Worldview,
-    build_interpretive_prompt_block,
     normalize_historiographical_lens,
     normalize_worldview,
 )
@@ -2628,6 +2632,7 @@ def build_coverage_input(
     historiographical_lens: HistoriographicalLens | str,
     voice: AnswerVoice | str,
     worldview: Worldview | str,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
 ) -> str:
     requirement_sources = _requirement_source_map(plan, facet_source_numbers)
     requirement_by_id = {
@@ -2737,10 +2742,11 @@ def build_coverage_input(
             "first_person": "forbidden",
             "reader_presentation": "one cohesive answer with no section labels",
         }
-    style = build_interpretive_prompt_block(
+    style = build_archivist_mode_prompt_block(
         historiographical_lens,
         voice,
         worldview,
+        archivist_mode=archivist_mode,
     )
     interpretive_expansion = bool(required_interpretive_moves)
     sections = [
@@ -2874,6 +2880,7 @@ def run_evidence_planned_answer(
     historiographical_lens: HistoriographicalLens | str = (HistoriographicalLens.EVIDENCE_FIRST),
     voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
     worldview: Worldview | str = Worldview.NONE,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
     policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
 ) -> AnswerModeResult:
     """Execute one bounded evidence-planned Answer Mode turn."""
@@ -2888,6 +2895,7 @@ def run_evidence_planned_answer(
         stage_timings_ms["pipeline_total"] = _elapsed_ms(pipeline_started_ns)
         return {
             "rag_policy_version": policy.version,
+            "archivist_mode": archivist_mode_metadata(archivist_mode),
             "evidence": dict(evidence),
             "generation": dict(generation),
             "planner": dict(planner_call_diagnostics),
@@ -2914,6 +2922,7 @@ def run_evidence_planned_answer(
         )
         diagnostics = {
             "rag_policy_version": policy.version,
+            "archivist_mode": archivist_mode_metadata(archivist_mode),
             "evidence": {
                 "schema": "archivist.evidence_policy_diagnostics/1",
                 "corpus": integrity.as_diagnostics(),
@@ -3141,10 +3150,11 @@ def run_evidence_planned_answer(
             ),
         )
 
-    style_block = build_interpretive_prompt_block(
+    style_block = build_archivist_mode_prompt_block(
         historiographical_lens,
         voice,
         worldview,
+        archivist_mode=archivist_mode,
     )
     required_interpretive_moves = interpretive_moves_for_settings(
         historiographical_lens,
@@ -3216,6 +3226,7 @@ def run_evidence_planned_answer(
         historiographical_lens=historiographical_lens,
         voice=voice,
         worldview=worldview,
+        archivist_mode=archivist_mode,
     )
     generation_started_ns = perf_counter_ns()
     try:

@@ -19,6 +19,11 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
+from archivist_modes import (
+    ArchivistMode,
+    archivist_mode_metadata,
+    resolve_archivist_mode_settings,
+)
 from costs import (
     CostLimitExceeded,
     tracked_embeddings_create,
@@ -116,6 +121,18 @@ def _with_stage_timings(
     timings = dict(existing) if isinstance(existing, Mapping) else {}
     timings.update(stage_timings_ms)
     diagnostics["stage_timings_ms"] = timings
+    if not isinstance(result, AnswerModeResult):
+        result.diagnostics = diagnostics
+        return result
+    return replace(result, diagnostics=diagnostics)
+
+
+def _with_archivist_mode_metadata(
+    result: AnswerModeResult,
+    archivist_mode: ArchivistMode | str,
+) -> AnswerModeResult:
+    diagnostics = dict(getattr(result, "diagnostics", {}))
+    diagnostics["archivist_mode"] = archivist_mode_metadata(archivist_mode)
     if not isinstance(result, AnswerModeResult):
         result.diagnostics = diagnostics
         return result
@@ -702,31 +719,64 @@ def merge_adjacent_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
+def _resolved_answer_style(
+    *,
+    archivist_mode: ArchivistMode | str,
+    perspective: AnswerPerspective | str | None,
+    historiographical_lens: HistoriographicalLens | str | None,
+    voice: AnswerVoice | str | None,
+    worldview: Worldview | str | None,
+) -> tuple[ArchivistMode, HistoriographicalLens, AnswerVoice, Worldview]:
+    selected_mode, lens, selected_voice, selected_worldview = (
+        resolve_archivist_mode_settings(
+            archivist_mode,
+            historiographical_lens,
+            voice,
+            worldview,
+        )
+    )
+    if perspective is None:
+        return selected_mode, lens, selected_voice, selected_worldview
+
+    legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(
+        perspective
+    )
+    if (
+        historiographical_lens is None
+        or historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST
+    ):
+        lens = legacy_lens
+    if voice is None or voice == AnswerVoice.SCHOLARLY:
+        selected_voice = legacy_voice
+    if worldview is None or worldview == Worldview.NONE:
+        selected_worldview = legacy_worldview
+    return selected_mode, lens, selected_voice, selected_worldview
+
+
 def answer_project_question_legacy(
     project_id: str,
     question: str,
     n_results: int = 5,
     perspective: AnswerPerspective | str | None = None,
     *,
-    historiographical_lens: HistoriographicalLens | str = (
-        HistoriographicalLens.EVIDENCE_FIRST
-    ),
-    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
-    worldview: Worldview | str = Worldview.NONE,
+    historiographical_lens: HistoriographicalLens | str | None = None,
+    voice: AnswerVoice | str | None = None,
+    worldview: Worldview | str | None = None,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
 ) -> tuple[str, list[dict[str, Any]]]:
     results = retrieve_project(project_id, question, n_results=n_results)
     final_chunks = finalize_context_chunks(results, chunks=load_project_chunks(project_id))
-    if perspective is not None:
-        legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(perspective)
-        if historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST:
-            historiographical_lens = legacy_lens
-        if voice == AnswerVoice.SCHOLARLY:
-            voice = legacy_voice
-        if worldview == Worldview.NONE:
-            worldview = legacy_worldview
+    selected_mode, historiographical_lens, voice, worldview = _resolved_answer_style(
+        archivist_mode=archivist_mode,
+        perspective=perspective,
+        historiographical_lens=historiographical_lens,
+        voice=voice,
+        worldview=worldview,
+    )
 
     all_defaults = (
-        historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST
+        selected_mode is ArchivistMode.ESSENTIAL
+        and historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST
         and voice == AnswerVoice.SCHOLARLY
         and worldview == Worldview.NONE
     )
@@ -739,6 +789,7 @@ def answer_project_question_legacy(
             historiographical_lens,
             voice,
             worldview,
+            archivist_mode=selected_mode,
         )
     )
     response = tracked_responses_create(
@@ -756,11 +807,10 @@ def answer_project_question_result(
     n_results: int = 5,
     perspective: AnswerPerspective | str | None = None,
     *,
-    historiographical_lens: HistoriographicalLens | str = (
-        HistoriographicalLens.EVIDENCE_FIRST
-    ),
-    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
-    worldview: Worldview | str = Worldview.NONE,
+    historiographical_lens: HistoriographicalLens | str | None = None,
+    voice: AnswerVoice | str | None = None,
+    worldview: Worldview | str | None = None,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
     resolved_turn: ResolvedTurn | None = None,
     history: Sequence[Mapping[str, object]] = (),
     answer_strategy: AnswerStrategy | str = AnswerStrategy.RAG,
@@ -772,16 +822,13 @@ def answer_project_question_result(
     """
     answer_run_started_ns = perf_counter_ns()
     selected_strategy = AnswerStrategy(answer_strategy)
-    if perspective is not None:
-        legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(
-            perspective
-        )
-        if historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST:
-            historiographical_lens = legacy_lens
-        if voice == AnswerVoice.SCHOLARLY:
-            voice = legacy_voice
-        if worldview == Worldview.NONE:
-            worldview = legacy_worldview
+    selected_mode, historiographical_lens, voice, worldview = _resolved_answer_style(
+        archivist_mode=archivist_mode,
+        perspective=perspective,
+        historiographical_lens=historiographical_lens,
+        voice=voice,
+        worldview=worldview,
+    )
 
     # Custom projects do not yet persist the independent per-chunk identity
     # manifest required to certify a whole-corpus absence. Keep their established
@@ -795,6 +842,7 @@ def answer_project_question_result(
             historiographical_lens=historiographical_lens,
             voice=voice,
             worldview=worldview,
+            archivist_mode=selected_mode,
         )
         result = AnswerModeResult(
             answer=answer,
@@ -805,7 +853,7 @@ def answer_project_question_result(
             diagnostics={},
         )
         return _with_stage_timings(
-            result,
+            _with_archivist_mode_metadata(result, selected_mode),
             total=_elapsed_ms(answer_run_started_ns),
         )
 
@@ -879,6 +927,7 @@ def answer_project_question_result(
             historiographical_lens=historiographical_lens,
             voice=voice,
             worldview=worldview,
+            archivist_mode=selected_mode,
         )
     else:
         result = run_evidence_planned_answer(
@@ -895,9 +944,10 @@ def answer_project_question_result(
             historiographical_lens=historiographical_lens,
             voice=voice,
             worldview=worldview,
+            archivist_mode=selected_mode,
         )
     return _with_stage_timings(
-        result,
+        _with_archivist_mode_metadata(result, selected_mode),
         preflight=preflight_ms,
         conversation_resolution=conversation_resolution_ms,
         total=_elapsed_ms(answer_run_started_ns),
@@ -910,11 +960,10 @@ def answer_project_question(
     n_results: int = 5,
     perspective: AnswerPerspective | str | None = None,
     *,
-    historiographical_lens: HistoriographicalLens | str = (
-        HistoriographicalLens.EVIDENCE_FIRST
-    ),
-    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
-    worldview: Worldview | str = Worldview.NONE,
+    historiographical_lens: HistoriographicalLens | str | None = None,
+    voice: AnswerVoice | str | None = None,
+    worldview: Worldview | str | None = None,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
     resolved_turn: ResolvedTurn | None = None,
     history: Sequence[Mapping[str, object]] = (),
 ) -> tuple[str, list[dict[str, Any]]]:
@@ -927,6 +976,7 @@ def answer_project_question(
         historiographical_lens=historiographical_lens,
         voice=voice,
         worldview=worldview,
+        archivist_mode=archivist_mode,
         resolved_turn=resolved_turn,
         history=history,
     )

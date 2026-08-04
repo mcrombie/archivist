@@ -65,24 +65,37 @@ dated snapshot is available and selected.
 
 ## Current UI scope
 
-The reader-facing interface is being treated separately from retrieval quality. It may support a
-multi-turn transcript, contextual follow-up resolution, and selectable visual vibes. Answer
-framing is exposed as three provisional, independent settings: Historiographical lens, Voice, and
-Worldview. Evidence-first + Scholarly + None remains the unchanged Neutral baseline. These answer
-settings affect generation only; visual vibes are presentation only. Neither may alter retrieval,
-source ordering, or citation rules. A non-default voice changes prose style without guaranteeing
-more text. A non-Evidence-first lens or non-None worldview uses a separate structured-output
-contract with an uncited interpretive opening of two or three sentences, the ordinary cited
-factual answer, and an uncited one-sentence interpretive conclusion. The opening and conclusion
-must directly name the trusted subject of the question, use no first-person narration, and flow
-with the cited middle as ordinary paragraphs in one cohesive reader-facing answer. Their boundary
-remains internal: they may make value judgments but may not introduce historical facts, satisfy
-factual coverage requirements, or enter follow-up conversation history as evidence-bearing answer
-text. Interpretive strength is evidence-conditioned: a tragic lens, for example, must locate a
-specific loss, coercion, incomplete reform, failed plan, or other tension already present in the
-factual middle rather than manufacture an unnamed human cost or foreclosed possibility. When
-several settings are active, the lens supplies one central judgment, the worldview evaluates that
-same judgment, and the voice shapes its expression.
+The reader-facing interface is being treated separately from retrieval quality. It supports a
+multi-turn transcript, contextual follow-up resolution, and three versioned presets that bind
+appearance to answer character: Professional, Essential, and Mythical Forest Folio. Professional
+is the new-visitor frontend default. Essential remains the unchanged Evidence-first + Scholarly +
+None baseline when an API, CLI, or evaluation caller omits a mode. The Forest preset supplies a
+bounded literary influence rather than historical evidence.
+
+An interpretive influence is a reviewed generation instruction, never another answer corpus. It
+may shape emphasis, cadence, and judgment after retrieval, but cannot alter query planning,
+retrieved chunks, source order, citation obligations, premise handling, or absence decisions.
+Professional uses a reviewed method profile distilled from Craven, Beard, and Du Bois; Forest uses
+formal qualities distilled from Dunsany's *The King of Elfland's Daughter*. Neither source pack is
+placed in Chroma or sent as historical evidence. Exact provenance, hashes, rights cautions, and the
+role contract are recorded in `docs/archivist_modes.md`.
+
+Evidence scope remains a separate control. The independent Historiographical lens, Voice, and
+Worldview selectors now sit under Advanced interpretive settings, together with an explicitly
+appearance-only selector that preserves all ten visual themes. A custom value applies to future
+turns, while each completed turn and retry retains its resolved mode and facets. A non-default
+voice changes prose style without guaranteeing more text. A non-Evidence-first lens or non-None
+worldview uses a separate structured-output contract with an uncited interpretive opening of two
+or three sentences, the ordinary cited factual answer, and an uncited one-sentence interpretive
+conclusion. The opening and conclusion must directly name the trusted subject of the question, use
+no first-person narration, and flow with the cited middle as ordinary paragraphs in one cohesive
+reader-facing answer. Their boundary remains internal: they may make value judgments but may not
+introduce historical facts, satisfy factual coverage requirements, or enter follow-up conversation
+history as evidence-bearing answer text. Interpretive strength is evidence-conditioned: a tragic
+lens, for example, must locate a specific loss, coercion, incomplete reform, failed plan, or other
+tension already present in the factual middle rather than manufacture an unnamed human cost or
+foreclosed possibility. When several settings are active, the lens supplies one central judgment,
+the worldview evaluates that same judgment, and the voice shapes its expression.
 
 ## Public demo and edition locators
 

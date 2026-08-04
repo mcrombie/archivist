@@ -2,8 +2,8 @@
 
 Archivist is a source-grounded conversational interface for one book:
 *Cradle of the Empire: A Big History of Virginia*. It searches a private full-manuscript retrieval
-index, answers with inline `[Source N]` citations, remembers the open conversation, and lets a
-reader vary historiographical lens, voice, worldview, and visual presentation.
+index, answers with inline `[Source N]` citations, remembers the open conversation, and offers
+versioned reader modes that combine visual presentation with bounded interpretive framing.
 
 It is not a manuscript-upload service or a general-purpose chatbot.
 
@@ -14,9 +14,12 @@ Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
 - one-page, conversational book interface;
 - contextual follow-up questions;
 - query decomposition, premise checks, absence handling, and source-bounded completeness checks;
-- neutral evidence-first answers by default;
-- separate Historiographical lens, Voice, and Worldview controls;
-- five visual vibes;
+- Professional, Essential, and Mythical Forest Folio modes, with Professional as the new-visitor
+  frontend default;
+- an unchanged Essential evidence-first baseline for API, CLI, and evaluation callers that omit a
+  mode;
+- Historiographical lens, Voice, Worldview, and all ten visual themes under Advanced controls;
+- interpretive influence profiles that shape framing only, never retrieval, evidence, or citations;
 - local OpenAI usage estimates and budget controls;
 - 481 retrieval-eligible chunks covering the complete substantive manuscript;
 - edition-qualified public citations for `Typeset PDF (July 6, 2026)`;

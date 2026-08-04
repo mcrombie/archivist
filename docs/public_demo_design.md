@@ -23,7 +23,9 @@ The design is now represented in code:
 - the canonical demo is `https://archivist.mcrombie.com`, with Render's generated subdomain kept
   as an operational fallback;
 - Cromblog discovers that address through `NEXT_PUBLIC_ARCHIVIST_URL` without hard-coding hosting
-  details into either repository.
+  details into either repository; and
+- the browser defaults new visitors to the Professional reader mode while the omitted-mode API,
+  CLI, and evaluation path stays on the frozen Essential baseline.
 
 The public smoke performed on July 27 used four paid turns: a focused opening question, a
 context-dependent follow-up, a broad tobacco/labor question, and a deliberate absence question.
@@ -54,6 +56,26 @@ toggle. A public client must not be able to request development payloads.
 This supersedes the earlier representative-subset proposal. The full corpus stays private on the
 server; public responses disclose only the answer, citation metadata, page locators, and short
 claim-local excerpts.
+
+## Reader modes and public disclosure
+
+Reader modes do not widen the public evidence boundary. Professional, Essential, and Mythical
+Forest Folio all search the same private manuscript corpus and pass through the same citation,
+quotation, and source-display controls. Their optional influence profiles are fixed, reviewed
+generation instructions rather than retrievable books.
+
+Professional is the public frontend default and uses interpretive methods distilled from selected
+public-domain artifacts by Wesley Frank Craven, Charles A. Beard, and W. E. B. Du Bois. Mythical
+Forest Folio uses reviewed formal qualities from Lord Dunsany's *The King of Elfland's Daughter*.
+Those works may shape framing, emphasis, cadence, and judgment, but they may never supply a
+historical assertion, citation, quotation, proper noun, or answer-specific causal link. Essential
+adds no curated external influence. See `docs/archivist_modes.md` for the versioned registry,
+artifact hashes, and rights cautions.
+
+The public request contract accepts only allowlisted mode IDs and resolved facet values. It does
+not accept prompt text, source paths, arbitrary influence identifiers, or raw influence excerpts.
+The response records mode and profile versions for reproducibility. Advanced overrides are
+reader-visible and apply only to future turns; completed answers retain their resolved settings.
 
 ## What an index means here
 

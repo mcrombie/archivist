@@ -52,11 +52,15 @@ from full_context_coverage import (
     process_full_context_coverage,
 )
 from model_config import FULL_CONTEXT_GENERATOR_SETTINGS
+from archivist_modes import (
+    ArchivistMode,
+    archivist_mode_metadata,
+    build_archivist_mode_prompt_block,
+)
 from perspectives import (
     AnswerVoice,
     HistoriographicalLens,
     Worldview,
-    build_interpretive_prompt_block,
 )
 from query_planning import (
     EvidenceTarget,
@@ -259,6 +263,7 @@ def build_full_context_input(
     historiographical_lens: HistoriographicalLens | str = (HistoriographicalLens.EVIDENCE_FIRST),
     voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
     worldview: Worldview | str = Worldview.NONE,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
 ) -> str:
     """Assemble the request with the stable corpus prefix ahead of the variable tail.
 
@@ -272,7 +277,12 @@ def build_full_context_input(
         "Manuscript (complete searchable corpus, in narrative order):",
         corpus_block,
     ]
-    style = build_interpretive_prompt_block(historiographical_lens, voice, worldview)
+    style = build_archivist_mode_prompt_block(
+        historiographical_lens,
+        voice,
+        worldview,
+        archivist_mode=archivist_mode,
+    )
     if style:
         sections.append(
             "Interpretive presentation (never alter factual coverage or citations):\n" + style
@@ -381,6 +391,7 @@ def run_full_context_answer(
     historiographical_lens: HistoriographicalLens | str = (HistoriographicalLens.EVIDENCE_FIRST),
     voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
     worldview: Worldview | str = Worldview.NONE,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
     policy: FullContextPolicy = FULL_CONTEXT_POLICY,
 ) -> AnswerModeResult:
     """Execute one bounded full-context Answer Mode turn.
@@ -401,6 +412,7 @@ def run_full_context_answer(
         stage_timings_ms["pipeline_total"] = elapsed_ms(pipeline_started_ns)
         return {
             "full_context_policy_version": policy.version,
+            "archivist_mode": archivist_mode_metadata(archivist_mode),
             "corpus": dict(corpus_trace or {}),
             "generation": dict(generation),
             "stage_timings_ms": dict(stage_timings_ms),
@@ -460,7 +472,12 @@ def run_full_context_answer(
         integrity,
     )
     corpus_block = serialize_full_context_corpus(eligible_chunks)
-    style_block = build_interpretive_prompt_block(historiographical_lens, voice, worldview)
+    style_block = build_archivist_mode_prompt_block(
+        historiographical_lens,
+        voice,
+        worldview,
+        archivist_mode=archivist_mode,
+    )
     style_prompt_sha256 = (
         hashlib.sha256(style_block.encode("utf-8")).hexdigest() if style_block else None
     )
@@ -471,6 +488,7 @@ def run_full_context_answer(
         historiographical_lens=historiographical_lens,
         voice=voice,
         worldview=worldview,
+        archivist_mode=archivist_mode,
     )
     estimated_input_tokens = estimate_full_context_input_tokens(
         FULL_CONTEXT_INSTRUCTIONS,

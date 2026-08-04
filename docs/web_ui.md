@@ -51,16 +51,23 @@ The web API needs:
   turn they support.
 - Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
   in both the conversation header and the top-of-page introduction.
-- Offers ten persistent visual vibes adapted from Cromblog. Vibes affect presentation only.
-- Offers independent Historiographical lens, Voice, and Worldview selectors. Their all-default
-  combination is the unchanged, concise Neutral baseline. A non-default voice changes expression
-  without automatically lengthening the answer. A non-Evidence-first lens or any worldview frames
-  the cited factual answer with an uncited interpretive opening and conclusion. Both framing
-  paragraphs must directly address the question's subject and use impersonal prose. They display
-  with the evidence as one cohesive answer, while the application keeps their internal boundary
-  so only the factual middle enters follow-up conversation history. Interpretive claims must grow
-  from concrete facts in that middle; combined settings elaborate one judgment rather than
-  multiplying unrelated themes.
+- Offers three reader-facing Archivist modes that bundle appearance and answer character:
+  Professional, Essential, and Mythical Forest Folio. Professional is the new-visitor default;
+  Essential is the unchanged concise neutral baseline; Forest Folio adds a bounded mythopoetic
+  literary influence. Every mode keeps historical claims and citations grounded in the manuscript.
+- Keeps Evidence scope separate from interpretation. Retrieved passages and experimental Full book
+  select what manuscript context the answer receives; neither choice selects a personality.
+- Moves the independent Historiographical lens, Voice, and Worldview selectors into an Advanced
+  interpretive settings disclosure. The same disclosure retains all ten visual themes as explicit
+  appearance-only overrides. Custom values apply to future turns, retries retain the settings that
+  originally produced the turn, and Reset to mode restores the active preset.
+- A non-default voice changes expression without automatically lengthening the answer. A
+  non-Evidence-first lens or any worldview frames the cited factual answer with an uncited
+  interpretive opening and conclusion. Both framing paragraphs must directly address the
+  question's subject and use impersonal prose. They display with the evidence as one cohesive
+  answer, while the application keeps their internal boundary so only the factual middle enters
+  follow-up conversation history. Interpretive claims must grow from concrete facts in that
+  middle; combined settings elaborate one judgment rather than multiplying unrelated themes.
 - Shows a locally persisted API-cost estimate for each answer, conversation, UTC month, and all
   tracked use, with optional budget warnings and a local hard stop. OpenAI billing remains the
   financial source of truth; see [Cost tracking](cost_tracking.md).

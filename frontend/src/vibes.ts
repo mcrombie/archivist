@@ -56,7 +56,7 @@ export const VIBES = [
 
 export type VibeId = (typeof VIBES)[number]["id"];
 
-export const DEFAULT_VIBE: VibeId = "codex";
+export const DEFAULT_VIBE: VibeId = "professional";
 
 export function isVibeId(value: unknown): value is VibeId {
   return VIBES.some((vibe) => vibe.id === value);

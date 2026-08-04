@@ -32,9 +32,11 @@ import {
   AnswerStrategy,
   AnswerVoice,
   AnswerWorldview,
+  ArchivistModeId,
   CandidateTerm,
   CostSettings,
   CostSummary,
+  ConversationHistoryTurn,
   DEFAULT_ANSWER_FACETS,
   DEFAULT_ANSWER_STRATEGY,
   DisplayGroup,
@@ -56,6 +58,16 @@ import {
   updateCostSettings
 } from "./api";
 import { VibeControl } from "./VibeControl";
+import {
+  archivistMode,
+  modeDefaultFacets,
+  modeHasOverrides,
+  persistAppearance,
+  persistArchivistMode,
+  storedAppearance,
+  storedArchivistMode
+} from "./modes";
+import { VIBES, type VibeId } from "./vibes";
 import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
 import openingQuestions from "./openingQuestions.json";
 
@@ -259,9 +271,15 @@ function answerFacetSummary(facets: AnswerFacets) {
   ].join(" · ");
 }
 
-function compactAnswerFacetSummary(facets: AnswerFacets) {
-  const summary = answerFacetSummary(facets);
-  return summary === "Neutral baseline" ? "Neutral" : summary;
+function archivistModeSummary(
+  modeId: ArchivistModeId,
+  facets: AnswerFacets,
+  appearance?: VibeId
+) {
+  const label = archivistMode(modeId).label;
+  const appearanceOverride = appearance !== undefined
+    && appearance !== archivistMode(modeId).appearance;
+  return modeHasOverrides(modeId, facets) || appearanceOverride ? `${label} · Custom` : label;
 }
 
 function hasInterpretiveFrame(facets: AnswerFacets) {
@@ -817,6 +835,7 @@ type ChatTurnStatus = "pending" | "complete" | "error";
 type ChatTurn = {
   id: string;
   question: string;
+  archivistMode: ArchivistModeId;
   facets: AnswerFacets;
   // What was requested, and what the server reports actually ran. They differ if
   // a request is rejected, so the badge reads the second one.
@@ -1495,7 +1514,9 @@ function QuestionMode({
 }) {
   const publicDemo = config.exposure_profile === "public_demo";
   const [question, setQuestion] = useState("");
-  const [facets, setFacets] = useState<AnswerFacets>({ ...DEFAULT_ANSWER_FACETS });
+  const [archivistModeId, setArchivistModeId] = useState<ArchivistModeId>(storedArchivistMode);
+  const [facets, setFacets] = useState<AnswerFacets>(() => modeDefaultFacets(archivistModeId));
+  const [appearance, setAppearance] = useState<VibeId>(() => storedAppearance(archivistModeId));
   // Per-turn, exactly like the interpretive facets, so a reader can compare the
   // two scopes inside one conversation instead of starting a new thread.
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>(DEFAULT_ANSWER_STRATEGY);
@@ -1511,6 +1532,8 @@ function QuestionMode({
   const landingQuestionRef = useRef<HTMLTextAreaElement>(null);
   const pending = turns.some((turn) => turn.status === "pending");
   const chatStarted = turns.length > 0;
+  const customMode = modeHasOverrides(archivistModeId, facets)
+    || appearance !== archivistMode(archivistModeId).appearance;
 
   useEffect(() => {
     if (!config.features.cost_ledger) {
@@ -1566,8 +1589,9 @@ function QuestionMode({
   async function runTurn(
     turnId: string,
     turnQuestion: string,
+    turnMode: ArchivistModeId,
     turnFacets: AnswerFacets,
-    history: Array<{ question: string; answer: string }>,
+    history: ConversationHistoryTurn[],
     allowOverBudget = false,
     turnStrategy: AnswerStrategy = DEFAULT_ANSWER_STRATEGY
   ) {
@@ -1581,6 +1605,7 @@ function QuestionMode({
         {
           conversationId,
           turnId,
+          archivistMode: turnMode,
           allowOverBudget,
           publicDemo,
           answerStrategy: turnStrategy
@@ -1597,6 +1622,7 @@ function QuestionMode({
         answerStatus: result.answer_status,
         answerStrategy: result.answer_strategy ?? DEFAULT_ANSWER_STRATEGY,
         resolvedQuery: result.resolved_query,
+        archivistMode: result.archivist_mode ?? turnMode,
         facets: {
           historiographicalLens: result.historiographical_lens,
           voice: result.voice,
@@ -1638,13 +1664,15 @@ function QuestionMode({
       .slice(-6)
       .map((turn) => ({
         question: turn.question.slice(0, 4_000),
-        answer: answerForConversationHistory(turn).slice(0, 12_000)
+        answer: answerForConversationHistory(turn).slice(0, 12_000),
+        archivist_mode: turn.archivistMode
       }));
     const turnId = createTurnId();
     const firstTurn = turns.length === 0;
     const nextTurn: ChatTurn = {
       id: turnId,
       question: trimmedQuestion,
+      archivistMode: archivistModeId,
       facets: { ...facets },
       requestedStrategy: answerStrategy,
       status: "pending",
@@ -1657,7 +1685,15 @@ function QuestionMode({
     setTurns((current) => [...current, nextTurn]);
     setQuestion("");
     scrollToTurn(turnId, firstTurn);
-    await runTurn(turnId, trimmedQuestion, facets, history, false, answerStrategy);
+    await runTurn(
+      turnId,
+      trimmedQuestion,
+      archivistModeId,
+      facets,
+      history,
+      false,
+      answerStrategy
+    );
   }
 
   async function retryTurn(turnId: string, allowOverBudget = false) {
@@ -1671,7 +1707,8 @@ function QuestionMode({
       .slice(-6)
       .map((candidate) => ({
         question: candidate.question.slice(0, 4_000),
-        answer: answerForConversationHistory(candidate).slice(0, 12_000)
+        answer: answerForConversationHistory(candidate).slice(0, 12_000),
+        archivist_mode: candidate.archivistMode
       }));
 
     setTurns((current) => current.map((candidate) => candidate.id === turnId ? {
@@ -1687,6 +1724,7 @@ function QuestionMode({
     await runTurn(
       turnId,
       turn.question,
+      turn.archivistMode,
       turn.facets,
       history,
       allowOverBudget,
@@ -1716,7 +1754,7 @@ function QuestionMode({
     if (pending) return;
     setTurns([]);
     setQuestion("");
-    setFacets({ ...DEFAULT_ANSWER_FACETS });
+    setFacets(modeDefaultFacets(archivistModeId));
     setCopiedTurnId(null);
     setConversationId(createConversationId());
     setCostSummary(null);
@@ -1726,6 +1764,27 @@ function QuestionMode({
       : "smooth";
     window.scrollTo({ top: 0, behavior });
     window.setTimeout(() => landingQuestionRef.current?.focus({ preventScroll: true }), 0);
+  }
+
+  function changeArchivistMode(nextMode: ArchivistModeId) {
+    const nextAppearance = archivistMode(nextMode).appearance;
+    setArchivistModeId(nextMode);
+    setFacets(modeDefaultFacets(nextMode));
+    setAppearance(nextAppearance);
+    persistArchivistMode(nextMode);
+    persistAppearance(nextAppearance);
+  }
+
+  function changeAppearance(nextAppearance: VibeId) {
+    setAppearance(nextAppearance);
+    persistAppearance(nextAppearance);
+  }
+
+  function resetModeOverrides() {
+    const defaultAppearance = archivistMode(archivistModeId).appearance;
+    setFacets(modeDefaultFacets(archivistModeId));
+    setAppearance(defaultAppearance);
+    persistAppearance(defaultAppearance);
   }
 
   function focusLandingQuestion(candidateQuestion = question, selectPlaceholder = false) {
@@ -1794,7 +1853,12 @@ function QuestionMode({
                     onOpen={() => setCostDrawerOpen(true)}
                   />
                 ) : null}
-                <VibeControl />
+                <VibeControl
+                  mode={archivistModeId}
+                  appearance={appearance}
+                  custom={customMode}
+                  onModeChange={changeArchivistMode}
+                />
               </div>
             ) : (
               <NewConversationButton pending={pending} onStart={startNewConversation} />
@@ -1815,6 +1879,8 @@ function QuestionMode({
                 location="landing"
                 project={project}
                 question={question}
+                archivistModeId={archivistModeId}
+                appearance={appearance}
                 facets={facets}
                 answerStrategy={answerStrategy}
                 fullContextAvailable={fullContextAvailable}
@@ -1822,6 +1888,8 @@ function QuestionMode({
                 inputRef={landingQuestionRef}
                 onQuestionChange={setQuestion}
                 onFacetsChange={setFacets}
+                onAppearanceChange={changeAppearance}
+                onResetModeDefaults={resetModeOverrides}
                 onAnswerStrategyChange={setAnswerStrategy}
                 onSubmit={submit}
               />
@@ -1868,7 +1936,13 @@ function QuestionMode({
                 />
               ) : null}
               <NewConversationButton pending={pending} onStart={startNewConversation} />
-              <VibeControl compact />
+              <VibeControl
+                mode={archivistModeId}
+                appearance={appearance}
+                custom={customMode}
+                onModeChange={changeArchivistMode}
+                compact
+              />
             </div>
           </header>
 
@@ -1893,12 +1967,16 @@ function QuestionMode({
               location="thread"
               project={project}
               question={question}
+              archivistModeId={archivistModeId}
+              appearance={appearance}
               facets={facets}
               answerStrategy={answerStrategy}
               fullContextAvailable={fullContextAvailable}
               pending={pending}
               onQuestionChange={setQuestion}
               onFacetsChange={setFacets}
+              onAppearanceChange={changeAppearance}
+              onResetModeDefaults={resetModeOverrides}
               onAnswerStrategyChange={setAnswerStrategy}
               onSubmit={submit}
             />
@@ -1924,6 +2002,8 @@ function ConversationComposer({
   location,
   project,
   question,
+  archivistModeId,
+  appearance,
   facets,
   answerStrategy,
   fullContextAvailable,
@@ -1931,12 +2011,16 @@ function ConversationComposer({
   inputRef,
   onQuestionChange,
   onFacetsChange,
+  onAppearanceChange,
+  onResetModeDefaults,
   onAnswerStrategyChange,
   onSubmit
 }: {
   location: "landing" | "thread";
   project: Project;
   question: string;
+  archivistModeId: ArchivistModeId;
+  appearance: VibeId;
   facets: AnswerFacets;
   answerStrategy: AnswerStrategy;
   fullContextAvailable: boolean;
@@ -1944,6 +2028,8 @@ function ConversationComposer({
   inputRef?: RefObject<HTMLTextAreaElement>;
   onQuestionChange: (question: string) => void;
   onFacetsChange: (facets: AnswerFacets) => void;
+  onAppearanceChange: (appearance: VibeId) => void;
+  onResetModeDefaults: () => void;
   onAnswerStrategyChange: (strategy: AnswerStrategy) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -1956,6 +2042,10 @@ function ConversationComposer({
   const scopeDescriptionId = `archivist-scope-description-${location}`;
   const scopeName = `archivist-evidence-scope-${location}`;
   const groundingId = `question-grounding-note-${location}`;
+  const selectedMode = archivistMode(archivistModeId);
+  const interpretiveOverrides = modeHasOverrides(archivistModeId, facets);
+  const appearanceOverride = appearance !== selectedMode.appearance;
+  const customMode = interpretiveOverrides || appearanceOverride;
   const evidenceScopeSettings = (
     <fieldset className="chat-evidence-scope" aria-describedby={scopeDescriptionId}>
       <legend>Evidence scope</legend>
@@ -2004,11 +2094,11 @@ function ConversationComposer({
   );
   const answerSettings = (
     <fieldset className="chat-answer-settings" aria-describedby={facetDescriptionId}>
-      <legend>Interpretive settings</legend>
+      <legend>Fine-grained overrides</legend>
       <div className="chat-answer-settings-heading">
         <p id={facetDescriptionId}>
-          A non-default lens or worldview shapes the opening and conclusion around the cited
-          manuscript answer; voice changes expression.
+          Override the mode's lens, voice, or worldview for future answers. These controls
+          shape interpretation and expression, never the evidence scope.
         </p>
         <span>{answerFacetSummary(facets)}</span>
       </div>
@@ -2041,6 +2131,34 @@ function ConversationComposer({
           onChange={(worldview) => onFacetsChange({ ...facets, worldview })}
         />
       </div>
+    </fieldset>
+  );
+  const appearanceSettings = (
+    <fieldset className="chat-appearance-settings">
+      <legend>Advanced appearance</legend>
+      <p>
+        Appearance only. This does not change the mode's interpretive defaults, evidence,
+        or citations.
+      </p>
+      <label htmlFor={`archivist-appearance-${location}`}>
+        <span
+          className={`vibe-swatch vibe-swatch-${appearance}`}
+          aria-hidden="true"
+        />
+        <span>
+          <strong>Visual theme</strong>
+          <small>{VIBES.find((vibe) => vibe.id === appearance)?.description}</small>
+        </span>
+        <select
+          id={`archivist-appearance-${location}`}
+          value={appearance}
+          onChange={(event) => onAppearanceChange(event.target.value as VibeId)}
+        >
+          {VIBES.map((vibe) => (
+            <option key={vibe.id} value={vibe.id}>{vibe.label}</option>
+          ))}
+        </select>
+      </label>
     </fieldset>
   );
 
@@ -2079,17 +2197,49 @@ function ConversationComposer({
 
       <div className="chat-composer-options">
         <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
-          <summary aria-label={`Answer style: ${answerFacetSummary(facets)}`}>
+          <summary aria-label={`Reading options: ${archivistModeSummary(archivistModeId, facets, appearance)}`}>
             <SlidersHorizontal size={16} aria-hidden="true" />
             <span>
-              <small>Answer style</small>
-              <strong>{compactAnswerFacetSummary(facets)}</strong>
+              <small>Reading options</small>
+              <strong>{archivistModeSummary(archivistModeId, facets, appearance)}</strong>
             </span>
             <ChevronDown size={14} aria-hidden="true" />
           </summary>
           <div className="chat-answer-settings-panel">
+            <div className="chat-mode-context">
+              <span>Current mode</span>
+              <strong>{archivistModeSummary(archivistModeId, facets, appearance)}</strong>
+              <p>{selectedMode.disclosure}</p>
+            </div>
             {evidenceScopeSettings}
-            {answerSettings}
+            <details className="chat-advanced-interpretive-settings">
+              <summary>
+                <span>
+                  <strong>Advanced interpretive settings</strong>
+                  <small>
+                    {interpretiveOverrides
+                      ? "Interpretive overrides active"
+                      : appearanceOverride
+                        ? "Appearance override active"
+                        : "Using mode defaults"}
+                  </small>
+                </span>
+                <ChevronDown size={15} aria-hidden="true" />
+              </summary>
+              <div>
+                {answerSettings}
+                {appearanceSettings}
+                <div className="chat-advanced-reset-row">
+                  <span>
+                    {customMode ? `${selectedMode.label} · Custom` : `${selectedMode.label} defaults`}
+                  </span>
+                  <button type="button" disabled={!customMode} onClick={onResetModeDefaults}>
+                    <RotateCcw size={14} aria-hidden="true" />
+                    Reset to mode
+                  </button>
+                </div>
+              </div>
+            </details>
           </div>
         </details>
 
@@ -2176,6 +2326,8 @@ function ConversationTurn({
         0
       );
   const facetSummary = answerFacetSummary(turn.facets);
+  const modeSummary = archivistModeSummary(turn.archivistMode, turn.facets);
+  const customMode = modeHasOverrides(turn.archivistMode, turn.facets);
 
   return (
     <article className={`conversation-turn is-${turn.status}`} id={`turn-${turn.id}`} aria-labelledby={headingId}>
@@ -2191,11 +2343,10 @@ function ConversationTurn({
             <div>
               <strong>Archivist</strong>
               <small className="sr-only">Turn {turnNumber}</small>
-              {facetSummary !== "Neutral baseline" ? (
-                <span className="turn-facet-summary">
-                  <span><i>Style</i>{facetSummary}</span>
-                </span>
-              ) : null}
+              <span className="turn-facet-summary">
+                <span><i>Mode</i>{modeSummary}</span>
+                {customMode ? <span><i>Overrides</i>{facetSummary}</span> : null}
+              </span>
             </div>
           </div>
         </header>

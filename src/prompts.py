@@ -1,3 +1,8 @@
+from archivist_modes import (
+    ArchivistMode,
+    build_archivist_mode_prompt_block,
+    resolve_archivist_mode_settings,
+)
 from perspectives import (
     AnswerPerspective,
     AnswerVoice,
@@ -116,18 +121,34 @@ def build_answer_prompt(question: str, final_chunks: list[dict]) -> str:
 def build_interpretive_answer_prompt(
     question: str,
     final_chunks: list[dict],
-    historiographical_lens: HistoriographicalLens | str = (
-        HistoriographicalLens.EVIDENCE_FIRST
-    ),
-    voice: AnswerVoice | str = AnswerVoice.SCHOLARLY,
-    worldview: Worldview | str = Worldview.NONE,
+    historiographical_lens: HistoriographicalLens | str | None = None,
+    voice: AnswerVoice | str | None = None,
+    worldview: Worldview | str | None = None,
+    *,
+    archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
 ) -> str:
     prompt = build_answer_prompt(question, final_chunks)
-    interpretive_block = build_interpretive_prompt_block(
+    selected_mode, lens, selected_voice, selected_worldview = resolve_archivist_mode_settings(
+        archivist_mode,
         historiographical_lens,
         voice,
         worldview,
     )
+    if selected_mode is ArchivistMode.ESSENTIAL:
+        # Keep the old builder on the old path. With default facets it returns
+        # an empty string, preserving the frozen prompt byte for byte.
+        interpretive_block = build_interpretive_prompt_block(
+            lens,
+            selected_voice,
+            selected_worldview,
+        )
+    else:
+        interpretive_block = build_archivist_mode_prompt_block(
+            lens,
+            selected_voice,
+            selected_worldview,
+            archivist_mode=selected_mode,
+        )
     if not interpretive_block:
         return prompt
     return _insert_answer_prompt_block(prompt, interpretive_block)

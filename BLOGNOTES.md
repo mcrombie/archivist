@@ -3056,6 +3056,60 @@ claims the application itself can verify: what the reader actually named, where 
 whether an absence is certifiable, whether a source was merely available or actually used, and
 whether an expensive request should be permitted before it is sent.
 
+### 2026-08-04 - Appearance and historical character became one honest reader control
+
+- Replaced the ambiguous top-level “vibe” picker with three versioned Archivist modes that join an
+  appearance, default Historiographical lens/Voice/Worldview settings, and an optional reviewed
+  influence profile. Professional is the first-visitor frontend default; Essential is the neutral
+  scholarly baseline; Mythical Forest Folio is a tragic, romantic, mythopoetic experiment.
+- Kept the evaluation boundary intact. An omitted mode in the API, CLI, or test harness still
+  resolves to Essential, and explicit Essential produces the old neutral prompt byte for byte.
+  The browser sends Professional deliberately. This keeps a public product default from silently
+  becoming a new RAG cohort or rewriting what earlier neutral measurements mean.
+- Defined three source roles instead of calling every book a “source.” *Cradle of the Empire* is
+  the sole `evidence_source`: it may support facts and citations. The selected public-domain works
+  are `interpretive_influence`: they may shape method, emphasis, cadence, and judgment but cannot
+  enter retrieval or supply historical content. Visual references affect CSS only. This is the
+  same design discipline as an elegant context window: every piece of context has a declared job,
+  and material that cannot do that job never enters the model-facing lane where it could be
+  mistaken for evidence.
+- Built the Professional profile from a deliberately complementary reviewed pack: Wesley Frank
+  Craven for corporate and institutional mechanism, Charles A. Beard for material-interest and
+  political-economy questions, and W. E. B. Du Bois for race, power, law, enforcement, and moral
+  consequence. The resulting instruction is multicausal rather than deterministic and asks for
+  clear public history rather than imitation of any author's prose.
+- Bound the Professional profile to exact Project Gutenberg artifacts and hashes: Craven #28555
+  (`7b647599…596c`), Beard #70677 (`3359e7ef…16e`), and Du Bois #17700
+  (`08e42808…b9b`). Their records identify the artifacts as public domain in the United States,
+  but rights outside the United States remain jurisdiction-specific. Craven's 1957 publication
+  requires particular caution in life-plus-70 jurisdictions. Archivist stores only a manually
+  reviewed prompt and provenance metadata; it neither commits nor redistributes the EPUB files.
+- Built Mythical Forest Folio from the owner-supplied Project Gutenberg #61077 EPUB of Lord
+  Dunsany's *The King of Elfland's Daughter*, frozen by SHA-256
+  `b8a8a8ca…80b4`. The profile permits restrained wonder, landscape, thresholds, longing, and
+  distance while expressly forbidding fictional names, places, lore, phrases, quotations, events,
+  or claims. It is a literary influence, never a historical authority.
+- Made the control hierarchy match what readers need first. The top-level picker chooses the
+  coherent mode. Evidence scope remains separate. Lens, Voice, Worldview, and all ten visual
+  themes moved into Advanced controls, where any departure is labeled Custom and Reset to mode
+  restores the preset. Completed turns and retries preserve their resolved answer settings.
+- Added server-owned allowlists, fixed profile files, mode/profile versions, prompt hashes, and
+  provenance metadata. A client can request a known mode and granular overrides; it cannot submit
+  arbitrary prompt text, influence paths, or new source IDs. Influence is inserted only after
+  retrieval, so it cannot change primary hits, admitted evidence, source order, or citations.
+- No manuscript text, influence-book text, or derived quotations entered the repository. No
+  embedding, retrieval, corpus, model, or paid API call was changed for this pass. Detailed
+  provenance and the evaluation/safety contract live in `docs/archivist_modes.md`.
+- Offline verification passed 680 tests with one intentional skip, repository-wide Ruff lint,
+  the TypeScript/Vite production build, and whitespace checks. The automated browser surface was
+  unavailable in this session, so visual QA and a paid style-perceptibility smoke remain explicit
+  follow-ups rather than implied claims.
+
+Useful blog lesson: a theme stops being cosmetic when it changes how a reader is invited to see
+the past. Making that honest requires more than colorful CSS: the interface must name the choice,
+the prompt must bound what influence is allowed to do, the evidence lane must remain exclusive,
+and the neutral experimental control must still be reproducible after the public default changes.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
