@@ -45,6 +45,74 @@ Entries below, most recent first.
 
 ---
 
+## [2026-08-05] Terminal ledgers delayed the first Progressive claim
+Phase/Brief: Phase 1 presentation and public-demo operations
+Symptom: after genuine checked-claim streaming replaced the earlier reveal animation, a live test
+still showed no answer prose for most of the request and then delivered nearly the entire answer
+in a few quick pieces near the end.
+Cause: model-contract ordering and a reader-feedback gap. The Structured Output schemas asked the
+model to serialize private premise, coverage, and obligation ledgers before the factual claim
+array, so no complete claim object existed to release during most of generation. The browser also
+discarded heartbeat frames, leaving valid upstream work visually silent. This repair changes the
+shared generation contract and therefore opens new cohorts; it is not evidence of a RAG-quality
+gain and changes no gold or evaluation contract.
+Resolution and verification: the shared Evidence Coverage and Full Context schemas now place
+factual claims immediately after the schema identifier and terminal-only ledgers afterward for
+both Complete and Progressive, opening `evidence-coverage-v11` and
+`full-context-coverage-v3`. A Progressive-only local lead gate releases only a direct,
+subject-linked factual sentence of at most 45 words; premise corrections and interpretive framing
+remain withheld until terminal validation. Three-second text-free heartbeats now drive a visible
+elapsed indicator. One private text-free timing record measures stage entry, first provider delta,
+first checked claim, provider terminal, terminal outcome, worker finish, and stream finish, and
+no-cache/no-transform headers reduce avoidable proxy buffering. Corpus-integrity checks were not
+cached because a cheap cache could miss same-metadata content changes. Offline verification is
+Ruff clean with 760 Python tests passing and one skipped, both focused frontend suites passing,
+and a successful production build. No paid OpenAI call was made; a deployed custom-domain versus
+direct-Render smoke remains required.
+
+## [2026-08-04] Progressive response animated a finished answer instead of streaming it
+Phase/Brief: Phase 1 presentation and public-demo operations
+Symptom: a live reader test spent nearly the entire request on the initial “Drafting” state, then
+revealed an already completed answer quickly. The option was technically streamed transport, but
+it did not improve time to first useful prose and therefore did not satisfy the intended
+answer-built-over-time experience.
+Cause: spec gap and implementation mismatch. The first contract resolved the ambiguity in favor
+of never showing prose that might later fail whole-answer validation. That retained the Complete
+mode guarantee, but made meaningful same-request answer streaming impossible and was not what the
+reader meant by progressive delivery.
+Resolution and verification: protocol v2 replaces post-validation answer deltas with complete
+structured factual claims extracted during the existing final Responses API generation. Each
+claim crosses the boundary only after local shape, order, citation, source, size, and (in public
+mode) locator and rolling quotation checks. Claims are labeled partial and are kept out of
+conversation history, copying, sources, and citation controls. The unchanged whole-answer
+validator remains authoritative: success replaces the working claims with the canonical answer;
+late failure or interruption clears them. Complete answer remains the strict default and retains
+the stronger no-rejected-prose guarantee. This is one streamed final-generation request, not an
+additional model call; upstream planning, embeddings, and retrieval are unchanged. Offline
+verification closed with 749 Python tests passing and one skipped, Ruff clean, both frontend
+behavior suites passing, and a successful production build. It covers transport, local gates,
+terminal usage accounting, public disclosure, retraction, and client failure behavior. A live
+Render smoke is still required to measure actual first-claim timing and proxy buffering.
+
+## [2026-08-04] Progressive delivery lacked a release and stream-lifecycle contract
+Superseded note: this entry records the original post-validation protocol. The newer defect entry
+above defines the protocol-v2 checked-claim behavior.
+Phase/Brief: Phase 1 presentation and public-demo operations
+Symptom: the requested progressive-answer option did not specify whether generated prose could be
+shown before evidence and privacy validation, which progress details were safe to expose, when an
+accepted request could be retried, or how long the process-local public concurrency gate owned a
+streaming request.
+Cause: spec gap in the brief. The implementer otherwise had to invent a transport, trust boundary,
+retry policy, and concurrency lifecycle for a feature presented as a UI option.
+Resolution and verification: `docs/answer_delivery.md` now makes Complete answer the recommended
+default and defines Progressive response as a presentation-only mode over the identical RAG run.
+Only fixed operational progress may precede validation; chain-of-thought and drafts remain private;
+answer deltas begin only after grounding, quotation/privacy, and public-source release gates pass.
+The public transport is a same-origin NDJSON POST with one terminal frame, no automatic replay
+after acceptance, and a concurrency slot held through completion or disconnect cleanup. The
+document also defines offline invariants and a required live Render smoke. The mode remains
+Experimental until those checks pass; no latency reduction is claimed.
+
 ## [2026-08-04] Six visual themes became Phase 2 interpretive modes
 Phase/Brief: Phase 2 perspective-mode prototype advanced beside the frozen Phase 1 Essential path
 Symptom: Pretty Pink Princess, Baleful Black Baron, Tidal Archive, Ember & Ink, Illuminated Codex,

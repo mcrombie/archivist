@@ -19,6 +19,13 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
+from answer_progress import (
+    AnswerProgressStage,
+    CheckedClaimCallback,
+    ProgressCallback,
+    ProviderStreamMilestoneCallback,
+    emit_progress,
+)
 from archivist_modes import (
     ArchivistMode,
     archivist_mode_metadata,
@@ -763,8 +770,11 @@ def answer_project_question_legacy(
     voice: AnswerVoice | str | None = None,
     worldview: Worldview | str | None = None,
     archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
+    emit_progress(progress_callback, AnswerProgressStage.RETRIEVING_SOURCES)
     results = retrieve_project(project_id, question, n_results=n_results)
+    emit_progress(progress_callback, AnswerProgressStage.PREPARING_CONTEXT)
     final_chunks = finalize_context_chunks(results, chunks=load_project_chunks(project_id))
     selected_mode, historiographical_lens, voice, worldview = _resolved_answer_style(
         archivist_mode=archivist_mode,
@@ -792,12 +802,14 @@ def answer_project_question_legacy(
             archivist_mode=selected_mode,
         )
     )
+    emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
     response = tracked_responses_create(
         openai_client(),
         operation="answer_generation",
         input=prompt,
         **GENERATOR_SETTINGS.responses_create_kwargs(),
     )
+    emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
     return response.output_text, final_chunks
 
 
@@ -814,6 +826,9 @@ def answer_project_question_result(
     resolved_turn: ResolvedTurn | None = None,
     history: Sequence[Mapping[str, object]] = (),
     answer_strategy: AnswerStrategy | str = AnswerStrategy.RAG,
+    progress_callback: ProgressCallback | None = None,
+    checked_claim_callback: CheckedClaimCallback | None = None,
+    stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
 ) -> AnswerModeResult:
     """Answer through the selected evidence scope's pipeline.
 
@@ -834,6 +849,7 @@ def answer_project_question_result(
     # manifest required to certify a whole-corpus absence. Keep their established
     # behavior until project ingestion writes that snapshot.
     if project_id != "current":
+        emit_progress(progress_callback, AnswerProgressStage.RESOLVING_QUESTION)
         turn = resolved_turn or resolve_conversation_turn(question, history)
         answer, final_chunks = answer_project_question_legacy(
             project_id,
@@ -843,6 +859,11 @@ def answer_project_question_result(
             voice=voice,
             worldview=worldview,
             archivist_mode=selected_mode,
+            **(
+                {"progress_callback": progress_callback}
+                if progress_callback is not None
+                else {}
+            ),
         )
         result = AnswerModeResult(
             answer=answer,
@@ -857,6 +878,7 @@ def answer_project_question_result(
             total=_elapsed_ms(answer_run_started_ns),
         )
 
+    emit_progress(progress_callback, AnswerProgressStage.CHECKING_CORPUS)
     collection = chroma_client().get_collection(name=collection_name(project_id))
     chunks = load_project_chunks(project_id)
     chunks_file = (
@@ -898,6 +920,7 @@ def answer_project_question_result(
     )
     preflight_ms = _elapsed_ms(preflight_started_ns)
     resolution_started_ns = perf_counter_ns()
+    emit_progress(progress_callback, AnswerProgressStage.RESOLVING_QUESTION)
     turn = resolved_turn
     if turn is None:
         turn = (
@@ -928,6 +951,21 @@ def answer_project_question_result(
             voice=voice,
             worldview=worldview,
             archivist_mode=selected_mode,
+            **(
+                {"progress_callback": progress_callback}
+                if progress_callback is not None
+                else {}
+            ),
+            **(
+                {"checked_claim_callback": checked_claim_callback}
+                if checked_claim_callback is not None
+                else {}
+            ),
+            **(
+                {"stream_milestone_callback": stream_milestone_callback}
+                if stream_milestone_callback is not None
+                else {}
+            ),
         )
     else:
         result = run_evidence_planned_answer(
@@ -945,6 +983,21 @@ def answer_project_question_result(
             voice=voice,
             worldview=worldview,
             archivist_mode=selected_mode,
+            **(
+                {"progress_callback": progress_callback}
+                if progress_callback is not None
+                else {}
+            ),
+            **(
+                {"checked_claim_callback": checked_claim_callback}
+                if checked_claim_callback is not None
+                else {}
+            ),
+            **(
+                {"stream_milestone_callback": stream_milestone_callback}
+                if stream_milestone_callback is not None
+                else {}
+            ),
         )
     return _with_stage_timings(
         _with_archivist_mode_metadata(result, selected_mode),

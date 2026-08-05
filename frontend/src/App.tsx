@@ -42,10 +42,14 @@ import {
   DisplayGroup,
   HistoriographicalLens,
   Project,
+  ProgressiveAnswerStage,
+  ProgressiveCheckedClaim,
+  ProgressiveStreamError,
   PublicSource,
   SourceChunk,
   SourceReference,
   askQuestion,
+  askQuestionProgressively,
   createProject,
   embedProject,
   generateIndexEntry,
@@ -54,9 +58,18 @@ import {
   getCostSettings,
   getCostSummary,
   getManuscriptSources,
+  isProgressiveFallbackEligible,
   searchExistingIndex,
   updateCostSettings
 } from "./api";
+import {
+  DEFAULT_RESPONSE_DELIVERY,
+  formatProgressiveElapsed,
+  persistResponseDelivery,
+  progressiveElapsedSeconds,
+  storedResponseDelivery,
+  type ResponseDelivery
+} from "./delivery";
 import { VibeControl } from "./VibeControl";
 import {
   archivistMode,
@@ -841,8 +854,15 @@ type ChatTurn = {
   // a request is rejected, so the badge reads the second one.
   requestedStrategy: AnswerStrategy;
   answerStrategy?: AnswerStrategy;
+  requestedDelivery: ResponseDelivery;
+  responseDelivery: ResponseDelivery;
   status: ChatTurnStatus;
   answer: string;
+  progressiveStage?: ProgressiveAnswerStage;
+  progressiveMessage?: string;
+  progressiveElapsedSeconds?: number;
+  progressiveHeartbeatCount?: number;
+  progressiveClaims: ProgressiveCheckedClaim[];
   answerStatus?: string;
   resolvedQuery?: string;
   sources: SourceReference[];
@@ -1521,6 +1541,10 @@ function QuestionMode({
   // two scopes inside one conversation instead of starting a new thread.
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>(DEFAULT_ANSWER_STRATEGY);
   const fullContextAvailable = config.features.full_context_answers === true;
+  const progressiveAvailable = config.features.progressive_answers === true;
+  const [responseDelivery, setResponseDelivery] = useState<ResponseDelivery>(() => (
+    storedResponseDelivery(progressiveAvailable)
+  ));
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState(createConversationId);
@@ -1593,24 +1617,110 @@ function QuestionMode({
     turnFacets: AnswerFacets,
     history: ConversationHistoryTurn[],
     allowOverBudget = false,
-    turnStrategy: AnswerStrategy = DEFAULT_ANSWER_STRATEGY
+    turnStrategy: AnswerStrategy = DEFAULT_ANSWER_STRATEGY,
+    turnDelivery: ResponseDelivery = DEFAULT_RESPONSE_DELIVERY
   ) {
     try {
-      const result = await askQuestion(
-        project.id,
-        turnQuestion,
-        5,
-        turnFacets,
-        history.slice(-6),
-        {
-          conversationId,
-          turnId,
-          archivistMode: turnMode,
-          allowOverBudget,
-          publicDemo,
-          answerStrategy: turnStrategy
+      const questionOptions = {
+        conversationId,
+        turnId,
+        archivistMode: turnMode,
+        allowOverBudget,
+        publicDemo,
+        answerStrategy: turnStrategy
+      };
+      let actualDelivery: ResponseDelivery = turnDelivery;
+      let result;
+      if (turnDelivery === "progressive" && progressiveAvailable) {
+        const progressiveStartedAt = Date.now();
+        const elapsedAtActivity = () => progressiveElapsedSeconds(
+          progressiveStartedAt,
+          Date.now()
+        );
+        setTurns((current) => current.map((turn) => turn.id === turnId ? {
+          ...turn,
+          progressiveElapsedSeconds: 0,
+          progressiveHeartbeatCount: 0
+        } : turn));
+        try {
+          result = await askQuestionProgressively(
+            project.id,
+            turnQuestion,
+            5,
+            turnFacets,
+            history.slice(-6),
+            {
+              ...questionOptions,
+              onStage: ({ stage, message }) => {
+                setTurns((current) => current.map((turn) => turn.id === turnId ? {
+                  ...turn,
+                  progressiveStage: stage,
+                  progressiveMessage: message,
+                  progressiveElapsedSeconds: Math.max(
+                    turn.progressiveElapsedSeconds ?? 0,
+                    elapsedAtActivity()
+                  )
+                } : turn));
+              },
+              onHeartbeat: ({ count }) => {
+                setTurns((current) => current.map((turn) => turn.id === turnId ? {
+                  ...turn,
+                  progressiveElapsedSeconds: Math.max(
+                    turn.progressiveElapsedSeconds ?? 0,
+                    elapsedAtActivity()
+                  ),
+                  progressiveHeartbeatCount: count
+                } : turn));
+              },
+              onCheckedClaim: (claim) => {
+                setTurns((current) => current.map((turn) => turn.id === turnId ? {
+                  ...turn,
+                  progressiveClaims: [...turn.progressiveClaims, claim],
+                  progressiveElapsedSeconds: Math.max(
+                    turn.progressiveElapsedSeconds ?? 0,
+                    elapsedAtActivity()
+                  )
+                } : turn));
+              }
+            }
+          );
+        } catch (progressiveError) {
+          if (!isProgressiveFallbackEligible(progressiveError)) throw progressiveError;
+          actualDelivery = "complete";
+          setTurns((current) => current.map((turn) => turn.id === turnId ? {
+            ...turn,
+            responseDelivery: "complete",
+            answer: "",
+            progressiveClaims: [],
+            progressiveStage: undefined,
+            progressiveMessage: undefined,
+            progressiveElapsedSeconds: undefined,
+            progressiveHeartbeatCount: undefined
+          } : turn));
+          setNotice({
+            type: "info",
+            text: "Progressive delivery is unavailable, so Archivist is returning a complete answer."
+          });
+          result = await askQuestion(
+            project.id,
+            turnQuestion,
+            5,
+            turnFacets,
+            history.slice(-6),
+            questionOptions
+          );
         }
-      );
+      } else {
+        actualDelivery = "complete";
+        result = await askQuestion(
+          project.id,
+          turnQuestion,
+          5,
+          turnFacets,
+          history.slice(-6),
+          questionOptions
+        );
+      }
       if (result.costs) setCostSummary(result.costs);
       else if (config.features.cost_ledger) void refreshCostSummary();
       const validationFailed = result.answer_status === "generation_contract_failed";
@@ -1621,6 +1731,7 @@ function QuestionMode({
         answer: pipelineFailed ? "" : result.answer,
         answerStatus: result.answer_status,
         answerStrategy: result.answer_strategy ?? DEFAULT_ANSWER_STRATEGY,
+        responseDelivery: actualDelivery,
         resolvedQuery: result.resolved_query,
         archivistMode: result.archivist_mode ?? turnMode,
         facets: {
@@ -1637,16 +1748,28 @@ function QuestionMode({
             : undefined,
         validationErrorCode: result.run_diagnostics?.validation_error_code ?? undefined,
         stageTimingsMs: result.run_diagnostics?.stage_timings_ms,
+        progressiveClaims: [],
+        progressiveStage: undefined,
+        progressiveMessage: undefined,
+        progressiveElapsedSeconds: undefined,
+        progressiveHeartbeatCount: undefined,
         budgetBlocked: false,
         turnCostUsd: result.costs?.turn_usd
       } : turn));
     } catch (error) {
-      const budgetBlocked = error instanceof ApiRequestError && error.status === 402;
+      const budgetBlocked = (error instanceof ApiRequestError && error.status === 402)
+        || (error instanceof ProgressiveStreamError && error.code === "cost_limit_exceeded");
       setTurns((current) => current.map((turn) => turn.id === turnId ? {
         ...turn,
         status: "error",
+        answer: "",
+        progressiveClaims: [],
         error: errorMessage(error),
-        budgetBlocked
+        budgetBlocked,
+        progressiveStage: undefined,
+        progressiveMessage: undefined,
+        progressiveElapsedSeconds: undefined,
+        progressiveHeartbeatCount: undefined
       } : turn));
       // A later call in the turn can fail after an earlier paid call succeeded.
       // Refresh on every failure so the ledger never looks artificially stale.
@@ -1675,8 +1798,13 @@ function QuestionMode({
       archivistMode: archivistModeId,
       facets: { ...facets },
       requestedStrategy: answerStrategy,
+      requestedDelivery: responseDelivery,
+      responseDelivery,
       status: "pending",
       answer: "",
+      progressiveElapsedSeconds: responseDelivery === "progressive" ? 0 : undefined,
+      progressiveHeartbeatCount: responseDelivery === "progressive" ? 0 : undefined,
+      progressiveClaims: [],
       sources: [],
       displayGroups: [],
       budgetBlocked: false
@@ -1692,7 +1820,8 @@ function QuestionMode({
       facets,
       history,
       false,
-      answerStrategy
+      answerStrategy,
+      responseDelivery
     );
   }
 
@@ -1714,11 +1843,18 @@ function QuestionMode({
     setTurns((current) => current.map((candidate) => candidate.id === turnId ? {
       ...candidate,
       status: "pending",
+      answer: "",
+      progressiveClaims: [],
+      responseDelivery: candidate.requestedDelivery,
       error: undefined,
       answerStatus: undefined,
       validationErrorCode: undefined,
       stageTimingsMs: undefined,
-      budgetBlocked: false
+      budgetBlocked: false,
+      progressiveStage: undefined,
+      progressiveMessage: undefined,
+      progressiveElapsedSeconds: candidate.requestedDelivery === "progressive" ? 0 : undefined,
+      progressiveHeartbeatCount: candidate.requestedDelivery === "progressive" ? 0 : undefined
     } : candidate));
     scrollToTurn(turnId, false);
     await runTurn(
@@ -1728,7 +1864,8 @@ function QuestionMode({
       turn.facets,
       history,
       allowOverBudget,
-      turn.requestedStrategy ?? DEFAULT_ANSWER_STRATEGY
+      turn.requestedStrategy ?? DEFAULT_ANSWER_STRATEGY,
+      turn.requestedDelivery
     );
   }
 
@@ -1778,6 +1915,12 @@ function QuestionMode({
   function changeAppearance(nextAppearance: VibeId) {
     setAppearance(nextAppearance);
     persistAppearance(nextAppearance);
+  }
+
+  function changeResponseDelivery(nextDelivery: ResponseDelivery) {
+    const resolved = progressiveAvailable ? nextDelivery : DEFAULT_RESPONSE_DELIVERY;
+    setResponseDelivery(resolved);
+    persistResponseDelivery(resolved, progressiveAvailable);
   }
 
   function resetModeOverrides() {
@@ -1884,6 +2027,8 @@ function QuestionMode({
                 facets={facets}
                 answerStrategy={answerStrategy}
                 fullContextAvailable={fullContextAvailable}
+                responseDelivery={responseDelivery}
+                progressiveAvailable={progressiveAvailable}
                 pending={pending}
                 inputRef={landingQuestionRef}
                 onQuestionChange={setQuestion}
@@ -1891,6 +2036,7 @@ function QuestionMode({
                 onAppearanceChange={changeAppearance}
                 onResetModeDefaults={resetModeOverrides}
                 onAnswerStrategyChange={setAnswerStrategy}
+                onResponseDeliveryChange={changeResponseDelivery}
                 onSubmit={submit}
               />
               <OpeningGuidance
@@ -1972,12 +2118,15 @@ function QuestionMode({
               facets={facets}
               answerStrategy={answerStrategy}
               fullContextAvailable={fullContextAvailable}
+              responseDelivery={responseDelivery}
+              progressiveAvailable={progressiveAvailable}
               pending={pending}
               onQuestionChange={setQuestion}
               onFacetsChange={setFacets}
               onAppearanceChange={changeAppearance}
               onResetModeDefaults={resetModeOverrides}
               onAnswerStrategyChange={setAnswerStrategy}
+              onResponseDeliveryChange={changeResponseDelivery}
               onSubmit={submit}
             />
           </div>
@@ -2007,6 +2156,8 @@ function ConversationComposer({
   facets,
   answerStrategy,
   fullContextAvailable,
+  responseDelivery,
+  progressiveAvailable,
   pending,
   inputRef,
   onQuestionChange,
@@ -2014,6 +2165,7 @@ function ConversationComposer({
   onAppearanceChange,
   onResetModeDefaults,
   onAnswerStrategyChange,
+  onResponseDeliveryChange,
   onSubmit
 }: {
   location: "landing" | "thread";
@@ -2024,6 +2176,8 @@ function ConversationComposer({
   facets: AnswerFacets;
   answerStrategy: AnswerStrategy;
   fullContextAvailable: boolean;
+  responseDelivery: ResponseDelivery;
+  progressiveAvailable: boolean;
   pending: boolean;
   inputRef?: RefObject<HTMLTextAreaElement>;
   onQuestionChange: (question: string) => void;
@@ -2031,6 +2185,7 @@ function ConversationComposer({
   onAppearanceChange: (appearance: VibeId) => void;
   onResetModeDefaults: () => void;
   onAnswerStrategyChange: (strategy: AnswerStrategy) => void;
+  onResponseDeliveryChange: (delivery: ResponseDelivery) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const settingsDisclosureRef = useRef<HTMLDetailsElement>(null);
@@ -2041,6 +2196,8 @@ function ConversationComposer({
   const facetDescriptionId = `archivist-facet-description-${location}`;
   const scopeDescriptionId = `archivist-scope-description-${location}`;
   const scopeName = `archivist-evidence-scope-${location}`;
+  const deliveryDescriptionId = `archivist-delivery-description-${location}`;
+  const deliveryName = `archivist-answer-delivery-${location}`;
   const groundingId = `question-grounding-note-${location}`;
   const selectedMode = archivistMode(archivistModeId);
   const interpretiveOverrides = modeHasOverrides(archivistModeId, facets);
@@ -2092,6 +2249,46 @@ function ConversationComposer({
       </div>
     </fieldset>
   );
+  const deliverySettings = progressiveAvailable ? (
+    <fieldset className="chat-answer-delivery" aria-describedby={deliveryDescriptionId}>
+      <legend>Answer delivery</legend>
+      <p id={deliveryDescriptionId}>
+        Choose whether Archivist presents the final answer all at once or first shows
+        locally checked manuscript claims while the complete answer is still being assembled.
+        This does not change the evidence or interpretation.
+      </p>
+      <div className="chat-answer-delivery-options">
+        <label>
+          <input
+            type="radio"
+            name={deliveryName}
+            value="complete"
+            checked={responseDelivery === "complete"}
+            disabled={pending}
+            onChange={() => onResponseDeliveryChange("complete")}
+          />
+          <span>
+            <span><strong>Complete answer</strong><i>Recommended</i></span>
+            <small>Wait for every check, then show the verified answer at once.</small>
+          </span>
+        </label>
+        <label>
+          <input
+            type="radio"
+            name={deliveryName}
+            value="progressive"
+            checked={responseDelivery === "progressive"}
+            disabled={pending}
+            onChange={() => onResponseDeliveryChange("progressive")}
+          />
+          <span>
+            <span><strong>Progressive response</strong><i>Experimental</i></span>
+            <small>Show checked partial claims, then replace them with the final answer.</small>
+          </span>
+        </label>
+      </div>
+    </fieldset>
+  ) : null;
   const answerSettings = (
     <fieldset className="chat-answer-settings" aria-describedby={facetDescriptionId}>
       <legend>Fine-grained overrides</legend>
@@ -2197,7 +2394,7 @@ function ConversationComposer({
 
       <div className="chat-composer-options">
         <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
-          <summary aria-label={`Reading options: ${archivistModeSummary(archivistModeId, facets, appearance)}`}>
+          <summary aria-label={`Reading options: ${archivistModeSummary(archivistModeId, facets, appearance)}; ${responseDelivery === "progressive" ? "Progressive response, experimental" : "Complete answer"}`}>
             <SlidersHorizontal size={16} aria-hidden="true" />
             <span>
               <small>Reading options</small>
@@ -2212,6 +2409,7 @@ function ConversationComposer({
               <p>{selectedMode.disclosure}</p>
             </div>
             {evidenceScopeSettings}
+            {deliverySettings}
             <details className="chat-advanced-interpretive-settings">
               <summary>
                 <span>
@@ -2300,6 +2498,19 @@ function FacetSelect<T extends string>({
   );
 }
 
+function groupedProgressiveClaims(claims: readonly ProgressiveCheckedClaim[]) {
+  const groups: Array<{ paragraph: number; claims: ProgressiveCheckedClaim[] }> = [];
+  for (const claim of claims) {
+    const current = groups[groups.length - 1];
+    if (!current || current.paragraph !== claim.paragraph) {
+      groups.push({ paragraph: claim.paragraph, claims: [claim] });
+    } else {
+      current.claims.push(claim);
+    }
+  }
+  return groups;
+}
+
 function ConversationTurn({
   turn,
   turnNumber,
@@ -2328,9 +2539,22 @@ function ConversationTurn({
   const facetSummary = answerFacetSummary(turn.facets);
   const modeSummary = archivistModeSummary(turn.archivistMode, turn.facets);
   const customMode = modeHasOverrides(turn.archivistMode, turn.facets);
+  const progressiveHasClaims = turn.progressiveClaims.length > 0;
+  const progressiveFinalizing = progressiveHasClaims
+    && (turn.progressiveStage === "validating_answer" || turn.progressiveStage === "checking_release");
+  const progressiveHeartbeatActive = (turn.progressiveHeartbeatCount ?? 0) > 0;
+  const progressiveElapsed = formatProgressiveElapsed(
+    turn.progressiveElapsedSeconds ?? 0
+  );
+  const progressiveClaimGroups = groupedProgressiveClaims(turn.progressiveClaims);
+  const progressiveDisclosureId = `turn-${turn.id}-progressive-disclosure`;
 
   return (
-    <article className={`conversation-turn is-${turn.status}`} id={`turn-${turn.id}`} aria-labelledby={headingId}>
+    <article
+      className={`conversation-turn is-${turn.status}`}
+      id={`turn-${turn.id}`}
+      aria-labelledby={headingId}
+    >
       <div className="user-turn">
         <span>You</span>
         <h2 id={headingId}>{turn.question}</h2>
@@ -2346,15 +2570,116 @@ function ConversationTurn({
               <span className="turn-facet-summary">
                 <span><i>Mode</i>{modeSummary}</span>
                 {customMode ? <span><i>Overrides</i>{facetSummary}</span> : null}
+                {turn.requestedDelivery === "progressive" ? (
+                  <span>
+                    <i>Delivery</i>
+                    {turn.responseDelivery === "progressive"
+                      ? "Progressive · Experimental"
+                      : "Complete · Fallback"}
+                  </span>
+                ) : null}
               </span>
             </div>
           </div>
         </header>
 
-        {turn.status === "pending" ? (
+        {turn.status === "pending" && turn.responseDelivery === "complete" ? (
           <div className="archivist-thinking">
             <ProcessStatus messages={QUESTION_STEPS} />
             <p>{turnNumber > 1 ? "Following the thread, then returning to the manuscript." : "Finding the passages that best answer your question."}</p>
+          </div>
+        ) : null}
+
+        {turn.status === "pending" && turn.responseDelivery === "progressive" ? (
+          <div className={`archivist-progressive${progressiveHasClaims ? " has-claims" : " is-preparing"}`}>
+            <div
+              className="progressive-live-stage"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              <Loader2 size={16} className="spin" aria-hidden="true" />
+              <span className="progressive-stage-copy">
+                <small>
+                  {progressiveHasClaims
+                    ? "Checked partial · Not final"
+                    : "Answer in progress · Provisional"}
+                </small>
+                <strong>
+                  {progressiveFinalizing
+                    ? "Final checks are running; the displayed claims are not yet a complete answer."
+                    : turn.progressiveMessage ?? "Connecting to Archivist…"}
+                </strong>
+              </span>
+              <span
+                className={`progressive-activity${progressiveHeartbeatActive ? " is-active" : ""}`}
+              >
+                <i aria-hidden="true" />
+                {progressiveHeartbeatActive ? "Active" : "Working"} · {progressiveElapsed}
+              </span>
+            </div>
+            {progressiveHasClaims ? (
+              <div
+                className="sr-only progressive-claim-announcements"
+                role="log"
+                aria-live="polite"
+                aria-relevant="additions"
+                aria-atomic="false"
+              >
+                {turn.progressiveClaims.map((claim) => (
+                  <span key={claim.claimIndex}>
+                    Checked manuscript claim {claim.claimIndex}: {claim.text}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <div
+              className="progressive-answer-region"
+              aria-label={progressiveHasClaims
+                ? "Checked partial manuscript claims; answer still being assembled"
+                : "Provisional answer preparation"}
+              aria-describedby={progressiveDisclosureId}
+              aria-busy="true"
+            >
+              {progressiveHasClaims ? (
+                <div className="assistant-paper is-progressive">
+                  <div className="progressive-response-badge">
+                    <span>Checked partial</span>
+                    <small>Not final</small>
+                  </div>
+                  <section className="output-block progressive-claims-block">
+                    <div className="panel-title">
+                      <h2>Checked manuscript claims</h2>
+                      <BookOpen size={17} aria-hidden="true" />
+                    </div>
+                    <div className="answer-copy progressive-claims-copy" aria-live="off">
+                      {progressiveClaimGroups.map((group) => (
+                        <p key={group.paragraph}>
+                          {group.claims.map((claim, index) => (
+                            <span className="progressive-claim" key={claim.claimIndex}>
+                              {index ? " " : null}
+                              <span className="sr-only">Checked claim {claim.claimIndex}: </span>
+                              <CitationText body={claim.text} sources={[]} />
+                            </span>
+                          ))}
+                        </p>
+                      ))}
+                    </div>
+                    <p className="progressive-claim-disclosure" id={progressiveDisclosureId}>
+                      Each displayed claim passed its local evidence check, but this is only a partial
+                      assembly. Final validation may still discard it; interpretive framing and sources
+                      remain withheld until the complete answer is released.
+                    </p>
+                    <span className="progressive-caret" aria-hidden="true" />
+                  </section>
+                </div>
+              ) : (
+                <p className="progressive-waiting-copy" id={progressiveDisclosureId}>
+                  Archivist is still preparing the answer. No answer text has been released; checked
+                  manuscript claims will appear here before the final assembly.
+                </p>
+              )}
+            </div>
           </div>
         ) : null}
 

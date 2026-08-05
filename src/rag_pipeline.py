@@ -18,7 +18,19 @@ from enum import StrEnum
 from time import perf_counter_ns
 from typing import Any
 
+from answer_progress import (
+    AnswerProgressStage,
+    CheckedClaimCallback,
+    CheckedClaimCandidate,
+    IncrementalJSONArrayItems,
+    ProgressCallback,
+    ProviderStreamMilestoneCallback,
+    emit_checked_claim,
+    emit_progress,
+    validate_progressive_lead,
+)
 from answer_coverage import (
+    AnswerUnitRole,
     ContentCompletenessContext,
     ContentCompletenessProfile,
     ContentOutcome,
@@ -37,16 +49,19 @@ from answer_coverage import (
     InterpretiveEvidenceCoverageAnswer,
     InterpretiveMove,
     MAX_ANSWER_UNITS,
+    MAX_TOTAL_UNIT_TEXT_CHARACTERS,
     PremiseSourceScope,
     process_evidence_coverage,
     process_interpretive_evidence_coverage,
     validate_evidence_coverage_context,
+    validate_streamable_answer_unit,
 )
 from costs import (
     CostLimitExceeded,
     safe_planner_exception_class,
     safe_planner_exception_code,
     tracked_responses_parse,
+    tracked_responses_stream,
 )
 from evidence_policy import (
     EVIDENCE_DIAGNOSTICS_SCHEMA,
@@ -125,7 +140,7 @@ NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v11"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v10"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v11"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
 MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
@@ -312,6 +327,14 @@ The broader facet is discovery only and never proves that the named subject is p
 EVIDENCE_COVERAGE_INSTRUCTIONS = """\
 Answer a question about one manuscript using only the numbered sources in the input.
 Return the required structured evidence-coverage object; do not return prose outside it.
+
+Write answer_units immediately after schema, before the diagnostic coverage ledgers. Except
+for a required premise_correction, make the first factual unit a direct bottom-line answer to
+the current question: one concise sentence of no more than 45 words that names the question's
+subject and carries its ordinary evidence citation. Use later units to expand the evidence,
+chronology, qualifications, and other requested dimensions without merely repeating the lead.
+When a premise correction is required, keep it first and put the concise direct answer immediately
+after it.
 
 For every ordered requirement:
 - inspect all supplied sources for directly relevant material;
@@ -2892,6 +2915,9 @@ def run_evidence_planned_answer(
     worldview: Worldview | str = Worldview.NONE,
     archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
     policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
+    progress_callback: ProgressCallback | None = None,
+    checked_claim_callback: CheckedClaimCallback | None = None,
+    stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
 ) -> AnswerModeResult:
     """Execute one bounded evidence-planned Answer Mode turn."""
     pipeline_started_ns = perf_counter_ns()
@@ -2912,6 +2938,7 @@ def run_evidence_planned_answer(
             "stage_timings_ms": dict(stage_timings_ms),
         }
 
+    emit_progress(progress_callback, AnswerProgressStage.CHECKING_CORPUS)
     integrity_started_ns = perf_counter_ns()
     eligible_chunks = [
         chunk for chunk in chunks if not should_skip_document(str(chunk.get("document") or ""))
@@ -2962,6 +2989,7 @@ def run_evidence_planned_answer(
             },
         )
 
+    emit_progress(progress_callback, AnswerProgressStage.PLANNING_SEARCH)
     catalog = build_document_catalog(eligible_chunks)
     request_client = without_automatic_retries(client)
     planning_started_ns = perf_counter_ns()
@@ -2974,6 +3002,7 @@ def run_evidence_planned_answer(
     )
     completeness_context = _content_completeness_context_for_plan(plan)
     stage_timings_ms["query_planning"] = _elapsed_ms(planning_started_ns)
+    emit_progress(progress_callback, AnswerProgressStage.RETRIEVING_SOURCES)
     retrieval_started_ns = perf_counter_ns()
     planned = retrieve_plan_from_collection(
         plan,
@@ -3008,12 +3037,14 @@ def run_evidence_planned_answer(
             "planner_call": _planner_trace_diagnostic(planner_call_diagnostics),
         }
     )
+    emit_progress(progress_callback, AnswerProgressStage.CHECKING_EVIDENCE)
     structural_stage_shortfall_count = _deterministic_structural_stage_shortfall_count(
         resolved_turn,
         plan,
         planned,
     )
     if structural_stage_shortfall_count:
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
         requirement_ids = tuple(requirement.requirement_id for requirement in plan.requirements)
         coverage = process_evidence_coverage(
             None,
@@ -3072,6 +3103,7 @@ def run_evidence_planned_answer(
     planned.trace["evidence"] = gate_diagnostics
 
     if gate.skip_answer_generation:
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
         answer = _clean_abstention(target_label)
         planned.trace["generation_contract"] = _generation_trace(
             None,
@@ -3090,6 +3122,7 @@ def run_evidence_planned_answer(
             ),
         )
 
+    emit_progress(progress_callback, AnswerProgressStage.PREPARING_CONTEXT)
     context_started_ns = perf_counter_ns()
     (
         final_chunks,
@@ -3130,6 +3163,7 @@ def run_evidence_planned_answer(
     stage_timings_ms["context_preparation"] = _elapsed_ms(context_started_ns)
 
     if not final_chunks:
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
         validation_started_ns = perf_counter_ns()
         coverage = process_evidence_coverage(
             None,
@@ -3183,7 +3217,7 @@ def run_evidence_planned_answer(
     )
     context_validation_started_ns = perf_counter_ns()
     try:
-        validate_evidence_coverage_context(
+        stream_validation_context = validate_evidence_coverage_context(
             requirement_ids=requirement_ids,
             premise_ids=premise_ids,
             premise_source_scopes=premise_source_scopes,
@@ -3191,6 +3225,7 @@ def run_evidence_planned_answer(
             source_count=len(final_chunks),
         )
     except CoverageContractError:
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
         coverage = process_evidence_coverage(
             None,
             requirement_ids=requirement_ids,
@@ -3238,17 +3273,88 @@ def run_evidence_planned_answer(
         worldview=worldview,
         archivist_mode=archivist_mode,
     )
+    emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
     generation_started_ns = perf_counter_ns()
     try:
-        response = tracked_responses_parse(
-            request_client,
-            operation="answer_generation",
-            instructions=EVIDENCE_COVERAGE_INSTRUCTIONS,
-            input=coverage_input,
-            text_format=response_format,
-            max_output_tokens=MAX_COVERAGE_OUTPUT_TOKENS,
+        generation_request = {
+            "instructions": EVIDENCE_COVERAGE_INSTRUCTIONS,
+            "input": coverage_input,
+            "text_format": response_format,
+            "max_output_tokens": MAX_COVERAGE_OUTPUT_TOKENS,
             **GENERATOR_SETTINGS.responses_create_kwargs(),
-        )
+        }
+        if checked_claim_callback is None:
+            response = tracked_responses_parse(
+                request_client,
+                operation="answer_generation",
+                **generation_request,
+            )
+        else:
+            extractor = IncrementalJSONArrayItems("answer_units")
+            seen_unit_ids: list[str] = []
+            streamed_factual_unit_count = 0
+            previous_paragraph: int | None = None
+            streamed_text_characters = 0
+            extraction_failed = False
+
+            def observe_structured_delta(delta: str) -> None:
+                nonlocal previous_paragraph
+                nonlocal streamed_factual_unit_count
+                nonlocal streamed_text_characters
+                nonlocal extraction_failed
+                if extraction_failed:
+                    return
+                try:
+                    values = extractor.feed(delta)
+                    for value in values:
+                        unit = validate_streamable_answer_unit(
+                            value,
+                            context=stream_validation_context,
+                            unit_ordinal=len(seen_unit_ids) + 1,
+                            seen_unit_ids=seen_unit_ids,
+                            previous_paragraph=previous_paragraph,
+                        )
+                        streamed_text_characters += len(unit.text)
+                        if streamed_text_characters > MAX_TOTAL_UNIT_TEXT_CHARACTERS:
+                            raise CoverageContractError(
+                                CoverageValidationErrorCode.TEXT_LIMIT_EXCEEDED
+                            )
+                        # The model's premise-decision ledger is authoritative
+                        # only when the complete payload is validated. Keep a
+                        # provisional correction private rather than implying
+                        # that its contradiction status has already passed.
+                        if unit.role is not AnswerUnitRole.PREMISE_CORRECTION:
+                            if streamed_factual_unit_count == 0:
+                                validate_progressive_lead(
+                                    unit.text,
+                                    question_anchors=required_question_anchors,
+                                )
+                            streamed_factual_unit_count += 1
+                        seen_unit_ids.append(unit.unit_id)
+                        previous_paragraph = unit.paragraph
+                        if unit.role is not AnswerUnitRole.PREMISE_CORRECTION:
+                            emit_checked_claim(
+                                checked_claim_callback,
+                                CheckedClaimCandidate(
+                                    paragraph=unit.paragraph,
+                                    text=unit.text,
+                                    source_chunks=tuple(final_chunks),
+                                    audit_chunks=tuple(final_chunks),
+                                ),
+                            )
+                except (CoverageContractError, TypeError, ValueError):
+                    # Stop provisional delivery, but consume and validate the
+                    # paid response normally. The final contract remains the
+                    # only authority and can still succeed without streaming.
+                    extraction_failed = True
+
+            response = tracked_responses_stream(
+                request_client,
+                operation="answer_generation",
+                on_text_delta=observe_structured_delta,
+                stream_milestone_callback=stream_milestone_callback,
+                **generation_request,
+            )
         parsed = getattr(response, "output_parsed", None)
         refused = _response_refused(response)
     except CostLimitExceeded:
@@ -3258,6 +3364,7 @@ def run_evidence_planned_answer(
         refused = True
     stage_timings_ms["answer_generation"] = _elapsed_ms(generation_started_ns)
 
+    emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
     validation_started_ns = perf_counter_ns()
     if interpretive_expansion:
         coverage = process_interpretive_evidence_coverage(

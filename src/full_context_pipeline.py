@@ -31,13 +31,25 @@ from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any
 
-from answer_coverage import CoverageOutcomeStatus
+from answer_progress import (
+    AnswerProgressStage,
+    CheckedClaimCallback,
+    CheckedClaimCandidate,
+    IncrementalJSONArrayItems,
+    ProgressCallback,
+    ProviderStreamMilestoneCallback,
+    emit_checked_claim,
+    emit_progress,
+    validate_progressive_lead,
+)
+from answer_coverage import AnswerUnitRole, CoverageOutcomeStatus
 from costs import (
     CostLimitExceeded,
     TokenUsage,
     calculate_cost_nano_usd,
     enforce_projected_usage_budget,
     tracked_responses_parse,
+    tracked_responses_stream,
 )
 from evidence_policy import CorpusIntegrity, scan_evidence_target
 from filters import should_skip_document
@@ -48,8 +60,10 @@ from full_context_coverage import (
     FullContextCoverageAnswer,
     FullContextCoverageResult,
     FullContextValidationErrorCode,
+    MAX_TOTAL_CLAIM_TEXT_CHARACTERS,
     TrustedTargetAudit,
     process_full_context_coverage,
+    validate_streamable_full_context_claim,
 )
 from model_config import FULL_CONTEXT_GENERATOR_SETTINGS
 from archivist_modes import (
@@ -138,6 +152,13 @@ Evidence and citation rules:
   are attached automatically from cited_chunk_ids.
 
 Claim rules:
+- Write claims immediately after schema, before premise and absence diagnostics.
+- Except for a required premise correction, make the first factual claim a direct
+  bottom-line answer to the current question: one concise sentence of no more than
+  45 words that names the question's subject. Use later claims to expand the evidence,
+  chronology, and qualifications without merely repeating the lead. When a premise
+  correction is required, keep it first and put the concise direct answer immediately
+  after it.
 - Each claim is exactly one complete sentence making one independently checkable
   factual assertion, ending in its only terminal punctuation.
 - Spell out or rephrase abbreviations, titles, initials, and decimals that would
@@ -393,6 +414,9 @@ def run_full_context_answer(
     worldview: Worldview | str = Worldview.NONE,
     archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
     policy: FullContextPolicy = FULL_CONTEXT_POLICY,
+    progress_callback: ProgressCallback | None = None,
+    checked_claim_callback: CheckedClaimCallback | None = None,
+    stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
 ) -> AnswerModeResult:
     """Execute one bounded full-context Answer Mode turn.
 
@@ -437,6 +461,7 @@ def run_full_context_answer(
             resolved_question_text=resolved_turn.standalone_question,
         )
 
+    emit_progress(progress_callback, AnswerProgressStage.CHECKING_CORPUS)
     integrity_started_ns = perf_counter_ns()
     eligible_chunks = eligible_full_context_chunks(chunks)
     integrity = corpus_integrity
@@ -464,6 +489,7 @@ def run_full_context_answer(
             ),
         )
 
+    emit_progress(progress_callback, AnswerProgressStage.PREPARING_CONTEXT)
     serialization_started_ns = perf_counter_ns()
     trusted_targets = extract_trusted_targets(resolved_turn)
     trusted_target_audits = _audit_trusted_targets(
@@ -497,6 +523,7 @@ def run_full_context_answer(
     stage_timings_ms["corpus_serialization"] = elapsed_ms(serialization_started_ns)
 
     if estimated_input_tokens > context_token_ceiling():
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
         # Fail closed rather than truncate. A silently partial corpus would make
         # every absence judgment in the answer unsound while still looking whole.
         coverage = FullContextCoverageResult(
@@ -533,17 +560,91 @@ def run_full_context_answer(
     )
     enforce_projected_usage_budget(projected_request_cost_nano_usd)
     request_client = without_automatic_retries(client)
+    emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
     generation_started_ns = perf_counter_ns()
     try:
-        response = tracked_responses_parse(
-            request_client,
-            operation="answer_generation",
-            instructions=FULL_CONTEXT_INSTRUCTIONS,
-            input=generation_input,
-            text_format=FullContextCoverageAnswer,
-            max_output_tokens=MAX_FULL_CONTEXT_OUTPUT_TOKENS,
+        generation_request = {
+            "instructions": FULL_CONTEXT_INSTRUCTIONS,
+            "input": generation_input,
+            "text_format": FullContextCoverageAnswer,
+            "max_output_tokens": MAX_FULL_CONTEXT_OUTPUT_TOKENS,
             **FULL_CONTEXT_GENERATOR_SETTINGS.responses_create_kwargs(),
-        )
+        }
+        if checked_claim_callback is None:
+            response = tracked_responses_parse(
+                request_client,
+                operation="answer_generation",
+                **generation_request,
+            )
+        else:
+            extractor = IncrementalJSONArrayItems("claims")
+            seen_claim_ids: list[str] = []
+            streamed_factual_claim_count = 0
+            prior_cited_chunk_ids: tuple[str, ...] = ()
+            previous_paragraph: int | None = None
+            streamed_text_characters = 0
+            extraction_failed = False
+
+            def observe_structured_delta(delta: str) -> None:
+                nonlocal extraction_failed
+                nonlocal previous_paragraph
+                nonlocal prior_cited_chunk_ids
+                nonlocal streamed_factual_claim_count
+                nonlocal streamed_text_characters
+                if extraction_failed:
+                    return
+                try:
+                    for value in extractor.feed(delta):
+                        claim, rendered, source_chunks, ordered_ids = (
+                            validate_streamable_full_context_claim(
+                                value,
+                                eligible_chunks=eligible_chunks,
+                                claim_ordinal=len(seen_claim_ids) + 1,
+                                seen_claim_ids=seen_claim_ids,
+                                previous_paragraph=previous_paragraph,
+                                prior_cited_chunk_ids=prior_cited_chunk_ids,
+                            )
+                        )
+                        streamed_text_characters += len(claim.text)
+                        if streamed_text_characters > MAX_TOTAL_CLAIM_TEXT_CHARACTERS:
+                            raise ValueError("full-context streamed text limit exceeded")
+                        # Premise contradiction is a whole-payload finding. A
+                        # correction can establish ordering state here, but it
+                        # cannot be described to the reader as locally checked
+                        # until that finding is validated at the terminal gate.
+                        if claim.role is not AnswerUnitRole.PREMISE_CORRECTION:
+                            if streamed_factual_claim_count == 0:
+                                validate_progressive_lead(
+                                    claim.text,
+                                    question_anchors=tuple(
+                                        target.query_surface_span
+                                        for target in trusted_targets
+                                    ),
+                                )
+                            streamed_factual_claim_count += 1
+                        seen_claim_ids.append(claim.claim_id)
+                        previous_paragraph = claim.paragraph_group
+                        prior_cited_chunk_ids = ordered_ids
+                        if claim.role is not AnswerUnitRole.PREMISE_CORRECTION:
+                            emit_checked_claim(
+                                checked_claim_callback,
+                                CheckedClaimCandidate(
+                                    paragraph=claim.paragraph_group,
+                                    text=rendered,
+                                    source_chunks=source_chunks,
+                                    audit_chunks=tuple(eligible_chunks),
+                                ),
+                            )
+                except (TypeError, ValueError):
+                    extraction_failed = True
+
+            response = tracked_responses_stream(
+                request_client,
+                operation="answer_generation",
+                on_text_delta=observe_structured_delta,
+                stream_milestone_callback=stream_milestone_callback,
+                **generation_request,
+            )
         parsed = getattr(response, "output_parsed", None)
         refused = _response_refused(response)
     except CostLimitExceeded:
@@ -553,6 +654,7 @@ def run_full_context_answer(
         refused = True
     stage_timings_ms["answer_generation"] = elapsed_ms(generation_started_ns)
 
+    emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
     validation_started_ns = perf_counter_ns()
     coverage = process_full_context_coverage(
         parsed if isinstance(parsed, FullContextCoverageAnswer) else None,

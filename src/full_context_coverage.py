@@ -27,6 +27,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
     field_validator,
 )
 
@@ -48,6 +49,7 @@ __all__ = [
     "FULL_CONTEXT_NO_EVIDENCE_MESSAGE",
     "MAX_CITED_CHUNKS_PER_CLAIM",
     "MAX_FULL_CONTEXT_CLAIMS",
+    "MAX_TOTAL_CLAIM_TEXT_CHARACTERS",
     "AbsenceFinding",
     "AbsenceStatus",
     "FullContextClaim",
@@ -58,6 +60,7 @@ __all__ = [
     "TrustedTargetAudit",
     "process_full_context_coverage",
     "render_full_context_answer",
+    "validate_streamable_full_context_claim",
 ]
 
 
@@ -67,7 +70,7 @@ FULL_CONTEXT_RESPONSE_SCHEMA = "archivist.full_context_coverage/2"
 FULL_CONTEXT_COVERAGE_SCHEMA = FULL_CONTEXT_RESPONSE_SCHEMA
 FULL_CONTEXT_RUN_DIAGNOSTICS_SCHEMA = "archivist.full_context_run_diagnostics/1"
 FULL_CONTEXT_COVERAGE_RENDERER_VERSION = "full-context-coverage-renderer/2"
-FULL_CONTEXT_COVERAGE_PROMPT_VERSION = "full-context-coverage-v2"
+FULL_CONTEXT_COVERAGE_PROMPT_VERSION = "full-context-coverage-v3"
 
 MAX_FULL_CONTEXT_CLAIMS = 40
 MAX_CITED_CHUNKS_PER_CLAIM = 6
@@ -227,8 +230,18 @@ class TrustedTargetAudit:
 
 class FullContextCoverageAnswer(_ContractModel):
     schema_version: Literal["archivist.full_context_coverage/2"] = Field(alias="schema")
+    # Structured Outputs follows property order. Claims therefore precede the
+    # diagnostic ledgers so Progressive delivery can inspect a complete first
+    # claim without waiting for terminal-only metadata.
+    claims: tuple[FullContextClaim, ...] = Field(
+        max_length=MAX_FULL_CONTEXT_CLAIMS,
+        description=(
+            "Put factual claims first. Except for a required premise correction, "
+            "the first claim must be a concise one-sentence bottom-line answer "
+            "that directly names the question's subject; later claims expand it."
+        ),
+    )
     premise_finding: PremiseFinding | None
-    claims: tuple[FullContextClaim, ...] = Field(max_length=MAX_FULL_CONTEXT_CLAIMS)
     absence_findings: tuple[AbsenceFinding, ...] = Field(max_length=MAX_ABSENCE_FINDINGS)
     self_reported_content_outcome: ContentOutcome = Field(
         description=(
@@ -361,6 +374,69 @@ def render_full_context_answer(
         paragraphs.append(" ".join(sentences))
     paragraphs.extend(statement.strip() for statement in absence_statements)
     return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
+
+
+def validate_streamable_full_context_claim(
+    payload: FullContextClaim | Mapping[str, Any],
+    *,
+    eligible_chunks: Sequence[Mapping[str, object]],
+    claim_ordinal: int,
+    seen_claim_ids: Sequence[str] = (),
+    previous_paragraph: int | None = None,
+    prior_cited_chunk_ids: Sequence[str] = (),
+) -> tuple[
+    FullContextClaim,
+    str,
+    tuple[Mapping[str, object], ...],
+    tuple[str, ...],
+]:
+    """Validate and citation-render one provisional full-context claim."""
+
+    if claim_ordinal < 1 or claim_ordinal > MAX_FULL_CONTEXT_CLAIMS:
+        raise ValueError("claim ordinal is outside the generation contract")
+    try:
+        claim = (
+            payload
+            if isinstance(payload, FullContextClaim)
+            else FullContextClaim.model_validate(payload)
+        )
+    except (TypeError, ValidationError):
+        raise ValueError("invalid full-context claim payload") from None
+    if claim.claim_id in seen_claim_ids:
+        raise ValueError("duplicate full-context claim id")
+    if previous_paragraph is not None and claim.paragraph_group < previous_paragraph:
+        raise ValueError("full-context claim paragraphs are out of order")
+    if claim.role is AnswerUnitRole.PREMISE_CORRECTION and claim_ordinal != 1:
+        raise ValueError("premise correction must be the first claim")
+    if _CLAIM_TEXT_RE.fullmatch(claim.text) is None:
+        raise ValueError("malformed full-context claim text")
+    if len(set(claim.cited_chunk_ids)) != len(claim.cited_chunk_ids):
+        raise ValueError("duplicate cited chunk id")
+
+    chunks_by_id = {
+        str(chunk.get("chunk_id")): chunk
+        for chunk in eligible_chunks
+        if isinstance(chunk.get("chunk_id"), str) and chunk.get("chunk_id")
+    }
+    if any(chunk_id not in chunks_by_id for chunk_id in claim.cited_chunk_ids):
+        raise ValueError("unresolvable cited chunk id")
+
+    ordered_ids = list(prior_cited_chunk_ids)
+    for chunk_id in claim.cited_chunk_ids:
+        if chunk_id not in ordered_ids:
+            ordered_ids.append(chunk_id)
+    source_number_by_id = {
+        chunk_id: index for index, chunk_id in enumerate(ordered_ids, start=1)
+    }
+    source_numbers = tuple(source_number_by_id[value] for value in claim.cited_chunk_ids)
+    body = claim.text[:-1].rstrip()
+    rendered = f"{body} {_citation_token(source_numbers)}{claim.text[-1]}"
+    return (
+        claim,
+        rendered,
+        tuple(chunks_by_id[chunk_id] for chunk_id in ordered_ids),
+        tuple(ordered_ids),
+    )
 
 
 def _application_absence_statement(

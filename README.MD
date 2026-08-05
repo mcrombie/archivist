@@ -21,6 +21,9 @@ Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
   mode;
 - Historiographical lens, Voice, Worldview, and all eleven visual appearances under Advanced
   controls;
+- Complete answer as the recommended fail-closed delivery default, with an experimental
+  Progressive response that streams the same final-generation API call and reveals only complete,
+  locally checked factual claims while the canonical answer is still being validated;
 - interpretive influence profiles that shape framing only, never retrieval, evidence, or citations;
 - local OpenAI usage estimates and budget controls;
 - 481 retrieval-eligible chunks covering the complete substantive manuscript;
@@ -46,10 +49,18 @@ query planning and conversational resolution
 retrieval, premise checking, and evidence coverage
         |
         v
-GPT-5.6 Sol answer generation
+GPT-5.6 Sol structured answer generation
+        |
+        +--> Progressive (experimental): claim-level release checks
+        |                                  while generation continues
+        |
+        `--> Complete: no prose released before terminal validation
         |
         v
-[Source N] validation and edition-locator mapping
+whole-answer grounding and [Source N] validation
+        |
+        v
+edition-locator and exposure-policy release checks
         |
         +--> development: full diagnostic passages
         |
@@ -58,6 +69,36 @@ GPT-5.6 Sol answer generation
 
 The book is not sent to the answer model on every request. Archivist embeds the question, retrieves
 a bounded set of relevant private chunks, and supplies only that evidence to answer generation.
+
+## Answer delivery
+
+**Complete** is the default and the evaluation reference. It withholds answer prose until the full
+response has passed Archivist's grounding, citation, premise, completeness, and exposure checks.
+If a terminal check fails, the rejected prose is never presented as an answer.
+
+**Progressive** is an experimental presentation mode. It does not make a preview request or a
+second answer request: the backend streams the existing final-generation call using the
+`archivist.answer_stream/2` NDJSON protocol. It privately buffers structured-output deltas and may
+release a complete factual claim only after checking its order, role, citations, source mapping,
+and size. The shared generation schema places answer claims before terminal-only validation
+ledgers, and the first releasable factual claim must be a direct, subject-linked sentence of no
+more than 45 words. In the public profile, every provisional claim must also pass edition-locator
+and rolling quotation-budget checks before it leaves the server.
+
+The interface marks this material **Checked partial · Not final**. Provisional claims are excluded
+from conversation memory, copying, and the final source display. A successful terminal event
+replaces them with the canonical validated answer; an interruption or late validation failure
+clears them. Interpretive prefaces and conclusions remain withheld until terminal validation.
+
+Progressive delivery is not chain-of-thought, raw token streaming, or a promise that the whole
+request will finish faster. Query resolution, planning, embeddings, retrieval, and evidence checks
+still happen before final generation begins. Its narrower goal is to reduce the wait for the first
+useful, releasable claim once that generation is underway, without adding another answer-model
+call. While prose is unavailable, three-second heartbeat frames keep a visible elapsed-work
+indicator moving without exposing model reasoning. Complete and Progressive use the same prompt
+and schema within the current `evidence-coverage-v11` and `full-context-coverage-v3` generation
+cohorts. A live deployment smoke test is still required before treating first-claim timing as
+deployment-verified.
 
 ## Local setup
 
@@ -113,12 +154,14 @@ Public mode:
 - hides full chunks, internal paths, diagnostics, and per-turn costs;
 - maps citations to a named edition;
 - limits excerpts to 280 characters each, three excerpts, and 700 characters total;
+- applies the same locator and rolling quotation limits to every provisional Progressive claim;
 - enforces request-size, per-client, global, concurrency, and monthly-spend limits;
 - disables API documentation and sanitizes errors.
 
-See [`docs/public_demo_design.md`](docs/public_demo_design.md) for the disclosure design and
-[`docs/public_deployment.md`](docs/public_deployment.md) for the Render deployment and recovery
-runbook. The generated
+See [`docs/public_demo_design.md`](docs/public_demo_design.md) for the disclosure design,
+[`docs/answer_delivery.md`](docs/answer_delivery.md) for the Complete/Progressive transport and
+release contract, and [`docs/public_deployment.md`](docs/public_deployment.md) for the Render
+deployment and recovery runbook. The generated
 [`onrender.com`](https://archivist-cradle-of-the-empire.onrender.com) address remains enabled as
 an operational fallback, but `https://archivist.mcrombie.com` is the canonical reader-facing URL.
 
@@ -169,12 +212,18 @@ uv run ruff check src tests scripts
 uv run pytest
 ```
 
-Run the production frontend build:
+Run the focused frontend delivery and reader-mode checks, then the production build:
 
 ```powershell
 Set-Location frontend
+npm run test:delivery
+npm run test:modes
 npm run build
 ```
+
+These checks are offline and do not make paid OpenAI API calls. The current local implementation
+passes Ruff, 760 Python tests (with one skipped), both focused frontend suites, and the production
+build. Progressive delivery still requires the live deployment smoke described above.
 
 The repeatedly used ten-question set is a development regression suite, not held-out evidence.
 Formal measurement is gated on a separately owner-authored 34–46 item gold set whose questions,

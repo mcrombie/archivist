@@ -51,6 +51,16 @@ The web API needs:
   turn they support.
 - Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
   in both the conversation header and the top-of-page introduction.
+- Places an Answer delivery choice under Reading options after Evidence scope. **Complete answer**
+  is the recommended strict default. **Progressive response** is experimental: after fixed
+  operational progress, it reveals complete locally checked factual claims from the existing
+  streamed generation call while the whole answer remains provisional. A roughly three-second
+  heartbeat keeps an elapsed-work indicator visibly active before prose is available, and the
+  first provisional factual claim must be a short direct answer linked to the question's subject.
+  The canonical answer, interpretive framing, sources, copy action, and conversation history
+  appear only after final validation; interruption or late failure discards the working claims.
+  It neither exposes model reasoning nor adds another generation call. See
+  [Answer delivery modes](answer_delivery.md).
 - Offers ten reader-facing Archivist modes that bundle appearance and answer character:
   Professional, Essential, Mythical Forest Folio, Cromb Coo Coo, Pretty Pink Princess, Baleful
   Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and Cosmic Almanac. Professional is

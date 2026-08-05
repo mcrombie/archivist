@@ -4,6 +4,7 @@ import pytest
 
 import full_context_pipeline
 import web_project
+from answer_progress import ProviderStreamMilestone
 from answer_coverage import AnswerUnitRole, ContentOutcome, CoverageOutcomeStatus
 from evidence_policy import assess_corpus_integrity
 from full_context_coverage import (
@@ -328,6 +329,273 @@ def test_one_generation_call_with_no_retry_produces_cited_only_sources(patched_g
     assert result.answer_strategy_version == FULL_CONTEXT_POLICY_VERSION
     assert result.plan is None
     assert result.resolved_question == "What happened?"
+
+
+def test_full_context_prompt_contract_puts_a_concise_direct_claim_first():
+    instructions = " ".join(full_context_pipeline.FULL_CONTEXT_INSTRUCTIONS.split())
+
+    assert (
+        full_context_pipeline.FULL_CONTEXT_COVERAGE_PROMPT_VERSION
+        == "full-context-coverage-v3"
+    )
+    assert "claims immediately after schema" in instructions
+    assert "first factual claim a direct bottom-line answer" in instructions
+    assert "no more than 45 words" in instructions
+
+
+def test_progressive_full_context_streams_one_request_then_runs_terminal_validator(
+    monkeypatch,
+):
+    parsed = coverage_answer(
+        (
+            FullContextClaim(
+                claim_id="C1",
+                role=AnswerUnitRole.MECHANISM,
+                text="A synthetic process occurred.",
+                cited_chunk_ids=("10_Synthetic Chapter 1_ Title_002",),
+                paragraph_group=1,
+            ),
+        )
+    )
+    encoded = parsed.model_dump_json()
+    client = RecordingClient(parsed)
+    stream_calls: list[dict[str, object]] = []
+    checked_claims = []
+    provider_milestones = []
+    events: list[str] = []
+    original_validator = full_context_pipeline.process_full_context_coverage
+
+    def fake_stream(
+        _client,
+        *,
+        operation,
+        on_text_delta=None,
+        stream_milestone_callback=None,
+        **request,
+    ):
+        stream_calls.append({"operation": operation, **request})
+        assert on_text_delta is not None
+        assert stream_milestone_callback is not None
+        stream_milestone_callback(ProviderStreamMilestone.FIRST_DELTA)
+        ledger_start = encoded.index('"premise_finding"')
+        on_text_delta(encoded[:ledger_start])
+        assert len(checked_claims) == 1
+        on_text_delta(encoded[ledger_start:])
+        stream_milestone_callback(ProviderStreamMilestone.TERMINAL)
+        events.append("provider_terminal")
+        return stub_response(parsed)
+
+    def terminal_validator(*args, **kwargs):
+        events.append("terminal_validator")
+        return original_validator(*args, **kwargs)
+
+    def collect_claim(candidate):
+        checked_claims.append(candidate)
+        events.append("checked_claim")
+
+    monkeypatch.setattr(full_context_pipeline, "tracked_responses_stream", fake_stream)
+    monkeypatch.setattr(
+        full_context_pipeline,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: pytest.fail("blocking generation path was called"),
+    )
+    monkeypatch.setattr(
+        full_context_pipeline,
+        "process_full_context_coverage",
+        terminal_validator,
+    )
+
+    result = run_full_context_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="What happened?",
+            trusted_user_texts=("What happened?",),
+        ),
+        chunks=CORPUS,
+        client=client,
+        corpus_integrity=matching_integrity(CORPUS),
+        checked_claim_callback=collect_claim,
+        stream_milestone_callback=provider_milestones.append,
+    )
+
+    assert len(stream_calls) == 1
+    assert stream_calls[0]["operation"] == "answer_generation"
+    assert stream_calls[0]["text_format"] is FullContextCoverageAnswer
+    assert provider_milestones == [
+        ProviderStreamMilestone.FIRST_DELTA,
+        ProviderStreamMilestone.TERMINAL,
+    ]
+    assert events == ["checked_claim", "provider_terminal", "terminal_validator"]
+    assert checked_claims[0].paragraph == 1
+    assert checked_claims[0].text == "A synthetic process occurred [Source 1]."
+    assert tuple(
+        item["chunk_id"] for item in checked_claims[0].source_chunks
+    ) == ("10_Synthetic Chapter 1_ Title_002",)
+    assert checked_claims[0].audit_chunks == tuple(CORPUS)
+    assert result.status == CoverageOutcomeStatus.ANSWERED.value
+    assert result.answer == "A synthetic process occurred [Source 1]."
+
+
+def test_progressive_full_context_withholds_truncated_claim_but_accepts_valid_terminal(
+    monkeypatch,
+):
+    parsed = coverage_answer(
+        (
+            FullContextClaim(
+                claim_id="C1",
+                role=AnswerUnitRole.MECHANISM,
+                text="A synthetic process occurred.",
+                cited_chunk_ids=("10_Synthetic Chapter 1_ Title_002",),
+                paragraph_group=1,
+            ),
+        )
+    )
+    client = RecordingClient(parsed)
+    stream_calls: list[dict[str, object]] = []
+    checked_claims = []
+    terminal_validations = []
+    original_validator = full_context_pipeline.process_full_context_coverage
+
+    def fake_stream(_client, *, operation, on_text_delta=None, **request):
+        stream_calls.append({"operation": operation, **request})
+        assert on_text_delta is not None
+        on_text_delta(
+            '{"claims":[{"claim_id":"C1","role":"mechanism",'
+            '"text":"Never completed'
+        )
+        return stub_response(parsed)
+
+    def terminal_validator(*args, **kwargs):
+        terminal_validations.append(args[0])
+        return original_validator(*args, **kwargs)
+
+    monkeypatch.setattr(full_context_pipeline, "tracked_responses_stream", fake_stream)
+    monkeypatch.setattr(
+        full_context_pipeline,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: pytest.fail("blocking generation path was called"),
+    )
+    monkeypatch.setattr(
+        full_context_pipeline,
+        "process_full_context_coverage",
+        terminal_validator,
+    )
+
+    result = run_full_context_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="What happened?",
+            trusted_user_texts=("What happened?",),
+        ),
+        chunks=CORPUS,
+        client=client,
+        corpus_integrity=matching_integrity(CORPUS),
+        checked_claim_callback=checked_claims.append,
+    )
+
+    assert len(stream_calls) == 1
+    assert checked_claims == []
+    assert terminal_validations == [parsed]
+    assert result.status == CoverageOutcomeStatus.ANSWERED.value
+    assert result.answer == "A synthetic process occurred [Source 1]."
+
+
+def test_progressive_full_context_withholds_overlong_lead_but_keeps_terminal_parity(
+    monkeypatch,
+):
+    overlong_text = "A " + " ".join(["process"] * 45) + "."
+    parsed = coverage_answer(
+        (
+            FullContextClaim(
+                claim_id="C1",
+                role=AnswerUnitRole.MECHANISM,
+                text=overlong_text,
+                cited_chunk_ids=("10_Synthetic Chapter 1_ Title_002",),
+                paragraph_group=1,
+            ),
+        )
+    )
+    encoded = parsed.model_dump_json()
+    checked_claims = []
+    calls = []
+
+    def fake_stream(_client, *, on_text_delta=None, **request):
+        calls.append(request)
+        assert on_text_delta is not None
+        on_text_delta(encoded)
+        return stub_response(parsed)
+
+    monkeypatch.setattr(full_context_pipeline, "tracked_responses_stream", fake_stream)
+
+    result = run_full_context_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="What happened?",
+            trusted_user_texts=("What happened?",),
+        ),
+        chunks=CORPUS,
+        client=RecordingClient(parsed),
+        corpus_integrity=matching_integrity(CORPUS),
+        checked_claim_callback=checked_claims.append,
+    )
+
+    assert calls[0]["text_format"] is FullContextCoverageAnswer
+    assert checked_claims == []
+    assert result.status == CoverageOutcomeStatus.ANSWERED.value
+    assert result.answer == f"{overlong_text[:-1]} [Source 1]."
+
+
+def test_progressive_full_context_withholds_premise_correction_until_terminal(
+    monkeypatch,
+):
+    parsed = coverage_answer(
+        (
+            FullContextClaim(
+                claim_id="C1",
+                role=AnswerUnitRole.MECHANISM,
+                text="A synthetic process occurred.",
+                cited_chunk_ids=("10_Synthetic Chapter 1_ Title_002",),
+                paragraph_group=1,
+            ),
+        )
+    )
+    correction = FullContextClaim(
+        claim_id="C-correction",
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+        text="The question's premise requires correction.",
+        cited_chunk_ids=("10_Synthetic Chapter 1_ Title_002",),
+        paragraph_group=1,
+    )
+    checked_claims = []
+
+    def fake_stream(_client, *, on_text_delta=None, **_request):
+        assert on_text_delta is not None
+        on_text_delta('{"claims":[{}]}')
+        return stub_response(parsed)
+
+    monkeypatch.setattr(full_context_pipeline, "tracked_responses_stream", fake_stream)
+    monkeypatch.setattr(
+        full_context_pipeline,
+        "validate_streamable_full_context_claim",
+        lambda *_args, **_kwargs: (
+            correction,
+            "The question's premise requires correction [Source 1].",
+            (CORPUS[1],),
+            ("10_Synthetic Chapter 1_ Title_002",),
+        ),
+    )
+
+    result = run_full_context_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="What happened?",
+            trusted_user_texts=("What happened?",),
+        ),
+        chunks=CORPUS,
+        client=RecordingClient(parsed),
+        corpus_integrity=matching_integrity(CORPUS),
+        checked_claim_callback=checked_claims.append,
+    )
+
+    assert checked_claims == []
+    assert result.status == CoverageOutcomeStatus.ANSWERED.value
+    assert result.answer == "A synthetic process occurred [Source 1]."
 
 
 def test_the_full_corpus_never_reaches_the_result_or_its_diagnostics(patched_generation):

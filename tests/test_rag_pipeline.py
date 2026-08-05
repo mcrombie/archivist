@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import rag_pipeline
+from answer_progress import ProviderStreamMilestone
 from answer_coverage import (
     EVIDENCE_COVERAGE_SCHEMA,
     INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
@@ -422,7 +423,10 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v10"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v11"
+    assert "answer_units immediately after schema" in instructions
+    assert "first factual unit a direct bottom-line answer" in instructions
+    assert "no more than 45 words" in instructions
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -930,6 +934,233 @@ def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch)
         "pipeline_total",
     }.issubset(run_diagnostics["stage_timings_ms"])
     assert all(value >= 0 for value in run_diagnostics["stage_timings_ms"].values())
+
+
+def test_focused_progressive_path_streams_one_request_then_runs_terminal_validator(
+    monkeypatch,
+):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    parsed = supported_answer(("R1",))
+    direct_lead = parsed.answer_units[0].model_copy(
+        update={
+            "text": "Project Lumen established a synthetic institution [Source 1]."
+        }
+    )
+    parsed = parsed.model_copy(update={"answer_units": (direct_lead,)})
+    encoded = json.dumps(parsed.model_dump(mode="json"))
+    stream_calls: list[dict[str, object]] = []
+    checked_claims = []
+    provider_milestones = []
+    events: list[str] = []
+    original_validator = rag_pipeline.process_evidence_coverage
+
+    def fake_stream(
+        _client,
+        *,
+        operation,
+        on_text_delta=None,
+        stream_milestone_callback=None,
+        **request,
+    ):
+        stream_calls.append({"operation": operation, **request})
+        assert on_text_delta is not None
+        assert stream_milestone_callback is not None
+        stream_milestone_callback(ProviderStreamMilestone.FIRST_DELTA)
+        ledger_start = encoded.index('"premise_decisions"')
+        on_text_delta(encoded[:ledger_start])
+        assert len(checked_claims) == 1
+        # The first checked unit arrives before terminal-only ledgers, proving
+        # that progressive delivery no longer waits for most of the payload.
+        on_text_delta(encoded[ledger_start:])
+        stream_milestone_callback(ProviderStreamMilestone.TERMINAL)
+        events.append("provider_terminal")
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    def terminal_validator(*args, **kwargs):
+        events.append("terminal_validator")
+        return original_validator(*args, **kwargs)
+
+    def collect_claim(candidate):
+        checked_claims.append(candidate)
+        events.append("checked_claim")
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_stream", fake_stream)
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: pytest.fail("blocking generation path was called"),
+    )
+    monkeypatch.setattr(rag_pipeline, "process_evidence_coverage", terminal_validator)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        checked_claim_callback=collect_claim,
+        stream_milestone_callback=provider_milestones.append,
+    )
+
+    assert len(stream_calls) == 1
+    assert stream_calls[0]["operation"] == "answer_generation"
+    assert stream_calls[0]["text_format"] is EvidenceCoverageAnswer
+    assert provider_milestones == [
+        ProviderStreamMilestone.FIRST_DELTA,
+        ProviderStreamMilestone.TERMINAL,
+    ]
+    assert events == ["checked_claim", "provider_terminal", "terminal_validator"]
+    assert checked_claims[0].paragraph == 1
+    assert (
+        checked_claims[0].text
+        == "Project Lumen established a synthetic institution [Source 1]."
+    )
+    assert checked_claims[0].source_chunks == (CHUNK,)
+    assert result.status == "answered"
+    assert result.answer == "Project Lumen established a synthetic institution [Source 1]."
+
+
+def test_focused_progressive_path_withholds_truncated_unit_but_accepts_valid_terminal(
+    monkeypatch,
+):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    parsed = supported_answer(("R1",))
+    stream_calls: list[dict[str, object]] = []
+    checked_claims = []
+    terminal_validations = []
+    original_validator = rag_pipeline.process_evidence_coverage
+
+    def fake_stream(_client, *, operation, on_text_delta=None, **request):
+        stream_calls.append({"operation": operation, **request})
+        assert on_text_delta is not None
+        on_text_delta(
+            '{"answer_units":[{"unit_id":"U1","requirement_ids":["R1"],'
+            '"text":"Never completed'
+        )
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    def terminal_validator(*args, **kwargs):
+        terminal_validations.append(args[0])
+        return original_validator(*args, **kwargs)
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_stream", fake_stream)
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: pytest.fail("blocking generation path was called"),
+    )
+    monkeypatch.setattr(rag_pipeline, "process_evidence_coverage", terminal_validator)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        checked_claim_callback=checked_claims.append,
+    )
+
+    assert len(stream_calls) == 1
+    assert checked_claims == []
+    assert terminal_validations == [parsed]
+    assert result.status == "answered"
+    assert result.answer == "Synthetic supported point 1 [Source 1]."
+
+
+def test_progressive_path_fails_closed_on_overlong_first_fact_but_keeps_terminal_parity(
+    monkeypatch,
+):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    parsed = supported_answer(("R1",))
+    overlong_text = "Project Lumen " + " ".join(["grew"] * 44) + " [Source 1]."
+    overlong_unit = parsed.answer_units[0].model_copy(update={"text": overlong_text})
+    parsed = parsed.model_copy(update={"answer_units": (overlong_unit,)})
+    encoded = json.dumps(parsed.model_dump(mode="json"))
+    checked_claims = []
+    calls = []
+
+    def fake_stream(_client, *, on_text_delta=None, **request):
+        calls.append(request)
+        assert on_text_delta is not None
+        on_text_delta(encoded)
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_stream", fake_stream)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        checked_claim_callback=checked_claims.append,
+    )
+
+    assert calls[0]["text_format"] is EvidenceCoverageAnswer
+    assert checked_claims == []
+    assert result.status == "answered"
+    assert result.answer == overlong_text
+
+
+def test_focused_progressive_path_withholds_premise_correction_until_terminal(
+    monkeypatch,
+):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    parsed = supported_answer(("R1",))
+    correction = AnswerUnit(
+        unit_id="U-correction",
+        requirement_ids=(),
+        role=AnswerUnitRole.PREMISE_CORRECTION,
+        text="The question's premise requires correction [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+    )
+    checked_claims = []
+
+    def fake_stream(_client, *, on_text_delta=None, **_request):
+        assert on_text_delta is not None
+        on_text_delta('{"answer_units":[{}]}')
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_stream", fake_stream)
+    monkeypatch.setattr(
+        rag_pipeline,
+        "validate_streamable_answer_unit",
+        lambda *_args, **_kwargs: correction,
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        checked_claim_callback=checked_claims.append,
+    )
+
+    assert checked_claims == []
+    assert result.status == "answered"
+    assert result.answer == "Synthetic supported point 1 [Source 1]."
 
 
 @pytest.mark.parametrize(

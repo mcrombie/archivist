@@ -1,3 +1,5 @@
+import { readNdjson } from "./delivery";
+
 export type Project = {
   id: string;
   name: string;
@@ -71,12 +73,61 @@ export type AppConfig = {
     local_tools: boolean;
     public_page_locators: boolean;
     full_context_answers?: boolean;
+    progressive_answers?: boolean;
   };
 };
 
 export type AnswerStrategy = "rag" | "full_context";
 
 export const DEFAULT_ANSWER_STRATEGY: AnswerStrategy = "rag";
+
+export type ProgressiveAnswerStage =
+  | "accepted"
+  | "checking_corpus"
+  | "resolving_question"
+  | "planning_search"
+  | "retrieving_sources"
+  | "checking_evidence"
+  | "preparing_context"
+  | "generating_answer"
+  | "validating_answer"
+  | "checking_release";
+
+export type ProgressiveStageUpdate = {
+  stage: ProgressiveAnswerStage;
+  message: string;
+};
+
+export type ProgressiveHeartbeatUpdate = {
+  count: number;
+};
+
+export type ProgressiveCheckedClaim = {
+  claimIndex: number;
+  paragraph: number;
+  text: string;
+};
+
+export const PROGRESSIVE_STAGE_COPY = {
+  accepted: "Starting your request.",
+  checking_corpus: "Checking manuscript availability.",
+  resolving_question: "Resolving conversation context.",
+  planning_search: "Planning a source search.",
+  retrieving_sources: "Retrieving manuscript evidence.",
+  checking_evidence: "Checking evidence sufficiency.",
+  preparing_context: "Preparing source context.",
+  generating_answer: "Drafting a source-grounded answer.",
+  validating_answer: "Validating grounding and citations.",
+  checking_release: "Applying public release safeguards."
+} satisfies Readonly<Record<ProgressiveAnswerStage, string>>;
+
+// These client bounds match the broadest checked-claim generation contract:
+// full-context answers permit up to 40 claims of 2,000 characters and 24,000
+// total claim characters. Interpretive framing is never carried in these frames.
+export const MAX_PROGRESSIVE_CLAIMS = 40;
+export const MAX_PROGRESSIVE_PARAGRAPH = 40;
+export const MAX_PROGRESSIVE_CLAIM_CHARACTERS = 2_000;
+export const MAX_PROGRESSIVE_CLAIM_CHARACTERS_TOTAL = 24_000;
 
 export type ConversationHistoryTurn = {
   question: string;
@@ -230,6 +281,27 @@ export class ApiRequestError extends Error {
   }
 }
 
+export class ProgressiveUnavailableError extends ApiRequestError {
+  readonly receivedStreamEvent = false;
+
+  constructor(status: number, message: string, detail: unknown) {
+    super(status, message, detail);
+    this.name = "ProgressiveUnavailableError";
+  }
+}
+
+export class ProgressiveStreamError extends Error {
+  readonly receivedStreamEvent: boolean;
+  readonly code?: string;
+
+  constructor(message: string, receivedStreamEvent: boolean, code?: string) {
+    super(message);
+    this.name = "ProgressiveStreamError";
+    this.receivedStreamEvent = receivedStreamEvent;
+    this.code = code;
+  }
+}
+
 function detailMessage(detail: unknown, fallback: string) {
   if (typeof detail === "string" && detail.trim()) return detail;
   if (detail && typeof detail === "object") {
@@ -290,20 +362,44 @@ export async function embedProject(projectId: string): Promise<Project> {
   return data.project;
 }
 
-export async function askQuestion(
-  projectId: string,
+export type QuestionResponse = {
+  answer: string;
+  answer_status: string;
+  content_outcome?: "valid_complete" | "valid_partial" | "insufficient_evidence" | null;
+  answer_strategy?: AnswerStrategy;
+  answer_strategy_version?: string | null;
+  evidence_decision?: string;
+  run_diagnostics?: AnswerRunDiagnostics;
+  resolved_query?: string;
+  archivist_mode: ArchivistModeId;
+  archivist_mode_version?: string;
+  influence_profile_id?: string;
+  influence_profile_version?: string;
+  historiographical_lens: HistoriographicalLens;
+  voice: AnswerVoice;
+  worldview: AnswerWorldview;
+  source_schema?: "archivist.public_sources/1";
+  sources: SourceReference[];
+  display_groups?: DisplayGroup[];
+  costs?: CostSummary | null;
+};
+
+type QuestionOptions = {
+  conversationId: string;
+  turnId: string;
+  archivistMode: ArchivistModeId;
+  allowOverBudget?: boolean;
+  publicDemo?: boolean;
+  answerStrategy?: AnswerStrategy;
+  signal?: AbortSignal;
+};
+
+function questionRequestBody(
   question: string,
   nResults: number,
   facets: AnswerFacets,
   history: ConversationHistoryTurn[],
-  options: {
-    conversationId: string;
-    turnId: string;
-    archivistMode: ArchivistModeId;
-    allowOverBudget?: boolean;
-    publicDemo?: boolean;
-    answerStrategy?: AnswerStrategy;
-  }
+  options: QuestionOptions
 ) {
   const body: Record<string, unknown> = {
     question,
@@ -320,34 +416,341 @@ export async function askQuestion(
     body.n_results = nResults;
     body.allow_over_budget = options.allowOverBudget ?? false;
   }
-  return requestJson<{
-    answer: string;
-    answer_status: string;
-    content_outcome?: "valid_complete" | "valid_partial" | "insufficient_evidence" | null;
-    answer_strategy?: AnswerStrategy;
-    answer_strategy_version?: string | null;
-    evidence_decision?: string;
-    run_diagnostics?: AnswerRunDiagnostics;
-    resolved_query?: string;
-    archivist_mode: ArchivistModeId;
-    archivist_mode_version?: string;
-    influence_profile_id?: string;
-    influence_profile_version?: string;
-    historiographical_lens: HistoriographicalLens;
-    voice: AnswerVoice;
-    worldview: AnswerWorldview;
-    source_schema?: "archivist.public_sources/1";
-    sources: SourceReference[];
-    display_groups?: DisplayGroup[];
-    costs?: CostSummary | null;
-  }>(
+  return body;
+}
+
+export async function askQuestion(
+  projectId: string,
+  question: string,
+  nResults: number,
+  facets: AnswerFacets,
+  history: ConversationHistoryTurn[],
+  options: QuestionOptions
+) {
+  return requestJson<QuestionResponse>(
     `/api/projects/${projectId}/question`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(questionRequestBody(question, nResults, facets, history, options)),
+      signal: options.signal
     }
   );
+}
+
+type ProgressiveFrameBase = {
+  schema: "archivist.answer_stream/2";
+  sequence: number;
+};
+
+type ProgressiveFrame = ProgressiveFrameBase & (
+  | { type: "stage"; stage: ProgressiveAnswerStage; message: string }
+  | { type: "heartbeat" }
+  | {
+      type: "checked_claim";
+      claim_index: number;
+      paragraph: number;
+      text: string;
+    }
+  | { type: "complete"; result: QuestionResponse }
+  | { type: "error"; error: { code: string; message: string; request_id?: string } }
+);
+
+const PROGRESSIVE_STAGE_ORDER: readonly ProgressiveAnswerStage[] = [
+  "accepted",
+  "checking_corpus",
+  "resolving_question",
+  "planning_search",
+  "retrieving_sources",
+  "checking_evidence",
+  "preparing_context",
+  "generating_answer",
+  "validating_answer",
+  "checking_release"
+];
+const PROGRESSIVE_STAGES = new Set<ProgressiveAnswerStage>(PROGRESSIVE_STAGE_ORDER);
+const PROGRESSIVE_STAGE_INDEX = new Map(
+  PROGRESSIVE_STAGE_ORDER.map((stage, index) => [stage, index] as const)
+);
+
+function progressiveFrame(value: unknown): ProgressiveFrame {
+  if (!value || typeof value !== "object") {
+    throw new Error("Archivist received an invalid progressive response frame.");
+  }
+  const frame = value as Record<string, unknown>;
+  if (
+    frame.schema !== "archivist.answer_stream/2"
+    || !Number.isSafeInteger(frame.sequence)
+    || (frame.sequence as number) < 0
+  ) {
+    throw new Error("Archivist received an incompatible progressive response frame.");
+  }
+  const base: ProgressiveFrameBase = {
+    schema: "archivist.answer_stream/2",
+    sequence: frame.sequence as number
+  };
+  if (
+    frame.type === "stage"
+    && typeof frame.stage === "string"
+    && PROGRESSIVE_STAGES.has(frame.stage as ProgressiveAnswerStage)
+    && typeof frame.message === "string"
+  ) {
+    return {
+      ...base,
+      type: "stage",
+      stage: frame.stage as ProgressiveAnswerStage,
+      message: frame.message
+    };
+  }
+  if (frame.type === "heartbeat") {
+    return { ...base, type: "heartbeat" };
+  }
+  if (
+    frame.type === "checked_claim"
+    && Number.isSafeInteger(frame.claim_index)
+    && Number.isSafeInteger(frame.paragraph)
+    && typeof frame.text === "string"
+  ) {
+    return {
+      ...base,
+      type: "checked_claim",
+      claim_index: frame.claim_index as number,
+      paragraph: frame.paragraph as number,
+      text: frame.text
+    };
+  }
+  if (frame.type === "complete" && isQuestionResponse(frame.result)) {
+    return { ...base, type: "complete", result: frame.result as QuestionResponse };
+  }
+  if (frame.type === "error" && frame.error && typeof frame.error === "object") {
+    const streamError = frame.error as Record<string, unknown>;
+    if (typeof streamError.code !== "string" || typeof streamError.message !== "string") {
+      throw new Error("Archivist received an invalid progressive error frame.");
+    }
+    return {
+      ...base,
+      type: "error",
+      error: {
+        code: streamError.code,
+        message: streamError.message,
+        request_id: typeof streamError.request_id === "string" ? streamError.request_id : undefined
+      }
+    };
+  }
+  throw new Error("Archivist received an unknown progressive response frame.");
+}
+
+export function progressiveCheckedClaimsText(claims: readonly ProgressiveCheckedClaim[]) {
+  let text = "";
+  let previousParagraph: number | null = null;
+  for (const claim of claims) {
+    if (text) text += claim.paragraph === previousParagraph ? " " : "\n\n";
+    text += claim.text;
+    previousParagraph = claim.paragraph;
+  }
+  return text;
+}
+
+function isQuestionResponse(value: unknown): value is QuestionResponse {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  return (
+    typeof result.answer === "string"
+    && typeof result.answer_status === "string"
+    && typeof result.archivist_mode === "string"
+    && typeof result.historiographical_lens === "string"
+    && typeof result.voice === "string"
+    && typeof result.worldview === "string"
+    && Array.isArray(result.sources)
+  );
+}
+
+export function isProgressiveFallbackEligible(error: unknown) {
+  return error instanceof ProgressiveUnavailableError
+    && (error.status === 404 || error.status === 405 || error.status === 501);
+}
+
+export async function askQuestionProgressively(
+  projectId: string,
+  question: string,
+  nResults: number,
+  facets: AnswerFacets,
+  history: ConversationHistoryTurn[],
+  options: QuestionOptions & {
+    onStage?: (update: ProgressiveStageUpdate) => void;
+    onHeartbeat?: (update: ProgressiveHeartbeatUpdate) => void;
+    onCheckedClaim?: (claim: ProgressiveCheckedClaim) => void | Promise<void>;
+  }
+): Promise<QuestionResponse> {
+  const { onStage, onHeartbeat, onCheckedClaim, ...requestOptions } = options;
+  const response = await fetch(`/api/projects/${projectId}/question/progressive`, {
+    method: "POST",
+    headers: {
+      "Accept": "application/x-ndjson",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(questionRequestBody(question, nResults, facets, history, requestOptions)),
+    signal: requestOptions.signal
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    const data = contentType.includes("application/json") ? await response.json() : null;
+    const detail = data?.detail ?? response.statusText;
+    const message = detailMessage(detail, response.statusText);
+    if (response.status === 404 || response.status === 405 || response.status === 501) {
+      throw new ProgressiveUnavailableError(response.status, message, detail);
+    }
+    throw new ApiRequestError(response.status, message, detail);
+  }
+  if (!response.body) {
+    throw new ProgressiveStreamError("This browser could not read Archivist's progressive response.", false);
+  }
+
+  let receivedStreamEvent = false;
+  let terminal: QuestionResponse | null = null;
+  let terminalError: ProgressiveStreamError | null = null;
+  let lastSequence = -1;
+  let accepted = false;
+  let heartbeatCount = 0;
+  let expectedClaimIndex = 1;
+  let lastClaimParagraph = 0;
+  let accumulatedClaimCharacters = 0;
+  const checkedClaims: ProgressiveCheckedClaim[] = [];
+  const seenStages = new Set<ProgressiveAnswerStage>();
+  let lastStageIndex = -1;
+  try {
+    await readNdjson(response.body, async (value) => {
+      if (terminal || terminalError) {
+        throw new Error("Archivist received data after a terminal progressive response frame.");
+      }
+      const frame = progressiveFrame(value);
+      if (frame.sequence <= lastSequence) {
+        throw new Error("Archivist received progressive response frames out of order.");
+      }
+      lastSequence = frame.sequence;
+      receivedStreamEvent = true;
+      if (!accepted) {
+        if (frame.type !== "stage" || frame.stage !== "accepted") {
+          throw new Error("Archivist's progressive response did not begin with acceptance.");
+        }
+        accepted = true;
+      } else if (frame.type === "stage" && frame.stage === "accepted") {
+        throw new Error("Archivist received a duplicate progressive acceptance frame.");
+      }
+      if (frame.type === "stage") {
+        if (
+          checkedClaims.length
+          && frame.stage !== "validating_answer"
+          && frame.stage !== "checking_release"
+        ) {
+          throw new Error("Archivist received a non-final progress stage after checked claims began.");
+        }
+        const stageIndex = PROGRESSIVE_STAGE_INDEX.get(frame.stage);
+        if (
+          stageIndex === undefined
+          || stageIndex < lastStageIndex
+          || seenStages.has(frame.stage)
+        ) {
+          throw new Error("Archivist received progressive stages out of order.");
+        }
+        lastStageIndex = stageIndex;
+        seenStages.add(frame.stage);
+        onStage?.({
+          stage: frame.stage,
+          message: PROGRESSIVE_STAGE_COPY[frame.stage]
+        });
+      } else if (frame.type === "heartbeat") {
+        heartbeatCount += 1;
+        onHeartbeat?.({ count: heartbeatCount });
+        return;
+      } else if (frame.type === "checked_claim") {
+        if (!seenStages.has("generating_answer")) {
+          throw new Error("Archivist received a checked claim before answer generation began.");
+        }
+        if (
+          frame.claim_index !== expectedClaimIndex
+          || frame.claim_index < 1
+          || frame.claim_index > MAX_PROGRESSIVE_CLAIMS
+        ) {
+          throw new Error("Archivist received checked claims out of order.");
+        }
+        if (
+          frame.paragraph < 1
+          || frame.paragraph > MAX_PROGRESSIVE_PARAGRAPH
+          || frame.paragraph < lastClaimParagraph
+        ) {
+          throw new Error("Archivist received an invalid checked-claim paragraph.");
+        }
+        if (
+          !frame.text
+          || frame.text !== frame.text.trim()
+          || /[\r\n]/.test(frame.text)
+          || frame.text.length > MAX_PROGRESSIVE_CLAIM_CHARACTERS
+          || !/\[Source \d+(?:, Source \d+)*\][.!?]$/.test(frame.text)
+        ) {
+          throw new Error("Archivist received an invalid checked claim.");
+        }
+        if (
+          accumulatedClaimCharacters + frame.text.length
+          > MAX_PROGRESSIVE_CLAIM_CHARACTERS_TOTAL
+        ) {
+          throw new Error("Archivist's checked claims exceeded the client safety limit.");
+        }
+        const claim: ProgressiveCheckedClaim = {
+          claimIndex: frame.claim_index,
+          paragraph: frame.paragraph,
+          text: frame.text
+        };
+        expectedClaimIndex += 1;
+        lastClaimParagraph = frame.paragraph;
+        accumulatedClaimCharacters += frame.text.length;
+        checkedClaims.push(claim);
+        await onCheckedClaim?.(claim);
+      } else if (frame.type === "complete") {
+        const requiredStage: ProgressiveAnswerStage = requestOptions.publicDemo
+          ? "checking_release"
+          : "validating_answer";
+        if (!seenStages.has(requiredStage)) {
+          throw new Error("Archivist completed an answer before the required checks finished.");
+        }
+        const checkedText = progressiveCheckedClaimsText(checkedClaims);
+        if (checkedText && !frame.result.answer.includes(checkedText)) {
+          throw new Error("Archivist's checked claims did not match its canonical answer.");
+        }
+        terminal = frame.result;
+      } else {
+        const discarded = checkedClaims.length
+          ? " The incomplete checked-claim assembly was discarded."
+          : "";
+        terminalError = new ProgressiveStreamError(
+          `${frame.error.message}${discarded}`,
+          true,
+          frame.error.code
+        );
+      }
+    });
+  } catch (error) {
+    if (error instanceof ProgressiveStreamError) throw error;
+    const discarded = checkedClaims.length
+      ? " The incomplete checked-claim assembly was discarded."
+      : "";
+    throw new ProgressiveStreamError(
+      `${error instanceof Error ? error.message : "Archivist's progressive response was interrupted."}${discarded}`,
+      receivedStreamEvent
+    );
+  }
+  if (terminalError) throw terminalError;
+  if (!terminal) {
+    const discarded = checkedClaims.length
+      ? " The incomplete checked-claim assembly was discarded."
+      : "";
+    throw new ProgressiveStreamError(
+      `Archivist's progressive response ended before a verified answer arrived.${discarded}`,
+      receivedStreamEvent
+    );
+  }
+  return terminal;
 }
 
 function unwrapCostSummary(data: CostSummary | { costs?: CostSummary; summary?: CostSummary }) {

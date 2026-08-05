@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from threading import Lock
+from time import perf_counter_ns
 from typing import Annotated
 from uuid import uuid4
 
@@ -14,11 +18,24 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from answer_progress import (
+    ANSWER_STREAM_MEDIA_TYPE,
+    ANSWER_STREAM_SCHEMA,
+    PROGRESS_MESSAGES,
+    AnswerProgressStage,
+    CheckedClaimCallback,
+    CheckedClaimCandidate,
+    ProgressCallback,
+    ProviderStreamMilestone,
+    ProviderStreamMilestoneCallback,
+    emit_progress,
+)
 from archivist_modes import (
     ArchivistMode,
     archivist_mode_metadata,
@@ -227,6 +244,7 @@ def _feature_flags(
         "full_source_text": not public,
         "local_tools": not public,
         "public_page_locators": public,
+        "progressive_answers": True,
         # Lets a client hide an option it cannot use. This is presentation only:
         # the server still rejects an explicit request for a disabled strategy,
         # because a stale or modified client must not be able to spend on one.
@@ -363,8 +381,7 @@ def embed(project_id: str) -> dict[str, object]:
         raise HTTPException(status_code=500, detail=f"Embedding failed: {exc}") from exc
 
 
-@app.post("/api/projects/{project_id}/question")
-def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
+def _development_question_preflight(request: QuestionRequest) -> UsageLedger:
     _require_full_context_available(EXPOSURE_SETTINGS, request.answer_strategy)
     ledger = UsageLedger()
     budget = ledger.budget_state()
@@ -380,6 +397,18 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
                 "budget": budget,
             },
         )
+    return ledger
+
+
+def _run_development_question(
+    project_id: str,
+    request: QuestionRequest,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    checked_claim_callback: CheckedClaimCallback | None = None,
+    stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
+) -> dict[str, object]:
+    ledger = _development_question_preflight(request)
 
     try:
         with usage_scope(
@@ -401,6 +430,12 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
             }
             if "archivist_mode" in request.model_fields_set:
                 answer_kwargs["archivist_mode"] = request.archivist_mode
+            if progress_callback is not None:
+                answer_kwargs["progress_callback"] = progress_callback
+            if checked_claim_callback is not None:
+                answer_kwargs["checked_claim_callback"] = checked_claim_callback
+            if stream_milestone_callback is not None:
+                answer_kwargs["stream_milestone_callback"] = stream_milestone_callback
             answer_result = answer_project_question_result(
                 project_id,
                 request.question,
@@ -477,6 +512,435 @@ def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Question failed: {exc}") from exc
+
+
+@app.post("/api/projects/{project_id}/question")
+def question(project_id: str, request: QuestionRequest) -> dict[str, object]:
+    """Return the established complete JSON answer contract."""
+
+    return _run_development_question(project_id, request)
+
+
+# Keep interactive progress visibly alive through proxies and provider stalls.
+# Heartbeats are schema-only frames and contain no manuscript or diagnostic data.
+_STREAM_HEARTBEAT_SECONDS = 3.0
+_ANSWER_WORKER_TASKS: set[asyncio.Task[None]] = set()
+_PROGRESSIVE_TIMING_SCHEMA = "archivist.progressive_delivery_timing/1"
+
+
+class _ProgressiveDeliveryTiming:
+    """Record text-free progressive milestones and log once both sides finish."""
+
+    def __init__(
+        self,
+        *,
+        public: bool,
+        clock_ns: Callable[[], int] = perf_counter_ns,
+        wall_clock: Callable[[], datetime] | None = None,
+        trace_id: str | None = None,
+    ) -> None:
+        self._public = public
+        self._clock_ns = clock_ns
+        self._started_ns = clock_ns()
+        now = (wall_clock or (lambda: datetime.now(timezone.utc)))()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        self._accepted_at_utc = now.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+        self._trace_id = trace_id or uuid4().hex
+        self._milestones_ms: dict[str, float] = {"accepted": 0.0}
+        self._worker_finished = False
+        self._stream_finished = False
+        self._outcome = "interrupted"
+        self._logged = False
+        self._lock = Lock()
+
+    def mark_stage(self, stage: AnswerProgressStage) -> None:
+        self._mark(f"stage_{AnswerProgressStage(stage).value}")
+
+    def mark_provider(self, milestone: ProviderStreamMilestone) -> None:
+        self._mark(ProviderStreamMilestone(milestone).value)
+
+    def mark_first_checked_claim(self) -> None:
+        self._mark("first_checked_claim")
+
+    def mark_terminal(self, outcome: str) -> None:
+        selected = "complete" if outcome == "complete" else "error"
+        self._mark(f"terminal_{selected}")
+
+    def worker_finished(self) -> None:
+        self._mark("worker_finished")
+        self._finish(worker=True)
+
+    def stream_finished(self, outcome: str) -> None:
+        self._mark("stream_finished")
+        self._finish(worker=False, outcome=outcome)
+
+    def snapshot(self) -> dict[str, object]:
+        """Return the safe, text-free timing payload used by tests and logs."""
+
+        with self._lock:
+            return self._snapshot_locked()
+
+    def _elapsed_ms(self) -> float:
+        return round(max(0, self._clock_ns() - self._started_ns) / 1_000_000, 3)
+
+    def _mark(self, name: str) -> None:
+        with self._lock:
+            self._milestones_ms.setdefault(name, self._elapsed_ms())
+
+    def _snapshot_locked(self) -> dict[str, object]:
+        return {
+            "schema": _PROGRESSIVE_TIMING_SCHEMA,
+            "trace_id": self._trace_id,
+            "public": self._public,
+            "accepted_at_utc": self._accepted_at_utc,
+            "outcome": self._outcome,
+            "milestones_ms": dict(self._milestones_ms),
+            "total_ms": self._elapsed_ms(),
+        }
+
+    def _finish(self, *, worker: bool, outcome: str | None = None) -> None:
+        payload: dict[str, object] | None = None
+        with self._lock:
+            if worker:
+                self._worker_finished = True
+            else:
+                self._stream_finished = True
+                if outcome in {"complete", "error", "interrupted"}:
+                    self._outcome = outcome
+            if self._worker_finished and self._stream_finished and not self._logged:
+                self._logged = True
+                payload = self._snapshot_locked()
+        if payload is not None:
+            logger.info(
+                "progressive_delivery_timing %s",
+                json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True),
+            )
+
+
+class _GateLease:
+    """Release one public gate slot exactly once."""
+
+    def __init__(self, release: Callable[[], None]):
+        self._release = release
+        self._released = False
+        self._lock = Lock()
+
+    @property
+    def released(self) -> bool:
+        with self._lock:
+            return self._released
+
+    def release(self) -> None:
+        with self._lock:
+            if self._released:
+                return
+            self._released = True
+        self._release()
+
+
+class _StreamGateLifecycle:
+    """Hold a public gate lease until both worker and response stream finish."""
+
+    def __init__(self, lease: _GateLease | None):
+        self._lease = lease
+        self._worker_finished = False
+        self._stream_finished = False
+        self._lock = Lock()
+
+    def worker_finished(self) -> None:
+        self._finish(worker=True)
+
+    def stream_finished(self) -> None:
+        self._finish(worker=False)
+
+    def _finish(self, *, worker: bool) -> None:
+        release = False
+        with self._lock:
+            if worker:
+                self._worker_finished = True
+            else:
+                self._stream_finished = True
+            release = self._worker_finished and self._stream_finished
+        if release and self._lease is not None:
+            self._lease.release()
+
+
+_STREAM_ERROR_MESSAGES = {
+    "cost_limit_exceeded": "The local monthly OpenAI cost limit has been reached.",
+    "full_context_disabled": "Full-book answers are not available on this server.",
+    "public_usage_limit": (
+        "The public demo has reached its current usage limit. Please try later."
+    ),
+    "public_answer_unavailable": (
+        "Archivist could not safely present this answer. Please try again."
+    ),
+    "public_request_failed": "Archivist could not complete this request.",
+    "question_unavailable": "Archivist could not complete this request.",
+}
+
+
+def _safe_stream_error(exc: Exception, *, public: bool) -> dict[str, object]:
+    fallback_code = "public_request_failed" if public else "question_unavailable"
+    code = fallback_code
+    request_id: str | None = None
+    if isinstance(exc, HTTPException) and isinstance(exc.detail, Mapping):
+        candidate = exc.detail.get("code")
+        if isinstance(candidate, str) and candidate in _STREAM_ERROR_MESSAGES:
+            code = candidate
+        candidate_request_id = exc.detail.get("request_id")
+        if (
+            isinstance(candidate_request_id, str)
+            and 1 <= len(candidate_request_id) <= 128
+            and all(character.isalnum() or character in "._:-" for character in candidate_request_id)
+        ):
+            request_id = candidate_request_id
+    error: dict[str, object] = {
+        "code": code,
+        "message": _STREAM_ERROR_MESSAGES[code],
+    }
+    if request_id is not None:
+        error["request_id"] = request_id
+    return error
+
+
+def _ndjson_line(frame: Mapping[str, object]) -> str:
+    return json.dumps(
+        jsonable_encoder(frame),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ) + "\n"
+
+
+def _progressive_answer_response(
+    worker: Callable[
+        [ProgressCallback, CheckedClaimCallback, ProviderStreamMilestoneCallback],
+        dict[str, object],
+    ],
+    *,
+    public: bool,
+    lifecycle: _StreamGateLifecycle | None = None,
+) -> StreamingResponse:
+    """Deliver checked claims while retaining an authoritative terminal result."""
+
+    timing = _ProgressiveDeliveryTiming(public=public)
+
+    async def body():
+        loop = asyncio.get_running_loop()
+        events: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+        seen_stages = {AnswerProgressStage.ACCEPTED}
+        stage_lock = Lock()
+        sequence = 0
+        claim_index = 0
+        stream_outcome = "interrupted"
+
+        def enqueue_from_worker(event: tuple[str, object]) -> None:
+            """Synchronize worker callbacks with the terminal result enqueue.
+
+            ``call_soon_threadsafe`` alone permits a very fast worker to return
+            before its scheduled claim callback runs, letting the terminal
+            result overtake that claim. Waiting only for the queue put (never
+            for network delivery) preserves order without coupling provider
+            work to a connected browser.
+            """
+
+            put = events.put(event)
+            try:
+                future = asyncio.run_coroutine_threadsafe(put, loop)
+            except RuntimeError:
+                put.close()
+                return
+            try:
+                future.result(timeout=2.0)
+            except Exception:
+                future.cancel()
+                return
+
+        def progress_callback(stage: AnswerProgressStage) -> None:
+            try:
+                selected = AnswerProgressStage(stage)
+            except (TypeError, ValueError):
+                return
+            with stage_lock:
+                if selected in seen_stages:
+                    return
+                seen_stages.add(selected)
+            timing.mark_stage(selected)
+            enqueue_from_worker(("stage", selected))
+
+        def checked_claim_callback(candidate: CheckedClaimCandidate) -> None:
+            if not isinstance(candidate, CheckedClaimCandidate):
+                return
+            timing.mark_first_checked_claim()
+            enqueue_from_worker(("checked_claim", candidate))
+
+        def stream_milestone_callback(milestone: ProviderStreamMilestone) -> None:
+            try:
+                selected = ProviderStreamMilestone(milestone)
+            except (TypeError, ValueError):
+                return
+            timing.mark_provider(selected)
+
+        async def execute_worker() -> None:
+            try:
+                result = await asyncio.to_thread(
+                    worker,
+                    progress_callback,
+                    checked_claim_callback,
+                    stream_milestone_callback,
+                )
+            except Exception as exc:
+                await events.put(("error", _safe_stream_error(exc, public=public)))
+            else:
+                await events.put(("result", result))
+            finally:
+                timing.worker_finished()
+                if lifecycle is not None:
+                    lifecycle.worker_finished()
+
+        worker_task = asyncio.create_task(execute_worker())
+        # asyncio keeps only weak references to tasks. Retain paid workers after
+        # a client disconnects so provider usage and the local ledger finalize.
+        _ANSWER_WORKER_TASKS.add(worker_task)
+
+        def worker_task_finished(task: asyncio.Task[None]) -> None:
+            _ANSWER_WORKER_TASKS.discard(task)
+            try:
+                task.result()
+            except BaseException:
+                # Exception paths handled by execute_worker become safe frames;
+                # cancellation or process shutdown must not become an orphaned
+                # task warning.
+                pass
+
+        worker_task.add_done_callback(worker_task_finished)
+
+        def frame(frame_type: str, **fields: object) -> str:
+            nonlocal sequence
+            sequence += 1
+            return _ndjson_line(
+                {
+                    "schema": ANSWER_STREAM_SCHEMA,
+                    "type": frame_type,
+                    "sequence": sequence,
+                    **fields,
+                }
+            )
+
+        try:
+            yield frame(
+                "stage",
+                stage=AnswerProgressStage.ACCEPTED.value,
+                message=PROGRESS_MESSAGES[AnswerProgressStage.ACCEPTED],
+            )
+            while True:
+                try:
+                    event_type, value = await asyncio.wait_for(
+                        events.get(),
+                        timeout=_STREAM_HEARTBEAT_SECONDS,
+                    )
+                except TimeoutError:
+                    yield frame("heartbeat")
+                    continue
+
+                if event_type == "stage":
+                    stage = AnswerProgressStage(value)
+                    yield frame(
+                        "stage",
+                        stage=stage.value,
+                        message=PROGRESS_MESSAGES[stage],
+                    )
+                    continue
+                if event_type == "checked_claim":
+                    if not isinstance(value, CheckedClaimCandidate):
+                        continue
+                    claim_index += 1
+                    yield frame(
+                        "checked_claim",
+                        claim_index=claim_index,
+                        paragraph=value.paragraph,
+                        text=value.text,
+                    )
+                    continue
+                if event_type == "error":
+                    timing.mark_terminal("error")
+                    stream_outcome = "error"
+                    yield frame("error", error=value)
+                    break
+
+                result = value
+                if not isinstance(result, Mapping):
+                    timing.mark_terminal("error")
+                    stream_outcome = "error"
+                    yield frame(
+                        "error",
+                        error={
+                            "code": (
+                                "public_request_failed" if public else "question_unavailable"
+                            ),
+                            "message": "Archivist could not complete this request.",
+                        },
+                    )
+                    break
+                if result.get("answer_status") in {
+                    "generation_contract_failed",
+                    "corpus_integrity_failed",
+                }:
+                    timing.mark_terminal("error")
+                    stream_outcome = "error"
+                    yield frame(
+                        "error",
+                        error={
+                            "code": (
+                                "public_request_failed" if public else "question_unavailable"
+                            ),
+                            "message": "Archivist could not complete this request.",
+                        },
+                    )
+                    break
+                timing.mark_terminal("complete")
+                stream_outcome = "complete"
+                yield frame("complete", result=dict(result))
+                break
+        finally:
+            # Do not cancel worker_task on disconnect: the OpenAI request and its
+            # usage ledger must finish. The lifecycle releases only after this
+            # stream *and* that worker have both ended.
+            timing.stream_finished(stream_outcome)
+            if lifecycle is not None:
+                lifecycle.stream_finished()
+
+    return StreamingResponse(
+        body(),
+        media_type=ANSWER_STREAM_MEDIA_TYPE,
+        headers={
+            "Cache-Control": "no-store, no-transform",
+            "CDN-Cache-Control": "no-store",
+            "Surrogate-Control": "no-store",
+            "Vary": "Accept",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/projects/{project_id}/question/progressive")
+async def progressive_question(
+    project_id: str,
+    request: QuestionRequest,
+) -> StreamingResponse:
+    # Preserve ordinary HTTP errors for feature and spend checks. The worker
+    # repeats this preflight to close the race with another in-flight request.
+    _development_question_preflight(request)
+    return _progressive_answer_response(
+        lambda progress, checked_claim, stream_milestone: _run_development_question(
+            project_id,
+            request,
+            progress_callback=progress,
+            checked_claim_callback=checked_claim,
+            stream_milestone_callback=stream_milestone,
+        ),
+        public=False,
+    )
 
 
 @app.post("/api/projects/{project_id}/index/entry")
@@ -750,12 +1214,102 @@ def _public_verbatim_audit_chunks(
     return eligible_chunks
 
 
+def _preflight_public_progressive_question(
+    request: PublicQuestionRequest,
+    settings: ExposureSettings,
+) -> None:
+    """Keep cheap policy/spend failures as ordinary HTTP responses."""
+
+    request_id = uuid4().hex
+    if (
+        request.answer_strategy is AnswerStrategy.FULL_CONTEXT
+        and not settings.full_context_available
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "full_context_disabled",
+                "message": "Full-book answers are not available on this deployment.",
+                "request_id": request_id,
+            },
+        )
+    try:
+        ledger = UsageLedger()
+        _configure_public_budget(ledger, settings)
+        budget = ledger.budget_state()
+        if budget["exceeded"]:
+            raise CostLimitExceeded(budget)
+    except CostLimitExceeded:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "public_usage_limit",
+                "message": (
+                    "The public demo has reached its current usage limit. Please try later."
+                ),
+                "request_id": request_id,
+            },
+        ) from None
+    except Exception:
+        logger.exception("Public progressive preflight failed request_id=%s", request_id)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "public_request_failed",
+                "message": "Archivist could not complete this request.",
+                "request_id": request_id,
+            },
+        ) from None
+
+
 def _run_public_question(
     request: PublicQuestionRequest,
     settings: ExposureSettings,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    checked_claim_callback: CheckedClaimCallback | None = None,
+    stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
 ) -> dict[str, object]:
     request_id = uuid4().hex
     ledger = UsageLedger()
+    released_claims: list[CheckedClaimCandidate] = []
+    claim_release_failed = False
+
+    def release_checked_claim(candidate: CheckedClaimCandidate) -> None:
+        """Apply public policy synchronously before the best-effort observer."""
+
+        nonlocal claim_release_failed
+        if claim_release_failed:
+            return
+        try:
+            cumulative = " ".join(
+                [existing.text for existing in released_claims] + [candidate.text]
+            )
+            if answer_has_extended_verbatim_overlap(cumulative, candidate.audit_chunks):
+                raise PublicSourceError("provisional claims exceeded quotation boundary")
+            public_source_payload(
+                candidate.text,
+                list(candidate.source_chunks),
+                locator_path=settings.locator_artifact,
+                manifest_path=BASE_DIR / "fixtures" / "corpus_manifest.json",
+            )
+        except Exception:
+            # A broken locator loader or release checker is a deny condition,
+            # not permission to continue without provisional disclosure checks.
+            claim_release_failed = True
+            logger.exception(
+                "Public provisional-claim gate failed request_id=%s",
+                request_id,
+            )
+            return
+        released_claims.append(candidate)
+        if checked_claim_callback is not None:
+            try:
+                checked_claim_callback(candidate)
+            except Exception:
+                # Delivery is presentation. The paid run and final release gate
+                # must still finish after a client disconnects.
+                logger.debug("Public checked-claim observer failed", exc_info=True)
     if (
         request.answer_strategy is AnswerStrategy.FULL_CONTEXT
         and not settings.full_context_available
@@ -796,11 +1350,20 @@ def _run_public_question(
             }
             if "archivist_mode" in request.model_fields_set:
                 answer_kwargs["archivist_mode"] = request.archivist_mode
+            if progress_callback is not None:
+                answer_kwargs["progress_callback"] = progress_callback
+            if checked_claim_callback is not None:
+                answer_kwargs["checked_claim_callback"] = release_checked_claim
+            if stream_milestone_callback is not None:
+                answer_kwargs["stream_milestone_callback"] = stream_milestone_callback
             answer_result = answer_project_question_result(
                 "current",
                 request.question,
                 **answer_kwargs,
             )
+            emit_progress(progress_callback, AnswerProgressStage.CHECKING_RELEASE)
+            if claim_release_failed:
+                raise PublicSourceError("provisional claim did not pass release gate")
             if answer_result.status in {
                 "generation_contract_failed",
                 "corpus_integrity_failed",
@@ -937,10 +1500,16 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
     @public_app.middleware("http")
     async def public_security_boundary(request: Request, call_next):
         is_question = (
-            request.method == "POST" and request.url.path == "/api/projects/current/question"
+            request.method == "POST"
+            and request.url.path
+            in {
+                "/api/projects/current/question",
+                "/api/projects/current/question/progressive",
+            }
         )
         client_id = request.client.host if request.client is not None else "unknown"
         entered_gate = False
+        gate_lease: _GateLease | None = None
         category = DEFAULT_CATEGORY
         if is_question:
             content_length = request.headers.get("content-length")
@@ -995,11 +1564,19 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                     )
                 )
             entered_gate = True
+            gate_lease = _GateLease(
+                lambda: gate.leave(client_id, category=category)
+            )
+            request.state.public_gate_lease = gate_lease
         try:
             response = await call_next(request)
         finally:
-            if entered_gate:
-                gate.leave(client_id, category=category)
+            if (
+                entered_gate
+                and gate_lease is not None
+                and not getattr(request.state, "public_gate_release_deferred", False)
+            ):
+                gate_lease.release()
         return _with_public_security_headers(response)
 
     if FRONTEND_DIST.exists():
@@ -1054,6 +1631,33 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
     @public_app.post("/api/projects/current/question")
     def public_question(request: PublicQuestionRequest) -> dict[str, object]:
         return _run_public_question(request, settings)
+
+    @public_app.post("/api/projects/current/question/progressive")
+    async def public_progressive_question(
+        request: PublicQuestionRequest,
+        http_request: Request,
+    ) -> StreamingResponse:
+        _preflight_public_progressive_question(request, settings)
+        lease = getattr(http_request.state, "public_gate_lease", None)
+        lifecycle = _StreamGateLifecycle(
+            lease if isinstance(lease, _GateLease) else None
+        )
+        response = _progressive_answer_response(
+            lambda progress, checked_claim, stream_milestone: _run_public_question(
+                request,
+                settings,
+                progress_callback=progress,
+                checked_claim_callback=checked_claim,
+                stream_milestone_callback=stream_milestone,
+            ),
+            public=True,
+            lifecycle=lifecycle,
+        )
+        if isinstance(lease, _GateLease):
+            # The worker and stream now jointly own this lease. Middleware must
+            # not release it when the StreamingResponse headers are returned.
+            http_request.state.public_gate_release_deferred = True
+        return response
 
     @public_app.api_route(
         "/api",

@@ -3235,6 +3235,155 @@ evidence; Codex may test institutions against liberal ideals without importing a
 program; Almanac may look toward plausible futures without pretending they have already happened.
 The most important implementation detail is where that influence enters the context.
 
+### 2026-08-04 - Making a long answer feel alive without publishing the draft
+
+> Historical v1 design, superseded by the protocol-v2 entry immediately below.
+
+- Added an explicit answer-delivery choice beneath Evidence scope. **Complete answer** remains the
+  recommended default: the reader waits and receives the answer, citations, and sources together.
+  **Progressive response** is clearly Experimental and makes the wait legible with a fixed set of
+  operational stages before revealing the completed answer incrementally.
+- Rejected the tempting interpretation of “progressive” as raw model-token streaming. Archivist
+  can decide only after generation whether an answer satisfies its evidence contract, and the
+  public demo must also check extended quotation and construct its safe page-locator source
+  payload. Publishing a draft a token at a time would let prose cross the boundary before the
+  system knew whether it was grounded or safe to disclose.
+- Kept the trust boundary simple: operational progress may say that the application is preparing,
+  searching, composing, or checking, but it may never expose chain-of-thought, prompts, retrieval
+  queries, manuscript text, draft prose, validation traces, or private diagnostics. Once every
+  release gate passes, the already validated answer can be sent in ordered deltas and animated in
+  the transcript without becoming provisional.
+- Kept the experiment scientifically quiet. Both delivery modes send the same question,
+  conversation history, interpretive choices, evidence scope, and RAG configuration to the same
+  pipeline and resolve to the same answer and sources. Delivery therefore does not open an answer
+  cohort. If it changes retrieved chunks, prose, citations, or a score, that is a presentation
+  defect rather than a feature result.
+- Defined a public same-origin NDJSON POST rather than adding a second conversational system. An
+  accepted stream ends exactly once with completion or a safe error. The browser does not
+  automatically replay an accepted request after a disconnect, because the upstream paid call may
+  still be running and a replay could charge twice. Closing the tab is likewise not represented as
+  a guarantee that model compute stopped.
+- Made stream ownership part of the public abuse boundary. The request consumes its rate and
+  concurrency allowance until the stream finishes or disconnect cleanup runs—not merely until
+  Render receives response headers. This matters on the deliberately single-instance,
+  single-worker deployment, where the gate is process-local.
+- Recorded the honest latency story. Progressive response improves transparency and can make the
+  wait feel shorter, but it does not shorten retrieval, generation, validation, or model compute.
+  Because answer prose is withheld until approval, time-to-first-answer-word can remain nearly the
+  full generation time. A live Render smoke is required to check browser/proxy buffering,
+  disconnect cleanup, no automatic retry, and identical final answer/source behavior.
+- Hardened the browser protocol after adversarial review: it accepts only the documented stage
+  order, bounds NDJSON lines and cumulative answer text, requires deltas to reproduce the terminal
+  answer exactly, clears interrupted partial prose, and never retries a request after the server
+  has accepted it. Short post-validation chunks are paced in the interface so the reveal remains
+  perceptible even when a browser or proxy delivers several network frames together.
+- Closed the local verification pass with 714 Python tests passing (one skipped), Ruff clean, both
+  frontend behavior suites passing, and a successful production frontend build. No paid model call
+  was made for this implementation; the remaining live Render smoke is explicitly a deployment
+  check rather than evidence that has already been gathered.
+
+Useful blog lesson: streaming is not automatically more transparent. Raw model tokens would show
+more motion while weakening the evidence and privacy promises that make Archivist interesting.
+The more elegant design separates progress from reasoning and delivery from generation: explain
+what the application is doing, keep the draft private, and reveal the answer only when it is ready
+to stand behind.
+
+### 2026-08-04 - When “progressive” turned out to be only an animation
+
+- The first live test exposed a clean but important product mistake. Archivist displayed useful
+  status messages during the long wait, but no answer prose arrived until every check had already
+  finished. The browser then revealed the completed answer in paced chunks. It looked progressive
+  after the fact; it did not make the answer arrive progressively.
+- Replaced that post-validation reveal with genuine same-request Structured Output streaming. The
+  existing final generation call now arrives as raw SDK events. Archivist buffers the structured
+  JSON privately, releases nothing from an incomplete object, and extracts one whole factual claim
+  only when that claim can be parsed and checked locally.
+- Kept raw token deltas and model reasoning private. What appears in the transcript is neither a
+  scratchpad nor an unfinished sentence: it is a complete cited claim with valid local identifiers,
+  ordering, paragraph placement, source references, and size bounds. The public demo additionally
+  proves page-locator availability and applies the cumulative quotation boundary before each
+  claim, so dividing a long quotation among several claims cannot evade the limit.
+- Made the tradeoff visible instead of pretending it does not exist. A locally checked claim is
+  not yet a globally complete answer. Later validation can still discover missing coverage,
+  inconsistent premise handling, or another whole-answer defect. Progressive mode therefore marks
+  the working assembly **Checked partial · Not final**, excludes it from conversation memory,
+  copying, citations, and sources, and erases it on interruption or late failure. The canonical
+  answer replaces it only after the unchanged validator succeeds.
+- Preserved Complete answer as the default for readers who prefer the strongest fail-closed
+  contract: rejected prose is never shown at all. Progressive mode deliberately cannot make that
+  same promise while also showing prose before global validation. This is now an explicit reader
+  choice rather than a hidden implementation compromise.
+- Withheld interpretive prefaces and conclusions until completion. In the structured answer
+  contract the factual units are generated separately from the framing that ultimately surrounds
+  them. Reordering that model-facing schema would have changed the system under test, so the live
+  assembly presents manuscript claims first and introduces the selected historical voice only in
+  the canonical answer.
+- Kept the cost story honest. Progressive delivery uses one streamed final-generation API request,
+  replacing the previous blocking form of that same request. It adds no preview or second answer
+  call, and terminal provider usage is written to the ledger once before local schema parsing. The
+  conversation resolver, planner, embeddings, retrieval, and evidence gates still happen before
+  answer claims can appear, so the first claim will not be instantaneous and total compute should
+  remain similar.
+- Added a versioned NDJSON checked-claim protocol, a separate provisional frontend state, bounded
+  parsers on both sides, no replay after acceptance, public concurrency ownership through worker
+  cleanup, and adversarial tests for malformed, truncated, divergent, and late-failing streams.
+  The remaining deployment question is empirical: whether Render, Cloudflare, and the browser pass
+  frames through soon enough to make the first checked claim visibly earlier on the live site.
+- Closed the local verification pass with **749 Python tests passing and one skipped**, Ruff clean,
+  both frontend behavior suites passing, and a successful production build of 1,589 modules. A
+  focused 309-test backend pass covered the changed delivery, accounting, validation, RAG, and
+  full-context surfaces. No OpenAI request was made during implementation or verification.
+
+Useful blog lesson: latency is partly a trust-design problem. One extra spinner cannot disguise a
+blocking architecture, while raw token streaming can buy immediacy by giving up the right to check
+what was said. Archivist’s middle path makes the unit of progress a checked factual claim—and is
+honest that the complete argument is not trustworthy until the last gate closes.
+
+### 2026-08-05 - The answer was waiting behind its own ledgers
+
+- A second live test clarified why genuine checked-claim streaming still felt mostly silent. The
+  answer did not merely encounter network buffering: the Structured Output contract itself asked
+  the model to write private premise, coverage, and obligation ledgers before it reached the
+  factual claim array. Because Archivist only releases complete claim objects, almost all useful
+  prose was structurally scheduled near the end of the model's response.
+- Reordered the shared schemas so factual claims are serialized immediately after the schema
+  identifier and terminal-only ledgers follow them. This is deliberately shared by Complete and
+  Progressive rather than a cheaper or differently prompted streaming path. Because property
+  order is model-facing in Structured Outputs, the change opens `evidence-coverage-v11` and
+  `full-context-coverage-v3`; it must not be smuggled into an old evaluation cohort or described as
+  a measured RAG improvement.
+- Added a narrow Progressive lead contract. The first releasable factual claim must answer the
+  bottom line in one sentence, stay within 45 words, and name a trustworthy subject from the
+  question when one is available. A premise correction is still too globally consequential to
+  stream early, so it remains private and the following factual unit becomes the lead candidate.
+  If that candidate fails the local rule, the stream stays fail-closed while the one paid request
+  continues toward its ordinary canonical answer.
+- Turned the previously invisible heartbeat into honest reader feedback. About every three
+  seconds the interface updates an elapsed-work indicator without manufacturing prose or exposing
+  chain-of-thought. Response headers also forbid caching and transformation to reduce avoidable
+  proxy buffering.
+- Added one private, text-free timing record per Progressive request. It records application stage
+  entry, first provider text delta, first checked claim, provider terminal, terminal outcome,
+  worker finish, and stream finish. That makes the next live smoke diagnostic: a late first
+  provider delta implicates the model; an early provider delta but late checked claim implicates
+  schema/parsing/release; an early server claim but late browser claim implicates Render or
+  Cloudflare. Questions, prompts, sources, manuscript text, answers, and error text are excluded.
+- Deliberately did not cache the per-request corpus-integrity check. Its file reads and hashes may
+  contribute to the wait, but a cheap metadata cache could miss a same-size, same-timestamp content
+  mutation and weaken the private-corpus guarantee. The timing record lets a later optimization be
+  evidence-led rather than speculative.
+- Closed the offline pass with **760 Python tests passing and one skipped**, Ruff clean, both
+  focused frontend suites passing, and a successful production build of 1,589 modules. No paid
+  OpenAI call was made. The remaining proof is a deployed comparison of the custom domain and
+  Render's direct address, using the timing milestones to distinguish provider latency from proxy
+  buffering.
+
+Useful blog lesson: in a structured-output application, JSON property order can become user
+experience architecture. The answer was not waiting for a typing animation; it was queued behind
+machine-facing paperwork. Moving reader-useful facts ahead of terminal ledgers preserved one
+generation call and the validation boundary while giving the stream something worth showing
+earlier.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

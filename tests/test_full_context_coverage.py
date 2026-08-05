@@ -79,6 +79,18 @@ def answer(
     )
 
 
+def test_generation_schema_puts_streamable_claims_before_terminal_ledgers():
+    properties = list(FullContextCoverageAnswer.model_json_schema()["properties"])
+
+    assert properties == [
+        "schema",
+        "claims",
+        "premise_finding",
+        "absence_findings",
+        "self_reported_content_outcome",
+    ]
+
+
 def test_claim_text_may_not_contain_a_citation_bracket_or_extra_sentence():
     # The renderer owns the bracket, so a model-written one is rejected outright
     # rather than normalized into an ambiguous second citation group.

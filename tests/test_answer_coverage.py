@@ -47,6 +47,7 @@ from answer_coverage import (
     render_evidence_coverage,
     validate_evidence_coverage,
     validate_evidence_coverage_context,
+    validate_streamable_answer_unit,
 )
 
 
@@ -1132,6 +1133,57 @@ def test_broad_obligation_ledger_validates_exact_source_dimension_and_role():
 
     assert validated.answer.obligation_coverage[0].dimensions[0].unit_ids == ("U1",)
     assert validated.answer.answer_units[0].obligation_links[0].obligation_id == "O1"
+
+
+def test_streamable_unit_rejects_role_incompatible_with_linked_dimension():
+    scope = _obligation_scope(
+        dimensions=(EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT,)
+    )
+    context = validate_evidence_coverage_context(
+        requirement_ids=("R1",),
+        premise_ids=(),
+        premise_source_scopes=(),
+        obligation_scopes=(scope,),
+        source_count=1,
+    )
+    unit = AnswerUnit(
+        unit_id="U1",
+        requirement_ids=("R1",),
+        role=AnswerUnitRole.MECHANISM,
+        text="A synthetic process connected the stages [Source 1].",
+        source_numbers=(1,),
+        paragraph=1,
+        obligation_links=(
+            ObligationLink(
+                obligation_id="O1",
+                dimension=EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT,
+            ),
+        ),
+    )
+
+    with pytest.raises(CoverageContractError) as captured:
+        validate_streamable_answer_unit(
+            unit,
+            context=context,
+            unit_ordinal=1,
+        )
+
+    assert captured.value.code is CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
+
+
+def test_generation_schemas_put_streamable_units_before_terminal_ledgers():
+    neutral_properties = list(EvidenceCoverageAnswer.model_json_schema()["properties"])
+    interpretive_properties = list(
+        InterpretiveEvidenceCoverageAnswer.model_json_schema()["properties"]
+    )
+
+    assert neutral_properties[:2] == ["schema", "answer_units"]
+    assert interpretive_properties[:2] == ["schema", "answer_units"]
+    assert neutral_properties[2:] == [
+        "premise_decisions",
+        "coverage",
+        "obligation_coverage",
+    ]
 
 
 def test_adjacent_stage_link_requires_a_later_source_bounded_causal_unit():

@@ -6,7 +6,7 @@ import math
 import os
 import re
 import sqlite3
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import closing, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -16,6 +16,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from openai.lib._parsing._responses import (
+    parse_response as _parse_streamed_response,
+    type_to_text_format_param as _type_to_text_format_param,
+)
+
+from answer_progress import (
+    ProviderStreamMilestone,
+    ProviderStreamMilestoneCallback,
+    emit_provider_stream_milestone,
+)
 from query_planning import safe_planner_validation_code
 
 
@@ -1419,6 +1429,128 @@ def tracked_responses_parse(client: object, *, operation: str, **request: Any) -
             requested_model=requested_model,
         )
     return response
+
+
+def tracked_responses_stream(
+    client: object,
+    *,
+    operation: str,
+    text_format: type,
+    on_text_delta: Callable[[str], None] | None = None,
+    stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
+    **request: Any,
+) -> object:
+    """Stream one structured response, then parse and return its final response.
+
+    The SDK's high-level ``responses.stream(text_format=...)`` parses the
+    Pydantic payload at ``response.output_text.done``.  A local validator can
+    reject there before the later ``response.completed`` event is observed,
+    losing the only authoritative usage record for an already-billed request.
+    This adapter therefore uses the raw typed event stream, records the final
+    response exactly once, and only then applies the SDK's ordinary structured
+    response parser.  Delta observers are best-effort presentation and can
+    never cancel or mutate the paid answer run.
+    """
+
+    enforce_usage_budget()
+    requested_model = str(request.get("model", ""))
+    if "stream" in request:
+        raise TypeError("tracked_responses_stream owns the stream parameter")
+
+    requested_text = request.pop("text", None)
+    if requested_text is None:
+        text_config: dict[str, Any] = {}
+    elif isinstance(requested_text, Mapping):
+        text_config = dict(requested_text)
+    else:
+        raise TypeError("text must be a mapping when supplied")
+    if "format" in text_config:
+        raise TypeError("text.format cannot be combined with text_format")
+    text_config["format"] = _type_to_text_format_param(text_format)
+
+    stream = client.responses.create(
+        **request,
+        text=text_config,
+        stream=True,
+    )
+    terminal_response: object | None = None
+    completed = False
+    observer_failed = False
+    first_delta_observed = False
+    terminal_observed = False
+    iteration_error: BaseException | None = None
+    close_error: BaseException | None = None
+    try:
+        for event in stream:
+            event_type = getattr(event, "type", None)
+            if event_type == "response.output_text.delta":
+                if not first_delta_observed:
+                    first_delta_observed = True
+                    emit_provider_stream_milestone(
+                        stream_milestone_callback,
+                        ProviderStreamMilestone.FIRST_DELTA,
+                    )
+                delta = getattr(event, "delta", None)
+                if (
+                    not observer_failed
+                    and isinstance(delta, str)
+                    and on_text_delta is not None
+                ):
+                    try:
+                        on_text_delta(delta)
+                    except Exception:
+                        observer_failed = True
+                        logger.debug("Structured response delta observer failed", exc_info=True)
+            if event_type in {
+                "response.completed",
+                "response.failed",
+                "response.incomplete",
+            }:
+                terminal_response = getattr(event, "response", None)
+                completed = event_type == "response.completed"
+                if not terminal_observed:
+                    terminal_observed = True
+                    emit_provider_stream_milestone(
+                        stream_milestone_callback,
+                        ProviderStreamMilestone.TERMINAL,
+                    )
+    except BaseException as exc:
+        # A transport can yield response.completed and still fail when the
+        # iterator is advanced once more. Preserve that failure, but only
+        # re-raise it after the already-observed terminal usage is recorded.
+        iteration_error = exc
+    finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except BaseException as exc:
+                # Closing is part of the stream lifecycle, but a close failure
+                # must not skip accounting for a terminal response already in
+                # hand. Prefer an earlier iteration error when both occurred.
+                close_error = exc
+
+    if terminal_response is not None:
+        _track_without_breaking_response(
+            terminal_response,
+            operation=operation,
+            requested_model=requested_model,
+        )
+
+    if iteration_error is not None:
+        raise iteration_error
+    if close_error is not None:
+        raise close_error
+    if terminal_response is None:
+        raise RuntimeError("OpenAI response stream ended without a terminal response")
+    if not completed:
+        raise RuntimeError("OpenAI response stream did not complete successfully")
+
+    return _parse_streamed_response(
+        text_format=text_format,
+        input_tools=request.get("tools"),
+        response=terminal_response,
+    )
 
 
 def tracked_embeddings_create(client: object, *, operation: str, **request: Any) -> object:

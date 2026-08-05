@@ -37,6 +37,7 @@ __all__ = [
     "GENERATION_CONTRACT_FAILED_MESSAGE",
     "INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA",
     "MAX_ANSWER_UNITS",
+    "MAX_TOTAL_UNIT_TEXT_CHARACTERS",
     "NO_SOURCES_MESSAGE",
     "AnswerUnit",
     "AnswerUnitRole",
@@ -77,6 +78,7 @@ __all__ = [
     "render_evidence_coverage",
     "validate_evidence_coverage",
     "validate_evidence_coverage_context",
+    "validate_streamable_answer_unit",
 ]
 
 
@@ -517,6 +519,18 @@ class EvidenceObligationCoverage(_ContractModel):
 
 class EvidenceCoverageAnswer(_ContractModel):
     schema_version: Literal["archivist.evidence_coverage/5"] = Field(alias="schema")
+    # Keep the reader-facing material first in Structured Outputs. Field order
+    # is semantically irrelevant to terminal validation, but the provider must
+    # serialize schema properties in order, so placing ledgers first prevented
+    # genuine progressive delivery.
+    answer_units: tuple[AnswerUnit, ...] = Field(
+        max_length=MAX_ANSWER_UNITS,
+        description=(
+            "Put factual units first. Except for a required premise correction, "
+            "the first unit must be a concise one-sentence bottom-line answer "
+            "that directly names the question's subject; later units expand it."
+        ),
+    )
     premise_decisions: tuple[PremiseDecision, ...] = Field(max_length=MAX_PREMISES)
     coverage: tuple[RequirementCoverage, ...] = Field(
         min_length=1,
@@ -526,7 +540,6 @@ class EvidenceCoverageAnswer(_ContractModel):
         default=(),
         max_length=MAX_EVIDENCE_OBLIGATIONS,
     )
-    answer_units: tuple[AnswerUnit, ...] = Field(max_length=MAX_ANSWER_UNITS)
 
     @property
     def schema(self) -> str:
@@ -1803,6 +1816,140 @@ def validate_evidence_coverage_context(
         obligation_scopes,
         source_count,
     )
+
+
+def validate_streamable_answer_unit(
+    payload: AnswerUnit | Mapping[str, Any],
+    *,
+    context: CoverageValidationContext,
+    unit_ordinal: int,
+    seen_unit_ids: Sequence[str] = (),
+    previous_paragraph: int | None = None,
+) -> AnswerUnit:
+    """Validate one complete streamed unit against trusted generation inputs.
+
+    This is deliberately stricter than the final answer normalizer: provisional
+    prose must already have canonical ordering, citations, and punctuation
+    because a streamed claim cannot later be silently repaired.  Whole-answer
+    coverage and premise bindings remain the authority of
+    :func:`validate_evidence_coverage`; a later failure retracts these
+    provisional units.
+    """
+
+    if not isinstance(context, CoverageValidationContext):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_CONTEXT)
+    if unit_ordinal < 1 or unit_ordinal > MAX_ANSWER_UNITS:
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD)
+    try:
+        unit = payload if isinstance(payload, AnswerUnit) else AnswerUnit.model_validate(payload)
+    except (TypeError, ValidationError):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
+
+    if unit.unit_id in seen_unit_ids:
+        raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_UNIT_ID)
+    if previous_paragraph is not None and unit.paragraph < previous_paragraph:
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD)
+
+    requirement_order = {
+        requirement_id: index for index, requirement_id in enumerate(context.requirement_ids)
+    }
+    obligation_scopes_by_id = {scope.obligation_id: scope for scope in context.obligation_scopes}
+    obligation_order = {
+        scope.obligation_id: index for index, scope in enumerate(context.obligation_scopes)
+    }
+    obligation_dimension_order = {
+        (scope.obligation_id, dimension): index
+        for scope in context.obligation_scopes
+        for index, dimension in enumerate(scope.dimension_ids)
+    }
+
+    if unit.role is AnswerUnitRole.PREMISE_CORRECTION:
+        if unit_ordinal != 1:
+            raise CoverageContractError(CoverageValidationErrorCode.PREMISE_CORRECTION_NOT_FIRST)
+        if unit.requirement_ids or unit.obligation_links:
+            raise CoverageContractError(
+                CoverageValidationErrorCode.PREMISE_CORRECTION_REQUIREMENT_MISMATCH
+            )
+    elif not unit.requirement_ids:
+        raise CoverageContractError(CoverageValidationErrorCode.MISSING_UNIT_REQUIREMENT_ID)
+
+    if _has_duplicates(unit.requirement_ids):
+        raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_REQUIREMENT_ID)
+    if any(requirement_id not in requirement_order for requirement_id in unit.requirement_ids):
+        raise CoverageContractError(CoverageValidationErrorCode.UNKNOWN_UNIT_REQUIREMENT_ID)
+    order = tuple(requirement_order[value] for value in unit.requirement_ids)
+    if order != tuple(sorted(order)):
+        raise CoverageContractError(CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_REQUIREMENT_ID)
+
+    _validate_source_numbers(unit.source_numbers, context.source_count)
+    cited_numbers = parse_citation_numbers(unit.text)
+    if not cited_numbers:
+        raise CoverageContractError(CoverageValidationErrorCode.MISSING_CITATION)
+    locality_failure = _citation_locality_failure(
+        unit.text,
+        cited_numbers,
+        unit_id=unit.unit_id,
+        unit_ordinal=unit_ordinal,
+    )
+    if locality_failure is not None:
+        raise CoverageContractError(
+            CoverageValidationErrorCode.CITATION_LOCALITY_INVALID,
+            citation_locality_failure=locality_failure,
+        )
+    if any(number > context.source_count for number in cited_numbers):
+        raise CoverageContractError(CoverageValidationErrorCode.UNRESOLVABLE_CITATION)
+    if _ordered_unique(cited_numbers) != unit.source_numbers:
+        raise CoverageContractError(CoverageValidationErrorCode.CITATION_SOURCE_MISMATCH)
+
+    link_keys = tuple((link.obligation_id, link.dimension) for link in unit.obligation_links)
+    if len(link_keys) != len(set(link_keys)):
+        raise CoverageContractError(CoverageValidationErrorCode.DUPLICATE_UNIT_OBLIGATION_LINK)
+    if any(
+        obligation_id not in obligation_scopes_by_id
+        or (obligation_id, dimension) not in obligation_dimension_order
+        for obligation_id, dimension in link_keys
+    ):
+        raise CoverageContractError(CoverageValidationErrorCode.UNKNOWN_UNIT_OBLIGATION_LINK)
+    canonical_link_order = tuple(
+        sorted(
+            link_keys,
+            key=lambda value: (
+                obligation_order[value[0]],
+                obligation_dimension_order[value],
+            ),
+        )
+    )
+    if link_keys != canonical_link_order:
+        raise CoverageContractError(CoverageValidationErrorCode.OUT_OF_ORDER_UNIT_OBLIGATION_LINK)
+    if unit.obligation_links:
+        linked_source_numbers = _ordered_unique(
+            obligation_scopes_by_id[link.obligation_id].source_number
+            for link in unit.obligation_links
+        )
+        if set(linked_source_numbers) != set(unit.source_numbers):
+            raise CoverageContractError(CoverageValidationErrorCode.OBLIGATION_SOURCE_MISMATCH)
+        if any(
+            (
+                tuple(unit.requirement_ids)
+                != obligation_scopes_by_id[link.obligation_id].allowed_requirement_ids
+                if obligation_scopes_by_id[link.obligation_id].kind
+                is EvidenceObligationKind.ADJACENT_STAGE_LINK
+                else not set(unit.requirement_ids)
+                <= set(obligation_scopes_by_id[link.obligation_id].allowed_requirement_ids)
+            )
+            for link in unit.obligation_links
+        ):
+            raise CoverageContractError(
+                CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
+            )
+        if any(
+            unit.role not in _DIMENSION_COMPATIBLE_ROLES[link.dimension]
+            for link in unit.obligation_links
+        ):
+            raise CoverageContractError(
+                CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
+            )
+    return unit
 
 
 def _validation_context(

@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 import web_api
 import costs
+from answer_progress import ProviderStreamMilestone
 from costs import (
     CostLimitExceeded,
     MODEL_PRICING,
@@ -27,6 +28,7 @@ from costs import (
     tracked_embeddings_create,
     tracked_responses_create,
     tracked_responses_parse,
+    tracked_responses_stream,
     usage_scope,
 )
 
@@ -781,6 +783,416 @@ def test_structured_validation_error_still_tracks_completed_response_usage(
     ]
 
 
+def test_structured_stream_tracks_terminal_usage_then_parses(monkeypatch):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    output_text = json.dumps({"result": "ok"})
+    response_body = {
+        "id": "structured-stream-response",
+        "object": "response",
+        "created_at": 1.0,
+        "model": "gpt-5.6-sol",
+        "output": [
+            {
+                "id": "message-1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "annotations": [],
+                        "text": output_text,
+                    }
+                ],
+            }
+        ],
+        "parallel_tool_calls": True,
+        "tool_choice": "auto",
+        "tools": [],
+        "status": "completed",
+        "usage": {
+            "input_tokens": 12,
+            "input_tokens_details": {
+                "cached_tokens": 2,
+                "cache_write_tokens": 0,
+            },
+            "output_tokens": 3,
+            "output_tokens_details": {"reasoning_tokens": 1},
+            "total_tokens": 15,
+        },
+    }
+    events = [
+        {
+            "type": "response.output_text.delta",
+            "item_id": "message-1",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": output_text[:8],
+            "logprobs": [],
+            "sequence_number": 1,
+        },
+        {
+            "type": "response.output_text.delta",
+            "item_id": "message-1",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": output_text[8:],
+            "logprobs": [],
+            "sequence_number": 2,
+        },
+        {
+            "type": "response.completed",
+            "response": response_body,
+            "sequence_number": 3,
+        },
+    ]
+    sse = "".join(
+        f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events
+    )
+    requests = []
+    tracked = []
+    milestones = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            content=sse.encode(),
+            headers={"content-type": "text/event-stream"},
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+    client = OpenAI(
+        api_key="local-test-key",
+        base_url="https://example.test/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    deltas = []
+    try:
+        response = tracked_responses_stream(
+            client,
+            operation="answer_generation",
+            model="gpt-5.6-sol",
+            input="structured prompt",
+            text_format=StructuredPayload,
+            on_text_delta=deltas.append,
+            stream_milestone_callback=milestones.append,
+        )
+    finally:
+        client.close()
+
+    assert response.output_parsed == StructuredPayload(result="ok")
+    assert deltas == [output_text[:8], output_text[8:]]
+    assert milestones == [
+        ProviderStreamMilestone.FIRST_DELTA,
+        ProviderStreamMilestone.TERMINAL,
+    ]
+    assert len(requests) == 1
+    assert json.loads(requests[0].content)["stream"] is True
+    assert len(tracked) == 1
+    assert tracked[0][0].id == "structured-stream-response"
+    assert tracked[0][1] == {
+        "operation": "answer_generation",
+        "requested_model": "gpt-5.6-sol",
+    }
+
+
+def test_structured_stream_tracks_usage_before_local_validation_error(monkeypatch):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    output_text = json.dumps({"wrong": "shape"})
+    response_body = {
+        "id": "invalid-structured-stream-response",
+        "object": "response",
+        "created_at": 1.0,
+        "model": "gpt-5.6-sol",
+        "output": [
+            {
+                "id": "message-1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "annotations": [],
+                        "text": output_text,
+                    }
+                ],
+            }
+        ],
+        "parallel_tool_calls": True,
+        "tool_choice": "auto",
+        "tools": [],
+        "status": "completed",
+        "usage": {
+            "input_tokens": 2,
+            "input_tokens_details": {
+                "cached_tokens": 0,
+                "cache_write_tokens": 0,
+            },
+            "output_tokens": 2,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": 4,
+        },
+    }
+    completed = {
+        "type": "response.completed",
+        "response": response_body,
+        "sequence_number": 1,
+    }
+    sse = (
+        "event: response.completed\n"
+        f"data: {json.dumps(completed)}\n\n"
+    )
+    tracked = []
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            content=sse.encode(),
+            headers={"content-type": "text/event-stream"},
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+    client = OpenAI(
+        api_key="local-test-key",
+        base_url="https://example.test/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    try:
+        with pytest.raises(ValidationError):
+            tracked_responses_stream(
+                client,
+                operation="answer_generation",
+                model="gpt-5.6-sol",
+                input="structured prompt",
+                text_format=StructuredPayload,
+            )
+    finally:
+        client.close()
+
+    assert len(tracked) == 1
+    assert tracked[0][0].id == "invalid-structured-stream-response"
+
+
+class _ScriptedResponseStream:
+    def __init__(
+        self,
+        *events,
+        iteration_error: BaseException | None = None,
+        close_error: BaseException | None = None,
+    ):
+        self._events = iter(events)
+        self._iteration_error = iteration_error
+        self._close_error = close_error
+        self.close_calls = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            return next(self._events)
+        except StopIteration:
+            if self._iteration_error is not None:
+                error = self._iteration_error
+                self._iteration_error = None
+                raise error
+            raise
+
+    def close(self):
+        self.close_calls += 1
+        if self._close_error is not None:
+            raise self._close_error
+
+
+def _scripted_stream_client(stream, requests):
+    def create(**request):
+        requests.append(request)
+        return stream
+
+    return SimpleNamespace(responses=SimpleNamespace(create=create))
+
+
+def test_structured_stream_accounts_for_terminal_before_later_iterator_error(
+    monkeypatch,
+):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    terminal = SimpleNamespace(id="terminal-before-iterator-error")
+    stream = _ScriptedResponseStream(
+        SimpleNamespace(type="response.completed", response=terminal),
+        iteration_error=RuntimeError("iterator failed after terminal"),
+    )
+    requests = []
+    tracked = []
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+    monkeypatch.setattr(
+        costs,
+        "_parse_streamed_response",
+        lambda **_kwargs: pytest.fail("terminal parsing must not hide an iterator error"),
+    )
+
+    with pytest.raises(RuntimeError, match="iterator failed after terminal"):
+        tracked_responses_stream(
+            _scripted_stream_client(stream, requests),
+            operation="answer_generation",
+            model="gpt-5.6-sol",
+            input="structured prompt",
+            text_format=StructuredPayload,
+        )
+
+    assert len(requests) == 1
+    assert stream.close_calls == 1
+    assert tracked == [
+        (
+            terminal,
+            {
+                "operation": "answer_generation",
+                "requested_model": "gpt-5.6-sol",
+            },
+        )
+    ]
+
+
+def test_structured_stream_accounts_for_terminal_before_close_error(monkeypatch):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    terminal = SimpleNamespace(id="terminal-before-close-error")
+    stream = _ScriptedResponseStream(
+        SimpleNamespace(type="response.completed", response=terminal),
+        close_error=OSError("stream close failed"),
+    )
+    requests = []
+    tracked = []
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+    monkeypatch.setattr(
+        costs,
+        "_parse_streamed_response",
+        lambda **_kwargs: pytest.fail("terminal parsing must not hide a close error"),
+    )
+
+    with pytest.raises(OSError, match="stream close failed"):
+        tracked_responses_stream(
+            _scripted_stream_client(stream, requests),
+            operation="answer_generation",
+            model="gpt-5.6-sol",
+            input="structured prompt",
+            text_format=StructuredPayload,
+        )
+
+    assert len(requests) == 1
+    assert stream.close_calls == 1
+    assert tracked == [
+        (
+            terminal,
+            {
+                "operation": "answer_generation",
+                "requested_model": "gpt-5.6-sol",
+            },
+        )
+    ]
+
+
+def test_structured_stream_success_accounts_once_and_parses_terminal(monkeypatch):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    terminal = SimpleNamespace(id="successful-terminal")
+    parsed = SimpleNamespace(output_parsed=StructuredPayload(result="ok"))
+    stream = _ScriptedResponseStream(
+        SimpleNamespace(type="response.completed", response=terminal)
+    )
+    requests = []
+    tracked = []
+    parsed_terminals = []
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+
+    def parse_terminal(**kwargs):
+        parsed_terminals.append(kwargs["response"])
+        return parsed
+
+    monkeypatch.setattr(costs, "_parse_streamed_response", parse_terminal)
+
+    result = tracked_responses_stream(
+        _scripted_stream_client(stream, requests),
+        operation="answer_generation",
+        model="gpt-5.6-sol",
+        input="structured prompt",
+        text_format=StructuredPayload,
+    )
+
+    assert result is parsed
+    assert len(requests) == 1
+    assert stream.close_calls == 1
+    assert parsed_terminals == [terminal]
+    assert len(tracked) == 1
+    assert tracked[0][0] is terminal
+
+
+def test_structured_stream_without_terminal_closes_and_does_not_account(monkeypatch):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    stream = _ScriptedResponseStream()
+    requests = []
+    tracked = []
+    monkeypatch.setattr(
+        costs,
+        "record_openai_response",
+        lambda response, **metadata: tracked.append((response, metadata)),
+    )
+    monkeypatch.setattr(
+        costs,
+        "_parse_streamed_response",
+        lambda **_kwargs: pytest.fail("a missing terminal response cannot be parsed"),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="OpenAI response stream ended without a terminal response",
+    ):
+        tracked_responses_stream(
+            _scripted_stream_client(stream, requests),
+            operation="answer_generation",
+            model="gpt-5.6-sol",
+            input="structured prompt",
+            text_format=StructuredPayload,
+        )
+
+    assert len(requests) == 1
+    assert stream.close_calls == 1
+    assert tracked == []
+
+
 def test_summary_filters_scopes_and_utc_calendar_month(ledger_path):
     ledger = UsageLedger(ledger_path)
     usage = TokenUsage(input_tokens=1_000, total_tokens=1_000)
@@ -977,7 +1389,7 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     cohort = run_diagnostics.pop("cohort")
     assert cohort["rag_policy_version"] == "evidence-planned-v26"
     assert cohort["query_planner_prompt_version"] == "query-planner-v11"
-    assert cohort["coverage_prompt_version"] == "evidence-coverage-v10"
+    assert cohort["coverage_prompt_version"] == "evidence-coverage-v11"
     assert cohort["normalizer_version"] == "evidence-coverage-normalizer/7"
     assert len(cohort["coverage_instructions_sha256"]) == 64
     assert run_diagnostics == {

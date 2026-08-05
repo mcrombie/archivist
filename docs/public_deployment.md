@@ -113,7 +113,7 @@ After restart:
 1. `GET /api/live` returns `200` with `{"status":"live"}`.
 2. `GET /api/health` returns `200` with `{"status":"ready"}`.
 3. `GET /api/config` reports the `public_demo` profile, 481 searchable and embedded chunks,
-   `full_source_text: false`, and `public_page_locators: true`.
+   `full_source_text: false`, `public_page_locators: true`, and `progressive_answers: true`.
 4. The opening page loads from the service's HTTPS `onrender.com` fallback URL.
 5. One neutral question returns an answer with edition-qualified Typeset PDF page locators.
 6. Source cards expose no full chunk text, chunk IDs, physical PDF pages, or internal diagnostics.
@@ -173,6 +173,52 @@ Treat both sides of this boundary as release checks:
 
 Before promoting a frontend change, submit one live public question and confirm that the answer
 renders even though no `run_diagnostics` object is returned.
+
+## Progressive-response release check
+
+The optional Progressive response uses a same-origin NDJSON `POST` at
+`/api/projects/current/question/progressive`. It replaces the final blocking generation request
+with one streamed request; it does not add a second generation call and it never exposes raw tokens
+or private reasoning. After fixed operational progress, the service may emit only complete
+`checked_claim` objects that pass local citation/source checks plus the public edition-locator and
+rolling quotation boundaries. Those claims remain provisional as a complete answer until the
+terminal whole-answer validator succeeds. Complete answer remains the strict default. The protocol
+and invariants are specified in [Answer delivery modes](answer_delivery.md).
+
+The public rate/concurrency slot belongs to the full stream lifetime, not merely to the time needed
+to return response headers. It must be released exactly once after normal completion, terminal
+failure, or disconnect cleanup. Once an accepted stream has begun, the server reports a late
+failure in one safe terminal NDJSON frame; the client does not automatically replay the `POST`.
+
+Before promoting this transport, run a live smoke through `https://archivist.mcrombie.com`:
+
+1. Confirm Complete answer is still selected on a new browser session and an ordinary question
+   retains the existing behavior.
+2. Select Progressive response and submit a question. Fixed operational progress must appear
+   first, the elapsed-work indicator must continue updating on roughly three-second heartbeats,
+   and at least one visibly complete checked claim should appear before the terminal result.
+3. In the browser network panel, confirm the progressive response is
+   `application/x-ndjson` with schema `archivist.answer_stream/2`, monotonically sequenced frames,
+   and exactly one terminal frame. It must contain no chain-of-thought, private diagnostics,
+   source text, raw token delta, or incomplete structured claim.
+4. Confirm the working claim log is visibly marked not final, then is replaced—not duplicated—by
+   the authoritative cohesive answer with citations and edition-qualified public sources.
+5. Interrupt one accepted stream. Confirm there is no automatic retry and no partial answer is
+   retained as a completed conversation turn.
+6. While a public stream is held open, confirm a competing request is refused by the configured
+   concurrency limit; after completion or disconnect cleanup, confirm a new request is admitted.
+7. Repeat the Progressive question through Render's generated `onrender.com` address. If the
+   direct address shows a claim earlier than `https://archivist.mcrombie.com`, investigate
+   Cloudflare buffering rather than changing generation or retrieval.
+8. Inspect the Render log for the single `progressive_delivery_timing` record. Compare
+   `generating_answer`, `first_provider_delta`, `first_checked_claim`, `provider_terminal`, and
+   the terminal/worker/stream milestones. The record must contain durations and milestone names
+   only—never question, source, manuscript, prompt, answer, or error text.
+
+This smoke checks deployment behavior that the offline suite cannot establish, including Render
+proxy buffering and stream cleanup. Progressive response can reduce time to the first useful claim
+after generation begins, but it does not remove retrieval/planning latency or reduce total model
+compute and must not be described as a server-latency optimization.
 
 ## Operational limits
 

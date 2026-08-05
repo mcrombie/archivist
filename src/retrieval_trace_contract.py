@@ -1112,6 +1112,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-v8",
             "evidence-coverage-v9",
             "evidence-coverage-v10",
+            "evidence-coverage-v11",
         }
     ),
     "pool_names": frozenset({"canonical", "mechanism", "provider"}),
