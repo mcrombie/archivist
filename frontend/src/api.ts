@@ -200,7 +200,17 @@ export type AnswerFacets = {
   worldview: AnswerWorldview;
 };
 
-export type ArchivistModeId = "professional" | "essential" | "forest";
+export type ArchivistModeId =
+  | "professional"
+  | "essential"
+  | "forest"
+  | "cromb_coo_coo"
+  | "pretty_pink_princess"
+  | "baleful_black_baron"
+  | "tidal_archivist"
+  | "ember_and_ink"
+  | "illuminated_codex"
+  | "cosmic_almanac";
 
 export const DEFAULT_ANSWER_FACETS: AnswerFacets = {
   historiographicalLens: "evidence_first",

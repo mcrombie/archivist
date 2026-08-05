@@ -31,6 +31,13 @@ class ArchivistMode(StrEnum):
     PROFESSIONAL = "professional"
     ESSENTIAL = "essential"
     FOREST = "forest"
+    CROMB_COO_COO = "cromb_coo_coo"
+    PRETTY_PINK_PRINCESS = "pretty_pink_princess"
+    BALEFUL_BLACK_BARON = "baleful_black_baron"
+    TIDAL_ARCHIVIST = "tidal_archivist"
+    EMBER_AND_INK = "ember_and_ink"
+    ILLUMINATED_CODEX = "illuminated_codex"
+    COSMIC_ALMANAC = "cosmic_almanac"
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +166,107 @@ INFLUENCE_PROFILES: dict[str, InfluenceProfileDefinition] = {
         ),
         prompt_path=INFLUENCE_PROMPT_DIR / "dunsany_elfland.md",
     ),
+    "cromb_coo_coo_manuscript": InfluenceProfileDefinition(
+        profile_id="cromb_coo_coo_manuscript",
+        version="1",
+        label="Cromb Coo Coo literary influence",
+        provenance=(
+            InfluenceProvenance(
+                title="Journey through Cromb Coo Coo",
+                creator=None,
+                source_identifier=("owner-supplied:journey-through-cromb-coo-coo:2026-07-30"),
+                source_url=None,
+                source_sha256=("f67f9ed3f622583abe2fca090d73881ff86a7f801cea88034589c986509ece74"),
+                artifact_modified_at="2026-07-30T10:05:30-04:00",
+                rights_note=(
+                    "Private owner-supplied manuscript; not redistributed. Reviewed locally "
+                    "to derive a bounded literary influence profile."
+                ),
+                role="Literary/editorial framing only; never historical evidence.",
+            ),
+        ),
+        prompt_path=INFLUENCE_PROMPT_DIR / "cromb_coo_coo.md",
+    ),
+    "rose_tinted_optimism": InfluenceProfileDefinition(
+        profile_id="rose_tinted_optimism",
+        version="1",
+        label="Rose-tinted optimism",
+        provenance=(),
+        prompt_path=INFLUENCE_PROMPT_DIR / "pretty_pink_princess.md",
+    ),
+    "severe_tragic_history": InfluenceProfileDefinition(
+        profile_id="severe_tragic_history",
+        version="1",
+        label="Severe tragic history",
+        provenance=(),
+        prompt_path=INFLUENCE_PROMPT_DIR / "baleful_black_baron.md",
+    ),
+    "moby_dick_maritime": InfluenceProfileDefinition(
+        profile_id="moby_dick_maritime",
+        version="1",
+        label="Moby-Dick-informed maritime framing",
+        provenance=(
+            InfluenceProvenance(
+                title="Moby-Dick; or, The Whale",
+                creator="Herman Melville",
+                source_identifier="project-gutenberg:15",
+                source_url="https://www.gutenberg.org/ebooks/15.epub3.images",
+                source_sha256=(
+                    "8d76f75515a8e10b0ed0657275767f75b4b283177805a1c09c231840a0607d95"
+                ),
+                artifact_modified_at="2026-08-01T07:33:10Z",
+                rights_note=(
+                    "Project Gutenberg identifies this artifact as public domain in the USA, "
+                    "describes ebook #15 as its highest-quality Moby-Dick transcription, and "
+                    "ties it to the 1851 first American edition. Archivist does not redistribute "
+                    "the EPUB; status outside the USA requires a separate check."
+                ),
+                role=(
+                    "Maritime scale, moral pressure, uncertainty, and cadence only; never "
+                    "historical evidence."
+                ),
+            ),
+        ),
+        prompt_path=INFLUENCE_PROMPT_DIR / "moby_dick_maritime.md",
+    ),
+    "realist_statecraft": InfluenceProfileDefinition(
+        profile_id="realist_statecraft",
+        version="1",
+        label="Kissinger-associated realist statecraft",
+        provenance=(
+            InfluenceProvenance(
+                title="Realist statecraft tradition associated with Henry Kissinger",
+                creator=None,
+                source_identifier="conceptual-profile:realist-statecraft:no-text-ingested",
+                source_url=None,
+                source_sha256=None,
+                artifact_modified_at=None,
+                rights_note=(
+                    "No Henry Kissinger work was ingested, stored, quoted, paraphrased, or "
+                    "used as evidence."
+                ),
+                role=(
+                    "High-level attention to power, interests, leverage, institutions, and "
+                    "strategic constraint only."
+                ),
+            ),
+        ),
+        prompt_path=INFLUENCE_PROMPT_DIR / "realist_statecraft.md",
+    ),
+    "modern_liberal_history": InfluenceProfileDefinition(
+        profile_id="modern_liberal_history",
+        version="1",
+        label="Project-authored modern liberal history",
+        provenance=(),
+        prompt_path=INFLUENCE_PROMPT_DIR / "modern_liberal_history.md",
+    ),
+    "future_science_history": InfluenceProfileDefinition(
+        profile_id="future_science_history",
+        version="1",
+        label="Project-authored future-science history",
+        provenance=(),
+        prompt_path=INFLUENCE_PROMPT_DIR / "future_science_history.md",
+    ),
 }
 
 
@@ -192,6 +300,92 @@ ARCHIVIST_MODES: dict[ArchivistMode, ArchivistModeDefinition] = {
         voice=AnswerVoice.ROMANTIC,
         worldview=Worldview.NONE,
         influence_profile_id="dunsany_elfland",
+    ),
+    ArchivistMode.CROMB_COO_COO: ArchivistModeDefinition(
+        mode_id=ArchivistMode.CROMB_COO_COO,
+        version="1",
+        label="Cromb Coo Coo",
+        description=(
+            "A humane, mischievous reading attentive to contingency, eccentric actors, "
+            "and the collision of grandeur with ordinary experience."
+        ),
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.ROMANTIC,
+        worldview=Worldview.SECULAR_HUMANIST,
+        influence_profile_id="cromb_coo_coo_manuscript",
+    ),
+    ArchivistMode.PRETTY_PINK_PRINCESS: ArchivistModeDefinition(
+        mode_id=ArchivistMode.PRETTY_PINK_PRINCESS,
+        version="1",
+        label="Pretty Pink Princess",
+        description=(
+            "A strongly optimistic, rose-tinted reading that never falsifies or omits harm."
+        ),
+        historiographical_lens=HistoriographicalLens.TRIUMPHALIST,
+        voice=AnswerVoice.ROMANTIC,
+        worldview=Worldview.SECULAR_HUMANIST,
+        influence_profile_id="rose_tinted_optimism",
+    ),
+    ArchivistMode.BALEFUL_BLACK_BARON: ArchivistModeDefinition(
+        mode_id=ArchivistMode.BALEFUL_BLACK_BARON,
+        version="1",
+        label="Baleful Black Baron",
+        description="A severe tragic reading centered on costs, coercion, and loss.",
+        historiographical_lens=HistoriographicalLens.TRAGIC,
+        voice=AnswerVoice.ROMANTIC,
+        worldview=Worldview.NONE,
+        influence_profile_id="severe_tragic_history",
+    ),
+    ArchivistMode.TIDAL_ARCHIVIST: ArchivistModeDefinition(
+        mode_id=ArchivistMode.TIDAL_ARCHIVIST,
+        version="1",
+        label="Tidal Archivist",
+        description=(
+            "A Moby-Dick-informed maritime reading of scale, pressure, command, and uncertainty."
+        ),
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.ROMANTIC,
+        worldview=Worldview.NONE,
+        influence_profile_id="moby_dick_maritime",
+    ),
+    ArchivistMode.EMBER_AND_INK: ArchivistModeDefinition(
+        mode_id=ArchivistMode.EMBER_AND_INK,
+        version="1",
+        label="Ember & Ink",
+        description=(
+            "A realist statecraft reading associated with Henry Kissinger at the level of "
+            "tradition, without using his works."
+        ),
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.PLAINSPOKEN,
+        worldview=Worldview.ENLIGHTENMENT_RATIONALIST,
+        influence_profile_id="realist_statecraft",
+    ),
+    ArchivistMode.ILLUMINATED_CODEX: ArchivistModeDefinition(
+        mode_id=ArchivistMode.ILLUMINATED_CODEX,
+        version="1",
+        label="Illuminated Codex",
+        description=(
+            "A modern liberal-history reading of rights, pluralism, accountable institutions, "
+            "and contested reform."
+        ),
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.SCHOLARLY,
+        worldview=Worldview.SECULAR_HUMANIST,
+        influence_profile_id="modern_liberal_history",
+    ),
+    ArchivistMode.COSMIC_ALMANAC: ArchivistModeDefinition(
+        mode_id=ArchivistMode.COSMIC_ALMANAC,
+        version="1",
+        label="Cosmic Almanac",
+        description=(
+            "A future-science historical reading of systems, path dependence, uncertainty, "
+            "and the futures opened or constrained by past choices."
+        ),
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.SCHOLARLY,
+        worldview=Worldview.ENLIGHTENMENT_RATIONALIST,
+        influence_profile_id="future_science_history",
     ),
 }
 

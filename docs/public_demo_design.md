@@ -59,18 +59,30 @@ claim-local excerpts.
 
 ## Reader modes and public disclosure
 
-Reader modes do not widen the public evidence boundary. Professional, Essential, and Mythical
-Forest Folio all search the same private manuscript corpus and pass through the same citation,
-quotation, and source-display controls. Their optional influence profiles are fixed, reviewed
-generation instructions rather than retrievable books.
+Reader modes do not widen the public evidence boundary. All ten semantic modes search the same
+private *Cradle* manuscript corpus and pass through the same citation, quotation, and source-display
+controls. Their optional influence profiles are fixed, reviewed generation instructions rather
+than retrievable books or additional evidence.
 
 Professional is the public frontend default and uses interpretive methods distilled from selected
 public-domain artifacts by Wesley Frank Craven, Charles A. Beard, and W. E. B. Du Bois. Mythical
 Forest Folio uses reviewed formal qualities from Lord Dunsany's *The King of Elfland's Daughter*.
-Those works may shape framing, emphasis, cadence, and judgment, but they may never supply a
-historical assertion, citation, quotation, proper noun, or answer-specific causal link. Essential
-adds no curated external influence. See `docs/archivist_modes.md` for the versioned registry,
-artifact hashes, and rights cautions.
+Cromb Coo Coo uses a reviewed profile derived locally from an owner-supplied private manuscript.
+Pretty Pink Princess and Baleful Black Baron apply strong project-authored optimistic and tragic
+profiles. Tidal Archivist uses bounded formal qualities reviewed from Project Gutenberg #15,
+*Moby-Dick; or, The Whale*, rather than the Forest mode's Dunsany influence. Ember & Ink uses a
+text-free Realist Statecraft profile historically associated with Henry Kissinger; it does not
+ingest, quote, paraphrase, imitate, or cite a Kissinger work. Those influences may shape framing,
+Illuminated Codex uses a text-free modern liberal history profile centered on rights, pluralism,
+representative institutions, reform, inclusion, and accountable power without present-day party
+advocacy. Cosmic Almanac uses a text-free future-science history profile that considers systems,
+long time horizons, uncertainty, and plausible future implications without inventing predictions
+or treating them as evidence. Those influences may shape framing, emphasis, cadence, and judgment,
+but they may never supply a historical assertion, citation, quotation, proper noun, plot element,
+lore, or answer-specific causal link. The private Cromb PDF and extracts are neither committed nor
+sent to an API. Essential adds no curated external influence and remains the held-out and gold
+evaluation mode. See `docs/archivist_modes.md` for the versioned registry, artifact identities, and
+rights cautions.
 
 The public request contract accepts only allowlisted mode IDs and resolved facet values. It does
 not accept prompt text, source paths, arbitrary influence identifiers, or raw influence excerpts.

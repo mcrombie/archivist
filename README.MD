@@ -14,11 +14,13 @@ Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
 - one-page, conversational book interface;
 - contextual follow-up questions;
 - query decomposition, premise checks, absence handling, and source-bounded completeness checks;
-- Professional, Essential, and Mythical Forest Folio modes, with Professional as the new-visitor
-  frontend default;
+- ten reader-facing modes: Professional, Essential, Mythical Forest Folio, Cromb Coo Coo,
+  Pretty Pink Princess, Baleful Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and
+  Cosmic Almanac, with Professional as the new-visitor frontend default;
 - an unchanged Essential evidence-first baseline for API, CLI, and evaluation callers that omit a
   mode;
-- Historiographical lens, Voice, Worldview, and all ten visual themes under Advanced controls;
+- Historiographical lens, Voice, Worldview, and all eleven visual appearances under Advanced
+  controls;
 - interpretive influence profiles that shape framing only, never retrieval, evidence, or citations;
 - local OpenAI usage estimates and budget controls;
 - 481 retrieval-eligible chunks covering the complete substantive manuscript;

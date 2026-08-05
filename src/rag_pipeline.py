@@ -119,13 +119,13 @@ from document_roles import (
 )
 
 
-RAG_POLICY_VERSION = "evidence-planned-v25"
+RAG_POLICY_VERSION = "evidence-planned-v26"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v11"
-EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v9"
+EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v10"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
 MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
@@ -340,6 +340,16 @@ identity, or causal frame; a bare denial or merely earlier/later counterexample 
 Then cover every supported requirement in separate non-correction units. If sources do not
 resolve a premise, mark it unresolved with a null correction_unit_id. Do not use not_applicable
 for a listed premise. Never validate a premise merely because the question assumes it.
+
+Premise source lanes are strict and use the candidate lists in the request contract:
+- for status supported, source_numbers must be nonempty and a subset of
+  support_candidate_sources only; do not use counter_candidate_sources or
+  framing_candidate_sources;
+- for status contradicted, source_numbers must be nonempty and a subset of the union of
+  counter_candidate_sources and framing_candidate_sources only; when
+  framing_candidate_sources is nonempty, include at least one source from it, and the
+  premise_correction unit must declare and cite exactly the same source_numbers; and
+- for status unresolved, source_numbers must be empty and correction_unit_id must be null.
 
 Respect the evidence-boundary decision. A qualified near match must begin by saying the
 searchable manuscript does not directly establish the named subject or relationship, and

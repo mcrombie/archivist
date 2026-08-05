@@ -128,9 +128,10 @@ def test_committed_development_registry_is_valid_and_records_known_development_q
 
     summary = validate_development_registry(registry)
 
-    assert len(summary.questions) == 30
+    assert summary.version == "1.1.0"
+    assert len(summary.questions) == 31
     assert summary.questions[0].question_id == "DEV-PRACTICAL-G001"
-    assert summary.questions[-1].question_id == "DEV-MANUAL-007"
+    assert summary.questions[-1].question_id == "DEV-MANUAL-008"
 
 
 def test_provenance_template_binds_candidate_manifest_and_registry_but_is_not_attested():

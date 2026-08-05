@@ -383,6 +383,48 @@ html[data-vibe="rose"] {
     linear-gradient(145deg, var(--chat-paper), var(--chat-paper-deep));
 }
 
+html[data-vibe="cromb"] {
+  --chat-bg: #0f0a17;
+  --chat-stage: #191124;
+  --chat-surface: #241832;
+  --chat-surface-raised: #332342;
+  --chat-header: rgba(17, 10, 25, 0.9);
+  --chat-text: #f3ecda;
+  --chat-muted: #c1b3c9;
+  --chat-faint: #84778d;
+  --chat-accent: #8fae48;
+  --chat-accent-bright: #c5df69;
+  --chat-border: rgba(190, 212, 104, 0.22);
+  --chat-border-strong: rgba(181, 216, 87, 0.5);
+  --chat-user-bg: #58376a;
+  --chat-user-text: #fff8e8;
+  --chat-paper: #f2ecdc;
+  --chat-paper-deep: #d6cdaa;
+  --chat-paper-ink: #392b42;
+  --chat-paper-rule: rgba(97, 76, 80, 0.24);
+  --chat-source-bg: rgba(29, 19, 42, 0.97);
+  --chat-success: #b8d36a;
+  --chat-danger: #e8978c;
+  --chat-shadow: 0 32px 88px rgba(5, 2, 10, 0.48);
+  --chat-soft-shadow: 0 16px 44px rgba(5, 2, 10, 0.32);
+  --chat-radius: 22px;
+  --chat-control-radius: 15px;
+  --chat-cover-filter: sepia(0.09) saturate(0.74) hue-rotate(215deg) contrast(1.08) brightness(0.72);
+  --chat-grain-opacity: 0.1;
+  --chat-shell-background:
+    radial-gradient(ellipse at 84% 13%, transparent 0 8%, rgba(183, 216, 87, 0.08) 8.5% 9%, transparent 9.5% 17%, rgba(153, 101, 180, 0.09) 17.5% 18%, transparent 18.5%),
+    radial-gradient(ellipse at 12% 88%, rgba(116, 145, 60, 0.09), transparent 31%),
+    linear-gradient(142deg, #0d0814, #251532 64%, #100a18);
+  --chat-thread-background:
+    radial-gradient(ellipse at 87% 7%, transparent 0 5%, rgba(192, 221, 99, 0.065) 5.5% 6%, transparent 6.5% 13%, rgba(123, 77, 150, 0.1) 13.5% 14%, transparent 14.5%),
+    radial-gradient(ellipse at 8% 72%, rgba(135, 168, 68, 0.07), transparent 24%),
+    linear-gradient(180deg, #140d1e, #24152f 58%, #0f0a17);
+  --chat-paper-texture:
+    radial-gradient(ellipse at 91% 11%, rgba(95, 57, 109, 0.11) 0 4%, transparent 4.6%),
+    repeating-radial-gradient(ellipse at -8% 108%, transparent 0 18px, rgba(113, 135, 54, 0.035) 19px 20px),
+    linear-gradient(142deg, var(--chat-paper), var(--chat-paper-deep));
+}
+
 body {
   background: var(--chat-bg);
   font-family: var(--chat-ui-font);
@@ -2478,6 +2520,7 @@ body {
 .vibe-swatch-princess { background: linear-gradient(135deg, #fff4f8 0 48%, #df6ea3 48% 72%, #d7ac58 72%); }
 .vibe-swatch-baron { background: linear-gradient(135deg, #050506 0 52%, #781824 52% 76%, #b99c70 76%); }
 .vibe-swatch-rose { background: linear-gradient(135deg, #1b0d18 0 48%, #c57691 48% 72%, #dfbc78 72%); }
+.vibe-swatch-cromb { background: linear-gradient(135deg, #281637 0 46%, #a7c651 46% 70%, #f2ecdc 70%); }
 
 .chat-header-actions,
 .turn-response-actions {
@@ -3248,6 +3291,30 @@ html[data-vibe="rose"] .chat-brand > span,
 html[data-vibe="rose"] .conversation-brand > span:first-child {
   border-radius: 50% 50% 12% 12%;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chat-accent-bright) 32%, transparent);
+}
+
+html[data-vibe="cromb"] .assistant-paper .output-block {
+  border: 1px solid color-mix(in srgb, var(--chat-accent) 38%, var(--chat-paper-ink));
+  border-radius: 25px 13px 23px 16px / 18px 23px 15px 25px;
+  box-shadow:
+    5px 7px 0 -5px color-mix(in srgb, var(--chat-accent) 42%, transparent),
+    0 20px 50px rgba(8, 3, 13, 0.36),
+    inset 0 0 38px rgba(80, 48, 91, 0.07);
+}
+
+html[data-vibe="cromb"] .assistant-paper .output-block::after {
+  background:
+    radial-gradient(ellipse at 94% 9%, transparent 0 5%, rgba(103, 69, 113, 0.1) 5.5% 6%, transparent 6.5% 11%, rgba(127, 151, 62, 0.08) 11.5% 12%, transparent 12.5%),
+    radial-gradient(ellipse at 10% 94%, rgba(121, 145, 59, 0.07), transparent 24%);
+}
+
+html[data-vibe="cromb"] .archivist-identity > span,
+html[data-vibe="cromb"] .chat-brand > span,
+html[data-vibe="cromb"] .conversation-brand > span:first-child {
+  border-radius: 46% 54% 62% 38% / 54% 41% 59% 46%;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--chat-accent) 7%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--chat-accent-bright) 24%, transparent);
 }
 
 @keyframes chat-cover-arrive {

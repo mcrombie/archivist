@@ -51,16 +51,23 @@ The web API needs:
   turn they support.
 - Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
   in both the conversation header and the top-of-page introduction.
-- Offers three reader-facing Archivist modes that bundle appearance and answer character:
-  Professional, Essential, and Mythical Forest Folio. Professional is the new-visitor default;
-  Essential is the unchanged concise neutral baseline; Forest Folio adds a bounded mythopoetic
-  literary influence. Every mode keeps historical claims and citations grounded in the manuscript.
+- Offers ten reader-facing Archivist modes that bundle appearance and answer character:
+  Professional, Essential, Mythical Forest Folio, Cromb Coo Coo, Pretty Pink Princess, Baleful
+  Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and Cosmic Almanac. Professional is
+  the new-visitor default; Essential is the unchanged concise neutral baseline. Princess is
+  consistently optimistic without minimizing harm; Baron is strongly tragic without inventing
+  loss; Tidal uses a bounded Moby-Dick-informed maritime profile; Ember uses a project-authored
+  realist-statecraft frame associated with Henry Kissinger without ingesting or imitating his
+  works; Codex uses a lowercase-l modern liberal frame without present-day party advocacy; and
+  Almanac uses a future-science perspective attentive to systems, long horizons, and uncertainty
+  without turning projections into facts. Every mode keeps historical claims and citations
+  grounded in *Cradle of the Empire*.
 - Keeps Evidence scope separate from interpretation. Retrieved passages and experimental Full book
   select what manuscript context the answer receives; neither choice selects a personality.
 - Moves the independent Historiographical lens, Voice, and Worldview selectors into an Advanced
-  interpretive settings disclosure. The same disclosure retains all ten visual themes as explicit
-  appearance-only overrides. Custom values apply to future turns, retries retain the settings that
-  originally produced the turn, and Reset to mode restores the active preset.
+  interpretive settings disclosure. The same disclosure retains all eleven visual appearances as
+  explicit appearance-only overrides. Custom values apply to future turns, retries retain the
+  settings that originally produced the turn, and Reset to mode restores the active preset.
 - A non-default voice changes expression without automatically lengthening the answer. A
   non-Evidence-first lens or any worldview frames the cited factual answer with an uncited
   interpretive opening and conclusion. Both framing paragraphs must directly address the

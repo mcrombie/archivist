@@ -34,6 +34,13 @@ prompt profiles distilled offline rather than placing influence passages in a li
 | **Professional** | Professional | Evidence-first, Plainspoken, Secular humanist | `professional_public_history/1` |
 | **Essential** | Essential | Evidence-first, Scholarly, None | none |
 | **Mythical Forest Folio** | Forest Folio | Tragic, Romantic, None | `dunsany_elfland/1` |
+| **Cromb Coo Coo** | Cromb Coo Coo | Evidence-first, Romantic, Secular humanist | `cromb_coo_coo_manuscript/1` |
+| **Pretty Pink Princess** | Pretty Pink Princess | Triumphalist, Romantic, Secular humanist | `rose_tinted_optimism/1` |
+| **Baleful Black Baron** | Baleful Black Baron | Tragic, Romantic, None | `severe_tragic_history/1` |
+| **Tidal Archivist** | Tidal Archive | Evidence-first, Romantic, None | `moby_dick_maritime/1` |
+| **Ember & Ink** | Ember & Ink | Evidence-first, Plainspoken, Enlightenment rationalist | `realist_statecraft/1` |
+| **Illuminated Codex** | Illuminated Codex | Evidence-first, Scholarly, Secular humanist | `modern_liberal_history/1` |
+| **Cosmic Almanac** | Cosmic Almanac | Evidence-first, Scholarly, Enlightenment rationalist | `future_science_history/1` |
 
 Professional is the frontend default for a new visitor. It is a restrained public-history
 prototype, not a claim of neutrality. Essential remains the compatibility, evaluation, and
@@ -88,6 +95,106 @@ that an ebook may not correspond cleanly to one print edition. Archivist therefo
 influence record to this exact Gutenberg artifact and hash without claiming a more precise base
 transcription than the file establishes.
 
+## Cromb Coo Coo profile
+
+Cromb Coo Coo is the fourth reader-facing semantic mode. It joins the Cromb visual appearance
+with Evidence-first, Romantic, and Secular humanist defaults and the fixed influence profile
+`cromb_coo_coo_manuscript/1`.
+
+The owner supplied one private local artifact for offline review. This identity record deliberately
+does not infer or name an author:
+
+| Field | Value |
+|---|---|
+| Filename | `Journey through Cromb Coo Coo_7_30_2026.pdf` |
+| Access status | Owner-supplied private PDF |
+| Physical PDF pages | 226 |
+| File size | 815,751 bytes |
+| SHA-256 | `f67f9ed3f622583abe2fca090d73881ff86a7f801cea88034589c986509ece74` |
+| File modified | `2026-07-30 10:05:30 -04:00` |
+| PDF metadata creation | `2026-07-30 10:05:29 -04:00` |
+| Creator software | Scrivener for Windows |
+
+The reviewed profile permits only high-level formal traits: affectionate absurdity, grotesque
+high fantasy, comic deflation of grandeur, sensory specificity, tenderness amid violence, and
+an emphasis on contingency and eccentric agency. It must not quote, paraphrase, summarize, name,
+allude to, or import the private manuscript's people, places, events, plot, lore, phrases, images,
+or factual claims.
+
+This is a strict generation-only influence. The PDF remains outside the repository, and temporary
+review renders were deleted after local inspection; neither is committed or sent to an API. They
+never enter Chroma, retrieval,
+evidence admission, source numbering, citations, completeness checks, absence decisions, public
+source cards, follow-up evidence, or logs. Only the short, manually reviewed profile may enter the
+generation prompt after *Cradle* evidence has been selected. Historical assertions and citations
+remain grounded exclusively in *Cradle of the Empire*.
+
+## Princess, Baron, Tidal, Ember, Codex, and Almanac profiles
+
+Six former appearance-only themes now have explicit answer character. The profiles are deliberately
+strong enough to be perceptible, but the evidence contract still outranks the theme.
+
+**Pretty Pink Princess** is consistently rose-tinted. It looks first for courage, adaptation,
+fellowship, recovery, creative agency, and possibilities opened under pressure. That optimism is a
+judgment about meaning, not permission to rewrite the record: violence, enslavement, dispossession,
+exploitation, failure, exclusion, and suffering must still be stated plainly and may never be
+buried, euphemized, or converted into a happy ending.
+
+**Baleful Black Baron** applies an unmistakably tragic view of history. It emphasizes coercion,
+loss, broken promises, narrowing choices, unintended consequences, and possibilities foreclosed.
+It may not manufacture suffering, inevitability, or unsupported motives; its tragedy must arise
+from concrete facts in the *Cradle* evidence supplied for the answer.
+
+**Tidal Archivist** replaces the Forest Folio's Dunsany influence with high-level formal qualities
+reviewed from Herman Melville's *Moby-Dick; or, The Whale*: oceanic scale, long-voyage uncertainty,
+moral pressure, hierarchy, obsession, the limits of command, and restrained maritime imagery. It
+does not quote, paraphrase, imitate, or import Melville's characters, scenes, plot, symbols, famous
+lines, or claims. The frozen influence artifact is Project Gutenberg #15, which Gutenberg
+identifies as its highest-quality Moby-Dick transcription and as based on the 1851 first American
+edition:
+
+| Field | Value |
+|---|---|
+| Stable artifact URL | `https://www.gutenberg.org/ebooks/15.epub3.images` |
+| File size | 914,544 bytes |
+| SHA-256 | `8d76f75515a8e10b0ed0657275767f75b4b283177805a1c09c231840a0607d95` |
+| Artifact modified | `2026-08-01T07:33:10Z` |
+| Rights note | Project Gutenberg records public-domain status in the USA; other jurisdictions require a separate check |
+
+The EPUB was used only to freeze provenance for the reviewed profile. The temporary review copy
+remained outside version control and was removed after hash capture; it is not placed in Chroma or
+a live request and is not redistributed by Archivist.
+
+**Ember & Ink** uses a project-authored Realist Statecraft profile associated at a high level with
+the historical tradition of Henry Kissinger. It asks about interests, power, bargaining leverage,
+security, institutional capacity, credible commitments, constraints, tradeoffs, and unintended
+consequences, while refusing to equate domination with wisdom or reduce every action to cynicism.
+No Henry Kissinger work is ingested, retrieved, embedded, stored, cited, quoted, paraphrased, or
+imitated. The mode does not reproduce his voice or characteristic phrasing and is not affiliated
+with or endorsed by him, his estate, or any publisher. Its provenance is therefore a text-free
+project editorial record, `conceptual-profile:realist-statecraft:no-text-ingested`, rather than a
+book artifact.
+
+**Illuminated Codex** uses a project-authored, lowercase-l modern liberal historiographical
+profile. It attends to individual rights and dignity, pluralism, toleration, representative
+institutions, rule of law, reform, inclusion, accountable power, and the gap between declared
+ideals and lived access. It treats progress as incremental, contested, reversible, and uneven
+rather than automatic. The profile may evaluate institutions by whom they protect, include, or
+exclude, but it may not import present-day party positions, turn historical actors into proxies
+for current political factions, hide coercion behind reform language, or add unsupported facts.
+It is a text-free project editorial profile with no outside-work provenance rather than another
+book artifact.
+
+**Cosmic Almanac** uses a project-authored future-science history profile. It reads historical
+events across long time horizons and looks for interacting systems: demography, ecology and
+climate where the manuscript supports them, technology, energy, infrastructure, information,
+institutions, path dependence, and feedback loops. It may discuss how historical choices constrain
+or open plausible futures, but uncertainty and scenario language must remain explicit. It may not
+invent future facts, treat a projection as manuscript evidence, write science fiction, assume
+technological progress is inevitable, reduce history to a single system, or import anachronistic
+scientific categories into historical actors. This is another text-free project editorial profile,
+not an additional evidence source.
+
 ## Reader controls
 
 The primary control is **Archivist mode**, because it changes both presentation and answer
@@ -102,9 +209,10 @@ The composer keeps two secondary disclosures:
   appearance-only override. Changing an advanced value marks the preset as customized. Resetting
   restores the active mode's complete defaults.
 
-The seven other legacy visual themes remain available only as advanced appearance choices until
-they receive reviewed interpretive profiles. Choosing one changes presentation without silently
-inventing answer semantics.
+The one remaining legacy visual theme remains available only as an advanced appearance choice
+until it receives a reviewed interpretive profile. Together with the ten semantic-mode
+appearances, the interface therefore exposes eleven visual appearances. Choosing a legacy
+appearance changes presentation without silently inventing answer semantics.
 
 ## API and reproducibility
 
@@ -136,16 +244,29 @@ Offline tests must establish:
 2. retrieval and final source IDs are invariant across modes;
 3. every influence prompt is fixed, hashed, and source-bounded;
 4. Forest does not leak Dunsany proper nouns, quotations, fictional events, or lore;
-5. Professional does not import claims from Craven, Beard, or Du Bois;
-6. unknown mode IDs fail closed;
-7. advanced overrides and retries preserve the resolved per-turn settings; and
-8. public responses disclose the mode without exposing influence texts or private diagnostics.
+5. Cromb does not leak private-manuscript names, quotations, plot, lore, images, or claims;
+6. Tidal does not leak or imitate Melville language, characters, scenes, plot, symbols, or claims;
+7. Ember does not ingest, quote, paraphrase, or imitate Kissinger works and cannot treat realist
+   framing as evidence;
+8. Princess cannot hide or euphemize material harm, and Baron cannot invent tragedy;
+9. Codex remains lowercase-l liberal historical analysis rather than present-day party advocacy
+   and cannot assume progress, reform, or inclusion that the sources do not establish;
+10. Almanac distinguishes supported history from uncertain future implications and cannot invent
+    projections, science-fiction details, teleology, or technological determinism;
+11. Professional does not import claims from Craven, Beard, or Du Bois;
+12. unknown mode IDs fail closed;
+13. advanced overrides and retries preserve the resolved per-turn settings; and
+14. public responses disclose the mode without exposing influence texts or private diagnostics.
 
-Perceptibility and historical groundedness for Professional and Forest require a separate
-reader-facing style smoke. That smoke is development evidence, not a substitute for the held-out
-gold evaluation of factual answer quality.
+Perceptibility and historical groundedness for every non-Essential mode require separate
+reader-facing style smokes, including paired Princess/Baron readings and direct checks that Tidal
+is maritime rather than Forest-like, Ember is realist rather than merely formal, and Codex is
+recognizably liberal without becoming presentist or partisan. Almanac must likewise read as
+systems-minded and future-oriented without turning projections into facts. Those smokes are
+development evidence, not substitutes for the held-out gold evaluation of factual answer quality.
+Held-out and gold evaluation remains explicitly Essential.
 
-Implementation verification completed without provider calls: the full offline suite passed 680
-tests with one intentional skip, repository-wide Ruff lint passed, the production frontend build
-passed, and whitespace checks passed. The session's automated browser surface was unavailable, so
-this milestone does not claim screenshot-level visual QA or a paid perceptibility smoke.
+Implementation verification completed without provider calls: 29 focused backend mode tests and
+the focused frontend mapping test passed; the full offline suite passed 706 tests with one
+intentional skip; repository-wide Ruff lint, the production frontend build, and whitespace checks
+passed. This milestone does not claim screenshot-level visual QA or a paid perceptibility smoke.

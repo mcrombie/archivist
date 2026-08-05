@@ -33,11 +33,25 @@ def test_mode_registry_is_allowlisted_and_versioned():
         ArchivistMode.PROFESSIONAL,
         ArchivistMode.ESSENTIAL,
         ArchivistMode.FOREST,
+        ArchivistMode.CROMB_COO_COO,
+        ArchivistMode.PRETTY_PINK_PRINCESS,
+        ArchivistMode.BALEFUL_BLACK_BARON,
+        ArchivistMode.TIDAL_ARCHIVIST,
+        ArchivistMode.EMBER_AND_INK,
+        ArchivistMode.ILLUMINATED_CODEX,
+        ArchivistMode.COSMIC_ALMANAC,
     }
     assert set(INFLUENCE_PROFILES) == {
         "none",
         "professional_public_history",
         "dunsany_elfland",
+        "cromb_coo_coo_manuscript",
+        "rose_tinted_optimism",
+        "severe_tragic_history",
+        "moby_dick_maritime",
+        "realist_statecraft",
+        "modern_liberal_history",
+        "future_science_history",
     }
     assert all(definition.version for definition in ARCHIVIST_MODES.values())
     assert all(profile.version for profile in INFLUENCE_PROFILES.values())
@@ -81,6 +95,48 @@ def test_omitted_mode_is_essential_and_preserves_the_prompt_byte_for_byte():
             HistoriographicalLens.TRAGIC,
             AnswerVoice.ROMANTIC,
             Worldview.NONE,
+        ),
+        (
+            "cromb_coo_coo",
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.ROMANTIC,
+            Worldview.SECULAR_HUMANIST,
+        ),
+        (
+            "pretty_pink_princess",
+            HistoriographicalLens.TRIUMPHALIST,
+            AnswerVoice.ROMANTIC,
+            Worldview.SECULAR_HUMANIST,
+        ),
+        (
+            "baleful_black_baron",
+            HistoriographicalLens.TRAGIC,
+            AnswerVoice.ROMANTIC,
+            Worldview.NONE,
+        ),
+        (
+            "tidal_archivist",
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.ROMANTIC,
+            Worldview.NONE,
+        ),
+        (
+            "ember_and_ink",
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.PLAINSPOKEN,
+            Worldview.ENLIGHTENMENT_RATIONALIST,
+        ),
+        (
+            "illuminated_codex",
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.SECULAR_HUMANIST,
+        ),
+        (
+            "cosmic_almanac",
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.ENLIGHTENMENT_RATIONALIST,
         ),
     ],
 )
@@ -142,6 +198,126 @@ def test_professional_profile_is_multicausal_without_becoming_evidence():
     )
 
 
+def test_cromb_coo_coo_profile_is_playful_humane_and_strictly_generation_only():
+    block = build_archivist_mode_prompt_block(archivist_mode="cromb_coo_coo")
+    normalized = " ".join(block.split())
+
+    assert "playful but disciplined historical sensibility" in normalized
+    assert "contingency" in normalized
+    assert "official grandeur and ordinary experience" in normalized
+    assert "tenderness, appetite, violence, and absurdity" in normalized
+    assert "must never trivialize suffering" in normalized
+    assert "lucid, lightly whimsical, humane, and precise" in normalized
+    assert "never historical evidence" in normalized
+    assert (
+        "characters, places, creatures, plot, lore, names, distinctive phrases, or claims"
+        in normalized
+    )
+    assert "Do not convert historical actors into fantasy figures" in normalized
+    assert "invent onomatopoeia" in normalized
+    assert "jokes at victims' expense" in normalized
+    assert "every historical fact and citation" in normalized
+    assert "grounded exclusively in *Cradle of the Empire*" in normalized
+
+
+def test_pretty_pink_princess_is_strongly_optimistic_without_suppressing_harm():
+    block = build_archivist_mode_prompt_block(archivist_mode="pretty_pink_princess")
+    normalized = " ".join(block.split())
+
+    assert "deliberately and unmistakably triumphalist" in normalized
+    assert "unmistakably rose-tinted and optimistic" in normalized
+    assert "courage, adaptation, creative agency, fellowship, recovery" in normalized
+    assert "never falsify, omit, bury, euphemize, or minimize harm" in normalized
+    assert "violence, enslavement, dispossession, exploitation" in normalized
+    assert "state it plainly and with the same factual specificity" in normalized
+    assert "Hope is an interpretive judgment" in normalized
+    assert "grounded exclusively in *Cradle of the Empire*" in normalized
+
+
+def test_baleful_black_baron_is_strongly_tragic_but_cannot_invent_tragedy():
+    block = build_archivist_mode_prompt_block(archivist_mode="baleful_black_baron")
+    normalized = " ".join(block.split())
+
+    assert "opening and conclusion recognizably tragic" in normalized
+    assert "strong tragic interpretation" in normalized
+    assert "costs, coercion, violence, broken promises" in normalized
+    assert "do not let a routine balancing sentence dissolve" in normalized
+    assert "Do not invent or exaggerate suffering" in normalized
+    assert "Tragedy should arise from concrete evidence" in normalized
+    assert "grounded exclusively in *Cradle of the Empire*" in normalized
+
+
+def test_tidal_archivist_is_maritime_not_dunsany_or_literary_evidence():
+    block = build_archivist_mode_prompt_block(archivist_mode="tidal_archivist")
+    normalized = " ".join(block.split())
+
+    assert "Moby-Dick" not in block
+    assert "Herman Melville" not in block
+    assert "oceanic scale, long-voyage uncertainty, moral pressure" in normalized
+    assert "limits of command" in normalized
+    assert "image of tide, depth, weather, course, or wake" in normalized
+    assert "Do not quote, paraphrase, imitate, or reproduce" in normalized
+    assert "Dunsany-like mythopoetic forest register" in normalized
+    assert "supplies no historical content" in normalized
+    assert "grounded exclusively in *Cradle of the Empire*" in normalized
+
+
+def test_ember_and_ink_is_realist_statecraft_without_kissinger_text_or_imitation():
+    block = build_archivist_mode_prompt_block(archivist_mode="ember_and_ink")
+    normalized = " ".join(block.split())
+
+    assert "Kissinger" not in block
+    assert "restrained realist statecraft frame" in normalized
+    assert "interests, power, bargaining leverage" in normalized
+    assert "declared principle from operating incentive" in normalized
+    assert "Do not quote, paraphrase, imitate, or claim to channel" in normalized
+    assert "No copyrighted statecraft work is a source" in normalized
+    assert "no outside work may supply historical claims" in normalized
+    assert "grounded exclusively in *Cradle of the Empire*" in normalized
+
+
+def test_illuminated_codex_is_liberal_history_without_party_advocacy():
+    block = build_archivist_mode_prompt_block(archivist_mode="illuminated_codex")
+    normalized = " ".join(block.split())
+    metadata = archivist_mode_metadata("illuminated_codex")
+
+    assert "lowercase-l modern liberal historiography" in normalized
+    assert "individual rights and dignity" in normalized
+    assert "pluralism, representative institutions, rule of law" in normalized
+    assert "reform, inclusion, toleration" in normalized
+    assert "gaps between declared ideals and lived experience" in normalized
+    assert "incremental, contested, reversible, and incomplete" in normalized
+    assert "not as an automatic arc or inevitable destination" in normalized
+    assert "Preserve coercion, exclusion, violence" in normalized
+    assert "Do not turn this frame into present-day party advocacy" in normalized
+    assert "Do not add facts or make uncited claims" in normalized
+    assert "grounded exclusively in *Cradle of the Empire*" in normalized
+    assert metadata["influence_profile_id"] == "modern_liberal_history"
+    assert metadata["influence_provenance"] == []
+
+
+def test_cosmic_almanac_is_future_science_history_without_forecasting():
+    block = build_archivist_mode_prompt_block(archivist_mode="cosmic_almanac")
+    normalized = " ".join(block.split())
+    metadata = archivist_mode_metadata("cosmic_almanac")
+
+    assert "future-science-oriented historical perspective" in normalized
+    assert "long time horizons and connected systems" in normalized
+    assert "ecology and climate, demography, technology, energy" in normalized
+    assert "infrastructure, information, and institutions" in normalized
+    assert "path dependence, feedback loops, thresholds" in normalized
+    assert "constrained or opened plausible later futures" in normalized
+    assert "Keep possibility distinct from evidence" in normalized
+    assert "bounded interpretation, not prediction" in normalized
+    assert "Do not invent future facts" in normalized
+    assert "write science fiction" in normalized
+    assert "technologically deterministic or teleological" in normalized
+    assert "do not import present-day scientific categories" in normalized
+    assert "grounded exclusively in *Cradle of the Empire*" in normalized
+    assert metadata["influence_profile_id"] == "future_science_history"
+    assert metadata["influence_provenance"] == []
+
+
 def test_exact_provenance_stays_in_metadata_not_the_generation_prompt():
     metadata = archivist_mode_metadata("forest")
     prompt = build_archivist_mode_prompt_block(archivist_mode="forest")
@@ -184,6 +360,65 @@ def test_professional_profile_freezes_the_three_reviewed_artifacts():
         assert item["rights_note"] not in prompt
 
 
+def test_cromb_coo_coo_profile_freezes_private_provenance_outside_the_prompt():
+    metadata = archivist_mode_metadata("cromb_coo_coo")
+    prompt = build_archivist_mode_prompt_block(archivist_mode="cromb_coo_coo")
+    provenance = metadata["influence_provenance"]
+
+    assert metadata["archivist_mode"] == "cromb_coo_coo"
+    assert metadata["archivist_mode_version"] == "1"
+    assert metadata["influence_profile_id"] == "cromb_coo_coo_manuscript"
+    assert metadata["influence_profile_version"] == "1"
+    assert provenance == [
+        {
+            "title": "Journey through Cromb Coo Coo",
+            "creator": None,
+            "source_identifier": "owner-supplied:journey-through-cromb-coo-coo:2026-07-30",
+            "source_url": None,
+            "source_sha256": "f67f9ed3f622583abe2fca090d73881ff86a7f801cea88034589c986509ece74",
+            "artifact_modified_at": "2026-07-30T10:05:30-04:00",
+            "rights_note": (
+                "Private owner-supplied manuscript; not redistributed. Reviewed locally "
+                "to derive a bounded literary influence profile."
+            ),
+            "role": "Literary/editorial framing only; never historical evidence.",
+        }
+    ]
+    for value in provenance[0].values():
+        if isinstance(value, str):
+            assert value not in prompt
+
+
+def test_named_literary_and_statecraft_references_stay_in_metadata_only():
+    tidal_metadata = archivist_mode_metadata("tidal_archivist")
+    tidal_prompt = build_archivist_mode_prompt_block(archivist_mode="tidal_archivist")
+    tidal_provenance = tidal_metadata["influence_provenance"][0]
+
+    assert tidal_metadata["influence_profile_id"] == "moby_dick_maritime"
+    assert tidal_provenance["source_identifier"] == "project-gutenberg:15"
+    assert tidal_provenance["source_url"] == (
+        "https://www.gutenberg.org/ebooks/15.epub3.images"
+    )
+    assert tidal_provenance["source_sha256"] == (
+        "8d76f75515a8e10b0ed0657275767f75b4b283177805a1c09c231840a0607d95"
+    )
+    assert tidal_provenance["artifact_modified_at"] == "2026-08-01T07:33:10Z"
+    assert tidal_provenance["title"] not in tidal_prompt
+    assert tidal_provenance["creator"] not in tidal_prompt
+
+    ember_metadata = archivist_mode_metadata("ember_and_ink")
+    ember_prompt = build_archivist_mode_prompt_block(archivist_mode="ember_and_ink")
+    ember_provenance = ember_metadata["influence_provenance"][0]
+
+    assert ember_metadata["influence_profile_id"] == "realist_statecraft"
+    assert ember_provenance["source_identifier"] == (
+        "conceptual-profile:realist-statecraft:no-text-ingested"
+    )
+    assert ember_provenance["source_sha256"] is None
+    assert "No Henry Kissinger work was ingested" in ember_provenance["rights_note"]
+    assert "Henry Kissinger" not in ember_prompt
+
+
 def test_modes_do_not_change_retrieval_inputs(monkeypatch):
     calls = []
     monkeypatch.setattr(web_project, "load_project_chunks", lambda _project_id: CHUNKS)
@@ -211,7 +446,18 @@ def test_modes_do_not_change_retrieval_inputs(monkeypatch):
 
     monkeypatch.setattr(web_project, "run_evidence_planned_answer", fake_pipeline)
 
-    for mode in (ArchivistMode.ESSENTIAL, ArchivistMode.FOREST):
+    modes = (
+        ArchivistMode.ESSENTIAL,
+        ArchivistMode.FOREST,
+        ArchivistMode.CROMB_COO_COO,
+        ArchivistMode.PRETTY_PINK_PRINCESS,
+        ArchivistMode.BALEFUL_BLACK_BARON,
+        ArchivistMode.TIDAL_ARCHIVIST,
+        ArchivistMode.EMBER_AND_INK,
+        ArchivistMode.ILLUMINATED_CODEX,
+        ArchivistMode.COSMIC_ALMANAC,
+    )
+    for mode in modes:
         web_project.answer_project_question_result(
             "current",
             "What happened?",
@@ -219,13 +465,12 @@ def test_modes_do_not_change_retrieval_inputs(monkeypatch):
             archivist_mode=mode,
         )
 
-    assert len(calls) == 2
+    assert len(calls) == len(modes)
     for call in calls:
         assert call["chunks"] == CHUNKS
         assert call["n_results"] == 5
         assert call["resolved_turn"].standalone_question == "What happened?"
-    assert calls[0]["archivist_mode"] is ArchivistMode.ESSENTIAL
-    assert calls[1]["archivist_mode"] is ArchivistMode.FOREST
+    assert [call["archivist_mode"] for call in calls] == list(modes)
 
 
 def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):

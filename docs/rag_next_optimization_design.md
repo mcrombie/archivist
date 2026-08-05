@@ -1,8 +1,8 @@
 # Next RAG optimization: evidence-planned answers
 
-Status: evidence-planned-v25 implemented and verified offline; V24 completed the unchanged
-ten-question development run, and V25 now needs an exact clean freeze followed by one unchanged
-complete development run with no G007 reader-quality veto
+Status: evidence-planned-v26 implemented and verified offline; V24 completed the unchanged
+ten-question development run, V25 added source-bounded completeness, and V26 now needs a focused
+reader confirmation before the next complete unchanged development run
 Scope: Answer Mode only
 Behavior changed by this document: evidence-planned policy available behind the orchestration
 boundary; the legacy answer path remains callable
@@ -2242,3 +2242,35 @@ V25 is implemented but not yet frozen or reader-measured. The next action is an 
 candidate commit followed by one fresh isolated run of all ten unchanged development questions
 with zero retries. G007 remains one descriptive row in that distribution and cannot regain a
 reader-quality veto.
+
+## V26 offline repair: comparison grammar before premise adjudication
+
+A live reader request asked how the manuscript explained one causal topic in the nineteenth
+century versus the twentieth century. Retrieval succeeded and an answer was generated, but the
+answer failed `premise_provenance_mismatch`. Text-free usage diagnostics showed that the final
+validator rejected the generated structure in 0.604 milliseconds after 58.148 seconds and an
+estimated `$0.19791642`; query planning and answer generation accounted for nearly all of both.
+
+The failure began in deterministic routing. The factive pattern could not distinguish the verb in
+`How did X cause Y?` from the noun in `the cause of X`, and the `versus` construction did not have
+a local comparison contract. V26 fixes the route rather than relaxing provenance:
+
+- a bounded, corpus-agnostic `dimension of topic in A versus B` grammar creates one requirement
+  for each side and one requirement for their explicit contrast;
+- its search facets retain the nominal semantics (`causes of X in A`), rather than reversing the
+  relationship into `X cause A`;
+- exact locally resolved comparisons skip the paid planner, while ambiguous clause tails, broad
+  synthesis, and oversized facets defer to it;
+- genuine causal assertions still receive support, counter, and framing lanes; and
+- `evidence-coverage-v10` states the existing strict source-lane predicates directly in the model
+  instructions. The deterministic validator remains unchanged.
+
+The live question was also H020 in the private gold-authoring workbook. Once it was submitted and
+used to choose this repair, it ceased to be held out. Development registry `1.1.0` records it as
+`DEV-MANUAL-008`, and the unattested provenance template now binds the updated registry hash so a
+future gold audit rejects H020 rather than quietly promoting it.
+
+Offline verification passed 693 tests with one intentional skip, repository-wide Ruff, the
+production frontend build, and whitespace checks. No OpenAI request was made. The next bounded
+step is one paid reader confirmation of this comparison in Essential mode; if the trace is
+mechanically valid, report its answer quality as a result rather than making it a new gate.

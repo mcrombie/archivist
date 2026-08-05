@@ -422,7 +422,7 @@ def install_planned_retrieval(monkeypatch, chunks: list[dict]) -> None:
 def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
 
-    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v9"
+    assert rag_pipeline.EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v10"
     assert "exactly one independently checkable factual claim" in instructions
     assert "exactly one terminal citation group" in instructions
     assert "every listed source independently supports" in instructions
@@ -445,6 +445,29 @@ def test_evidence_coverage_prompt_requires_atomic_terminal_citations():
     assert "not manuscript evidence" in instructions
     assert "institutional_handoff" in instructions
     assert "required for that requirement is supported" in instructions
+
+
+def test_evidence_coverage_prompt_enforces_premise_source_lanes():
+    instructions = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
+
+    assert "Premise source lanes are strict" in instructions
+    assert (
+        "for status supported, source_numbers must be nonempty and a subset of "
+        "support_candidate_sources only"
+    ) in instructions
+    assert (
+        "for status contradicted, source_numbers must be nonempty and a subset of the union "
+        "of counter_candidate_sources and framing_candidate_sources only"
+    ) in instructions
+    assert (
+        "when framing_candidate_sources is nonempty, include at least one source from it"
+    ) in instructions
+    assert (
+        "the premise_correction unit must declare and cite exactly the same source_numbers"
+    ) in instructions
+    assert (
+        "for status unresolved, source_numbers must be empty and correction_unit_id must be null"
+    ) in instructions
 
 
 def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():

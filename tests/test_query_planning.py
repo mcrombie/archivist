@@ -561,6 +561,33 @@ def test_route_traits_are_composable_in_stable_order():
     )
 
 
+def test_nominal_cause_versus_question_routes_as_neutral_comparison():
+    question = (
+        "How does the book explain the cause of economic recessions in the "
+        "nineteenth century versus the twentieth century"
+    )
+
+    assert route_question(question) == (RouteTrait.MULTI_PART,)
+    assert RouteTrait.PREMISE_SENSITIVE not in route_question(question)
+    assert requires_planning(question) is False
+
+
+def test_how_did_subject_cause_event_remains_premise_sensitive():
+    question = "How did Project Lumen cause the signal failure?"
+
+    assert route_question(question) == (RouteTrait.PREMISE_SENSITIVE,)
+
+    plan = deterministic_fallback_plan(question)
+
+    assert len(plan.premises) == 1
+    assert [facet.role for facet in plan.facets] == [
+        FacetRole.ORIGINAL,
+        FacetRole.PREMISE_SUPPORT,
+        FacetRole.PREMISE_COUNTER,
+        FacetRole.FRAMING,
+    ]
+
+
 @pytest.mark.parametrize(
     ("question", "surface"),
     [
@@ -1849,6 +1876,129 @@ def test_coordinated_fallback_builds_one_requirement_and_facet_per_clause():
     assert len(plan.requirements) == 2
     assert [facet.facet_id for facet in plan.facets] == ["F0", "F1", "F2"]
     assert {requirement.requirement_id for requirement in plan.requirements} == {"R1", "R2"}
+
+
+def test_nominal_cause_versus_fallback_decomposes_both_sides_and_contrast():
+    question = (
+        "How does the book explain the cause of economic recessions in the "
+        "nineteenth century versus the twentieth century"
+    )
+
+    plan = build_question_plan(question)
+
+    assert plan.traits == (RouteTrait.MULTI_PART,)
+    assert plan.planner_used is False
+    assert plan.fallback_reason is None
+    assert plan.premises == ()
+    assert [requirement.label for requirement in plan.requirements] == [
+        "Causes of economic recessions in the nineteenth century",
+        "Causes of economic recessions in the twentieth century",
+        (
+            "Contrast between the nineteenth century and the twentieth century: "
+            "causes of economic recessions"
+        ),
+    ]
+    assert [facet.role for facet in plan.facets] == [
+        FacetRole.ORIGINAL,
+        FacetRole.MECHANISM,
+        FacetRole.MECHANISM,
+        FacetRole.BROADER_RELATED,
+    ]
+    assert [facet.search_query for facet in plan.facets] == [
+        question,
+        "causes of economic recessions in the nineteenth century",
+        "causes of economic recessions in the twentieth century",
+        (
+            "causes of economic recessions in the nineteenth century versus the "
+            "twentieth century comparison contrast"
+        ),
+    ]
+
+
+def test_nominal_comparison_accepts_plural_dimension_and_vs_abbreviation():
+    question = (
+        "What did the manuscript describe the mechanisms of signal failures in "
+        "Phase Alpha vs. Phase Beta?"
+    )
+
+    plan = build_question_plan(question)
+
+    assert plan.traits == (RouteTrait.MULTI_PART,)
+    assert requires_planning(question) is False
+    assert plan.premises == ()
+    assert [facet.search_query for facet in plan.facets[1:]] == [
+        "mechanisms of signal failures in Phase Alpha",
+        "mechanisms of signal failures in Phase Beta",
+        (
+            "mechanisms of signal failures in Phase Alpha versus Phase Beta "
+            "comparison contrast"
+        ),
+    ]
+
+
+def test_nominal_comparison_uses_rightmost_in_as_the_period_separator():
+    question = (
+        "How does the book explain the causes of banking crises in industrial "
+        "economies in Phase Alpha versus Phase Beta?"
+    )
+
+    plan = build_question_plan(question)
+
+    assert requires_planning(question) is False
+    assert [requirement.label for requirement in plan.requirements] == [
+        "Causes of banking crises in industrial economies in Phase Alpha",
+        "Causes of banking crises in industrial economies in Phase Beta",
+        (
+            "Contrast between Phase Alpha and Phase Beta: causes of banking "
+            "crises in industrial economies"
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        (
+            "How does the book explain the causes of shortages in Phase Alpha "
+            "because policy changed versus Phase Beta?"
+        ),
+        (
+            "How does the book explain the causes of shortages in Phase Alpha "
+            "versus Phase Beta over time?"
+        ),
+    ],
+)
+def test_ambiguous_nominal_comparison_defers_to_planner(question):
+    assert query_planning._nominal_comparison_parts(question) is None
+    assert RouteTrait.MULTI_PART in route_question(question)
+    assert requires_planning(question) is True
+
+
+def test_broad_nominal_comparison_does_not_take_local_planner_bypass():
+    question = (
+        "How does the book explain the causes of institutional change over time "
+        "in Phase Alpha versus Phase Beta?"
+    )
+
+    assert query_planning._nominal_comparison_parts(question) is not None
+    assert route_question(question) == (
+        RouteTrait.BROAD_SYNTHESIS,
+        RouteTrait.MULTI_PART,
+    )
+    assert requires_planning(question) is True
+
+
+def test_oversized_nominal_comparison_defers_instead_of_truncating_a_facet():
+    topic = "institutional transformation " * 4
+    left = "the first historical period " * 2
+    right = "the second extended historical period " * 2
+    question = (
+        f"How does the book explain the causes of {topic}in {left}versus {right}?"
+    )
+
+    assert query_planning._nominal_comparison_parts(question) is None
+    assert RouteTrait.MULTI_PART in route_question(question)
+    assert requires_planning(question) is True
 
 
 def test_homepage_relationship_fallback_searches_both_concepts_and_their_link():

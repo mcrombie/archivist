@@ -66,11 +66,12 @@ dated snapshot is available and selected.
 ## Current UI scope
 
 The reader-facing interface is being treated separately from retrieval quality. It supports a
-multi-turn transcript, contextual follow-up resolution, and three versioned presets that bind
-appearance to answer character: Professional, Essential, and Mythical Forest Folio. Professional
-is the new-visitor frontend default. Essential remains the unchanged Evidence-first + Scholarly +
-None baseline when an API, CLI, or evaluation caller omits a mode. The Forest preset supplies a
-bounded literary influence rather than historical evidence.
+multi-turn transcript, contextual follow-up resolution, and ten versioned presets that bind
+appearance to answer character: Professional, Essential, Mythical Forest Folio, Cromb Coo Coo,
+Pretty Pink Princess, Baleful Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and
+Cosmic Almanac. Professional is the new-visitor frontend default. Essential remains the unchanged
+Evidence-first + Scholarly + None baseline when an API, CLI, or evaluation caller omits a mode.
+The other presets supply bounded literary or editorial influence rather than historical evidence.
 
 An interpretive influence is a reviewed generation instruction, never another answer corpus. It
 may shape emphasis, cadence, and judgment after retrieval, but cannot alter query planning,
@@ -80,10 +81,41 @@ formal qualities distilled from Dunsany's *The King of Elfland's Daughter*. Neit
 placed in Chroma or sent as historical evidence. Exact provenance, hashes, rights cautions, and the
 role contract are recorded in `docs/archivist_modes.md`.
 
+Cromb Coo Coo uses the Cromb appearance with Evidence-first + Romantic + Secular humanist defaults
+and influence profile `cromb_coo_coo_manuscript/1`. Its reviewed traits are affectionate
+absurdity, grotesque high fantasy, comic deflation of grandeur, sensory specificity, tenderness
+amid violence, contingency, and eccentric agency. The owner-supplied 226-page private PDF and
+temporary extracts stay local: they are neither committed nor sent to an API, and no author is
+inferred from the artifact. The profile is generation-only and is forbidden from supplying names,
+plot, lore, quotations, facts, evidence, or citations. Reader-facing Cromb style checks remain
+development smokes; held-out and gold evaluation continues to use Essential.
+
+Pretty Pink Princess is deliberately and visibly optimistic, while still requiring material harm
+to be stated without minimization. Baleful Black Baron makes tragedy, coercion, loss, and
+foreclosed possibilities its dominant judgment without inventing them. Tidal Archivist replaces
+the Forest mode's Dunsany influence with a reviewed, generation-only Moby-Dick profile frozen to
+Project Gutenberg #15. Ember & Ink uses a text-free Realist Statecraft editorial profile associated
+with Henry Kissinger's historical tradition; no Kissinger work is ingested, quoted, paraphrased,
+imitated, or treated as evidence.
+
+Illuminated Codex uses Evidence-first + Scholarly + Secular humanist defaults with the text-free
+`modern_liberal_history/1` profile. It foregrounds rights, dignity, pluralism, toleration,
+representative institutions, rule of law, reform, inclusion, accountable power, and gaps between
+declared ideals and lived access. It treats progress as contested and reversible, not automatic,
+and is explicitly lowercase-l liberal historical analysis rather than current party advocacy.
+
+Cosmic Almanac uses Evidence-first + Scholarly + Enlightenment rationalist defaults with the
+text-free `future_science_history/1` profile. It connects long time horizons, systems, demography,
+ecology and climate where supported, technology, energy, infrastructure, information, institutions,
+path dependence, feedback loops, uncertainty, and plausible future consequences. It cannot invent
+future facts, write science fiction, treat a projection as evidence, or assume technological
+progress is inevitable. All six modes remain downstream of retrieval and keep *Cradle* as the sole
+source of historical facts and citations.
+
 Evidence scope remains a separate control. The independent Historiographical lens, Voice, and
 Worldview selectors now sit under Advanced interpretive settings, together with an explicitly
-appearance-only selector that preserves all ten visual themes. A custom value applies to future
-turns, while each completed turn and retry retains its resolved mode and facets. A non-default
+appearance-only selector that preserves all eleven visual appearances. A custom value applies to
+future turns, while each completed turn and retry retains its resolved mode and facets. A non-default
 voice changes prose style without guaranteeing more text. A non-Evidence-first lens or non-None
 worldview uses a separate structured-output contract with an uncited interpretive opening of two
 or three sentences, the ordinary cited factual answer, and an uncited one-sentence interpretive

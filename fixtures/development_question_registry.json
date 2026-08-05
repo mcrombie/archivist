@@ -1,6 +1,6 @@
 {
   "schema": "archivist.development_question_registry/1",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "normalization": "NFKC+casefold+collapse-whitespace/v1",
   "questions": [
     {
@@ -152,6 +152,11 @@
       "id": "DEV-MANUAL-007",
       "question": "John Rolfe",
       "normalized_sha256": "8681f203a5a2910733092da6eb9e526e641d68e0b2538f3956eafb312e78167e"
+    },
+    {
+      "id": "DEV-MANUAL-008",
+      "question": "How does the book explain the cause of economic recessions in the nineteenth century versus the twentieth century?",
+      "normalized_sha256": "b3e2d8e83beb94bce2e0d853eaafd4292082fec0d78bb3d115a20400424c1e53"
     }
   ]
 }

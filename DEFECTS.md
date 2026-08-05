@@ -45,6 +45,56 @@ Entries below, most recent first.
 
 ---
 
+## [2026-08-04] Six visual themes became Phase 2 interpretive modes
+Phase/Brief: Phase 2 perspective-mode prototype advanced beside the frozen Phase 1 Essential path
+Symptom: Pretty Pink Princess, Baleful Black Baron, Tidal Archive, Ember & Ink, Illuminated Codex,
+and Cosmic Almanac existed as appearance-only choices, but their names implied answer character
+that the application did not actually apply.
+Cause: Phase 2 concern in Phase 1 work plus six mode-specific prompt cohort openings. The owner
+deliberately requested strong semantic behavior: rose-tinted optimism, severe tragedy,
+Moby-Dick-informed maritime framing, Kissinger-associated realist statecraft, and lowercase-l
+modern liberal history, followed by a systems-minded future-science perspective.
+Resolution and verification: promoted the six appearances to allowlisted, versioned semantic
+modes while leaving omitted-mode and explicit Essential behavior unchanged. Influence is inserted
+only after retrieval and cannot enter Chroma, source admission, citations, premise handling, or
+absence decisions. Princess explicitly may not suppress harm; Baron may not invent tragedy; Tidal
+uses a frozen public-domain Project Gutenberg #15 provenance record but may not quote, paraphrase,
+imitate, or import literary content; Ember uses a text-free project editorial profile and no
+Kissinger work is ingested, quoted, paraphrased, imitated, cited, or treated as evidence; Codex
+must treat liberal progress as contested rather than automatic and may not become present-day party
+advocacy; Almanac may discuss plausible future implications only as explicit uncertainty and may
+not invent predictions, science fiction, teleology, or anachronistic scientific claims. Focused
+backend tests, the focused frontend mapping test, and the complete offline suite establish those
+mechanical boundaries. Reader-facing perceptibility and groundedness remain unconfirmed until
+separate paid style smokes; none of these modes may be used as evidence about Essential or the
+held-out gold cohort.
+
+## [2026-08-04] A neutral comparison was misrouted as a disputed premise
+Phase/Brief: Phase 1 Answer Mode, live reader test after semantic mode deployment
+Symptom: the question asking how the book explains nineteenth-century versus twentieth-century
+recessions retrieved evidence and generated an answer, then failed after 58.148 seconds and an
+estimated `$0.19791642` with `premise_provenance_mismatch`. The deterministic validator took
+0.604 milliseconds; planning and generation consumed essentially all latency and spend.
+Cause: model error in application routing plus a prompt cohort opening. The factive-question regex
+treated the noun phrase `cause of` as the causal verb `cause`, while `versus` had no bounded local
+comparison decomposition. The system therefore invented support/counter/framing premise lanes for
+a neutral comparison. The generation prompt also described those lanes without stating the
+validator's exact subset rules.
+Resolution and verification: opened `evidence-planned-v26` and `evidence-coverage-v10`. A
+corpus-agnostic bounded grammar now decomposes `dimension of topic in A versus B` into both sides
+and an explicit contrast, preserves the nominal phrase in retrieval queries, and skips the paid
+planner only for the exact locally resolved route. Ambiguous, broad, or oversized forms defer to
+the planner. Genuine `How did X cause Y?` questions retain premise checking. The strict provenance
+validator was not weakened; its source-lane predicates are now explicit in the generation prompt.
+The complete offline suite passed 693 tests with one intentional skip, Ruff passed, and the
+production frontend built. No provider call was made for the repair.
+
+Governance consequence: the failed question was H020 in the private authoring workbook. Because it
+was submitted to Archivist and directly shaped this repair, it is now `DEV-MANUAL-008` in
+development registry `1.1.0` and is permanently ineligible for the genuinely held-out gold set.
+The unattested provenance template was rebound to the updated registry hash; H020 needs a fresh
+owner-authored replacement before gold lock.
+
 ## [2026-08-01] Full-context v1 trusted its own completeness and absence assertions
 Phase/Brief: Phase 1 full-context answer strategy, review after the first paid G007 debugging run
 Symptom: the live answer self-reported `valid_complete`, while subsequent strict manual grading

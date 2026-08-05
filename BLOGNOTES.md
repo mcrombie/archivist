@@ -3110,6 +3110,131 @@ the past. Making that honest requires more than colorful CSS: the interface must
 the prompt must bound what influence is allowed to do, the evidence lane must remain exclusive,
 and the neutral experimental control must still be reproducible after the public default changes.
 
+### 2026-08-04 - Cromb Coo Coo became the fourth semantic Archivist mode
+
+- Joined the Cromb visual appearance to a reader-facing semantic preset with Evidence-first,
+  Romantic, and Secular humanist defaults. The fixed influence profile is
+  `cromb_coo_coo_manuscript/1`. Professional remains the first-visitor default, while Essential
+  remains the omitted-mode compatibility baseline and the only mode used for held-out and gold
+  evaluation.
+- Distilled only reviewed formal traits from the private manuscript: affectionate absurdity,
+  grotesque high fantasy, comic deflation of grandeur, sensory specificity, tenderness amid
+  violence, and an emphasis on contingency and eccentric agency. The profile cannot quote,
+  paraphrase, summarize, name, or allude to the manuscript's people, places, events, plot, lore,
+  phrases, images, or factual claims.
+- Froze a text-free local identity record for the owner-supplied private PDF without inferring an
+  author: `Journey through Cromb Coo Coo_7_30_2026.pdf`, 226 pages, 815,751 bytes, SHA-256
+  `f67f9ed3f622583abe2fca090d73881ff86a7f801cea88034589c986509ece74`, file modified
+  `2026-07-30 10:05:30 -04:00`, PDF metadata creation `2026-07-30 10:05:29 -04:00`, created with
+  Scrivener for Windows.
+- Kept the private boundary mechanical. The PDF and temporary extracts are neither committed nor
+  sent to an API. They do not enter Chroma, retrieval, evidence admission, source numbering,
+  citations, completeness or absence checks, source cards, follow-up evidence, or logs. Only the
+  short reviewed profile may affect generation after *Cradle* evidence is fixed.
+- The interface now has four semantic modes and eleven visual appearances. The seven remaining
+  legacy appearances remain appearance-only, so adding Cromb semantics did not quietly give those
+  older themes invented answer behavior.
+- Verified the implementation without provider calls: 683 offline tests passed with one intentional
+  skip, repository-wide Ruff lint and focused formatting checks passed, the production frontend
+  build passed, and whitespace checks passed. Browser screenshot automation remained unavailable,
+  so perceptibility still needs a later manual or automated reader-facing smoke.
+
+Useful blog lesson: a private creative work can influence an answer's sensibility without becoming
+another answer corpus. The safe unit is not the manuscript text but a short reviewed contract that
+names permitted formal qualities, forbids content leakage, and enters only after the historical
+evidence has already been selected.
+
+### 2026-08-04 - One expensive rejection began with one small grammatical mistake
+
+- Traced a live Forest Folio failure for a nineteenth-versus-twentieth-century recession question
+  through the text-free usage ledger. Archivist had found evidence and generated an answer; the
+  strict validator rejected it afterward with `premise_provenance_mismatch`. Validation took only
+  0.604 milliseconds. The request's 58.148 seconds and estimated `$0.19791642` were spent almost
+  entirely on a planner call and answer generation that should never have received that premise
+  contract.
+- Found the root cause in deterministic routing, not in the Forest style or vector retrieval. A
+  regex read the noun phrase `the cause of recessions` as though the reader had asserted `X caused
+  Y`. At the same time, the router recognized neither side of `A versus B` as a bounded comparison,
+  so it invented support, counter, and framing lanes for the whole question.
+- Opened `evidence-planned-v26` with a corpus-agnostic comparison grammar. It creates one
+  requirement for each side and a third for the contrast, keeps phrases such as `causes of X in A`
+  intact in retrieval queries, and avoids the paid planner when that exact shape is locally
+  unambiguous. Questions with subordinate assumptions, broad time spans, or oversized operands
+  still go to the planner. Ordinary `How did X cause Y?` questions still receive premise checks.
+- Kept the provenance validator strict. Instead of broadening eligible sources or silently
+  rewriting model output, `evidence-coverage-v10` now tells the model the exact source-lane rules
+  the application already enforced: supported premises cite support sources; contradicted ones
+  cite counter/framing sources and include framing when available; unresolved ones cite nothing.
+- The question had been drafted as H020 in the private gold-authoring workbook. Because it was
+  submitted to Archivist and then used to choose a repair, it is no longer genuinely held out.
+  Registered it as `DEV-MANUAL-008`, advanced the development registry to `1.1.0`, and rebound the
+  unattested provenance template so the eventual gold audit will reject it. A new owner-authored
+  H020 replacement will be needed before gold lock.
+- Verification made no provider calls: 693 offline tests passed with one intentional skip,
+  repository-wide Ruff passed, the production frontend built, and whitespace checks passed. The
+  repaired route still needs one paid reader confirmation; offline correctness is not being
+  presented as proof that the answer itself will be good.
+
+Useful blog lesson: an elegant LLM context window begins before the context exists. A single word
+can assign a question to the wrong evidence contract, causing a capable model to spend time and
+money answering a problem the reader never posed. Good orchestration is partly the art of knowing
+when *not* to call another model.
+
+### 2026-08-04 - Six visual themes acquired a historical point of view
+
+- Promoted Pretty Pink Princess, Baleful Black Baron, Tidal Archive, Ember & Ink, and Illuminated
+  Codex, followed by Cosmic Almanac, from appearance-only overrides to versioned semantic Archivist
+  modes. The interface now offers ten coherent mode presets while retaining all eleven appearances
+  under Advanced controls.
+- Made the contrasts deliberately legible. Pretty Pink Princess uses Triumphalist + Romantic +
+  Secular humanist defaults and looks for courage, fellowship, adaptation, recovery, and possibility.
+  Its optimism cannot erase or euphemize violence, enslavement, dispossession, exploitation, or
+  failure. Baleful Black Baron uses Tragic + Romantic + None and makes cost, coercion, broken
+  promises, narrowing choices, and foreclosed alternatives its dominant judgment without inventing
+  suffering or inevitability.
+- Replaced Tidal's previously cosmetic ocean theme with a Moby-Dick-informed maritime profile:
+  oceanic scale, long-voyage uncertainty, moral pressure, hierarchy, obsession, limits of command,
+  and restrained images of tide, depth, weather, course, or wake. It is intentionally distinct from
+  Forest Folio's Dunsany register. The reviewed reference is Project Gutenberg #15, Gutenberg's
+  preferred transcription based on the 1851 first American edition, frozen at SHA-256
+  `8d76f75515a8e10b0ed0657275767f75b4b283177805a1c09c231840a0607d95` and artifact timestamp
+  `2026-08-01T07:33:10Z`. No literary text enters retrieval or a live prompt, and the mode may not
+  quote, paraphrase, imitate, or import Melville's characters, scenes, plot, symbols, or claims.
+- Defined Ember & Ink as Realist Statecraft: a controlled, unsentimental reading attentive to
+  interests, power, leverage, security, institutions, constraints, tradeoffs, and unintended
+  consequences. Henry Kissinger is named only as an association with that broader historical
+  tradition. No Kissinger work is ingested, retrieved, embedded, stored, cited, quoted, paraphrased,
+  or imitated; the profile is a short, text-free project-authored contract rather than an authorial
+  voice simulation.
+- Defined Illuminated Codex as a lowercase-l modern liberal historian. It asks how rights,
+  dignity, pluralism, toleration, representative institutions, rule of law, reform, inclusion,
+  and accountable power changed who could participate and who remained excluded. It also requires
+  the gap between declared ideals and lived access to remain visible, treats progress as contested,
+  reversible, and uneven rather than automatic, and bars present-day party advocacy or the use of
+  historical actors as proxies for current factions.
+- Defined Cosmic Almanac as a future-science historian. It reads across long time horizons and
+  looks for systems linking demography, ecology and climate where supported, technology, energy,
+  infrastructure, information, institutions, path dependence, and feedback loops. It may discuss
+  how historical choices constrain or open plausible futures only with explicit uncertainty; it
+  may not invent future facts, write science fiction, treat projections as evidence, assume
+  technological destiny, or explain historical actors through categories they did not possess.
+- Kept the experimental boundary intact. All new profiles enter only after *Cradle* evidence has
+  been selected. Essential is still byte-identical when omitted or selected explicitly and remains
+  the sole held-out and gold-evaluation mode. The new modes open four Phase 2 style cohorts, not a
+  new claim about neutral RAG quality.
+- Verification used no provider calls: 29 focused backend mode tests and the focused frontend
+  mapping test passed; the complete offline suite passed 706 tests with one intentional skip;
+  repository-wide Ruff, the production frontend build, and whitespace checks passed. Paid paired
+  style smokes remain a separate follow-up because offline prompt inspection cannot establish
+  reader-visible tone.
+
+Useful blog lesson: a dramatic theme is honest only when its invitation to interpret the past is
+named and bounded. The Princess and Baron may disagree about meaning without disagreeing about
+facts; Tidal and Ember may borrow a method or atmosphere without turning another author's work into
+evidence; Codex may test institutions against liberal ideals without importing a current party
+program; Almanac may look toward plausible futures without pretending they have already happened.
+The most important implementation detail is where that influence enters the context.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

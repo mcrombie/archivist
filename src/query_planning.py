@@ -780,7 +780,8 @@ _WHY_PRESUPPOSITION = re.compile(
 )
 _HOW_FACTIVE_PREDICATE = re.compile(
     r"\bhow\s+(?:did|does|do|was|were|is|are|has|have|had)\b.{0,180}"
-    r"\b(?:caus(?:e|ed|es|ing)|creat(?:e|ed|es|ing)|found(?:ed|ing)?|"
+    r"\b(?:caus(?:e|es)(?!\s+of\b)|caused|causing|"
+    r"creat(?:e|ed|es|ing)|found(?:ed|ing)?|"
     r"begin|began|start(?:ed|ing)?|originat(?:e|ed|es|ing)|lead|led|"
     r"prevent(?:ed|ing)?|prov(?:e|ed|es|ing)|first)\b",
     re.IGNORECASE,
@@ -806,6 +807,10 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
     turn = _coerce_resolved_turn(question)
     text = turn.standalone_question
     traits: set[RouteTrait] = set()
+    nominal_comparison = _nominal_comparison_parts(text)
+    nominal_comparison_syntax = bool(
+        _NOMINAL_COMPARISON_REQUEST.fullmatch(text)
+    )
     between_relationship_syntax = bool(_BETWEEN_RELATIONSHIP_REQUEST.search(text))
     bounded_between_relationship = _bounded_between_relationship_parts(text) is not None
 
@@ -827,6 +832,7 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
         or len(_ENUMERATED_REQUEST.findall(text)) > 1
         or _PLURAL_REQUEST.search(text)
         or len({match.rstrip("s") for match in dimension_matches}) > 1
+        or nominal_comparison_syntax
     ):
         traits.add(RouteTrait.MULTI_PART)
 
@@ -845,7 +851,7 @@ def route_question(question: str | ResolvedTurn) -> tuple[RouteTrait, ...]:
         else:
             traits.add(RouteTrait.BROAD_SYNTHESIS)
 
-    if not bounded_between_relationship:
+    if not bounded_between_relationship and nominal_comparison is None:
         if (
             _ATTRIBUTED_PREMISE.search(text)
             or _FACTIVE_INTRODUCTION.search(text)
@@ -886,6 +892,11 @@ def requires_planning(question: str | ResolvedTurn) -> bool:
     if (
         traits == (RouteTrait.RELATIONSHIP,)
         and _relational_parts(turn.standalone_question) is not None
+    ):
+        return False
+    if (
+        traits == (RouteTrait.MULTI_PART,)
+        and _nominal_comparison_parts(turn.standalone_question) is not None
     ):
         return False
     return bool(traits)
@@ -2181,6 +2192,85 @@ _DIMENSION_ROLE = {
     "consequence": FacetRole.ENDPOINT,
 }
 
+_NOMINAL_COMPARISON_REQUEST = re.compile(
+    r"^\s*(?:how|what)\s+(?:does|do|did)\s+"
+    r"(?:(?:the|this|that)\s+)?(?:manuscript|book|text|author|account)\s+"
+    r"(?:explain|describe|frame|present|treat|compare)\s+"
+    r"(?:(?:the|a)\s+)?"
+    r"(?P<dimension>causes?|mechanisms?|consequences?)\s+of\s+"
+    r"[^\r\n]{1,280}?\s+(?:versus|vs\.?)\s+[^\r\n]{1,120}?"
+    r"\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+_NOMINAL_COMPARISON_PATTERN = re.compile(
+    r"^\s*(?:how|what)\s+(?:does|do|did)\s+"
+    r"(?:(?:the|this|that)\s+)?(?:manuscript|book|text|author|account)\s+"
+    r"(?:explain|describe|frame|present|treat|compare)\s+"
+    r"(?:(?:the|a)\s+)?"
+    r"(?P<dimension>causes?|mechanisms?|consequences?)\s+of\s+"
+    r"(?P<body>[^?.!,;\r\n]{3,225}?)\s+(?:versus|vs\.?)\s+"
+    r"(?P<right>[^?.!,;\r\n]{1,100}?)\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+_COMPARISON_SCOPE_SEPARATOR = re.compile(r"\s+in\s+", re.IGNORECASE)
+_AMBIGUOUS_COMPARISON_OPERAND_TAIL = re.compile(
+    r"\b(?:as|because|although|though|while|when|where|which|who|whose|"
+    r"despite|unless|until|given|assuming|according)\b|"
+    r"\bover\s+time\b|"
+    r"in\s+light\s+of\s+the\s+fact\s+that|"
+    r"on\s+the\s+assumption\s+that",
+    re.IGNORECASE,
+)
+
+
+def _nominal_comparison_parts(
+    question: str,
+) -> tuple[str, str, str, str] | None:
+    """Extract a bounded ``dimension of topic in A versus B`` comparison."""
+
+    match = _NOMINAL_COMPARISON_PATTERN.fullmatch(question)
+    if match is None:
+        return None
+
+    body = match.group("body")
+    separators = tuple(_COMPARISON_SCOPE_SEPARATOR.finditer(body))
+    if not separators:
+        return None
+    separator = separators[-1]
+
+    dimension = normalize_search_query(match.group("dimension")).rstrip("s")
+    topic = _bounded_text(body[: separator.start()].strip(" ,;:?"))
+    left = _bounded_text(body[separator.end() :].strip(" ,;:?"))
+    right = _bounded_text(match.group("right").strip(" ,;:?"))
+    if (
+        dimension not in _DIMENSION_ROLE
+        or not topic
+        or not left
+        or not right
+        or normalize_search_query(left) == normalize_search_query(right)
+        or _AMBIGUOUS_COMPARISON_OPERAND_TAIL.search(left)
+        or _AMBIGUOUS_COMPARISON_OPERAND_TAIL.search(right)
+        or re.search(r"\b(?:versus|vs\.?)\b", topic, flags=re.IGNORECASE)
+        or re.search(r"\b(?:versus|vs\.?)\b", left, flags=re.IGNORECASE)
+        or re.search(r"\b(?:versus|vs\.?)\b", right, flags=re.IGNORECASE)
+    ):
+        return None
+
+    dimension_label = {
+        "cause": "causes",
+        "mechanism": "mechanisms",
+        "consequence": "consequences",
+    }[dimension]
+    focus = f"{dimension_label} of {topic}"
+    search_queries = (
+        f"{focus} in {left}",
+        f"{focus} in {right}",
+        f"{focus} in {left} versus {right} comparison contrast",
+    )
+    if any(len(" ".join(query.split())) > MAX_SEARCH_QUERY_CHARS for query in search_queries):
+        return None
+    return dimension, topic, left, right
+
 
 def _bounded_text(value: str, limit: int = MAX_SEARCH_QUERY_CHARS) -> str:
     collapsed = " ".join(value.split()).strip(" ,;")
@@ -2572,6 +2662,7 @@ def deterministic_fallback_plan(
     premises: tuple[PremiseHypothesis, ...] = ()
 
     span = _START_END_PATTERN.search(question)
+    nominal_comparison = _nominal_comparison_parts(question)
     relational = _relational_parts(question)
     if span:
         start = _bounded_text(span.group("start"))
@@ -2618,6 +2709,42 @@ def deterministic_fallback_plan(
                     f"endpoint {context} {end}",
                 ),
             )
+    elif nominal_comparison is not None:
+        dimension, topic, left, right = nominal_comparison
+        dimension_label = {
+            "cause": "Causes",
+            "mechanism": "Mechanisms",
+            "consequence": "Consequences",
+        }[dimension]
+        focus = f"{dimension_label} of {topic}"
+        requirements = (
+            _fallback_requirement(1, f"{focus} in {left}"),
+            _fallback_requirement(2, f"{focus} in {right}"),
+            _fallback_requirement(
+                3,
+                f"Contrast between {left} and {right}: {focus.casefold()}",
+            ),
+        )
+        facets = (
+            _fallback_facet(
+                1,
+                requirements[0],
+                _DIMENSION_ROLE[dimension],
+                f"{focus.casefold()} in {left}",
+            ),
+            _fallback_facet(
+                2,
+                requirements[1],
+                _DIMENSION_ROLE[dimension],
+                f"{focus.casefold()} in {right}",
+            ),
+            _fallback_facet(
+                3,
+                requirements[2],
+                FacetRole.BROADER_RELATED,
+                f"{focus.casefold()} in {left} versus {right} comparison contrast",
+            ),
+        )
     elif relational is not None:
         left, right, predicate, relationship_context = relational
         relationship_label = _bounded_text(

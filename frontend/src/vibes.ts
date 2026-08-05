@@ -13,6 +13,11 @@ export const VIBES = [
     description: "Deep greens, vellum, and botanical warmth."
   },
   {
+    id: "cromb",
+    label: "Cromb Coo Coo",
+    description: "Plum twilight, goblin green, cloud cream, and cheerful disorder."
+  },
+  {
     id: "minimal",
     label: "Essential",
     description: "Quiet monochrome with almost no ornament."
