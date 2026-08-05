@@ -1,4 +1,4 @@
-"""Flag possible manuscript quotation in an owner-authored gold set.
+"""Flag possible manuscript quotation in an owner-adjudicated gold set.
 
 The audit finds exact contiguous normalized token runs. Its report intentionally
 contains only gold IDs, chunk IDs, and token counts; matching words are never
@@ -74,9 +74,7 @@ def _verified_chunk_tokens(
 
     missing = sorted(set(expected_by_id) - set(result))
     if missing:
-        raise PrivacyAuditError(
-            f"local chunk payload is missing {len(missing)} manifest chunks"
-        )
+        raise PrivacyAuditError(f"local chunk payload is missing {len(missing)} manifest chunks")
     return result
 
 
@@ -127,6 +125,11 @@ def audit_gold_privacy(
         claims = item.get("claims")
         if not isinstance(claims, list):
             raise PrivacyAuditError("gold items require claims arrays")
+        prose_fields: list[tuple[str, str, str]] = []
+        question = item.get("question")
+        if not isinstance(question, str):
+            raise PrivacyAuditError("gold items require string questions")
+        prose_fields.append(("question", "question", question))
         for claim in claims:
             if (
                 not isinstance(claim, dict)
@@ -134,14 +137,31 @@ def audit_gold_privacy(
                 or not isinstance(claim.get("text"), str)
             ):
                 raise PrivacyAuditError("gold claims require string claim_id and text")
-            tokens = _tokens(str(claim["text"]))
+            prose_fields.append(("claim", str(claim["claim_id"]), str(claim["text"])))
+
+        must_not_claim = item.get("must_not_claim")
+        if not isinstance(must_not_claim, list) or not all(
+            isinstance(value, str) for value in must_not_claim
+        ):
+            raise PrivacyAuditError("gold items require string must_not_claim arrays")
+        prose_fields.extend(
+            ("must_not_claim", f"must_not_claim[{index}]", value)
+            for index, value in enumerate(must_not_claim)
+        )
+        notes = item.get("notes")
+        if not isinstance(notes, str):
+            raise PrivacyAuditError("gold items require string notes")
+        prose_fields.append(("notes", "notes", notes))
+
+        for field, entry_id, prose in prose_fields:
+            tokens = _tokens(prose)
             longest_by_chunk: dict[str, int] = {}
-            for claim_start in range(len(tokens) - minimum_run_tokens + 1):
-                ngram = tuple(tokens[claim_start : claim_start + minimum_run_tokens])
+            for prose_start in range(len(tokens) - minimum_run_tokens + 1):
+                ngram = tuple(tokens[prose_start : prose_start + minimum_run_tokens])
                 for chunk_id, chunk_start in ngram_positions.get(ngram, []):
                     length = _longest_match_from(
                         tokens,
-                        claim_start,
+                        prose_start,
                         chunk_tokens[chunk_id],
                         chunk_start,
                     )
@@ -153,7 +173,8 @@ def audit_gold_privacy(
                 flags.append(
                     {
                         "item_id": item["id"],
-                        "claim_id": claim["claim_id"],
+                        "field": field,
+                        "entry_id": entry_id,
                         "chunk_id": chunk_id,
                         "matched_token_count": matched_count,
                     }
@@ -162,12 +183,13 @@ def audit_gold_privacy(
     flags.sort(
         key=lambda flag: (
             str(flag["item_id"]),
-            str(flag["claim_id"]),
+            str(flag["field"]),
+            str(flag["entry_id"]),
             str(flag["chunk_id"]),
         )
     )
     return {
-        "schema": "archivist.gold_privacy_audit/1",
+        "schema": "archivist.gold_privacy_audit/2",
         "minimum_run_tokens": minimum_run_tokens,
         "flag_count": len(flags),
         "flags": flags,

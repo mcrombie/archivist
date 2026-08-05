@@ -4,6 +4,12 @@ The experimental control. These definitions are **authored by the project owner 
 
 This file specifies *what is measured and how*. It does not specify how to implement a harness, and it does not contain thresholds for what counts as good — those live in §8 and are authored at a specific, stated moment.
 
+**Owner-authorized amendment, 2026-08-05:** §3.1 now permits blinded external-AI drafts of
+annotation fields under source-level owner adjudication. No held-out run had occurred under the
+superseded owner-only annotation rule, so this change invalidates no formal result; all earlier
+practical runs remain development evidence only. Provenance for the eventual first run uses
+`archivist.gold_provenance/2` and records the assistance explicitly.
+
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. Both lock after the calibration pilot (Brief 6) answers what only runs can answer; the open questions are enumerated at the end of each section, split by whether they are desk questions or run questions.
 
 ---
@@ -120,7 +126,7 @@ repeated only to establish that the measurement path works; it does not acquire 
 threshold through repetition.
 
 No repeatedly tuned practical item may become a formal release gate or be moved into the held-out
-gold set. Formal quality decisions use the owner-authored gold set, the metrics in §§4–7, the
+gold set. Formal quality decisions use the owner-adjudicated held-out gold set, the metrics in §§4–7, the
 noise-floor rule in §1.4, and the envelopes written into §8 at the contracted time.
 
 ---
@@ -187,11 +193,49 @@ Re-verification is a mechanical check and must be implemented as one. It is not 
 
 ### 3.1 Purpose and constraints
 
-The gold set is the input to all three measurements. It is **authored by the project owner from knowledge of the manuscript**, not extracted from it by a model.
+The gold set is the input to all three measurements. Its **questions, strata, expected behaviors,
+and inclusion decisions are authored by the project owner without seeing candidate-system
+output**. Those fields define what the system must be tested on and may not be proposed, selected,
+removed, or rewritten by an annotation model.
 
-**This is a hard rule, and the reason is circularity.** If the same class of model that generates answers also authors the questions and answers, the evaluation measures agreement between two runs of the same system rather than correctness. A model-authored gold set will systematically fail to contain the questions the system is bad at, because the model that authored it had the same blind spots. Model assistance is permitted for *formatting, deduplication, and schema validation*; it is not permitted for deciding what the correct answer is or where it lives.
+Held-out independence is substantive, not merely lexical. Replacing one date, entity, or comparison
+endpoint in a development question does not make its close twin held out when that question form or
+topic already shaped a candidate repair. A near-match review may approve genuinely different
+questions that share vocabulary; it may not waive a parameter substitution or known tuned failure
+family into the gold set.
 
-Claims are stated **in the author's own words**, never as quoted passages, so the gold set is committable without reproducing the book.
+An external model may produce a **blinded annotation draft** for the remaining fields: claims,
+essentiality, claim-specific supporting chunk IDs, question-wide relevant chunk IDs,
+`must_not_claim`, and notes. This is assistance with evidence discovery and drafting, not delegated
+ground-truth authority. Every proposed field remains unverified until the
+owner checks it against the private corpus, independently searches for omissions, decides whether
+to accept, revise, or reject it, and rewrites every accepted claim and other committed prose in the
+owner's own words.
+
+The annotation model may receive only the frozen owner-authored questions, the eligible private
+corpus and stable chunk identifiers, the corpus manifest, and the annotation instructions. It may
+not receive or search for Archivist answers, retrieved chunks selected by Archivist, planner or
+generation traces, development-run answers, scores, known candidate failures, or any other
+candidate-system output. Discovery of such material stops annotation for the affected batch and is
+recorded as possible benchmark contamination. The annotation model may not later serve as the
+evaluation judge for this gold set.
+
+**The hard rule is independence, not the fiction that a tool touched no draft text.** Allowing a
+model to choose the questions or allowing its plausible annotations to pass without source-level
+owner adjudication would make the benchmark measure model agreement rather than correctness. The
+owner therefore verifies every claim, essential flag, support location, exhaustive relevance set,
+prohibited claim, and note. A rubber-stamp review does not satisfy this contract.
+
+Before assistance begins, a text-free hash commits the ordered IDs, questions, strata, and expected
+behaviors. The provenance sidecar records that commitment plus the annotation method, provider,
+displayed model identifier and surface, canonical prompt path and hash, private draft path and hash,
+drafting completion time, and the owner's explicit attestations. Where a consumer surface exposes
+only a moving alias rather than a dated snapshot, that reproducibility limitation is recorded rather
+than guessed away.
+
+All committed claims, `must_not_claim` entries, and notes are stated **in the owner's own words**,
+never as quoted passages, so the gold set is committable without reproducing the book. Raw AI
+drafts and manuscript-bearing inputs remain private and gitignored.
 
 ### 3.2 Schema — `archivist.gold/1`
 
@@ -262,7 +306,7 @@ Conflating these is the most likely schema error, and it would silently corrupt 
 
 **A gold set of this size cannot resolve small differences.** At 10 items in a stratum, the standard error on a proportion near 0.5 is roughly 16 percentage points; a within-stratum difference below about 15–20 points is not distinguishable from sampling variation, independently of the run-to-run noise floor in §1.4.
 
-This is stated in advance, deliberately, and it **bounds what the post-baseline briefs may claim**. It is a real limitation of a hand-authored gold set at feasible scale, and the correct response is to report it rather than to over-read the numbers. Aggregate (all-strata) figures are correspondingly tighter and may support smaller claims; per-stratum figures may not.
+This is stated in advance, deliberately, and it **bounds what the post-baseline briefs may claim**. It is a real limitation of an owner-designed and owner-adjudicated gold set at feasible scale, and the correct response is to report it rather than to over-read the numbers. Aggregate (all-strata) figures are correspondingly tighter and may support smaller claims; per-stratum figures may not.
 
 ### 3.6 Validation
 

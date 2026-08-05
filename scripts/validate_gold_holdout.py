@@ -20,7 +20,7 @@ from gold_provenance import (  # noqa: E402
 from gold_set import GoldSetValidationError, validate_gold_set_file  # noqa: E402
 
 
-DEFAULT_POLICY = "evidence-planned-v21"
+DEFAULT_POLICY = "evidence-planned-v26"
 _FULL_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # These are the only files allowed to differ from the frozen system candidate
@@ -34,16 +34,19 @@ ALLOWED_POST_FREEZE_PATHS = frozenset(
         "README.MD",
         "ROADMAP.md",
         "docs/gold_set_authoring.md",
+        "docs/gold_annotation_prompt_claude.md",
         "docs/gold_set_pilot_intake.md",
         "fixtures/development_question_registry.json",
         "fixtures/gold_set.json",
         "fixtures/gold_set.provenance.json",
         "fixtures/gold_set.provenance.template.json",
         "fixtures/gold_set.template.json",
+        "fixtures/gold_questions.commitment.json",
         "scripts/audit_gold_privacy.py",
         "scripts/audit_gold_leakage.py",
         "scripts/check_gold_carryover.py",
         "scripts/create_gold_authoring_workbook.py",
+        "scripts/fingerprint_gold_questions.py",
         "scripts/gold_authoring_workbench.py",
         "scripts/validate_gold_holdout.py",
         "src/gold_provenance.py",
@@ -141,7 +144,7 @@ def validate_candidate_lock(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate a final owner-authored held-out gold set, its exact "
+            "Validate a final owner-designed, owner-adjudicated held-out gold set, its exact "
             "provenance bindings, and optionally the frozen-candidate Git boundary."
         )
     )
@@ -208,6 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_gold_set_path=args.expected_gold_path,
             expected_candidate_commit=args.candidate_commit,
             expected_rag_policy=args.rag_policy,
+            repository_root=BASE_DIR,
         )
         changed: tuple[str, ...] = ()
         if args.lock:
@@ -226,6 +230,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(f"Candidate commit: {provenance_summary.candidate_commit}")
     print(f"RAG policy: {provenance_summary.candidate_rag_policy}")
+    print(
+        "Annotation assistance: "
+        f"{provenance_summary.annotation_provider} / "
+        f"{provenance_summary.annotation_model}"
+    )
     print(f"Gold-set SHA-256: {provenance_summary.gold_set_sha256}")
     if args.lock:
         print(

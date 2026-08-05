@@ -2409,7 +2409,22 @@ function ConversationComposer({
               <p>{selectedMode.disclosure}</p>
             </div>
             {evidenceScopeSettings}
-            {deliverySettings}
+            {deliverySettings ? (
+              <details className="chat-advanced-interpretive-settings chat-advanced-delivery-settings">
+                <summary>
+                  <span>
+                    <strong>Advanced delivery settings</strong>
+                    <small>
+                      {responseDelivery === "progressive"
+                        ? "Progressive response · Experimental"
+                        : "Complete answer · Recommended"}
+                    </small>
+                  </span>
+                  <ChevronDown size={15} aria-hidden="true" />
+                </summary>
+                <div>{deliverySettings}</div>
+              </details>
+            ) : null}
             <details className="chat-advanced-interpretive-settings">
               <summary>
                 <span>

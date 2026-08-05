@@ -1,14 +1,16 @@
 """Mechanical provenance and leakage checks for a held-out gold set.
 
 This module never judges historical correctness and never authors gold
-content.  It binds an owner-authored gold file to a frozen candidate, corpus
-manifest, and development-question registry, then checks that every fuzzy
+content. It binds owner-authored questions and owner-adjudicated annotations
+to a frozen candidate, corpus manifest, development-question registry, and
+the disclosed blinded-drafting record. It then checks that every fuzzy
 similarity flag received an explicit owner review.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -20,7 +22,10 @@ from gold_set import load_json_object, sha256_file
 
 
 DEVELOPMENT_REGISTRY_SCHEMA = "archivist.development_question_registry/1"
-GOLD_PROVENANCE_SCHEMA = "archivist.gold_provenance/1"
+GOLD_PROVENANCE_SCHEMA = "archivist.gold_provenance/2"
+ANNOTATION_METHOD = "blinded_external_ai_draft_owner_adjudication/1"
+ANNOTATION_PROMPT_PATH = "docs/gold_annotation_prompt_claude.md"
+ANNOTATION_DRAFT_PATH = "runtime/gold-authoring/claude_annotation_drafts.md"
 QUESTION_NORMALIZATION = "NFKC+casefold+collapse-whitespace/v1"
 
 # A pair is flagged when either independently legible rule is satisfied.
@@ -30,8 +35,12 @@ NEAR_SEQUENCE_RATIO_THRESHOLD = 0.86
 NEAR_MIN_NORMALIZED_CHARACTERS = 24
 
 OWNER_ATTESTATIONS = {
-    "questions_authored_without_candidate_outputs",
-    "claims_and_locations_owner_authored",
+    "questions_behaviors_and_strata_owner_authored_without_candidate_outputs",
+    "annotation_assistant_blinded_to_candidate_outputs",
+    "claims_and_essentiality_owner_adjudicated",
+    "supporting_and_relevant_chunk_ids_owner_verified",
+    "must_not_claim_and_notes_owner_adjudicated",
+    "accepted_prose_rewritten_in_owner_words",
     "held_out_items_not_run_before_lock",
     "near_match_flags_reviewed",
 }
@@ -42,14 +51,27 @@ _PROVENANCE_FIELDS = {
     "schema",
     "gold_set_path",
     "gold_set_sha256",
+    "question_set_sha256",
     "candidate_commit",
     "candidate_rag_policy",
     "corpus_manifest_sha256",
     "development_registry_sha256",
     "authoring_started_at",
     "authoring_completed_at",
+    "annotation_assistance",
     "owner_attestations",
     "near_match_reviews",
+}
+_ANNOTATION_ASSISTANCE_FIELDS = {
+    "method",
+    "provider",
+    "model",
+    "surface",
+    "prompt_template_path",
+    "prompt_template_sha256",
+    "private_draft_path",
+    "private_draft_sha256",
+    "completed_at",
 }
 _REVIEW_FIELDS = {
     "gold_item_id",
@@ -120,6 +142,8 @@ class GoldProvenanceSummary:
     gold_set_sha256: str
     corpus_manifest_sha256: str
     development_registry_sha256: str
+    annotation_provider: str
+    annotation_model: str
     near_match_count: int
 
 
@@ -136,6 +160,53 @@ def normalized_question_sha256(question: str) -> str:
     return hashlib.sha256(normalize_question(question).encode("utf-8")).hexdigest()
 
 
+def gold_question_set_sha256(gold_set: object) -> str:
+    """Hash the ordered owner-controlled question projection of a gold set.
+
+    Annotation fields are deliberately excluded. The resulting commitment can
+    therefore be recorded before an annotation assistant sees the questions
+    and later compared with the completed gold file.
+    """
+
+    if not isinstance(gold_set, dict) or not isinstance(gold_set.get("items"), list):
+        raise GoldProvenanceValidationError(
+            ["$gold.items: cannot fingerprint questions without an items array"]
+        )
+
+    projection: list[dict[str, str]] = []
+    errors: list[str] = []
+    seen_ids: set[str] = set()
+    for index, raw_item in enumerate(gold_set["items"]):
+        path = f"$gold.items[{index}]"
+        if not isinstance(raw_item, dict):
+            errors.append(f"{path}: must be an object")
+            continue
+        projected: dict[str, str] = {}
+        for field in ("id", "question", "stratum", "expected_behavior"):
+            value = raw_item.get(field)
+            if not _is_nonempty_string(value):
+                errors.append(f"{path}.{field}: must be a non-empty string")
+            else:
+                projected[field] = value
+        item_id = projected.get("id")
+        if item_id in seen_ids:
+            errors.append(f"{path}.id: duplicate gold item ID {item_id!r}")
+        elif item_id is not None:
+            seen_ids.add(item_id)
+        if len(projected) == 4:
+            projection.append(projected)
+
+    if errors:
+        raise GoldProvenanceValidationError(errors)
+    canonical = json.dumps(
+        projection,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def validate_development_registry(registry: object) -> DevelopmentRegistrySummary:
     """Validate a text-only registry of questions exposed during development."""
 
@@ -147,10 +218,7 @@ def validate_development_registry(registry: object) -> DevelopmentRegistrySummar
 
     _validate_fields(registry, _REGISTRY_FIELDS, "$registry", errors)
     if registry.get("schema") != DEVELOPMENT_REGISTRY_SCHEMA:
-        errors.append(
-            "$registry.schema: must be exactly "
-            f"{DEVELOPMENT_REGISTRY_SCHEMA!r}"
-        )
+        errors.append(f"$registry.schema: must be exactly {DEVELOPMENT_REGISTRY_SCHEMA!r}")
 
     version = registry.get("version")
     if not isinstance(version, str) or _SEMVER_RE.fullmatch(version) is None:
@@ -160,10 +228,7 @@ def validate_development_registry(registry: object) -> DevelopmentRegistrySummar
         version_text = version
 
     if registry.get("normalization") != QUESTION_NORMALIZATION:
-        errors.append(
-            "$registry.normalization: must be exactly "
-            f"{QUESTION_NORMALIZATION!r}"
-        )
+        errors.append(f"$registry.normalization: must be exactly {QUESTION_NORMALIZATION!r}")
 
     raw_questions = registry.get("questions")
     if not isinstance(raw_questions, list):
@@ -200,8 +265,7 @@ def validate_development_registry(registry: object) -> DevelopmentRegistrySummar
         previous_id = normalized_questions.get(normalized)
         if previous_id is not None:
             errors.append(
-                f"{path}.question: duplicates normalized development question "
-                f"{previous_id!r}"
+                f"{path}.question: duplicates normalized development question {previous_id!r}"
             )
         else:
             normalized_questions[normalized] = question_id_text
@@ -237,9 +301,7 @@ def find_question_overlap(
     """Reject exact reuse and return every deterministic fuzzy-match flag."""
 
     gold_questions = _extract_gold_questions(gold_set)
-    development_by_normalized = {
-        question.normalized: question for question in registry.questions
-    }
+    development_by_normalized = {question.normalized: question for question in registry.questions}
     exact_errors: list[str] = []
     near_matches: list[NearMatch] = []
 
@@ -277,6 +339,7 @@ def validate_gold_provenance_file(
     expected_gold_set_path: str,
     expected_candidate_commit: str,
     expected_rag_policy: str,
+    repository_root: Path | None = None,
 ) -> GoldProvenanceSummary:
     """Validate exact file bindings and held-out attestations."""
 
@@ -285,6 +348,19 @@ def validate_gold_provenance_file(
     registry = load_json_object(
         development_registry_path,
         label="development-question registry",
+    )
+    root = (repository_root or provenance_path.parent.parent).resolve()
+    prompt_sha256 = _bound_private_file_sha256(
+        provenance,
+        root,
+        object_field="annotation_assistance",
+        path_field="prompt_template_path",
+    )
+    private_draft_sha256 = _bound_private_file_sha256(
+        provenance,
+        root,
+        object_field="annotation_assistance",
+        path_field="private_draft_path",
     )
     return validate_gold_provenance(
         provenance,
@@ -296,6 +372,8 @@ def validate_gold_provenance_file(
         expected_gold_set_path=expected_gold_set_path,
         expected_candidate_commit=expected_candidate_commit,
         expected_rag_policy=expected_rag_policy,
+        expected_annotation_prompt_sha256=prompt_sha256,
+        expected_private_draft_sha256=private_draft_sha256,
     )
 
 
@@ -310,6 +388,8 @@ def validate_gold_provenance(
     expected_gold_set_path: str,
     expected_candidate_commit: str,
     expected_rag_policy: str,
+    expected_annotation_prompt_sha256: str | None = None,
+    expected_private_draft_sha256: str | None = None,
 ) -> GoldProvenanceSummary:
     """Validate provenance without inspecting manuscript text or model output."""
 
@@ -332,10 +412,7 @@ def validate_gold_provenance(
         )
     _validate_fields(provenance, _PROVENANCE_FIELDS, "$provenance", errors)
     if provenance.get("schema") != GOLD_PROVENANCE_SCHEMA:
-        errors.append(
-            "$provenance.schema: must be exactly "
-            f"{GOLD_PROVENANCE_SCHEMA!r}"
-        )
+        errors.append(f"$provenance.schema: must be exactly {GOLD_PROVENANCE_SCHEMA!r}")
 
     _validate_binding(
         provenance,
@@ -343,6 +420,26 @@ def validate_gold_provenance(
         expected=gold_set_sha256,
         errors=errors,
     )
+
+    try:
+        expected_question_set_sha256 = gold_question_set_sha256(gold_set)
+    except GoldProvenanceValidationError as exc:
+        errors.extend(exc.errors)
+        expected_question_set_sha256 = ""
+    recorded_question_set_sha256 = provenance.get("question_set_sha256")
+    if (
+        not isinstance(recorded_question_set_sha256, str)
+        or _SHA256_RE.fullmatch(recorded_question_set_sha256) is None
+    ):
+        errors.append("$provenance.question_set_sha256: must be a lowercase 64-character SHA-256")
+    elif (
+        expected_question_set_sha256
+        and recorded_question_set_sha256 != expected_question_set_sha256
+    ):
+        errors.append(
+            "$provenance.question_set_sha256: does not match the canonical ordered "
+            "ID/question/stratum/behavior projection"
+        )
     _validate_binding(
         provenance,
         field="corpus_manifest_sha256",
@@ -371,8 +468,7 @@ def validate_gold_provenance(
     candidate_commit = provenance.get("candidate_commit")
     if not isinstance(candidate_commit, str) or _COMMIT_RE.fullmatch(candidate_commit) is None:
         errors.append(
-            "$provenance.candidate_commit: must be a full lowercase 40-character "
-            "Git commit"
+            "$provenance.candidate_commit: must be a full lowercase 40-character Git commit"
         )
         candidate_commit_text = ""
     else:
@@ -406,8 +502,25 @@ def validate_gold_provenance(
         errors,
     )
     if started is not None and completed is not None and completed < started:
+        errors.append("$provenance.authoring_completed_at: must not precede authoring_started_at")
+
+    annotation_completed, annotation_provider, annotation_model = _validate_annotation_assistance(
+        provenance.get("annotation_assistance"),
+        errors,
+        expected_prompt_sha256=expected_annotation_prompt_sha256,
+        expected_private_draft_sha256=expected_private_draft_sha256,
+    )
+    if started is not None and annotation_completed is not None and annotation_completed < started:
         errors.append(
-            "$provenance.authoring_completed_at: must not precede authoring_started_at"
+            "$provenance.annotation_assistance.completed_at: must not precede authoring_started_at"
+        )
+    if (
+        completed is not None
+        and annotation_completed is not None
+        and annotation_completed > completed
+    ):
+        errors.append(
+            "$provenance.annotation_assistance.completed_at: must not follow authoring_completed_at"
         )
 
     attestations = provenance.get("owner_attestations")
@@ -441,6 +554,8 @@ def validate_gold_provenance(
         gold_set_sha256=gold_set_sha256,
         corpus_manifest_sha256=corpus_manifest_sha256,
         development_registry_sha256=development_registry_sha256,
+        annotation_provider=annotation_provider,
+        annotation_model=annotation_model,
         near_match_count=len(near_matches),
     )
 
@@ -525,6 +640,114 @@ def _near_match(
     )
 
 
+def _validate_annotation_assistance(
+    raw_assistance: object,
+    errors: list[str],
+    *,
+    expected_prompt_sha256: str | None,
+    expected_private_draft_sha256: str | None,
+) -> tuple[datetime | None, str, str]:
+    path = "$provenance.annotation_assistance"
+    if not isinstance(raw_assistance, dict):
+        errors.append(f"{path}: must be an object")
+        return None, "", ""
+
+    _validate_fields(raw_assistance, _ANNOTATION_ASSISTANCE_FIELDS, path, errors)
+    if raw_assistance.get("method") != ANNOTATION_METHOD:
+        errors.append(f"{path}.method: must be exactly {ANNOTATION_METHOD!r}")
+
+    text_values: dict[str, str] = {}
+    for field in ("provider", "model", "surface"):
+        value = raw_assistance.get(field)
+        if not _is_nonempty_string(value):
+            errors.append(f"{path}.{field}: must be a non-empty string")
+            text_values[field] = ""
+        else:
+            text_values[field] = value
+
+    prompt_path = raw_assistance.get("prompt_template_path")
+    if not _is_safe_relative_posix_path(prompt_path):
+        errors.append(f"{path}.prompt_template_path: must be a safe relative POSIX path")
+    elif prompt_path != ANNOTATION_PROMPT_PATH:
+        errors.append(f"{path}.prompt_template_path: must be exactly {ANNOTATION_PROMPT_PATH!r}")
+
+    draft_path = raw_assistance.get("private_draft_path")
+    if not _is_safe_relative_posix_path(draft_path):
+        errors.append(f"{path}.private_draft_path: must be a safe relative POSIX path")
+    elif draft_path != ANNOTATION_DRAFT_PATH:
+        errors.append(f"{path}.private_draft_path: must be exactly {ANNOTATION_DRAFT_PATH!r}")
+
+    _validate_annotation_hash(
+        raw_assistance,
+        field="prompt_template_sha256",
+        path=path,
+        expected=expected_prompt_sha256,
+        errors=errors,
+    )
+    _validate_annotation_hash(
+        raw_assistance,
+        field="private_draft_sha256",
+        path=path,
+        expected=expected_private_draft_sha256,
+        errors=errors,
+    )
+    completed = _validate_timestamp(
+        raw_assistance.get("completed_at"),
+        f"{path}.completed_at",
+        errors,
+    )
+    return completed, text_values.get("provider", ""), text_values.get("model", "")
+
+
+def _validate_annotation_hash(
+    assistance: dict[str, object],
+    *,
+    field: str,
+    path: str,
+    expected: str | None,
+    errors: list[str],
+) -> None:
+    recorded = assistance.get(field)
+    if not isinstance(recorded, str) or _SHA256_RE.fullmatch(recorded) is None:
+        errors.append(f"{path}.{field}: must be a lowercase 64-character SHA-256")
+    elif expected is not None and recorded != expected:
+        errors.append(f"{path}.{field}: does not match the exact local file hash {expected}")
+
+
+def _bound_private_file_sha256(
+    provenance: object,
+    repository_root: Path,
+    *,
+    object_field: str,
+    path_field: str,
+) -> str | None:
+    """Hash a safe provenance-bound local file when its path is structurally usable."""
+
+    if not isinstance(provenance, dict):
+        return None
+    container = provenance.get(object_field)
+    if not isinstance(container, dict):
+        return None
+    raw_path = container.get(path_field)
+    if not _is_safe_relative_posix_path(raw_path):
+        return None
+    candidate = repository_root.joinpath(*PurePosixPath(raw_path).parts).resolve()
+    try:
+        candidate.relative_to(repository_root)
+    except ValueError as exc:
+        raise GoldProvenanceValidationError(
+            [f"$provenance.{object_field}.{path_field}: resolves outside repository root"]
+        ) from exc
+    if not candidate.is_file():
+        raise GoldProvenanceValidationError(
+            [
+                f"$provenance.{object_field}.{path_field}: bound local file does not exist "
+                f"at {raw_path!r}"
+            ]
+        )
+    return sha256_file(candidate)
+
+
 def _validate_near_match_reviews(
     raw_reviews: object,
     near_matches: tuple[NearMatch, ...],
@@ -548,10 +771,7 @@ def _validate_near_match_reviews(
             errors.append(f"{path}.gold_item_id: must be a non-empty string")
         if not _is_nonempty_string(development_question_id):
             errors.append(f"{path}.development_question_id: must be a non-empty string")
-        if not (
-            _is_nonempty_string(gold_item_id)
-            and _is_nonempty_string(development_question_id)
-        ):
+        if not (_is_nonempty_string(gold_item_id) and _is_nonempty_string(development_question_id)):
             continue
 
         key = (gold_item_id, development_question_id)
@@ -569,14 +789,10 @@ def _validate_near_match_reviews(
     missing = sorted(expected - reviewed)
     extra = sorted(reviewed - expected)
     if missing:
-        errors.append(
-            "$provenance.near_match_reviews: missing owner reviews for "
-            f"{missing!r}"
-        )
+        errors.append(f"$provenance.near_match_reviews: missing owner reviews for {missing!r}")
     if extra:
         errors.append(
-            "$provenance.near_match_reviews: contains reviews for unflagged pairs "
-            f"{extra!r}"
+            f"$provenance.near_match_reviews: contains reviews for unflagged pairs {extra!r}"
         )
 
 
@@ -589,13 +805,9 @@ def _validate_binding(
 ) -> None:
     recorded = provenance.get(field)
     if not isinstance(recorded, str) or _SHA256_RE.fullmatch(recorded) is None:
-        errors.append(
-            f"$provenance.{field}: must be a lowercase 64-character SHA-256"
-        )
+        errors.append(f"$provenance.{field}: must be a lowercase 64-character SHA-256")
     elif recorded != expected:
-        errors.append(
-            f"$provenance.{field}: does not match the exact file hash {expected}"
-        )
+        errors.append(f"$provenance.{field}: does not match the exact file hash {expected}")
 
 
 def _validate_timestamp(

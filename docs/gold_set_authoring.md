@@ -1,48 +1,57 @@
 # Held-out gold-set authoring
 
-The final gold set is the owner-authored, never-before-run input to Archivist's formal
-measurements. It contains 34–46 questions across the six locked strata in
-`EVAL_CONTRACT.md` §3.4.
+The final gold set is the owner-designed, owner-adjudicated, never-before-run input to
+Archivist's formal measurements. It contains 34–46 questions across the six locked strata in
+`EVAL_CONTRACT.md` §3.4. The questions, strata, Behavior values, and inclusion decisions are
+owner-authored. Claude may draft the evidence annotations under a blinded protocol, but those
+drafts are not ground truth.
 
 It is not the repeatedly used ten-question practical set. Those questions, the earlier Brief 1
 questions, opening-screen examples, and known manual smoke questions are development data recorded
 in `fixtures/development_question_registry.json`.
 
-## Non-negotiable authorship boundary
+## Non-negotiable authority and blinding boundary
 
 Only the manuscript owner decides:
 
 - which questions belong in the set;
 - whether each question should be answered or declined;
-- what a correct answer must claim;
-- which claims are essential;
-- which chunks support each claim;
-- which chunks are relevant to the complete question; and
-- which plausible but false statements belong in `must_not_claim`.
+- each question's stratum; and
+- whether to accept, rewrite, or reject every drafted claim, essentiality flag, supporting or
+  relevant chunk ID, `must_not_claim` entry, and note.
 
-Codex or another model may create blank forms, format owner-written material, find duplicate
-wording, and run mechanical validation. It may not propose questions, historical claims, expected
-answers, essentiality, source locations, relevant chunks, or false-claim traps. Claims must be
-paraphrased in the owner's words, not copied from the manuscript.
+Claude may propose claims, essentiality, locations, relevance, prohibited claims, and notes only
+after the owner-controlled fields are frozen. It must see only the declared question batch, private
+eligible chunks, corpus manifest, and canonical instructions in
+`docs/gold_annotation_prompt_claude.md`. It must never see Archivist answers, Archivist-selected
+chunks, traces, scores, known failures, development answers, or evaluation output.
+
+The owner then checks every proposal directly against the corpus, independently searches for
+missing relevant chunks, and rewrites all accepted prose. Plausibility is not verification and a
+rubber-stamp review does not satisfy the contract. Claude's raw drafts remain private under
+`runtime/gold-authoring/`; only their hash enters provenance. The privacy audit covers questions,
+claims, `must_not_claim`, and notes before commit.
 
 No held-out question may be sent to Archivist, its retriever, its planner, an answer model, or an
 evaluation judge until the set and provenance sidecar are committed and locked.
 
-## Gate 0: accept one frozen candidate
+## Gate 0: freeze a current candidate
 
-The offline-verified V21 candidate is:
+The old V21 binding is superseded. The application currently reports policy V26, but the next
+candidate commit is not frozen while current presentation and evaluation-contract work remains
+uncommitted. Finish that work, commit it, run the offline suite, and record one clean candidate
+before annotation starts:
 
 ```text
-candidate commit: bf424c880bca4728a8d13225f85978e27a8d8dcf
-RAG policy:       evidence-planned-v21
+candidate commit: <next clean frozen 40-character commit>
+RAG policy:       evidence-planned-v26
 ```
 
-Before beginning substantive gold authoring, finish the predeclared unchanged no-retry G007
-confirmation and ten-question development evaluation. If that causes another system change, freeze
-a new candidate and update the provenance template before authoring. This prevents the benchmark
-from being bound to a candidate that was already known to need replacement.
+If the answer pipeline changes after that commit, freeze a new candidate and rebind provenance
+before any held-out item is run. Annotation itself may happen after the freeze because it is blind
+to candidate output.
 
-## Gate 1: create the private owner workbook
+## Gate 1: finish and fingerprint the owner-controlled fields
 
 Create a deliberately incomplete draft under the ignored `runtime/` directory:
 
@@ -68,9 +77,45 @@ every final count remains within §3.4. The generator refuses to overwrite an ex
 `--force` is supplied.
 
 Before writing the first question, replace `authoring_started_at` in the private provenance draft
-with a timezone-aware ISO-8601 timestamp. Leave every attestation `false`.
+with an honest timezone-aware ISO-8601 timestamp. Leave every attestation `false`.
 
-## Gate 2: author from the manuscript, not from Archivist
+Before Claude sees any question, run the leakage audit over the completed owner question set.
+Exact development reuse is forbidden. A fuzzy flag requires substantive review, not a cosmetic
+word substitution. In particular, H020's current recession-comparison replacement remains a close
+twin of `DEV-MANUAL-008` and must be replaced again before this gate can pass.
+
+After every ID, question, stratum, and Behavior value is final, write a text-free commitment:
+
+```powershell
+uv run python scripts\fingerprint_gold_questions.py `
+  runtime\gold-authoring\gold_set_questions.md `
+  --output fixtures\gold_questions.commitment.json
+```
+
+Copy the resulting `question_set_sha256` into the private provenance draft and commit the
+commitment, contract, prompt, and candidate binding **before** sending a batch to Claude. The final
+provenance validator recomputes the same ordered ID/question/stratum/Behavior projection from
+`fixtures/gold_set.json`; annotation edits cannot alter it silently.
+
+## Gate 2: obtain blinded drafts in five-item batches
+
+Use `docs/gold_annotation_prompt_claude.md` verbatim and name one five-item batch in the message
+immediately before it. Supply only those five private question blocks, `output/chunks.json`, and
+`fixtures/corpus_manifest.json`. The chunk payload contains the commercial manuscript; upload it
+only under data controls the owner accepts. This repository action does not authorize that external
+disclosure.
+
+Append Claude's manifest and five returned blocks to
+`runtime/gold-authoring/claude_annotation_drafts.md`. Record the exact displayed model label,
+provider, surface, final drafting timestamp, canonical prompt hash, and combined private-draft hash
+in `annotation_assistance`. If Claude reports candidate output, web use, or contamination, stop the
+batch.
+
+Do not use the same Claude model as the later evaluation judge. A consumer UI may expose only a
+moving model label; record exactly what it displays and retain that limitation rather than inventing
+a dated snapshot.
+
+## Gate 3: adjudicate from the manuscript, not from Archivist
 
 Use direct knowledge of the book and the offline workbench. The workbench performs no retrieval,
 ranking, embedding, or API call.
@@ -102,9 +147,10 @@ are orientation. `supporting_chunk_ids` is claim-specific and may contain more t
 overlapping chunk. `relevant_chunk_ids` is question-wide and must include every supporting chunk.
 
 An `answer` item needs at least one essential claim. An `abstain` item has no claims and no relevant
-chunks.
+chunks. Claude's output is merely a search aid: independently confirm support for each atomic claim,
+search for omitted aliases and locations, and rewrite accepted prose in the owner's voice.
 
-## Gate 3: run offline audits before locking
+## Gate 4: run offline audits before locking
 
 Validate the schema, eligible locations, item count, and stratum composition:
 
@@ -125,8 +171,9 @@ An exact normalized duplicate is never eligible. A fuzzy flag is not automatical
 but the owner must either replace the question or record why it is substantively distinct in
 `near_match_reviews`.
 
-Check that claims are paraphrases rather than long copied passages. This reads the private local
-chunks but emits only IDs and matched-token counts:
+Check that questions, claims, prohibited claims, and notes are paraphrases rather than long copied
+passages. This reads the private local chunks but emits only field labels, IDs, and matched-token
+counts:
 
 ```powershell
 uv run python scripts\audit_gold_privacy.py `
@@ -139,7 +186,7 @@ uv run python scripts\audit_gold_privacy.py `
 The command exits nonzero while quotation-risk flags remain. Review each flag manually and rewrite
 copied prose in the owner's words.
 
-## Gate 4: lock provenance
+## Gate 5: lock provenance
 
 After the owner finishes the content:
 
@@ -148,19 +195,21 @@ After the owner finishes the content:
 3. Record `authoring_completed_at`.
 4. Add one `approved_distinct` review with a substantive owner note for every remaining fuzzy
    match reported by the leakage audit.
-5. Set each owner attestation to `true` only if it is true.
-6. Save the completed sidecar as `fixtures/gold_set.provenance.json`.
+5. Hash the exact combined private Claude draft and record the annotation metadata.
+6. Set each owner attestation to `true` only if it is true.
+7. Save the completed sidecar as `fixtures/gold_set.provenance.json`.
 
-The sidecar binds the exact gold bytes to the frozen candidate commit, V21 policy, corpus manifest,
-and complete development-question registry. The hash-bound JSON files are pinned to LF line
-endings in `.gitattributes`, so a Windows checkout cannot silently change their hashes.
+The version-2 sidecar binds the owner-controlled question projection, exact final gold bytes,
+frozen candidate, V26 policy, corpus manifest, development registry, canonical Claude prompt, and
+private raw draft. The hash-bound JSON files are pinned to LF line endings in `.gitattributes`, so
+a Windows checkout cannot silently change their hashes.
 
 Commit the gold set, completed provenance, and any owner-authored notes. From the resulting clean
 tree run:
 
 ```powershell
 uv run python scripts\validate_gold_holdout.py `
-  --candidate-commit bf424c880bca4728a8d13225f85978e27a8d8dcf `
+  --candidate-commit <next-clean-frozen-commit> `
   --lock
 ```
 

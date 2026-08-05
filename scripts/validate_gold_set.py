@@ -21,7 +21,7 @@ from gold_set import (  # noqa: E402
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Mechanically validate an owner-authored archivist.gold/1 file "
+            "Mechanically validate an owner-adjudicated archivist.gold/1 file "
             "without reading manuscript text or calling an API."
         )
     )

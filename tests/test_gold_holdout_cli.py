@@ -39,6 +39,7 @@ def test_candidate_lock_allows_only_declared_evaluation_files(monkeypatch, tmp_p
             _completed(
                 "fixtures/gold_set.json\n"
                 "fixtures/gold_set.provenance.json\n"
+                "docs/gold_annotation_prompt_claude.md\n"
                 "src/gold_provenance.py\n"
             ),
         )
@@ -53,6 +54,7 @@ def test_candidate_lock_allows_only_declared_evaluation_files(monkeypatch, tmp_p
     assert changed == (
         "fixtures/gold_set.json",
         "fixtures/gold_set.provenance.json",
+        "docs/gold_annotation_prompt_claude.md",
         "src/gold_provenance.py",
     )
 

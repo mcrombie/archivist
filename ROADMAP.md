@@ -8,7 +8,7 @@ Maps the sequence of briefs for Archivist, a retrieval-augmented QA system over 
 
 ## Two phases
 
-**Phase 1 — Answer Mode, measured.** Grounded, cited question answering, evaluated against a hand-authored gold set, reproducible, and deployable without exposing the manuscript.
+**Phase 1 — Answer Mode, measured.** Grounded, cited question answering, evaluated against an owner-designed and owner-adjudicated gold set, reproducible, and deployable without exposing the manuscript.
 
 **Phase 2 — Index Mode and perspective modes.** The back-of-book index assistant, and the perspective experiment in which the same question is answered from the same retrieved passages in different registers.
 
@@ -52,11 +52,13 @@ The next evidence-producing sequence is:
    with V24 rather than reinstating a G007 reader-quality veto. If the repair does not improve the
    declared completeness and absence behaviors, retain V24's measured limitations or revise the
    contract before calling the candidate final.
-3. **Author and freeze the final held-out gold set.** The blank 40-slot private workbook,
+3. **Author, annotate, adjudicate, and freeze the final held-out gold set.** The blank 40-slot private workbook,
    development-question registry, leakage and quotation audits, provenance binding, location
-   carry-over check, and Git freeze validator are implemented. The owner must now supply the
-   34–46 questions and exact relevance/support labels required by Brief 3 without running those
-   items through Archivist. The existing practical, Brief 1, opening-screen, smoke, and known
+   carry-over check, and Git freeze validator are implemented. The owner supplies and freezes the
+   34–46 questions, strata, and Behavior values without candidate output. Claude may then draft
+   relevance/support labels and claim fields while blinded to Archivist; the owner independently
+   verifies, adjudicates, and rewrites them before lock. The existing practical, Brief 1,
+   opening-screen, smoke, and known
    manual questions remain development data. Private authoring may proceed while development
    uses only that registered development set, but the final provenance sidecar must be rebound to
    the next passing frozen candidate before the gold set is ingested or scored.
@@ -111,7 +113,12 @@ to the formal measurements and the artifact only the author can produce. The ten
 practical set already used to optimize V11–V20 is a development/calibration set, not part of the
 held-out evidence for a resume comparison.
 
-⚠ **Model assistance is limited to formatting, deduplication, and schema validation.** A model may not decide what the correct answer is or where it lives. A model-authored gold set measures agreement between two runs of the same system and will systematically omit the questions the system is bad at, because the author had the same blind spots.
+⚠ **Model assistance is blind drafting, not delegated authority.** Questions, strata, expected
+behaviors, and inclusion decisions remain owner-authored and are fingerprinted before assistance.
+Claude may draft claims, essentiality, support/relevance locations, prohibited claims, and notes only
+without candidate output. The owner must independently verify every proposal against the corpus,
+search for omissions, and rewrite accepted prose. Otherwise the benchmark measures model agreement
+rather than correctness.
 
 The owner has now settled the scope explicitly: retrieval and evaluation begin with
 `05_Introduction.md`. `01_Front Matter.md`, `02_Table of Contents.md`,
@@ -208,7 +215,7 @@ The numerical Archivist bullets remain blank until all of the following are true
 
 - the evaluated commit, deployed commit, corpus manifest, index, model/configuration, and gold-set
   hashes identify one frozen candidate;
-- the owner-authored 34–46 item held-out gold set passes schema and provenance validation;
+- the owner-designed, blinded-draft-assisted, owner-adjudicated 34–46 item held-out gold set passes schema and provenance validation;
 - the committed retrieval runner reproduces vector-only and hybrid results from one command;
 - the report states the predeclared metric and denominator, with Recall@5/context recall preferred
   unless exhaustive labels justified a prior Precision@5 contract;
@@ -220,7 +227,8 @@ The numerical Archivist bullets remain blank until all of the following are true
 
 The intended evidence-backed form is:
 
-> Published a 34–46-question, owner-authored retrieval benchmark measuring Recall@5 and context
+> Published a 34–46-question retrieval benchmark with owner-authored questions and source-level
+> owner-adjudicated annotations, measuring Recall@5 and context
 > recall; dense/BM25 reciprocal-rank fusion changed macro Recall@5 from A% to B% (X percentage
 > points) versus vector-only retrieval.
 
@@ -272,7 +280,7 @@ Excluded from Phase 1 to keep it finishable. Not rejected.
 |---|---|---|---|
 | 1 | **The generic multi-project stack** — upload, manifests, per-project collections, `importers.py` | The *importers* are corpus handling and worth keeping — the manuscript is docx with an existing index section. The *project management* is the generic tool and is what conflicts with the corpus-specific strategy. Splitting the two is the eventual cut. | The baseline. Deciding now costs a week and changes no measurement. |
 | 2 | **Additional edition locator profiles** | Paperback, hardcover, and ebook numbering can let readers use the edition they own | The typeset-PDF profile is active design work in Brief 8; other profiles wait for edition-specific pagination from the owner |
-| 3 | **Precision@k as a formal public metric** | It can describe how much of a short result list is relevant, but only when relevance judgments are exhaustive enough to make non-relevant labels meaningful | An owner-authored exhaustive relevance set and a pre-result amendment to `EVAL_CONTRACT.md`; otherwise use Recall@k and context recall |
+| 3 | **Precision@k as a formal public metric** | It can describe how much of a short result list is relevant, but only when relevance judgments are exhaustive enough to make non-relevant labels meaningful | An owner-verified exhaustive relevance set and a pre-result amendment to `EVAL_CONTRACT.md`; otherwise use Recall@k and context recall |
 | 4 | **Learned re-ranking** | The heuristic pipeline is the known weak point | A baseline to beat, and enough labelled data — which the gold set at 40 items is not |
 | 5 | **Reader-facing persona on the public demo** | Book marketing; explicitly permitted by the settled decisions, on the demo only | Brief 8, and never on the evaluated path |
 

@@ -1,7 +1,7 @@
-"""Validation for owner-authored Archivist gold question sets.
+"""Validation for owner-designed, owner-adjudicated Archivist gold sets.
 
 This module validates identifiers and structure only. It cannot decide whether
-an owner's historical claim is correct or whether a chunk genuinely supports
+an adjudicated historical claim is correct or whether a chunk genuinely supports
 that claim.
 """
 

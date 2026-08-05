@@ -1303,6 +1303,11 @@ body {
   padding: 13px;
 }
 
+.chat-advanced-delivery-settings .chat-answer-delivery {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
 .chat-appearance-settings {
   display: grid;
   min-width: 0;

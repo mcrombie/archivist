@@ -25,12 +25,15 @@ def _load_script(name: str):
 
 
 privacy_audit = _load_script("audit_gold_privacy")
+question_fingerprint = _load_script("fingerprint_gold_questions")
 carryover = _load_script("check_gold_carryover")
 workbook = _load_script("create_gold_authoring_workbook")
 workbench = _load_script("gold_authoring_workbench")
 
 PrivacyAuditError = privacy_audit.PrivacyAuditError
 audit_gold_privacy = privacy_audit.audit_gold_privacy
+GoldQuestionFingerprintError = question_fingerprint.GoldQuestionFingerprintError
+fingerprint_markdown = question_fingerprint.fingerprint_markdown
 CarryoverError = carryover.CarryoverError
 check_carryover = carryover.check_carryover
 DEFAULT_OUTPUT = workbook.DEFAULT_OUTPUT
@@ -142,6 +145,47 @@ def test_final_gold_template_is_empty_stable_and_bound_to_current_manifest() -> 
         validate_gold_set_file(template_path, manifest_path, mode="run-of-record")
 
 
+def test_question_fingerprint_is_text_free_and_changes_with_owner_fields() -> None:
+    form = """# Private form
+
+## H001 · focused_analytical
+
+**Q:** What happened in the synthetic example?
+
+**Behavior:** answer
+
+## H002 · out_of_corpus
+
+**Q:** What is absent from the synthetic example?
+
+**Behavior:** abstain
+"""
+
+    commitment = fingerprint_markdown(form)
+
+    assert commitment["schema"] == "archivist.gold_question_commitment/1"
+    assert commitment["question_count"] == 2
+    assert commitment["stratum_counts"] == {
+        "focused_analytical": 1,
+        "out_of_corpus": 1,
+    }
+    assert len(str(commitment["question_set_sha256"])) == 64
+    assert "synthetic example" not in json.dumps(commitment)
+    assert fingerprint_markdown(form.replace("What happened", "Why did it happen")) != commitment
+
+
+def test_question_fingerprint_rejects_missing_owner_behavior() -> None:
+    form = """## H001 · focused_analytical
+
+**Q:** What happened?
+
+**Behavior:**
+"""
+
+    with pytest.raises(GoldQuestionFingerprintError, match="expected_behavior"):
+        fingerprint_markdown(form)
+
+
 def test_workbook_has_balanced_blank_slots_and_refuses_overwrite(tmp_path: Path) -> None:
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
@@ -173,9 +217,10 @@ def test_workbook_has_balanced_blank_slots_and_refuses_overwrite(tmp_path: Path)
         and item["relevant_chunk_ids"] == []
         for item in workbook["items"]
     )
-    assert workbook["authored_against_corpus"] == hashlib.sha256(
-        manifest_path.read_bytes()
-    ).hexdigest()
+    assert (
+        workbook["authored_against_corpus"]
+        == hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    )
     assert "runtime" in DEFAULT_OUTPUT.parts
 
     with pytest.raises(WorkbookCreationError, match="refusing to overwrite"):
@@ -359,8 +404,29 @@ def test_privacy_audit_flags_exact_run_without_emitting_matching_words() -> None
                 supporting=["chapter_001"],
                 claim_text=safe,
             ),
+            _gold_item(
+                "H003",
+                relevant=["chapter_001"],
+                supporting=["chapter_001"],
+                claim_text=safe,
+            ),
+            _gold_item(
+                "H004",
+                relevant=["chapter_001"],
+                supporting=["chapter_001"],
+                claim_text=safe,
+            ),
+            _gold_item(
+                "H005",
+                relevant=["chapter_001"],
+                supporting=["chapter_001"],
+                claim_text=safe,
+            ),
         ],
     }
+    gold["items"][2]["must_not_claim"] = [quoted]
+    gold["items"][3]["notes"] = quoted
+    gold["items"][4]["question"] = quoted
 
     report = audit_gold_privacy(
         gold_set=gold,
@@ -369,14 +435,37 @@ def test_privacy_audit_flags_exact_run_without_emitting_matching_words() -> None
         minimum_run_tokens=10,
     )
 
-    assert report["flag_count"] == 1
+    assert report["schema"] == "archivist.gold_privacy_audit/2"
+    assert report["flag_count"] == 4
     assert report["flags"] == [
         {
             "item_id": "H001",
-            "claim_id": "H001.1",
+            "field": "claim",
+            "entry_id": "H001.1",
             "chunk_id": "chapter_001",
             "matched_token_count": 11,
-        }
+        },
+        {
+            "item_id": "H003",
+            "field": "must_not_claim",
+            "entry_id": "must_not_claim[0]",
+            "chunk_id": "chapter_001",
+            "matched_token_count": 11,
+        },
+        {
+            "item_id": "H004",
+            "field": "notes",
+            "entry_id": "notes",
+            "chunk_id": "chapter_001",
+            "matched_token_count": 11,
+        },
+        {
+            "item_id": "H005",
+            "field": "question",
+            "entry_id": "question",
+            "chunk_id": "chapter_001",
+            "matched_token_count": 11,
+        },
     ]
     serialized = json.dumps(report)
     assert "alpha" not in serialized
@@ -403,7 +492,5 @@ def test_privacy_audit_requires_complete_hash_verified_local_corpus() -> None:
         audit_gold_privacy(
             gold_set=empty_gold,
             manifest=manifest,
-            chunk_payload=[
-                _payload("chapter_001", "chapter.md", "tampered synthetic text")
-            ],
+            chunk_payload=[_payload("chapter_001", "chapter.md", "tampered synthetic text")],
         )

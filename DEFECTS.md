@@ -45,6 +45,29 @@ Entries below, most recent first.
 
 ---
 
+## [2026-08-05] Contract event: blinded AI drafts became permissible, not authoritative
+Phase/Brief: Phase 1, Brief 3 held-out gold authoring
+Symptom: the owner-only annotation rule made a forty-question benchmark unnecessarily laborious,
+even though the owner had already written the questions and proposed reviewing a separate model's
+evidence annotations manually. The old provenance attestation would also have falsely described
+AI-drafted claims and locations as entirely owner-authored.
+Cause: owner-authorized contract change before the first held-out run. The contract had conflated
+who designs the exam and holds ground-truth authority with who may prepare an unverified evidence
+draft.
+Resolution and verification: §3.1 now keeps questions, strata, Behavior values, and inclusion
+decisions exclusively owner-authored while allowing Claude to draft claims, essentiality,
+support/relevance locations, prohibited claims, and notes under a candidate-output blind. Every
+field still requires independent source-level owner adjudication and accepted prose must be
+rewritten. Provenance advances to `archivist.gold_provenance/2`, binds a pre-assistance question
+fingerprint plus prompt/private-draft hashes, and replaces the obsolete authorship attestation.
+The privacy audit now covers questions, prohibited claims, and notes as well as claims. No formal
+held-out run exists, so no formal score was invalidated; older practical runs remain development
+evidence only. The current H020 replacement is still a strong near-match to registered development
+item `DEV-MANUAL-008` and therefore blocks question freeze until the owner replaces it again.
+Offline verification passed all 768 Python tests with one intentional skip and Ruff; the private
+question form parses as 40 items in the contracted 8/8/6/10/5/3 stratum distribution. No model or
+paid API call was made.
+
 ## [2026-08-05] Terminal ledgers delayed the first Progressive claim
 Phase/Brief: Phase 1 presentation and public-demo operations
 Symptom: after genuine checked-claim streaming replaced the earlier reveal animation, a live test

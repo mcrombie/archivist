@@ -19,8 +19,8 @@ Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
   Cosmic Almanac, with Professional as the new-visitor frontend default;
 - an unchanged Essential evidence-first baseline for API, CLI, and evaluation callers that omit a
   mode;
-- Historiographical lens, Voice, Worldview, and all eleven visual appearances under Advanced
-  controls;
+- Historiographical lens, Voice, Worldview, all eleven visual appearances, and experimental
+  Progressive delivery under Advanced controls;
 - Complete answer as the recommended fail-closed delivery default, with an experimental
   Progressive response that streams the same final-generation API call and reveals only complete,
   locally checked factual claims while the canonical answer is still being validated;
@@ -226,8 +226,10 @@ passes Ruff, 760 Python tests (with one skipped), both focused frontend suites, 
 build. Progressive delivery still requires the live deployment smoke described above.
 
 The repeatedly used ten-question set is a development regression suite, not held-out evidence.
-Formal measurement is gated on a separately owner-authored 34–46 item gold set whose questions,
-claims, and source locations are locked before any item is run. Passing the public security
+Formal measurement is gated on a separately owner-designed and owner-adjudicated 34–46 item gold
+set. Its questions and expected behaviors are owner-authored; Claude may draft evidence annotations
+only while blinded to every Archivist output, after which the owner verifies every field and rewrites
+accepted prose before the set is locked. Passing the public security
 boundary does not by itself mean every historical answer is correct.
 
 ## Privacy

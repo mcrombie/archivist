@@ -3362,6 +3362,9 @@ honest that the complete argument is not trustworthy until the last gate closes.
   seconds the interface updates an elapsed-work indicator without manufacturing prose or exposing
   chain-of-thought. Response headers also forbid caching and transformation to reduce avoidable
   proxy buffering.
+- Kept the experiment deliberately subordinate to the main product. Complete answer remains the
+  default, while Progressive response now sits inside a collapsed **Advanced delivery settings**
+  disclosure rather than reading like a peer feature every visitor is expected to choose.
 - Added one private, text-free timing record per Progressive request. It records application stage
   entry, first provider text delta, first checked claim, provider terminal, terminal outcome,
   worker finish, and stream finish. That makes the next live smoke diagnostic: a late first
@@ -3383,6 +3386,37 @@ experience architecture. The answer was not waiting for a typing animation; it w
 machine-facing paperwork. Moving reader-useful facts ahead of terminal ledgers preserved one
 generation call and the validation boundary while giving the stream something worth showing
 earlier.
+
+### 2026-08-05 - Separating benchmark authorship from annotation labor
+
+- Amended the still-unrun formal evaluation contract after the owner proposed having Claude draft
+  the repetitive annotation fields. The important boundary is now stated more precisely: the owner
+  writes and freezes the questions, strata, expected answer-versus-abstain behavior, and inclusion
+  decisions; an external model may help search the corpus and propose evidence labels, but it does
+  not become the ground-truth authority.
+- Designed the assistance as a blind protocol. Claude receives a five-question batch, the private
+  chunk payload, the corpus manifest, and a canonical prompt—never Archivist answers, retrieved
+  contexts, traces, development results, known failures, or scores. Its output is visibly marked
+  unverified, kept out of Git, and hashed for provenance.
+- Added a text-free question fingerprint covering ordered IDs, question wording, strata, and
+  Behavior values. Recording that fingerprint before assistance makes it possible to prove later
+  that annotation work did not silently rewrite the exam, without publishing the held-out
+  questions themselves.
+- Strengthened the privacy audit because AI-drafted prose can leak through more than claim text.
+  It now checks questions, `must_not_claim`, and notes too, while reporting only item/field/chunk
+  identifiers and match lengths.
+- Found an important preflight failure before any Claude work began: the replacement for H020 is
+  still structurally and semantically too close to a registered development question that drove
+  the V26 repair. A one-century substitution does not restore held-out status. H020 therefore needs
+  a genuinely different owner-authored question before the complete question set can be frozen.
+- Verified the amended machinery with 768 passing Python tests, one intentional skip, and Ruff.
+  The private form fingerprints all 40 questions with the contracted 8/8/6/10/5/3 stratum mix.
+  No OpenAI or Anthropic call was made.
+
+Useful blog lesson: a trustworthy benchmark does not require pretending that no tool assisted with
+the clerical work. It requires freezing the questions first, blinding the assistant to the system
+under test, preserving an audit trail, and keeping final judgment with a human who checks the
+sources rather than approving plausible prose.
 
 ## Update convention
 

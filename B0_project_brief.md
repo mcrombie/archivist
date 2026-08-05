@@ -82,7 +82,7 @@ None of that asks whether the answers are impressive. A well-characterized medio
 The manuscript is a commercial product. This constrains the architecture, not just the deployment.
 
 - **Nothing derived from the manuscript that contains its text may be committed.** `manuscript/`, `output/`, and `projects/` stay gitignored. Committed artifacts reference the corpus by identifier and hash — chunk IDs, paragraph ranges, document names, SHA-256 digests — never by content.
-- **The gold set states answers as claim lists in the author's own words**, not as quoted passages, so that it can be committed.
+- **The gold set states owner-adjudicated answers as claim lists rewritten in the author's own words**, not as manuscript or raw AI-draft quotations, so that it can be committed.
 - **Public deployment searches the complete 481-chunk substantive corpus privately**, but serves
   edition-qualified page locators and short cited excerpts rather than whole chunks. The exposure
   profile is fixed by the server, not selected by the browser, and the public surface is

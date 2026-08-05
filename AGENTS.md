@@ -121,8 +121,8 @@ invalid trace, broken identifier mapping, or cost-safety stop.
 Its answer-quality score is never a promotion veto. Once the focused measurement is mechanically
 valid, run the complete unchanged practical cohort and report the difficult item inside that
 profile, even when it misses a previously used claim-coverage or target-coverage threshold.
-Formal quality gates belong to the owner-authored held-out gold contract, its noise floor, and its
-predeclared §8 envelopes—not to one question repeatedly used to guide repairs.
+Formal quality gates belong to the owner-designed and owner-adjudicated held-out gold contract, its
+noise floor, and its predeclared §8 envelopes—not to one question repeatedly used to guide repairs.
 
 ## The corpus never leaves the machine
 
@@ -130,7 +130,8 @@ The manuscript is a commercial product sold on Amazon. Three rules, all hard:
 
 - **No manuscript text is committed to the repository, ever** — not in fixtures, not in test data, not in example outputs, not in a docstring, not in a brief. `manuscript/`, `output/`, and `projects/` stay gitignored.
 - **Committed artifacts reference the corpus by identifier and hash, never by content.** Chunk IDs, paragraph ranges, document names, and SHA-256 digests are safe and are what run identity and the gold set are built from.
-- **Gold-set answers are stated as claim lists in the author's own words**, not as quoted passages. A gold set full of verbatim excerpts is a partial reproduction of the book with extra steps.
+- **Gold questions, strata, Behavior values, and inclusion decisions are owner-authored without candidate output.** A blinded external model may draft claims, essentiality, locations, relevance, prohibited claims, and notes only under `docs/gold_annotation_prompt_claude.md`. It may never see Archivist outputs or development results, and its proposals have no authority until the owner independently verifies and adjudicates every field against the corpus.
+- **All accepted gold-set prose is rewritten in the owner's own words**, not copied from the manuscript or an AI draft. A gold set full of verbatim excerpts is a partial reproduction of the book with extra steps. Raw annotation drafts remain private and gitignored.
 
 For any public deployment: the complete retrieval-eligible corpus may remain private on the server,
 but responses expose short cited excerpts only, never whole chunks; arbitrary source browsing and

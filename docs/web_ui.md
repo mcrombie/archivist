@@ -51,8 +51,9 @@ The web API needs:
   turn they support.
 - Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
   in both the conversation header and the top-of-page introduction.
-- Places an Answer delivery choice under Reading options after Evidence scope. **Complete answer**
-  is the recommended strict default. **Progressive response** is experimental: after fixed
+- Places Answer delivery inside a collapsed **Advanced delivery settings** disclosure under
+  Reading options. **Complete answer** is the recommended strict default. **Progressive
+  response** is experimental: after fixed
   operational progress, it reveals complete locally checked factual claims from the existing
   streamed generation call while the whole answer remains provisional. A roughly three-second
   heartbeat keeps an elapsed-work indicator visibly active before prose is available, and the
