@@ -312,6 +312,18 @@ This is stated in advance, deliberately, and it **bounds what the post-baseline 
 
 A gold set is invalid, and may not be used, if any of the following fail:
 
+- the ordered owner-controlled projection (`id`, `question`, `stratum`, and
+  `expected_behavior`) exactly matches the text-free question commitment recorded before canonical
+  annotation assistance
+- the provenance sidecar exactly binds the final gold-set bytes, frozen candidate commit and RAG
+  policy, corpus manifest, development-question registry, canonical annotation prompt, and private
+  raw annotation draft
+- annotation-assistance metadata identifies the declared blinded method, provider, displayed model
+  label, surface, and a completion time within the recorded authoring window
+- every required owner attestation is explicitly true, including assistant blinding, source-level
+  adjudication, owner rewriting of accepted prose, and the prohibition on pre-lock held-out runs
+- no normalized held-out question exactly reuses a registered development question, and every
+  deterministic fuzzy-match flag has one substantive owner review
 - every `chunk_id` in `supporting_chunk_ids` and `relevant_chunk_ids` exists in the corpus manifest referenced by `authored_against_corpus` **and is retrieval-eligible under that manifest's `ingest.skip_files`**
 - every claim has a non-empty `supporting_chunk_ids`
 - `relevant_chunk_ids` ⊇ ⋃ `supporting_chunk_ids`, per item
@@ -319,6 +331,12 @@ A gold set is invalid, and may not be used, if any of the following fail:
 - every item with `expected_behavior: "answer"` has at least one `essential` claim
 - `claim_id` values are unique and prefixed by their item `id`
 - stratum counts fall within §3.4
+- the quotation-risk audit finds no unresolved copied run in a question, claim, `must_not_claim`
+  entry, or note
+
+The committed validators enforce the mechanical portions of this list. Historical correctness,
+claim atomicity, exhaustive relevance, and genuine source support remain owner-adjudication duties;
+a validator success cannot substitute for reading the evidence.
 
 ---
 

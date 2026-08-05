@@ -10,6 +10,13 @@ It is not the repeatedly used ten-question practical set. Those questions, the e
 questions, opening-screen examples, and known manual smoke questions are development data recorded
 in `fixtures/development_question_registry.json`.
 
+> **Paused owner-review checkpoint — 2026-08-05.** The private Markdown form currently contains
+> useful Claude-drafted annotations, but those drafts predate the provenance-v2 question
+> commitment and the canonical raw-draft manifest. They are exploratory review aids, not a
+> protocol-compliant annotation cohort. H020 also remains too close to a registered development
+> question. Preserve the draft privately, replace H020, finish the owner-controlled fields, and
+> follow the gates below before requesting fresh canonical annotation batches.
+
 ## Non-negotiable authority and blinding boundary
 
 Only the manuscript owner decides:
@@ -37,13 +44,14 @@ evaluation judge until the set and provenance sidecar are committed and locked.
 
 ## Gate 0: freeze a current candidate
 
-The old V21 binding is superseded. The application currently reports policy V26, but the next
-candidate commit is not frozen while current presentation and evaluation-contract work remains
-uncommitted. Finish that work, commit it, run the offline suite, and record one clean candidate
-before annotation starts:
+The old V21 binding is superseded. The application currently reports policy V26, and commit
+`355f78d` is the verified implementation checkpoint immediately preceding the documentation
+closeout. When the owner is ready to begin Gate 1, verify that `HEAD` is clean, rerun the complete
+offline suite if any executable code has changed, and record that exact clean 40-character commit
+as the candidate before canonical annotation starts:
 
 ```text
-candidate commit: <next clean frozen 40-character commit>
+candidate commit: <clean frozen 40-character commit selected at Gate 1>
 RAG policy:       evidence-planned-v26
 ```
 
@@ -84,6 +92,13 @@ Exact development reuse is forbidden. A fuzzy flag requires substantive review, 
 word substitution. In particular, H020's current recession-comparison replacement remains a close
 twin of `DEV-MANUAL-008` and must be replaced again before this gate can pass.
 
+**Current tooling gap:** `scripts/fingerprint_gold_questions.py` reads the private Markdown form,
+while `scripts/audit_gold_leakage.py` currently reads JSON. The fingerprint is not a leakage audit.
+Canonical annotation must therefore wait until a later tooling change gives the overlap checker the
+same Markdown projection (or emits an equivalent private JSON projection) and the owner resolves
+every resulting flag. Do not work around this gap by committing the held-out questions or by
+calling the existing exploratory Claude material canonical.
+
 After every ID, question, stratum, and Behavior value is final, write a text-free commitment:
 
 ```powershell
@@ -98,6 +113,10 @@ provenance validator recomputes the same ordered ID/question/stratum/Behavior pr
 `fixtures/gold_set.json`; annotation edits cannot alter it silently.
 
 ## Gate 2: obtain blinded drafts in five-item batches
+
+This gate applies to **fresh batches requested after Gate 1 is complete**. The Claude-derived text
+already present in the private review form may inform owner editing, but it cannot supply the raw
+draft hash or pre-assistance proof required by provenance v2.
 
 Use `docs/gold_annotation_prompt_claude.md` verbatim and name one five-item batch in the message
 immediately before it. Supply only those five private question blocks, `output/chunks.json`, and

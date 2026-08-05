@@ -10,15 +10,33 @@ The distinction that matters, because it is the one most likely to erode: **the 
 
 The corpus is also the moat. Rigorous evaluation depends on knowing the source material well enough to state what a correct answer is; that is only possible because the project owner wrote the book. A generic ingest-anything tool would forfeit exactly that.
 
-## Which phase are you in
+## Current priorities and answer surfaces
 
-The project runs in two phases (see `ROADMAP.md`). **Phase 1 is Answer Mode: grounded, cited question answering, measured against a gold set, reproducible, and deployable without exposing the manuscript.** Phase 2 is Index Assistant Mode and the perspective-mode experiment.
+The highest-leverage unfinished work remains the formal held-out evaluation described in
+`EVAL_CONTRACT.md` and `ROADMAP.md`. The gate is not "the answers look good." Retrieval,
+faithfulness, citation, and abstention behavior must be measured, bounded, reproducible, and have
+their failures written down. A system with mediocre but characterized numbers is better evidence
+than a system with excellent-looking answers and no defensible measurement.
 
-Nearly all current work is Phase 1. If a brief doesn't say otherwise, assume Phase 1 rules.
+The product has nevertheless moved beyond the original two-phase description. Reader-facing
+appearance and interpretive modes are implemented and public; they are no longer forbidden work.
+Index Assistant Mode remains deferred and requires its own measurement before repair or promotion.
+Do not mistake a shipped reader feature for completion of the evaluation.
 
-**The gate to Phase 2 is not "the answers are good."** It is: Answer Mode's retrieval, faithfulness, and citation behavior are **measured, bounded, and reproducible, and where it fails is written down.** A system with mediocre but characterized numbers has passed the gate. A system with excellent-looking answers and no numbers has not.
+Archivist currently has two answer strategies:
 
-This ordering is not aesthetic. Phase 2's perspective modes — the same question answered from the same retrieved passages in a neutral, wry, tragic, or triumphant register — are only defensible if every register passes the *same* faithfulness and citation checks. The claim "framing varies, facts don't" is unverifiable without the Phase 1 measurement apparatus, so the apparatus comes first. Index Mode is likewise deferred: Answer Mode reaches done without it.
+- **Retrieval-backed Answer Mode.** `Essential` is the concise neutral default for API, CLI, and
+  evaluation callers that omit a reader mode. It is the evaluated baseline. Professional and the
+  other public reader modes may alter framing, voice, worldview, length, and appearance, but they
+  use the same corpus identity, retrieval primitives, evidence admission, source ordering,
+  citation contract, and terminal grounding checks. Reader-mode quality is not formal evidence
+  about Essential unless it is evaluated in a separately declared cohort.
+- **`full-context-v2`.** This separately versioned experiment supplies the complete eligible corpus
+  and intentionally bypasses query planning, ranking, retrieval, neighbour expansion, and the RAG
+  evidence-obligation contract. It shares corpus-integrity, conversation, cost, mode-style,
+  citation-remapping, and public-disclosure boundaries where those concepts apply. It is disabled
+  by default and must remain behind the server-side full-context flags; the public flag cannot
+  enable it unless the general flag is also enabled. Never mix its results into a retrieval cohort.
 
 ## The layers
 
@@ -28,11 +46,17 @@ In decreasing order of fixedness. Changes to a lower number are more expensive a
 
    This is the experimental control, and it plays the role invariants play in a simulation project. **Implement the definitions exactly as written; never adjust one to make a number come out better.** Only the project owner may change them, and any change must be logged in `DEFECTS.md` as a contract change and treated as invalidating every earlier run for comparison. If a result only holds because a metric definition moved, the result is worthless.
 
-   Sections settle on their own clocks. §§1–5 — run identity, the corpus contract, the gold-set schema, retrieval recall, citation accuracy — are settleable at the desk and are locked. §6 faithfulness and §7 abstention are drafted but **not yet settled**, because judge agreement and threshold placement can only be answered by a pilot run. They lock once the pilot has answered what only runs can answer. There is no category of Phase 1 metric that stays permanently adjustable.
+   Sections settle on their own clocks. §§1–5 — run identity, the corpus contract, the gold-set schema, retrieval recall, citation accuracy — are settleable at the desk and are locked. §6 faithfulness and §7 abstention are drafted but **not yet settled**, because judge agreement and threshold placement can only be answered by a pilot run. They lock once the pilot has answered what only runs can answer. There is no category of formal metric that stays permanently adjustable.
 
-2. **The system under test.** The retrieval core, the Answer Mode prompt, and the model configuration. Freely changeable — that is the point — but every change either opens a new run cohort or is a defect, and which one it is must be stated (see Run identity and cohorts).
+2. **The system under test.** The Essential retrieval path, its prompt and model configuration, and
+   any separately declared experimental arm. Freely changeable — that is the point — but every
+   behavioral change either opens a new run cohort or is a defect, and which one it is must be
+   stated (see Run identity and cohorts). A reader mode's interpretive prompt is behavior, not mere
+   presentation.
 
-3. **Presentation.** Citation rendering, chunk merging for display, the frontend. Changes here must not be able to alter what the model sees. If a presentation change moves a metric, the boundary has been violated and that is a defect.
+3. **Presentation.** Citation rendering, source disclosure, layout, animation, and appearance CSS.
+   Pure presentation changes must not alter what the model sees. If one moves an Essential metric,
+   the boundary has been violated and that is a defect.
 
 ## The gold set is not a target
 
@@ -49,9 +73,27 @@ The test is whether the correction would have been made had the run passed. If t
 
 The same applies to metric definitions. "Recall@k should probably count a neighbouring chunk as a hit" may well be true — but decided *after* seeing a bad recall number, it is indistinguishable from moving the goalposts. Raise it, log it, change it deliberately as a contract change, and re-baseline.
 
+**Never send an `H###` held-out item to Archivist, its retriever, planner, answer model, judge, or a
+system-informed annotation workflow before the final gold set and provenance sidecar are locked.**
+An H-item may be inspected directly against the private corpus for owner adjudication, but it may
+not become development data. If an H-item is exposed accidentally, record the contamination and
+replace or reclassify it under the contract; do not quietly keep it held out.
+
+## External and paid operations require authorization
+
+No API call, embedding request, hosted-model query, external upload, paid evaluation, live smoke
+test, or other network operation that can disclose private material or incur cost is authorized by
+an implementation request alone. Obtain explicit owner authorization for the specific operation,
+scope, data, and reasonable cost ceiling before starting it. An earlier authorization does not
+silently cover a later cohort, retry, or expanded corpus.
+
+Offline inspection, linting, unit tests, builds, and local deterministic audits are safe defaults.
+Never convert an offline verification command into a live call by supplying credentials or enabling
+network-backed fixtures without saying so first. Automatic paid retries are forbidden.
+
 ## Wanting to skip the measurement is data
 
-The project's recurring failure mode is documented and expected: **exciting work crowds out the tedious high-leverage work.** Rebuilding retrieval, adding personality, and building perspective modes are all more enjoyable than authoring forty questions with known answers and running a harness.
+The project's recurring failure mode is documented and expected: **exciting work crowds out the tedious high-leverage work.** New reader modes, visual polish, and speculative retrieval changes are all more enjoyable than adjudicating forty questions with known answers and running a harness.
 
 Concretely, this has already happened once. A generic multi-project upload-and-index stack exists in `src/web_api.py` and `src/web_project.py` — an architecturally satisfying generalization that was built while the evaluation was not. That is not a criticism of the code; it is the pattern, in evidence, in this repository.
 
@@ -59,15 +101,31 @@ If you find yourself wanting to improve retrieval before it has been measured, t
 
 ## One retrieval core
 
-From Brief 1 onward there is exactly **one** implementation of each retrieval primitive — distance filtering, neighbour expansion, context finalization, context building — and both modes call it.
+There is exactly **one** implementation of each retrieval primitive — distance filtering,
+neighbour expansion, context finalization, and context building. Every retrieval-backed reader
+mode, including Essential, calls those same primitives. A mode-specific variation is a parameter
+on the shared function, never a second copy of it.
 
-Prior to Brief 1 there were three partial copies (`retrieval.py`, `web_project.py`, `query.py`). This is why the rule is stated as a standing rule rather than left to Brief 1: the duplication was drift, not design, and it will re-form the moment a mode needs "just a small variation." A mode-specific variation is a parameter on the shared function, never a second copy of it.
+Prior to Brief 1 there were three partial copies (`retrieval.py`, `web_project.py`, `query.py`). The
+duplication was drift, not design, and it will re-form the moment a mode asks for "just a small
+variation." Log any new duplicate as a defect.
 
-**Transferability is demonstrated by the shared core serving two modes, not by the system accepting arbitrary corpora.** These are different claims and only the first one is in scope.
+`full-context-v2` is the deliberate exception to the *use* of retrieval, not an alternate
+implementation of it. Because that strategy supplies the entire eligible corpus, retrieval
+ranking and expansion have no referent and are intentionally bypassed. Do not force it through RAG
+primitives merely to make the architectures look alike, and do not let it grow duplicate RAG
+primitives.
+
+**Transferability is demonstrated by corpus-agnostic plumbing and shared retrieval primitives, not
+by a public upload-anything surface.**
 
 ## The citation contract
 
-**The model always emits `[Source N]`, where N is a 1-based index into the ordered source list it was given.** This is the model-facing contract and it does not vary by surface.
+**Retrieval-backed generation emits `[Source N]`, where N is a 1-based index into the ordered
+source list it was given.** The separately versioned `full-context-v2` experiment instead returns
+stable chunk IDs in its structured claim payload; local validation resolves those IDs against the
+exact supplied corpus and mechanically renders the same compact `[Source N]` presentation. The UI
+never invents, parses, or renumbers model citations.
 
 Human-readable citations — `Chapter 4 Cradle of the Empire (1601 – 1622), ¶49–52` — are **presentation**. They are attached to each source in the API payload and rendered by the frontend by substitution. They never appear in the prompt.
 
@@ -81,7 +139,12 @@ A question does not identify a run, and neither does a date. Every eval run reco
 
 Runs of record require a **clean working tree**. A dirty run is permitted — exploration is the normal case — and records `"working_tree": "dirty"` plus `dirty_fingerprint`: SHA-256 over `git diff HEAD` concatenated with the contents of every untracked non-ignored file, in `git status --porcelain` order. Untracked content belongs in the fingerprint because a new source file otherwise changes behaviour while leaving the fingerprint unchanged. **A dirty run may never be cited as a run of record**, and may never appear in `docs/evaluation.md`.
 
-**Model aliases are forbidden in run configuration.** `gpt-5` is an alias that currently resolves to the snapshot `gpt-5-2025-08-07`, which OpenAI has scheduled for removal from the API on 11 December 2026. An alias silently re-points; a run recorded against one is not reproducible and its number cannot be compared to anything. Record and request the dated snapshot.
+**Model aliases are forbidden in run-of-record configuration.** The interactive application
+currently uses `gpt-5.6-sol`; that convenient named model is **not** a dated snapshot and is not
+eligible for a formal run of record. An alias can silently re-point, so a number recorded against
+one is not reproducible. For formal evaluation, record and request exact dated generator and judge
+snapshots ending in `YYYY-MM-DD`, and fail closed when the provider does not expose one. Do not
+invent a dated identifier from a marketing name.
 
 **Two different things invalidate a comparison, and they are not the same:**
 
@@ -96,7 +159,8 @@ Runs are comparable **within** a cohort, never across. Raising `MAX_FINAL_SOURCE
 
 The success criterion is a before-and-after comparison across code versions, so controlling variance is load-bearing rather than housekeeping.
 
-- **Pin the generator snapshot explicitly**, never an alias. Record it in the run identity.
+- **Pin the generator snapshot explicitly**, never an alias. Interactive `gpt-5.6-sol` is not a
+  valid run-of-record pin. Record the exact dated identifier in the run identity.
 - **The judge model is a separate pinned snapshot from the generator**, recorded independently. If the two are the same string, a generator upgrade silently moves the judge and every faithfulness delta becomes uninterpretable. They must be able to move independently, and in general the judge should not be the model under test.
 - **Set every sampling parameter the API exposes and record it** — temperature, top_p, seed, reasoning effort, verbosity — rather than relying on defaults, which are not stable across snapshots.
 - **Residual non-determinism is expected and must be measured, not assumed away.** Repeated identical requests to the same pinned snapshot can differ. Before any metric is reported as a single number, the pilot establishes its run-to-run spread by repeating one fixed subset **five times unchanged**; that spread is reported alongside every later figure. A change smaller than the measured spread is not a result.
@@ -124,22 +188,43 @@ profile, even when it misses a previously used claim-coverage or target-coverage
 Formal quality gates belong to the owner-designed and owner-adjudicated held-out gold contract, its
 noise floor, and its predeclared §8 envelopes—not to one question repeatedly used to guide repairs.
 
-## The corpus never leaves the machine
+## Controlled private corpus boundary
 
-The manuscript is a commercial product sold on Amazon. Three rules, all hard:
+The manuscript is a commercial product. "Private" has several distinct, explicitly controlled
+contexts; it does not mean "only on one developer machine":
 
-- **No manuscript text is committed to the repository, ever** — not in fixtures, not in test data, not in example outputs, not in a docstring, not in a brief. `manuscript/`, `output/`, and `projects/` stay gitignored.
-- **Committed artifacts reference the corpus by identifier and hash, never by content.** Chunk IDs, paragraph ranges, document names, and SHA-256 digests are safe and are what run identity and the gold set are built from.
-- **Gold questions, strata, Behavior values, and inclusion decisions are owner-authored without candidate output.** A blinded external model may draft claims, essentiality, locations, relevance, prohibited claims, and notes only under `docs/gold_annotation_prompt_claude.md`. It may never see Archivist outputs or development results, and its proposals have no authority until the owner independently verifies and adjudicates every field against the corpus.
-- **All accepted gold-set prose is rewritten in the owner's own words**, not copied from the manuscript or an AI draft. A gold set full of verbatim excerpts is a partial reproduction of the book with extra steps. Raw annotation drafts remain private and gitignored.
+- **Local private runtime.** Source files, extracted chunks, indexes, annotation drafts, and runtime
+  bundles may exist in gitignored local directories for development and evaluation.
+- **Private hosted runtime.** The complete retrieval corpus may exist on the private Render service
+  and persistent disk required to operate the public demo. The public interface must not expose
+  that store as a browseable document service.
+- **Owner-authorized external annotation.** A declared question batch and the necessary private
+  corpus material may be sent to an external annotation model only after the owner explicitly
+  authorizes that provider, data scope, and operation. Follow
+  `docs/gold_annotation_prompt_claude.md`; keep the assistant blinded to Archivist outputs and
+  development results. This narrow authorization is not permission for any other upload or model
+  call.
 
-For any public deployment: the complete retrieval-eligible corpus may remain private on the server,
-but responses expose short cited excerpts only, never whole chunks; arbitrary source browsing and
-source-file streaming are disabled; and server-side rate, concurrency, abuse, and spend limits are
-required. The public/development exposure profile is selected at server startup and may never be a
-client-controlled option. The endpoints that return full chunk text or stream source files are not
-deployable as they stand. This is a deployment gate, specified in Brief 8 - not something to solve
-incidentally in an earlier brief.
+The hard boundary rules are:
+
+- **No manuscript text is committed to the repository, ever** — not in fixtures, test data,
+  example outputs, docstrings, briefs, or logs. `manuscript/`, `output/`, `projects/`, private
+  annotation drafts, vector stores, and runtime bundles stay gitignored.
+- **Committed artifacts reference the corpus by identifier and hash, never by content.** Chunk IDs,
+  paragraph ranges, document names, edition locators, and SHA-256 digests are the allowed binding
+  material.
+- **Gold questions, strata, Behavior values, and inclusion decisions are owner-authored without
+  candidate output.** An authorized blinded model may only draft the annotation fields permitted
+  by the evaluation contract. Its proposals have no authority until the owner verifies and
+  adjudicates every field directly against the private corpus.
+- **All accepted gold-set prose is rewritten in the owner's own words**, not copied from the
+  manuscript or an AI draft. Raw drafts remain private and gitignored.
+
+For public deployment, responses expose generated prose, edition-qualified locations, and only
+tightly bounded cited excerpts—never whole chunks. Arbitrary source browsing and source-file
+streaming stay disabled. Server-side exposure profile, rate, concurrency, abuse, quotation, and
+spend controls are fail-closed and cannot be selected by the client. Development endpoints that
+return full text are not public-deployable.
 
 Reader-facing page citations are edition-specific presentation metadata. Every page or location
 must name its edition profile (for example, `Typeset PDF (July 6, 2026), pp. 33-35`), and a new
@@ -155,9 +240,14 @@ Log to `DEFECTS.md` whenever:
 - a presentation-layer change moved a measured number
 - corpus-specific logic has leaked into engine code
 - a retrieval primitive has been duplicated rather than parameterized
-- a Phase 2 concern — Index Mode, persona, perspective modes — has crept into Phase 1 work
+- a reader mode changed retrieval/evidence behavior, or its result was represented as evidence for
+  the Essential evaluation cohort without a declared comparison
+- `full-context-v2` was silently substituted for retrieval, enabled outside its flags, or mixed into
+  a retrieval cohort
 - a metric's run-to-run spread exceeds the effect being claimed
 - manuscript text has entered a committed file
+- an H-item was exposed to Archivist or candidate-informed material before the gold lock
+- an external or paid call ran without the owner's explicit authorization
 - **the brief itself was underspecified and the implementer had to invent a mechanic**
 
 That last one is not a courtesy entry. **A gap in the brief is a defect**, logged the same as a code fault. On the previous project most defects traced to specification gaps rather than to model output, and that pattern only became visible because they were counted.
@@ -172,29 +262,73 @@ Use the entry format at the top of that file.
 | Deps & venv | **uv** | One tool for install, virtualenv, resolution, and lockfile. Commit `uv.lock`; its SHA-256 goes in every run identity. |
 | Tests | **pytest** | |
 | Lint & format | **ruff** | |
-| Vector store | **ChromaDB, persistent** | Already in use. See the note below on distance space. |
+| Vector store | **ChromaDB, persistent; HNSW `l2`** | The corpus manifest pins the store contract. |
 | Embeddings | **`text-embedding-3-small`** | Current, not deprecated, and re-embedding is expensive — no reason to move. |
-| Generation | **A pinned dated GPT-5-family snapshot** | Never the bare `gpt-5` alias. See Run identity. |
+| Interactive generation | **`gpt-5.6-sol` with explicit settings** | Convenient product model; not run-of-record eligible. |
+| Formal generation/judging | **Exact dated snapshots** | Generator and judge are pinned independently. |
 
-### The distance space must be stated, not assumed
+### Distance contract
 
-The `manuscript` collection is created with `get_or_create_collection(name="manuscript")` and no `metadata={"hnsw:space": ...}`, so it uses Chroma's **default** space rather than an explicitly chosen one. `MAX_PRIMARY_DISTANCE = 1.05` is therefore a threshold in units nobody has written down.
+`fixtures/corpus_manifest.json` pins `store.hnsw_space` to **`l2`**, the embedding model to
+`text-embedding-3-small`, the collection name, and the embedded chunk count. Runtime corpus
+preflight must reject a collection whose configuration disagrees with that manifest. Changing the
+space, embedding model, chunking, or distance threshold opens a new cohort and may require a new
+index; never infer or silently substitute those values.
 
-Brief 2 must determine the space empirically from the installed Chroma version, record it in the corpus manifest, and state what 1.05 means in it. On unit-normalized embeddings squared-L2 and cosine distance are monotonically related, so the *ranking* is unaffected either way — but the *threshold* is not, and a filter whose cut point has no stated meaning cannot be tuned deliberately. Set `hnsw:space` explicitly from that point on.
+## Offline verification
 
-### Requirements hygiene
+From the repository root, the current complete offline verification sequence is exactly:
 
-`requirements.txt` is currently UTF-16-encoded, contains a corrupted entry (`chromadb==1.5.5dir`), and ends with duplicated unpinned lines. `pip install -r requirements.txt` fails on it. Replaced by `pyproject.toml` plus `uv.lock` in Brief 1; do not patch it in place.
+```powershell
+uv run ruff check src tests scripts
+uv run pytest
+Set-Location frontend
+npm run test:delivery
+npm run test:modes
+npm run build
+Set-Location ..
+```
+
+These commands must not make OpenAI calls or require an API key. Run the smallest focused tests
+while iterating, then this complete sequence before handing off a broad backend/frontend change.
+If the suite cannot run because of an environment or filesystem failure, report that distinction;
+do not describe an unrun check as passing. Live Render/Cloudflare behavior, paid model behavior,
+and provider streaming require separately authorized smoke tests and are not proven offline.
+
+## Documentation duties
+
+Keep documentation synchronized as part of the change, not as a later archaeology project:
+
+- update `README.MD` when setup, public behavior, modes, architecture, or verification commands
+  change;
+- update `ROADMAP.md` when a milestone changes status, ordering, dependency, or acceptance gate;
+- append `BLOGNOTES.md` for major development decisions, measurements, launches, reversals, and
+  lessons worth preserving for the eventual public account;
+- update `DEFECTS.md` for contract changes, contamination, privacy failures, cohort mistakes,
+  underspecified mechanics, and resolved defects; and
+- update the narrow design or runbook document that owns a changed protocol. Keep `AGENTS.md` for
+  durable operating rules rather than daily chronology.
+
+Documentation claims must match code and committed artifacts. Do not copy manuscript text, private
+prompts, credentials, or raw external-model drafts into documentation.
 
 ## Settled — do not re-litigate
 
 These are decided. A brief may note a consequence, but may not reopen the question.
 
-- **Do not rebuild the code.** It is modular and reasonably clean. The gap is that behavior is unmeasured, not that the code is bad, and a rebuild produces equally unmeasured code.
+- **Do not rebuild the code.** It is modular and reasonably clean. The remaining measurement gap is
+  not evidence that a rewrite would help; a rebuild produces equally unmeasured code.
 - **The evaluation is the highest-leverage next action**, ahead of any retrieval improvement.
 - **The gold set is the first artifact** and the input to all three measurements.
 - **Optimize for this manuscript; keep the plumbing corpus-agnostic.**
 - **Answer Mode reaches done without Index Mode.**
-- **An evaluated system gets no personality.** Grounded and boring is the achievement. A light persona is acceptable only on a reader-facing public demo, as book marketing, and never on the evaluated path.
-- **`[Source N]` is the model-facing citation contract**; human-readable labels are presentation.
-- **The generic multi-project stack is deferred**, not deleted and not extended. It is out of scope for every Phase 1 brief. Revisit after the baseline exists.
+- **Essential is the neutral evaluated retrieval baseline.** Reader modes and advanced interpretive
+  settings are legitimate product features, but they do not change retrieval or become formal
+  evidence for Essential without their own declared cohorts and checks.
+- **`full-context-v2` remains a disabled, separately versioned experiment.** It is not a silent
+  fallback, retrieval improvement, or substitute evaluation arm.
+- **`[Source N]` is the retrieval model-facing and common reader-facing citation contract.**
+  `full-context-v2` uses validated stable chunk IDs internally and remaps them locally; human-readable
+  labels remain presentation.
+- **The generic multi-project stack is deferred**, not deleted. Do not extend it incidentally while
+  working on the single-corpus product or its evaluation.

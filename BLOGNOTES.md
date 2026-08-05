@@ -4,6 +4,31 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
+## Current checkpoint — 2026-08-05
+
+- **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
+  local code reports `evidence-planned-v26`, `query-planner-v11`, and
+  `evidence-coverage-v11` over 481 retrieval-eligible manuscript chunks. Render deploys remain
+  manual, so production parity with the current Git commit must be confirmed rather than assumed.
+- **Reader experience:** Complete answer is the default. Progressive response is an experimental
+  advanced setting. Ten semantic modes and eleven visual appearances are implemented; they are
+  public interpretive prototypes, not formal evidence that perspective changes preserve answer
+  quality. The separate full-context-v2 experiment remains disabled on the public server.
+- **Measurement:** the unchanged ten-question cohort is development evidence. No formal held-out
+  gold evaluation has run. The owner is pausing code development to review the private forty-item
+  gold workbook carefully.
+- **Gold-set status:** H020 must be replaced because it remains too close to a registered
+  development question. Claude-derived annotations currently in the private workbook are useful
+  exploratory drafts, but they predate the provenance-v2 question commitment and cannot be called
+  the canonical blinded cohort.
+- **Restart point:** finish the owner-controlled questions, strata, and Behavior values; run the
+  missing pre-assistance overlap check; record the text-free commitment; obtain fresh five-item
+  blinded drafts; adjudicate and rewrite them; lock provenance; then run retrieval, citation,
+  faithfulness, abstention, baseline, and production measurements in that order.
+
+This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
+known at the time they were written and should not be silently rewritten into present-tense claims.
+
 ## The central story
 
 Archivist is a book-specific retrieval-augmented conversation interface for *Cradle of the
@@ -1633,21 +1658,22 @@ subject-specific, impersonal answer in the interface.
 
 1. Open the cover-led landing page and briefly explain that the app is built around one specific
    manuscript rather than asking the reader to upload a file.
-2. Ask a non-gold, focused question so the public demo does not contaminate an unfinished
-   evaluation item.
+2. Use a registered development/example question—not an H-numbered held-out question—so the demo
+   cannot contaminate the unfinished formal evaluation.
 3. Show the transition into the full-width answer and open one cited source to reveal an
    edition-qualified page range and brief supporting quotation, not a full chunk.
 4. Ask a natural follow-up containing a pronoun or shorthand reference to demonstrate
    conversational continuity.
 5. Show that the second turn retrieves its own evidence rather than treating the earlier answer as
    truth.
-6. Open the interpretive controls and explain the three-axis design, then return to the neutral
-   baseline.
-7. Change a visual vibe to demonstrate that appearance is isolated from retrieval.
-8. Open the cost panel and distinguish local estimates from authoritative billing.
-9. End with the evaluation work: paragraph-addressable chunks, the owner-authored test set, the
-   practical before baseline, and the plan to report failure modes instead of relying on
-   impressive examples.
+6. Switch from Essential to one interpretive mode and explain that the preset combines appearance,
+   historiographical lens, voice, and worldview while the cited manuscript evidence remains the
+   answer's factual boundary. Advanced controls expose the individual axes.
+7. Mention Progressive response only as an optional experiment; Complete answer remains the
+   recommended default.
+8. End with the evaluation work: paragraph-addressable chunks, the owner-designed held-out set,
+   its blinded-draft/owner-adjudication protocol, and the deliberate pause before any formal score
+   is claimed. The public deployment hides private cost and diagnostics panels.
 
 ## Screenshots or clips worth capturing
 
@@ -1656,11 +1682,12 @@ subject-specific, impersonal answer in the interface.
 - The archival-paper answer treatment with a visible citation and a compact
   `Typeset PDF, p./pp.` source card.
 - A compact follow-up turn with prior sources collapsed.
-- Historiographical lens, Voice, and Worldview shown as separate controls.
-- Two different visual vibes displaying the same conversation.
-- The local cost panel with an estimated per-turn and monthly total.
-- The frozen ten-question pilot document beside a compact before/after results table, without
-  exposing expected-answer or manuscript text.
+- Essential and one interpretive mode displaying the same development question.
+- The Advanced controls showing Historiographical lens, Voice, and Worldview as separate axes.
+- A private development screenshot of the text-free timing or cost ledger, clearly labeled as
+  operational evidence rather than public UI.
+- The private gold-review workbook's cover and field legend only—never its held-out questions,
+  expected claims, locations, or manuscript-derived working notes before lock.
 
 ## Claims to avoid until measurement exists
 
@@ -1690,22 +1717,26 @@ subject-specific, impersonal answer in the interface.
 
 ## Open threads for later entries
 
-- Preserve the v6 result as the directional comparison point; do not change its frozen questions
-  or rubric in response to the observed failures.
-- Preserve the successful v8 bounded-absence rule and v10's five-stage G007 document coverage.
-  Do not widen G006 to sixteen; target the missing within-stage mechanisms before another full
-  ten-question run.
-- Later conversion of the practical pilot into exact chunk-level gold data if publication-grade
-  retrieval and citation metrics require it.
-- Retrieval-only pilot results before any answer generation is graded.
-- Judge-human agreement and the final faithfulness/abstention thresholds.
-- A pinned dated generator snapshot suitable for a run of record.
-- Baseline retrieval, citation, faithfulness, and abstention measurements with run-to-run spread.
-- Measurement-driven retrieval changes such as hybrid search, reranking, or query routing.
+- Replace H020 with a genuinely distinct conceptual question and finish the owner's review of all
+  forty questions, strata, and Behavior values.
+- Close the tooling gap between the private Markdown question form and the pre-assistance
+  development-question overlap audit. A hash commitment alone does not prove held-out status.
+- Record the question commitment, then obtain fresh canonical Claude batches under the blind
+  protocol; treat all pre-commitment Claude text as exploratory only.
+- Complete source-level owner adjudication, privacy and leakage audits, provenance lock, and the
+  clean frozen-candidate boundary before any H-numbered item reaches Archivist.
+- Run retrieval-only measurement first, followed by the citation/faithfulness/abstention pilot,
+  baseline comparison, and only then a production cohort with run-to-run spread.
+- Pin dated generator and judge snapshots suitable for a run of record; interactive
+  `gpt-5.6-sol` is a development model label, not a reproducible snapshot.
+- Confirm which Git commit is live after each manual Render deployment rather than inferring
+  production parity from the repository.
+- Use Progressive timing records to measure provider, schema/release, and proxy delay before
+  considering any latency optimization.
 - Durable saved conversations.
 - Paperback, hardcover, and ebook locator profiles after their pagination is supplied.
-- Hosted public-demo observation: real cold-start/latency behavior, memory headroom, abuse traffic,
-  and whether the initial monthly budget is appropriate.
+- Multi-corpus ingestion and the deferred Index workflow only after the single-book measured path
+  is complete.
 
 ### 2026-07-27 - The typeset-PDF locator became a verified production artifact
 
@@ -3417,6 +3448,41 @@ Useful blog lesson: a trustworthy benchmark does not require pretending that no 
 the clerical work. It requires freezing the questions first, blinding the assistant to the system
 under test, preserving an audit trail, and keeping final judgment with a human who checks the
 sources rather than approving plausible prose.
+
+### 2026-08-05 - Pausing feature work to build the ruler carefully
+
+- Closed the current implementation checkpoint in commit `355f78d`. The checkpoint formalizes
+  provenance-v2 for blinded annotation assistance, adds a text-free owner-question fingerprint,
+  broadens quotation-risk checks beyond claims, and moves Progressive delivery into Advanced
+  settings so an experiment does not compete with the recommended answer path.
+- Verified the checkpoint with 768 passing Python tests and one intentional skip, Ruff, both
+  focused frontend suites, and a production frontend build. The first sandboxed full run produced
+  fixture setup errors because Windows denied Pytest's default temporary directory; the identical
+  offline suite passed when rerun with an authorized repository-local fixture directory. No paid
+  model call was made.
+- Converted the private forty-question Markdown form into an editable owner-review Word workbook.
+  The workbook visually separates owner-controlled fields from Claude-derived, unverified draft
+  fields; adds a priority review queue and per-item revision notes; and marks H020 as a blocking
+  replacement rather than disguising it as usable gold. The file remains private and gitignored.
+- The review surfaced a protocol-history problem worth preserving rather than papering over: the
+  current Claude-filled form was created before the question commitment and canonical raw-draft
+  manifest existed. It can help the owner think, but it cannot honestly become the provenance-v2
+  canonical annotation batch. Fresh blinded batches come only after the owner finalizes the exam
+  and records its commitment.
+- Paused RAG and reader-feature development while the owner works through the gold set. The next
+  engineering action is not another answer-quality patch; it is closing the private-Markdown
+  overlap-audit gap and then executing the declared evaluation sequence against a clean frozen
+  candidate.
+- Reconciled the README, roadmap, standing agent rules, project notes, evaluation contract, and
+  gold-authoring guide around that pause. The current-state summaries now separate the live reader
+  product from unrun formal measurement, distinguish ten semantic modes from eleven visual
+  appearances, document the internal full-context citation remap, and leave one explicit restart
+  path instead of several stale next-step lists.
+
+Useful blog lesson: evaluation work is product work. A polished retrieval system needs a carefully
+made ruler, and making that ruler can require more historical judgment than writing another search
+heuristic. Stopping feature development here protects the eventual measurement from becoming one
+more tuned demonstration.
 
 ## Update convention
 

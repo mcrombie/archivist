@@ -1,113 +1,93 @@
 # Archivist
 
-Archivist is a source-grounded conversational interface for one book:
-*Cradle of the Empire: A Big History of Virginia*. It searches a private full-manuscript retrieval
-index, answers with inline `[Source N]` citations, remembers the open conversation, and offers
-versioned reader modes that combine visual presentation with bounded interpretive framing.
-
-It is not a manuscript-upload service or a general-purpose chatbot.
+Archivist is a source-grounded conversational interface for one book: *Cradle of the Empire: A
+Big History of Virginia*. It searches the complete substantive manuscript, answers with inline
+`[Source N]` citations, and carries context across follow-up questions.
 
 Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
 
+Archivist is not a manuscript-upload service, a general-purpose chatbot, or an unrestricted source
+browser. The public application never exposes its private manuscript, vector store, full retrieved
+chunks, internal traces, or arbitrary file paths.
+
 ## Current product
 
-- one-page, conversational book interface;
-- contextual follow-up questions;
-- query decomposition, premise checks, absence handling, and source-bounded completeness checks;
-- ten reader-facing modes: Professional, Essential, Mythical Forest Folio, Cromb Coo Coo,
-  Pretty Pink Princess, Baleful Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and
-  Cosmic Almanac, with Professional as the new-visitor frontend default;
-- an unchanged Essential evidence-first baseline for API, CLI, and evaluation callers that omit a
-  mode;
-- Historiographical lens, Voice, Worldview, all eleven visual appearances, and experimental
-  Progressive delivery under Advanced controls;
-- Complete answer as the recommended fail-closed delivery default, with an experimental
-  Progressive response that streams the same final-generation API call and reveals only complete,
-  locally checked factual claims while the canonical answer is still being validated;
-- interpretive influence profiles that shape framing only, never retrieval, evidence, or citations;
-- local OpenAI usage estimates and budget controls;
-- 481 retrieval-eligible chunks covering the complete substantive manuscript;
-- edition-qualified public citations for `Typeset PDF (July 6, 2026)`;
-- development and public-demo exposure profiles.
+The interactive application currently uses RAG policy `evidence-planned-v26` over **481
+retrieval-eligible chunks**. Those chunks cover the Introduction, geological formation, Prologue,
+Chapters 1–20, Epilogue, Afterword, and Appendices A–D. Front matter, the table of contents,
+acknowledgments, illustration notes, bibliography, printed index, and credits are excluded from
+retrieval.
 
-The printed Index, bibliography, table of contents, acknowledgments, illustration notes, and
-credits are not part of the answer corpus. The Introduction, geological formation, Prologue,
-Chapters 1–20, Epilogue, Afterword, and Appendices A–D are searchable.
+The reader experience includes:
+
+- a one-page, multi-turn conversation with contextual follow-up resolution;
+- query decomposition, premise checking, absence handling, evidence-coverage checks, and inline
+  source citations;
+- **10 semantic modes**: Professional, Essential, Mythical Forest Folio, Cromb Coo Coo, Pretty
+  Pink Princess, Baleful Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and Cosmic
+  Almanac;
+- **11 visual appearances**, available separately under advanced controls;
+- Professional as the new-visitor default and Essential as the neutral evidence-first baseline for
+  API, CLI, and evaluation callers that omit a mode;
+- **Complete answer** as the fail-closed default delivery mode;
+- **Progressive response** as an experimental advanced setting that may reveal locally checked,
+  cited claims from the same generation call before the canonical answer finishes validation;
+- typeset-PDF page locators and tightly bounded excerpts in the public demo; and
+- local cost estimates and budget controls for development.
+
+Modes influence framing, emphasis, and prose style. They do not change the manuscript evidence,
+retrieval corpus, citation requirements, premise checks, or absence decisions.
+
+Progressive response is not chain-of-thought and does not make a second answer-model call. It may
+improve perceived responsiveness, but planning and retrieval still occur before prose can be
+released. Any provisional text is discarded if the final response fails validation. Complete
+answer remains the reference behavior.
+
+An experimental `full-context-v2` strategy also exists behind server-side feature flags. It is
+disabled by default and disabled on the public deployment; the public demo uses the V26 RAG path.
 
 ## Architecture
 
 ```text
-private manuscript chunks
+private DOCX and typeset PDF
         |
         v
-private Chroma embedding index (481 records)
+deterministic preparation, manifest, and edition locators
         |
         v
-query planning and conversational resolution
+private Chroma index (481 eligible text-embedding-3-small vectors)
         |
         v
-retrieval, premise checking, and evidence coverage
+V26 conversation resolution, planning, retrieval, and evidence checks
         |
         v
-GPT-5.6 Sol structured answer generation
-        |
-        +--> Progressive (experimental): claim-level release checks
-        |                                  while generation continues
-        |
-        `--> Complete: no prose released before terminal validation
+structured answer generation through the OpenAI Responses API
         |
         v
-whole-answer grounding and [Source N] validation
+grounding, citation, premise, completeness, and exposure validation
+        |
+        +--> development: private diagnostics and full source inspection
+        |
+        `--> public_demo: page locators and bounded excerpts only
         |
         v
-edition-locator and exposure-policy release checks
-        |
-        +--> development: full diagnostic passages
-        |
-        `--> public_demo: page locators and bounded excerpts
+FastAPI service + React/Vite conversation interface
 ```
 
-The book is not sent to the answer model on every request. Archivist embeds the question, retrieves
-a bounded set of relevant private chunks, and supplies only that evidence to answer generation.
+The interactive generator, follow-up resolver, and planner currently use the undated
+`gpt-5.6-sol` identifier with explicit role-specific settings. That is a development and public-demo
+configuration, not a reproducible evaluation pin. A future formal run of record must use separately
+declared **dated model snapshots** for the generator and judge; Archivist rejects an undated alias
+when run-of-record eligibility is checked.
 
-## Answer delivery
-
-**Complete** is the default and the evaluation reference. It withholds answer prose until the full
-response has passed Archivist's grounding, citation, premise, completeness, and exposure checks.
-If a terminal check fails, the rejected prose is never presented as an answer.
-
-**Progressive** is an experimental presentation mode. It does not make a preview request or a
-second answer request: the backend streams the existing final-generation call using the
-`archivist.answer_stream/2` NDJSON protocol. It privately buffers structured-output deltas and may
-release a complete factual claim only after checking its order, role, citations, source mapping,
-and size. The shared generation schema places answer claims before terminal-only validation
-ledgers, and the first releasable factual claim must be a direct, subject-linked sentence of no
-more than 45 words. In the public profile, every provisional claim must also pass edition-locator
-and rolling quotation-budget checks before it leaves the server.
-
-The interface marks this material **Checked partial · Not final**. Provisional claims are excluded
-from conversation memory, copying, and the final source display. A successful terminal event
-replaces them with the canonical validated answer; an interruption or late validation failure
-clears them. Interpretive prefaces and conclusions remain withheld until terminal validation.
-
-Progressive delivery is not chain-of-thought, raw token streaming, or a promise that the whole
-request will finish faster. Query resolution, planning, embeddings, retrieval, and evidence checks
-still happen before final generation begins. Its narrower goal is to reduce the wait for the first
-useful, releasable claim once that generation is underway, without adding another answer-model
-call. While prose is unavailable, three-second heartbeat frames keep a visible elapsed-work
-indicator moving without exposing model reasoning. Complete and Progressive use the same prompt
-and schema within the current `evidence-coverage-v11` and `full-context-coverage-v3` generation
-cohorts. A live deployment smoke test is still required before treating first-claim timing as
-deployment-verified.
-
-## Local setup
+## Local quickstart
 
 Requirements:
 
 - Python 3.13;
 - Node.js and npm;
 - `uv`;
-- an OpenAI API key;
+- an OpenAI API key; and
 - the private runtime corpus already present under `output/` and `chroma_db/`.
 
 Install dependencies and build the frontend:
@@ -126,20 +106,16 @@ Create `.env` in the repository root:
 OPENAI_API_KEY=your_project_scoped_key
 ```
 
-Run the local development application:
+Run the development application:
 
 ```powershell
 uv run uvicorn web_api:app --app-dir src --reload
 ```
 
-Then open `http://127.0.0.1:8000`.
+Open `http://127.0.0.1:8000`. Development mode exposes private diagnostic tools and must not be
+published to the internet.
 
-Development mode is the default. It preserves the full diagnostic source display and the local
-cost interface. Do not expose this profile to the public internet.
-
-## Public-demo profile
-
-The public profile is selected only at server startup:
+To exercise the hardened public profile locally:
 
 ```powershell
 $env:ARCHIVIST_EXPOSURE_PROFILE = "public_demo"
@@ -147,72 +123,46 @@ $env:ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD = "5.00"
 uv run uvicorn web_api:app --app-dir src
 ```
 
-Public mode:
+## Private data and deployment
 
-- fixes retrieval depth on the server;
-- removes upload, project, embedding, index, source-file, and cost-management routes;
-- hides full chunks, internal paths, diagnostics, and per-turn costs;
-- maps citations to a named edition;
-- limits excerpts to 280 characters each, three excerpts, and 700 characters total;
-- applies the same locator and rolling quotation limits to every provisional Progressive claim;
-- enforces request-size, per-client, global, concurrency, and monthly-spend limits;
-- disables API documentation and sanitizes errors.
+The repository ignores the manuscript, typeset PDF, extracted chunks, Chroma database, runtime
+bundles, usage databases, API keys, and generated frontend build. Committed fixtures identify the
+corpus and edition mapping by stable IDs and hashes rather than by reproducing book text.
 
-See [`docs/public_demo_design.md`](docs/public_demo_design.md) for the disclosure design,
-[`docs/answer_delivery.md`](docs/answer_delivery.md) for the Complete/Progressive transport and
-release contract, and [`docs/public_deployment.md`](docs/public_deployment.md) for the Render
-deployment and recovery runbook. The generated
-[`onrender.com`](https://archivist-cradle-of-the-empire.onrender.com) address remains enabled as
-an operational fallback, but `https://archivist.mcrombie.com` is the canonical reader-facing URL.
+The public service searches the same 481-chunk substantive corpus privately. Its startup-selected
+`public_demo` profile removes upload, project, indexing, diagnostic, cost-management, and full-source
+routes; sanitizes errors; disables API documentation; fixes retrieval depth server-side; limits
+request size, rate, concurrency, and monthly spend; and serves only edition-qualified locations and
+short excerpts. Page numbers currently refer specifically to **Typeset PDF (July 6, 2026)**.
 
-## Edition locators
+Build the gitignored deployment bundle only when preparing or refreshing the Render disk:
 
-The committed locator fixture contains no book text:
-
-```text
-fixtures/edition_locators/typeset_pdf_0706.json
+```powershell
+uv run python scripts/build_public_runtime_bundle.py
 ```
 
-Its 481 records are bound to the exact typeset PDF, chunks, and corpus-manifest hashes. These page
-numbers apply only to `Typeset PDF (July 6, 2026)`. Future paperback, hardcover, and ebook profiles
-can reuse stable chunk IDs without changing retrieval or re-embedding the manuscript.
-
-The private PDF is required only when deliberately rebuilding the locator artifact:
+Rebuild the committed, text-free edition locator only from the authorized private PDF:
 
 ```powershell
 uv run python scripts/build_edition_locators.py `
   "C:\path\to\Cradle_of_the_Empire_FINAL_PDF_revised_0706.pdf"
 ```
 
-## Private runtime bundle
-
-The public deployment receives its full retrieval corpus through a private, gitignored archive:
-
-```powershell
-uv run python scripts/build_public_runtime_bundle.py
-```
-
-The archive contains the pruned Chroma collection and its matching chunks, but not the source DOCX
-or PDF. It remains private and must never be committed or attached to a public release.
-
-## Cost tracking
-
-Archivist records local per-operation estimates for OpenAI Responses and embeddings. Use a
-project-scoped OpenAI key for clean attribution. The OpenAI Usage Dashboard remains the billing
-source of truth; local estimates are an operational guardrail.
-
-See [`docs/cost_tracking.md`](docs/cost_tracking.md).
+Render hosts the FastAPI service and private runtime disk. `archivist.mcrombie.com` is the canonical
+reader URL; the generated `onrender.com` address remains an operational fallback. Deployment,
+recovery, environment variables, and smoke checks are documented in
+[`docs/public_deployment.md`](docs/public_deployment.md).
 
 ## Verification
 
-Run backend checks:
+Run the offline backend checks:
 
 ```powershell
 uv run ruff check src tests scripts
 uv run pytest
 ```
 
-Run the focused frontend delivery and reader-mode checks, then the production build:
+Run the focused frontend suites and production build:
 
 ```powershell
 Set-Location frontend
@@ -221,22 +171,42 @@ npm run test:modes
 npm run build
 ```
 
-These checks are offline and do not make paid OpenAI API calls. The current local implementation
-passes Ruff, 760 Python tests (with one skipped), both focused frontend suites, and the production
-build. Progressive delivery still requires the live deployment smoke described above.
+**Verification snapshot — August 5, 2026:** repository-wide Ruff passed; **768 Python tests passed
+and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
+built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
+still requires the release smoke checks in the deployment runbook.
 
-The repeatedly used ten-question set is a development regression suite, not held-out evidence.
-Formal measurement is gated on a separately owner-designed and owner-adjudicated 34–46 item gold
-set. Its questions and expected behaviors are owner-authored; Claude may draft evidence annotations
-only while blinded to every Archivist output, after which the owner verifies every field and rewrites
-accepted prose before the set is locked. Passing the public security
-boundary does not by itself mean every historical answer is correct.
+## Evaluation status
 
-## Privacy
+The familiar ten-question cohort is a development regression set, not held-out evidence. Formal
+measurement is paused while the owner completes a separate 34–46-item held-out gold set. Its
+questions, strata, expected behaviors, and inclusion decisions are owner-authored; blinded Claude
+drafts may assist with evidence annotations, but every field must be checked against the private
+corpus, adjudicated by the owner, and rewritten before lock. H020 currently requires replacement
+before the question set can be frozen.
 
-The repository intentionally ignores the manuscript, PDF, chunks, vector store, runtime bundles,
-usage databases, API keys, and generated frontend build. Public responses disclose only generated
-answers, source numbers, edition-qualified page locations, and tightly bounded excerpts.
+No formal benchmark result should yet be claimed. A run of record requires one frozen candidate,
+the locked gold set and provenance sidecar, predeclared metrics and thresholds, and dated generator
+and judge model snapshots. The V26 interactive application and earlier practical evaluations are
+development evidence only.
+
+## Documentation map
+
+- [`B0_project_brief.md`](B0_project_brief.md) — product scope and non-negotiable constraints.
+- [`ROADMAP.md`](ROADMAP.md) — current phase, remaining work, and release evidence.
+- [`EVAL_CONTRACT.md`](EVAL_CONTRACT.md) — formal measurement and held-out governance contract.
+- [`docs/project_notes.md`](docs/project_notes.md) — canonical corpus, model, index, and UI state.
+- [`docs/rag_next_optimization_design.md`](docs/rag_next_optimization_design.md) — V26 RAG design
+  lineage and contracts.
+- [`docs/full_context_answer_strategy_design.md`](docs/full_context_answer_strategy_design.md) —
+  disabled full-context experiment.
+- [`docs/answer_delivery.md`](docs/answer_delivery.md) — Complete and Progressive delivery rules.
+- [`docs/public_demo_design.md`](docs/public_demo_design.md) — public exposure and citation design.
+- [`docs/public_deployment.md`](docs/public_deployment.md) — Render deployment and recovery runbook.
+- [`docs/gold_set_authoring.md`](docs/gold_set_authoring.md) — private held-out authoring workflow.
+- [`docs/cost_tracking.md`](docs/cost_tracking.md) — local estimates, budgets, and billing caveats.
+- [`BLOGNOTES.md`](BLOGNOTES.md) and [`DEFECTS.md`](DEFECTS.md) — development narrative and defect
+  history.
 
 ## Author
 

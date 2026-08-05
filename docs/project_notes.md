@@ -36,17 +36,18 @@ non-reader collections were preserved with identical records and metadata. The i
 preceding 488-vector store and its manifest remain recoverable under
 `runtime/corpus-staging/introduction-scope-20260723/replaced-active/`.
 
-## Current: optimize against the practical neutral baseline
+## Current: hold the candidate while the owner builds the gold set
 
-The present RAG is a basic semantic-retrieval system. The canonical manuscript is active and a
-frozen ten-question practical neutral baseline now exists, so measured work on hybrid retrieval,
-reranking, threshold calibration, query routing, generation completeness, and related changes can
-begin. The practical baseline is directional rather than a formal run of record; its role is to
-support paired before-and-after development against the unchanged owner test document. The earlier
-conversation-design pass deliberately left embeddings, retrieval parameters, the Answer Mode
-prompt, and the generation model unchanged. The subsequent model-configuration step changes only
-the generation model and its explicit settings; it does not itself tune retrieval or the Answer
-Mode prompt.
+The active retrieval path is `evidence-planned-v26`, with `query-planner-v11` and
+`evidence-coverage-v11`. The familiar ten-question cohort is development data: it helped shape the
+system and cannot establish a held-out quality claim. Feature and RAG development are paused while
+the owner replaces H020, finishes the private question set, records its pre-assistance commitment,
+and adjudicates fresh blinded evidence annotations under `EVAL_CONTRACT.md`.
+
+The next engineering work is limited to closing the Markdown/JSON leakage-audit tooling gap and
+supporting the declared lock-and-measure sequence. Hybrid retrieval, reranking, threshold changes,
+and further answer-quality tuning wait until the gold ruler is frozen and the formal baseline has
+identified a measured defect.
 
 ## Current generation-model configuration
 
@@ -109,7 +110,7 @@ text-free `future_science_history/1` profile. It connects long time horizons, sy
 ecology and climate where supported, technology, energy, infrastructure, information, institutions,
 path dependence, feedback loops, uncertainty, and plausible future consequences. It cannot invent
 future facts, write science fiction, treat a projection as evidence, or assume technological
-progress is inevitable. All six modes remain downstream of retrieval and keep *Cradle* as the sole
+progress is inevitable. All reader modes remain downstream of retrieval and keep *Cradle* as the sole
 source of historical facts and citations.
 
 Evidence scope remains a separate control. The independent Historiographical lens, Voice, and
@@ -128,6 +129,12 @@ lens, for example, must locate a specific loss, coercion, incomplete reform, fai
 tension already present in the factual middle rather than manufacture an unnamed human cost or
 foreclosed possibility. When several settings are active, the lens supplies one central judgment,
 the worldview evaluates that same judgment, and the voice shapes its expression.
+
+Complete answer is the recommended fail-closed delivery default. Progressive response is an
+experimental Advanced setting: it streams only locally checked, complete cited claims from the
+same answer-model request and still withholds the canonical turn until terminal validation passes.
+It is not chain-of-thought, does not remove planning or retrieval latency, and is not the formal
+evaluation presentation.
 
 ## Public demo and edition locators
 
