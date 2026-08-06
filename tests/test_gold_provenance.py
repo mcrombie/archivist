@@ -69,7 +69,7 @@ def _gold(*questions):
 
 def _provenance(*, reviews=None):
     return {
-        "schema": "archivist.gold_provenance/2",
+        "schema": "archivist.gold_provenance/3",
         "gold_set_path": "fixtures/gold_set.json",
         "gold_set_sha256": GOLD_SHA256,
         "question_set_sha256": AUTO_QUESTION_SHA256,
@@ -96,7 +96,7 @@ def _provenance(*, reviews=None):
             "claims_and_essentiality_owner_adjudicated": True,
             "supporting_and_relevant_chunk_ids_owner_verified": True,
             "must_not_claim_and_notes_owner_adjudicated": True,
-            "accepted_prose_rewritten_in_owner_words": True,
+            "accepted_annotation_prose_source_verified_and_owner_adopted_or_revised": True,
             "held_out_items_not_run_before_lock": True,
             "near_match_flags_reviewed": True,
         },
@@ -168,7 +168,7 @@ def test_provenance_template_binds_candidate_manifest_and_registry_but_is_not_at
         (fixtures / "gold_set.provenance.template.json").read_text(encoding="utf-8")
     )
 
-    assert template["schema"] == "archivist.gold_provenance/2"
+    assert template["schema"] == "archivist.gold_provenance/3"
     assert template["candidate_commit"] == "<replace with the next clean frozen candidate commit>"
     assert template["candidate_rag_policy"] == "evidence-planned-v26"
     assert template["corpus_manifest_sha256"] == sha256_file(fixtures / "corpus_manifest.json")

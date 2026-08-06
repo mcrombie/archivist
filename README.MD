@@ -171,19 +171,20 @@ npm run test:modes
 npm run build
 ```
 
-**Verification snapshot — August 5, 2026:** repository-wide Ruff passed; **768 Python tests passed
+**Verification snapshot — August 6, 2026:** repository-wide Ruff passed; **768 Python tests passed
 and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
 built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
 
 ## Evaluation status
 
-The familiar ten-question cohort is a development regression set, not held-out evidence. Formal
-measurement is paused while the owner completes a separate 34–46-item held-out gold set. Its
-questions, strata, expected behaviors, and inclusion decisions are owner-authored; blinded Claude
-drafts may assist with evidence annotations, but every field must be checked against the private
-corpus, adjudicated by the owner, and rewritten before lock. H020 currently requires replacement
-before the question set can be frozen.
+The familiar ten-question cohort is a development regression set, not held-out evidence. The owner
+has completed and mechanically cleaned a private 38-item held-out workbook spanning all six
+contracted strata. Its questions, expected behaviors, inclusion decisions, and evidence annotations
+remain private and unexposed to Archivist. Naturalistic questions need not be polished into exam
+prompts, accurate source-verified draft paraphrases do not require performative rewriting, and
+optional error tripwires remain deliberately bounded. One explicit H039 question/rubric reading
+conflict must be settled while converting the workbook to the canonical schema.
 
 No formal benchmark result should yet be claimed. A run of record requires one frozen candidate,
 the locked gold set and provenance sidecar, predeclared metrics and thresholds, and dated generator

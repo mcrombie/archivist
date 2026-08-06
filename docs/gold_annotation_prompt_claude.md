@@ -25,7 +25,7 @@ retrieval-augmented question-answering system over a private historical manuscri
 
 Your response is an **AI-generated annotation draft, not ground truth**. Every field is unverified
 until the manuscript owner personally checks it against the corpus, independently searches for
-omissions, and accepts, rewrites, or rejects it. The owner—not you—has final authority over expected
+omissions, and adopts, revises, or rejects it. The owner—not you—has final authority over expected
 behavior, claims, essentiality, source locations, relevant-chunk coverage, prohibited claims, and
 notes.
 
@@ -52,7 +52,7 @@ possible benchmark contamination instead of annotating it.
 
 - Treat every attachment as confidential.
 - Never quote or reproduce manuscript passages or distinctive phrases.
-- Write short, atomic claims in fresh paraphrase.
+- Write concise, independently scorable claim units in fresh paraphrase.
 - Output only exact, retrieval-eligible `chunk_id` values as locations. Apply the manifest's
   `ingest.skip_files` rules; excluded chunks are never valid support or relevance labels.
 - Do not use page numbers, paragraph numbers, chapter labels, inferred neighbors, or invented IDs.
@@ -63,30 +63,39 @@ possible benchmark contamination instead of annotating it.
 
 ### Claims
 
-- Each claim is one atomic historical proposition that directly helps answer the question.
+- Each claim is one independently scorable historical unit that directly helps answer the
+  question. It may contain closely connected clauses when they share the same evidence,
+  essentiality, and correctness verdict.
 - `[x]` means essential to a materially correct and complete answer. It does not mean owner-approved.
 - `[ ]` means supported and useful but nonessential.
-- Split compound statements when their parts require different evidence.
+- Split a statement when its parts require different evidence, could differ in essentiality, or
+  could receive different correctness scores. Do not split merely because a sentence has more than
+  one clause.
 - Every `answer` item needs at least one essential claim.
+- Use the smallest claim set that captures material correctness. There is no required claim quota.
 - Do not add a proposition merely because it is plausible or historically familiar.
 
 Put exact supporting chunk IDs after `||` on the same claim line. Every listed chunk must contain
-evidence for the complete atomic claim. If two chunks support different parts, split the claim.
+evidence for the complete scorable unit. If different parts have different support, split the unit.
 
 ### Relevant
 
 `Relevant` is question-wide, unlike claim-specific support. It must contain the union of all
 supporting IDs plus every retrieval-eligible chunk containing evidence materially useful to a
-complete answer. Search the whole supplied corpus for names, aliases, spelling variants, related
-institutions, and conceptually equivalent language. Inspect neighboring chunks when a discussion
-crosses a boundary, but do not include a neighbor merely because it is adjacent. Flag uncertainty
-about exhaustive coverage in Notes.
+complete answer within the question's declared scoring scope. Necessary historical background is
+in scope even when it is not a standalone expected claim. Search the whole supplied corpus for
+names, aliases, spelling variants, related institutions, and conceptually equivalent language.
+Inspect neighboring chunks when a discussion crosses a boundary, but do not include a neighbor
+merely because it is adjacent or every passage vaguely related to the topic. Flag uncertainty about
+scope-complete coverage in Notes.
 
 ### Must not claim
 
-Include only specific, plausible propositions that the manuscript affirmatively contradicts.
-Absence, uncertainty, disputed interpretation, or lack of support is not contradiction. Record the
-contradicting chunk IDs in Notes. Leave the field empty when no suitable proposition is contradicted.
+This is an optional, deliberately non-exhaustive tripwire list. Include only a few specific,
+plausible, consequential propositions directly implicated by the question and affirmatively
+contradicted by the manuscript. Absence, uncertainty, disputed interpretation, or lack of support
+is not contradiction. Record the contradicting chunk IDs in Notes. Leave the field empty when no
+suitable proposition is contradicted; do not attempt to enumerate every possible falsehood.
 
 ### Behavior and Notes
 
@@ -117,8 +126,8 @@ Return each item in this exact shape:
 **Behavior:** answer
 
 **Claims:**
-- [x] Atomic essential paraphrased claim. || exact_chunk_id_001
-- [ ] Atomic optional paraphrased claim. || exact_chunk_id_002, exact_chunk_id_003
+- [x] Independently scorable essential paraphrased unit. || exact_chunk_id_001
+- [ ] Independently scorable optional paraphrased unit. || exact_chunk_id_002, exact_chunk_id_003
 
 **Relevant:** exact_chunk_id_001, exact_chunk_id_002, exact_chunk_id_003
 
@@ -136,12 +145,14 @@ and Relevant empty.
 Before responding, verify that:
 
 1. IDs, strata, questions, descriptions, and Behavior values are unchanged.
-2. Claims are atomic, responsive, and paraphrased.
+2. Claims are independently scorable, responsive, and paraphrased.
 3. Every answer item has an essential claim.
 4. Every source ID exists exactly and is retrieval-eligible.
 5. Every source supports the whole claim attached to it.
-6. Relevant contains the support union and reflects a corpus-wide search.
-7. Every Must not claim is affirmatively contradicted, with evidence IDs in Notes.
+6. Relevant contains the support union and reflects a corpus-wide search within the declared scope,
+   including materially useful background.
+7. Must not claim is empty or contains only a few affirmatively contradicted tripwires, with
+   evidence IDs in Notes.
 8. No manuscript quotation or long copied phrase appears.
 9. Every Notes field carries the unverified warning.
 

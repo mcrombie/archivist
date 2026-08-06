@@ -22,7 +22,7 @@ from gold_set import load_json_object, sha256_file
 
 
 DEVELOPMENT_REGISTRY_SCHEMA = "archivist.development_question_registry/1"
-GOLD_PROVENANCE_SCHEMA = "archivist.gold_provenance/2"
+GOLD_PROVENANCE_SCHEMA = "archivist.gold_provenance/3"
 ANNOTATION_METHOD = "blinded_external_ai_draft_owner_adjudication/1"
 ANNOTATION_PROMPT_PATH = "docs/gold_annotation_prompt_claude.md"
 ANNOTATION_DRAFT_PATH = "runtime/gold-authoring/claude_annotation_drafts.md"
@@ -40,7 +40,7 @@ OWNER_ATTESTATIONS = {
     "claims_and_essentiality_owner_adjudicated",
     "supporting_and_relevant_chunk_ids_owner_verified",
     "must_not_claim_and_notes_owner_adjudicated",
-    "accepted_prose_rewritten_in_owner_words",
+    "accepted_annotation_prose_source_verified_and_owner_adopted_or_revised",
     "held_out_items_not_run_before_lock",
     "near_match_flags_reviewed",
 }

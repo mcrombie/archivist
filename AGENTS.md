@@ -93,7 +93,7 @@ network-backed fixtures without saying so first. Automatic paid retries are forb
 
 ## Wanting to skip the measurement is data
 
-The project's recurring failure mode is documented and expected: **exciting work crowds out the tedious high-leverage work.** New reader modes, visual polish, and speculative retrieval changes are all more enjoyable than adjudicating forty questions with known answers and running a harness.
+The project's recurring failure mode is documented and expected: **exciting work crowds out the tedious high-leverage work.** New reader modes, visual polish, and speculative retrieval changes are all more enjoyable than adjudicating a held-out cohort with known answers and running a harness.
 
 Concretely, this has already happened once. A generic multi-project upload-and-index stack exists in `src/web_api.py` and `src/web_project.py` — an architecturally satisfying generalization that was built while the evaluation was not. That is not a criticism of the code; it is the pattern, in evidence, in this repository.
 
@@ -217,8 +217,10 @@ The hard boundary rules are:
   candidate output.** An authorized blinded model may only draft the annotation fields permitted
   by the evaluation contract. Its proposals have no authority until the owner verifies and
   adjudicates every field directly against the private corpus.
-- **All accepted gold-set prose is rewritten in the owner's own words**, not copied from the
-  manuscript or an AI draft. Raw drafts remain private and gitignored.
+- **All accepted gold-set annotations are source-verified and consciously adopted or revised by
+  the owner.** Accurate AI-drafted wording need not be performatively paraphrased, but committed
+  prose must remain a paraphrase rather than copied manuscript text. Raw drafts remain private and
+  gitignored.
 
 For public deployment, responses expose generated prose, edition-qualified locations, and only
 tightly bounded cited excerpts—never whole chunks. Arbitrary source browsing and source-file

@@ -45,6 +45,28 @@ Entries below, most recent first.
 
 ---
 
+## [2026-08-06] Contract event: held-out annotation adopted a practical scoring standard
+Phase/Brief: Phase 1, Brief 3 held-out gold authoring
+Symptom: the authoring materials treated rigor as requiring polished user questions, clause-level
+claim splitting, cosmetic rewriting of source-verified AI drafts, and potentially expansive
+`must_not_claim` lists. That made owner review needlessly dense and risked turning the benchmark
+into a test of ideal prompts rather than realistic questions.
+Cause: owner-authorized contract correction before the first formal held-out run. The previous
+instructions conflated independently scorable expectations with grammatical clauses and confused
+owner adoption with owner rewording.
+Resolution and verification: realistic questions may now remain awkward, compound, ambiguous, or
+premise-faulty when their scoring intent is stable. Claims are grouped into the smallest useful
+independently scorable units; necessary background may be essential, optional, or relevant;
+`must_not_claim` is optional, non-exhaustive, and reserved for a few high-value tripwires. The
+owner may adopt or revise source-verified draft prose without performative paraphrase. Relevant
+locations remain complete within the owner-declared scoring scope. Provenance advances to
+`archivist.gold_provenance/3`, and the prompt, prompt hash, template, validator, tests, authoring
+guidance, and owner-review workbook were updated together. No formal held-out run exists, so no
+formal result was invalidated; practical runs remain development evidence only. Focused offline
+verification passed 64 tests and Ruff. Complete offline verification then passed repository-wide
+Ruff, 768 Python tests with one intentional skip, both focused frontend suites, and the production
+frontend build. No model or paid API call was made.
+
 ## [2026-08-05] Contract event: blinded AI drafts became permissible, not authoritative
 Phase/Brief: Phase 1, Brief 3 held-out gold authoring
 Symptom: the owner-only annotation rule made a forty-question benchmark unnecessarily laborious,

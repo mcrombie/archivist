@@ -78,7 +78,8 @@ seen. The list is retained to document why a question list alone was never a for
 
 Before the pilot JSON can be created, the owner reviews and approves:
 
-- the atomic split of each supplied expected reply;
+- the independently scorable grouping of each supplied expected reply, splitting only where
+  correctness, essentiality, or evidentiary support could differ;
 - which claims are essential and which are optional;
 - every per-claim `supporting_chunk_ids` set;
 - every question-level `relevant_chunk_ids` set; and

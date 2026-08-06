@@ -1,5 +1,5 @@
 {
-  "schema": "archivist.gold_provenance/2",
+  "schema": "archivist.gold_provenance/3",
   "gold_set_path": "fixtures/gold_set.json",
   "gold_set_sha256": "<replace after the owner locks the complete gold set>",
   "question_set_sha256": "<record the canonical owner-controlled question projection before assistance>",
@@ -15,7 +15,7 @@
     "model": "<record the exact model label displayed by Claude>",
     "surface": "<record the Claude interface used, such as claude.ai>",
     "prompt_template_path": "docs/gold_annotation_prompt_claude.md",
-    "prompt_template_sha256": "a34bbe76bfdfab2255fc254e4b7b4f060bf0f156bd89a4e79c8bf1c45a05b384",
+    "prompt_template_sha256": "c44286da84c8d11e6c73b1f7a9ae59bd6ea82bcbc8acb65d7d292d9b70bb2a31",
     "private_draft_path": "runtime/gold-authoring/claude_annotation_drafts.md",
     "private_draft_sha256": "<replace with the exact combined private draft hash>",
     "completed_at": "<record an ISO-8601 timestamp after the final draft batch>"
@@ -26,7 +26,7 @@
     "claims_and_essentiality_owner_adjudicated": false,
     "supporting_and_relevant_chunk_ids_owner_verified": false,
     "must_not_claim_and_notes_owner_adjudicated": false,
-    "accepted_prose_rewritten_in_owner_words": false,
+    "accepted_annotation_prose_source_verified_and_owner_adopted_or_revised": false,
     "held_out_items_not_run_before_lock": false,
     "near_match_flags_reviewed": false
   },

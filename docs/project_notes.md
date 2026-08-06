@@ -36,13 +36,19 @@ non-reader collections were preserved with identical records and metadata. The i
 preceding 488-vector store and its manifest remain recoverable under
 `runtime/corpus-staging/introduction-scope-20260723/replaced-active/`.
 
-## Current: hold the candidate while the owner builds the gold set
+## Current: hold the candidate while the completed gold set is locked
 
 The active retrieval path is `evidence-planned-v26`, with `query-planner-v11` and
 `evidence-coverage-v11`. The familiar ten-question cohort is development data: it helped shape the
-system and cannot establish a held-out quality claim. Feature and RAG development are paused while
-the owner replaces H020, finishes the private question set, records its pre-assistance commitment,
-and adjudicates fresh blinded evidence annotations under `EVAL_CONTRACT.md`.
+system and cannot establish a held-out quality claim. On August 6 the owner completed and
+mechanically cleaned a private 38-item held-out workbook spanning all six contracted strata; H020
+was replaced and all 570 recorded chunk references were found in the frozen inventory. The
+candidate remains held while one explicitly documented H039 reading is settled, the workbook is
+converted to canonical private JSON, and the cohort is provenance-locked under
+`EVAL_CONTRACT.md`. The practical standard preserves realistic user wording, treats claims as
+independently scorable rubric units, permits materially useful background, bounds optional
+`must_not_claim` tripwires, and records source-verified owner adoption or revision through
+`archivist.gold_provenance/3`.
 
 The next engineering work is limited to closing the Markdown/JSON leakage-audit tooling gap and
 supporting the declared lock-and-measure sequence. Hybrid retrieval, reranking, threshold changes,

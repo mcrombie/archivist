@@ -10,12 +10,13 @@ It is not the repeatedly used ten-question practical set. Those questions, the e
 questions, opening-screen examples, and known manual smoke questions are development data recorded
 in `fixtures/development_question_registry.json`.
 
-> **Paused owner-review checkpoint — 2026-08-05.** The private Markdown form currently contains
-> useful Claude-drafted annotations, but those drafts predate the provenance-v2 question
-> commitment and the canonical raw-draft manifest. They are exploratory review aids, not a
-> protocol-compliant annotation cohort. H020 also remains too close to a registered development
-> question. Preserve the draft privately, replace H020, finish the owner-controlled fields, and
-> follow the gates below before requesting fresh canonical annotation batches.
+> **Held Out Evaluation Set Complete — 2026-08-06.** Owner review and mechanical cleanup of the
+> private workbook are complete, with 38 retained questions across all six contracted strata. H020
+> has been replaced, the source DOCX remains untouched beside its cleaned copy, and all 570 recorded
+> chunk references resolve against the frozen chunk inventory. Existing Claude-derived material
+> still predates the provenance-v3 question commitment and canonical raw-draft manifest, so it is
+> not by itself a protocol-compliant annotation cohort. The cleaned workbook also records one H039
+> question/rubric reading conflict that must be settled before canonical conversion and lock.
 
 ## Non-negotiable authority and blinding boundary
 
@@ -24,7 +25,7 @@ Only the manuscript owner decides:
 - which questions belong in the set;
 - whether each question should be answered or declined;
 - each question's stratum; and
-- whether to accept, rewrite, or reject every drafted claim, essentiality flag, supporting or
+- whether to accept, adopt, revise, or reject every drafted claim, essentiality flag, supporting or
   relevant chunk ID, `must_not_claim` entry, and note.
 
 Claude may propose claims, essentiality, locations, relevance, prohibited claims, and notes only
@@ -34,13 +35,39 @@ eligible chunks, corpus manifest, and canonical instructions in
 chunks, traces, scores, known failures, development answers, or evaluation output.
 
 The owner then checks every proposal directly against the corpus, independently searches for
-missing relevant chunks, and rewrites all accepted prose. Plausibility is not verification and a
-rubber-stamp review does not satisfy the contract. Claude's raw drafts remain private under
-`runtime/gold-authoring/`; only their hash enters provenance. The privacy audit covers questions,
-claims, `must_not_claim`, and notes before commit.
+missing relevant chunks, and consciously adopts or revises every accepted annotation. Accurate
+draft wording does not need cosmetic paraphrasing merely to prove ownership. Plausibility is not
+verification and a rubber-stamp review does not satisfy the contract. Claude's raw drafts remain
+private under `runtime/gold-authoring/`; only their hash enters provenance. The privacy audit covers
+questions, claims, `must_not_claim`, and notes before commit and still rejects copied manuscript
+language.
 
 No held-out question may be sent to Archivist, its retriever, its planner, an answer model, or an
 evaluation judge until the set and provenance sidecar are committed and locked.
+
+## Practical adjudication standard
+
+The gold set should resemble real use, not a collection of polished exam prompts. A question may
+remain awkward, ambiguous, compound, typo-bearing, or premise-faulty when the owner can record a
+stable intended behavior and scoring scope. Rewrite a question only for contamination or
+duplication, unintelligibility, or the absence of any stable scoring interpretation. Resolve an
+otherwise useful ambiguity in claims or notes rather than editing realism out of the question.
+
+Claims are independently scorable rubric units, not necessarily one-clause microclaims. Keep
+closely connected facts together when they have the same evidence, essentiality, and correctness
+verdict; split them when those could differ. Use the smallest rubric that captures material
+correctness. As a nonbinding starting point, a focused answer will often need about 3–5 essential
+claims and a broad answer about 5–8, but the historical scope—not a quota—controls the final count.
+
+Necessary historical background is in scope. It may be essential, optional, or merely relevant
+when it materially helps answer the question. `relevant_chunk_ids` remains complete within the
+declared scoring scope because it is the denominator for Recall@k; it is not every passage vaguely
+related to the topic.
+
+`must_not_claim` is an optional, deliberately non-exhaustive tripwire list. Empty is valid. Usually
+zero to two plausible, consequential errors directly implicated by the question are enough, and
+each must be affirmatively contradicted by the manuscript. Notes are optional and should preserve
+only useful scoring, scope, ambiguity, or provenance decisions.
 
 ## Gate 0: freeze a current candidate
 
@@ -89,8 +116,7 @@ with an honest timezone-aware ISO-8601 timestamp. Leave every attestation `false
 
 Before Claude sees any question, run the leakage audit over the completed owner question set.
 Exact development reuse is forbidden. A fuzzy flag requires substantive review, not a cosmetic
-word substitution. In particular, H020's current recession-comparison replacement remains a close
-twin of `DEV-MANUAL-008` and must be replaced again before this gate can pass.
+word substitution. Preserve the resulting review decision in provenance before this gate passes.
 
 **Current tooling gap:** `scripts/fingerprint_gold_questions.py` reads the private Markdown form,
 while `scripts/audit_gold_leakage.py` currently reads JSON. The fingerprint is not a leakage audit.
@@ -166,8 +192,9 @@ are orientation. `supporting_chunk_ids` is claim-specific and may contain more t
 overlapping chunk. `relevant_chunk_ids` is question-wide and must include every supporting chunk.
 
 An `answer` item needs at least one essential claim. An `abstain` item has no claims and no relevant
-chunks. Claude's output is merely a search aid: independently confirm support for each atomic claim,
-search for omitted aliases and locations, and rewrite accepted prose in the owner's voice.
+chunks. Claude's output is merely a search aid: independently confirm support for each scorable
+claim unit, search for omitted aliases and locations within the declared scope, and consciously
+adopt, revise, or reject each proposed annotation.
 
 ## Gate 4: run offline audits before locking
 
@@ -191,8 +218,8 @@ but the owner must either replace the question or record why it is substantively
 `near_match_reviews`.
 
 Check that questions, claims, prohibited claims, and notes are paraphrases rather than long copied
-passages. This reads the private local chunks but emits only field labels, IDs, and matched-token
-counts:
+manuscript passages. This reads the private local chunks but emits only field labels, IDs, and
+matched-token counts:
 
 ```powershell
 uv run python scripts\audit_gold_privacy.py `
@@ -203,7 +230,8 @@ uv run python scripts\audit_gold_privacy.py `
 ```
 
 The command exits nonzero while quotation-risk flags remain. Review each flag manually and rewrite
-copied prose in the owner's words.
+copied manuscript language. This privacy step does not require cosmetic rewriting of an accurate
+AI-drafted paraphrase that the owner has source-verified and consciously adopted.
 
 ## Gate 5: lock provenance
 
@@ -218,7 +246,7 @@ After the owner finishes the content:
 6. Set each owner attestation to `true` only if it is true.
 7. Save the completed sidecar as `fixtures/gold_set.provenance.json`.
 
-The version-2 sidecar binds the owner-controlled question projection, exact final gold bytes,
+The version-3 sidecar binds the owner-controlled question projection, exact final gold bytes,
 frozen candidate, V26 policy, corpus manifest, development registry, canonical Claude prompt, and
 private raw draft. The hash-bound JSON files are pinned to LF line endings in `.gitattributes`, so
 a Windows checkout cannot silently change their hashes.

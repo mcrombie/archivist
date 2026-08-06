@@ -15,7 +15,7 @@ Archivist remains a retrieval-augmented question-answering system over one long-
 manuscript. Its public reader experience is already live; its formal held-out evaluation has not
 yet run. Those are different accomplishments and must not be conflated.
 
-## Current checkpoint — 2026-08-05
+## Current checkpoint — 2026-08-06
 
 The repository's current Answer Mode is `evidence-planned-v26`, with
 `query-planner-v11` and `evidence-coverage-v11`. It searches 481 retrieval-eligible chunks from the
@@ -58,26 +58,30 @@ V25 subsequently added source-bounded completeness and explicit complete/partial
 outcomes. V26 added corpus-agnostic comparison grammar before premise adjudication. Neither has
 received the formal held-out evaluation described below.
 
-### Gold-set checkpoint and development pause
+### Gold-set owner-authoring checkpoint
 
-The private owner workbook contains 40 proposed held-out questions across the contracted six
-strata. No held-out item has been run through Archivist. The owner is pausing system development to
-review the questions and expected evidence carefully.
+**Held Out Evaluation Set Complete — 2026-08-06.** The owner has finished the private workbook and
+retained 38 held-out questions across the contracted six strata. Mechanical cleanup preserved the
+owner's wording and decisions, produced a separate cleaned DOCX without overwriting the source, and
+verified all 570 recorded chunk references against the frozen derived corpus. No held-out item has
+been run through Archivist.
 
-H020 is a blocking question-design defect: its current recession-comparison wording remains too
-close to registered development item `DEV-MANUAL-008`. It must be replaced with a substantively
-different owner-authored question before the question set is frozen.
+H020 has been replaced. The cleaned workbook explicitly surfaces one remaining H039
+question/rubric interpretation conflict. That narrow semantic decision must be settled before the
+cohort is converted to canonical JSON and locked; it does not reopen the completed workbook as a
+general question-design exercise.
 
 The current private workbook also contains Claude-drafted annotation material, but that material
 is **exploratory and noncanonical**. It predates the required committed question fingerprint, and
 the canonical private draft ledger does not yet contain the exact batch responses and manifests
-required by `archivist.gold_provenance/2`. It may help the owner notice ambiguities, but it cannot be
+required by `archivist.gold_provenance/3`. It may help the owner notice ambiguities, but it cannot be
 treated as protocol-compliant ground truth or bound retroactively as if the pre-assistance
 commitment existed.
 
-During this pause:
+Until formal lock:
 
-- do not send H001–H040 to Archivist, its retriever, planner, answer model, or evaluation judge;
+- do not send any retained H-item to Archivist, its retriever, planner, answer model, or evaluation
+  judge;
 - do not tune retrieval, prompts, or validation against the private questions or draft
   annotations;
 - keep the workbook, DOCX review copy, raw drafts, and manuscript evidence private and ignored;
@@ -92,7 +96,7 @@ During this pause:
 | **0. Project brief and boundaries** | **Complete** | Maintain the book-specific product boundary and links to the governing documents. |
 | **1. Unified Answer Mode path** | **Complete** | Preserve one shared implementation of every retrieval primitive across retrieval-backed surfaces. |
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. A formal run still requires an eligible pinned dated generator snapshot rather than the interactive `gpt-5.6-sol` name. |
-| **3. Held-out gold question set** | **Active, owner pause** | Replace H020; finish the owner-controlled questions, strata, Behavior values, and inclusion decisions; fingerprint them; obtain fresh compliant blinded annotation batches; adjudicate every field; and lock provenance. |
+| **3. Held-out gold question set** | **Owner authoring complete; lock pending** | Settle the recorded H039 interpretation, parse the 38 retained items into canonical private JSON, fingerprint them, complete required blinded-annotation provenance, pass the audits, and lock. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Not run** | Build/run the committed retrieval-only comparison against the untouched locked gold set. Generation is excluded. |
 | **5. Citation-accuracy harness** | **Not run** | Run the locked answer-generation and claim-decomposition workflow, establish mechanical citation measures, and preserve complete run identity. |
 | **6. Faithfulness and abstention calibration** | **Not run** | Hand-label the pilot before judge output, measure judge-human agreement and noise, settle §§6–7, and write the §8 envelopes before the baseline. |
@@ -102,15 +106,16 @@ During this pause:
 
 ## Next sequence
 
-The order below is the shortest credible path from the present pause to publishable measurement.
-Do not substitute another retrieval iteration for the owner work at the top of the list.
+The order below is the shortest credible path from the completed owner-authoring milestone to
+publishable measurement. Do not substitute another retrieval iteration for the lock work at the
+top of the list.
 
-1. **Hold the system still while the owner reviews the gold set.** Existing code may be repaired for
-   an independently discovered security or correctness defect, but no change may be derived from
-   an H-item or its draft annotation.
-2. **Repair and finish the owner-controlled exam.** Replace H020, review every question for clarity
-   and distinctness, and settle each ID, stratum, `answer`/`abstain` Behavior, and inclusion
-   decision. Existing Claude prose remains only a private review aid.
+1. **Hold the system still until the gold set is locked.** Existing code may be repaired for an
+   independently discovered security or correctness defect, but no change may be derived from an
+   H-item or its draft annotation.
+2. **Canonicalize the completed owner workbook.** Settle the one explicitly recorded H039 reading,
+   then parse the 38 retained questions and owner decisions into the private canonical gold schema.
+   Treat this as transcription and validation, not a new round of question optimization.
 3. **Freeze the candidate and fingerprint the questions before fresh assistance.** Commit the clean
    candidate and record its exact policy and corpus identity. First close the current tooling gap
    between the Markdown question-fingerprint input and the JSON-only leakage audit (or create an
@@ -122,8 +127,9 @@ Do not substitute another retrieval iteration for the owner work at the top of t
    exact raw manifests and responses in the private draft ledger.
 5. **Adjudicate and lock provenance.** Independently verify every claim, essentiality flag,
    supporting/relevant chunk ID, prohibited claim, and note against the manuscript; search for
-   omissions; rewrite accepted prose in the owner's words; pass schema, leakage, privacy, location,
-   and provenance checks; and lock from a clean tree.
+   omissions within the declared scoring scope; consciously adopt or revise accepted annotation
+   prose; pass schema, leakage, privacy, location, and provenance checks; and lock from a clean
+   tree.
 6. **Run the retrieval-only benchmark.** Compare vector-only retrieval with dense/BM25
    reciprocal-rank fusion using identical questions, corpus, eligibility, query embeddings, and
    values of `k`. Publish Recall@k/context-recall results only from the predeclared contract.

@@ -4,7 +4,7 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-05
+## Current checkpoint — 2026-08-06
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
   local code reports `evidence-planned-v26`, `query-planner-v11`, and
@@ -15,19 +15,58 @@ anything that still requires measurement.
   public interpretive prototypes, not formal evidence that perspective changes preserve answer
   quality. The separate full-context-v2 experiment remains disabled on the public server.
 - **Measurement:** the unchanged ten-question cohort is development evidence. No formal held-out
-  gold evaluation has run. The owner is pausing code development to review the private forty-item
-  gold workbook carefully.
-- **Gold-set status:** H020 must be replaced because it remains too close to a registered
-  development question. Claude-derived annotations currently in the private workbook are useful
-  exploratory drafts, but they predate the provenance-v2 question commitment and cannot be called
-  the canonical blinded cohort.
-- **Restart point:** finish the owner-controlled questions, strata, and Behavior values; run the
-  missing pre-assistance overlap check; record the text-free commitment; obtain fresh five-item
-  blinded drafts; adjudicate and rewrite them; lock provenance; then run retrieval, citation,
+  gold evaluation has run. Owner authoring and mechanical cleanup of the private held-out workbook
+  are complete; the candidate remains held while the cohort is canonicalized and locked.
+- **Gold-set status:** the private workbook retains 38 questions across all six contracted strata:
+  8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
+  and 3 adversarial-premise items. The original owner-edited DOCX remains untouched beside a
+  cleaned review copy. All 570 recorded supporting/relevant chunk references resolve against the
+  frozen chunk inventory. H020 has been replaced. One explicit H039 question/rubric interpretation
+  conflict is preserved in the cleaned workbook and must be settled before formal lock.
+- **Restart point:** settle the recorded H039 interpretation without reopening the completed
+  cohort wholesale; parse the cleaned workbook into the canonical private gold schema; run the
+  pre-assistance overlap and privacy checks; record the text-free commitment; obtain compliant
+  blinded annotation records where required; lock provenance; then run retrieval, citation,
   faithfulness, abstention, baseline, and production measurements in that order.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-06 — Held Out Evaluation Set Complete
+
+- The owner finished the held-out question workbook and made the inclusion, behavior, category,
+  claim, relevance, negative-tripwire, and note decisions for the retained cohort. Accepting a
+  smaller final cohort left 38 questions, still inside the contract's 34–46-item envelope and every
+  per-stratum range.
+- Mechanical cleanup preserved every retained question and per-item claim count, normalized the
+  document for comfortable review, and verified all 570 recorded chunk references against the
+  frozen derived corpus. The source workbook was not overwritten.
+- The workbook and manuscript-derived labels remain private under `runtime/gold-authoring/` and are
+  intentionally absent from Git. This commit records the contract, process, tooling, and milestone,
+  not the held-out answers themselves.
+- The milestone checkpoint passed Ruff for the provenance implementation and tests plus 69 focused
+  offline gold/provenance/holdout tests. No model or paid API call was made.
+- “Complete” here names the owner-authoring milestone. It is not a benchmark score: canonical JSON,
+  provenance lock, and the first untouched run still lie ahead. Mechanical cleanup also surfaced
+  one explicit H039 question/rubric reading conflict for resolution before lock.
+
+## 2026-08-06 — Rigor without performative annotation labor
+
+- Reviewing H001 exposed a mismatch between benchmark rigor and the workbook's burden. The old
+  guidance treated realistic ambiguity as a question defect, grammatical compounds as automatic
+  microclaim work, accurate AI paraphrases as text that still had to be rewritten, and negative
+  expectations as a potentially unbounded list.
+- The owner-authorized contract amendment keeps the controls that matter: held-out questions remain
+  owner-designed and candidate-blind; every proposed annotation is checked directly against the
+  manuscript; every support and relevance location is adjudicated; and copied manuscript language
+  remains forbidden.
+- The lighter standard changes the labor, not the independence. Questions may look like real user
+  questions when their scoring interpretation is stable. Claims are the smallest independently
+  scorable units needed for material correctness. Historical background may be in scope.
+  `must_not_claim` is an optional, non-exhaustive set of a few high-value tripwires.
+- Accurate AI-drafted paraphrases may be consciously adopted after source verification rather than
+  cosmetically rewritten. Provenance advances to `archivist.gold_provenance/3` so that distinction
+  is explicit and auditable. No formal held-out run existed, so no formal result was invalidated.
 
 ## The central story
 

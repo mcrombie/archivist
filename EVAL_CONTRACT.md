@@ -8,7 +8,17 @@ This file specifies *what is measured and how*. It does not specify how to imple
 annotation fields under source-level owner adjudication. No held-out run had occurred under the
 superseded owner-only annotation rule, so this change invalidates no formal result; all earlier
 practical runs remain development evidence only. Provenance for the eventual first run uses
-`archivist.gold_provenance/2` and records the assistance explicitly.
+`archivist.gold_provenance/2` and records the assistance explicitly; that unused draft schema is
+superseded by the later amendment below.
+
+**Owner-authorized amendment, 2026-08-06:** §3 now defines a practical owner-adjudication
+standard. Natural user questions may remain awkward, ambiguous, compound, or premise-faulty when
+their scoring intent is stable and recorded. Gold claims are independently scorable rubric units,
+not clause-level exercises; materially useful background is in scope; and `must_not_claim` is an
+optional bounded tripwire list. Source-verified AI-drafted prose may be consciously adopted or
+revised without performative rewriting. No held-out run had occurred, so this change invalidates no
+formal result. Provenance advances to `archivist.gold_provenance/3` for the revised owner
+attestation; earlier practical runs remain development evidence only.
 
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. Both lock after the calibration pilot (Brief 6) answers what only runs can answer; the open questions are enumerated at the end of each section, split by whether they are desk questions or run questions.
 
@@ -209,8 +219,16 @@ essentiality, claim-specific supporting chunk IDs, question-wide relevant chunk 
 `must_not_claim`, and notes. This is assistance with evidence discovery and drafting, not delegated
 ground-truth authority. Every proposed field remains unverified until the
 owner checks it against the private corpus, independently searches for omissions, decides whether
-to accept, revise, or reject it, and rewrites every accepted claim and other committed prose in the
-owner's own words.
+to accept, revise, or reject it, and explicitly adopts or revises every accepted annotation. The
+owner need not paraphrase accurate draft wording merely to demonstrate authorship; the required
+work is source verification and a conscious scoring decision, not cosmetic rewriting.
+
+Held-out questions are samples of real user behavior, not polished examination prompts. They may
+preserve ambiguity, awkward wording, typographical errors, compound structure, or a faulty premise.
+Replace a question only when it is contaminated or duplicative, unintelligible, or lacks any stable
+scoring interpretation. When wording permits more than one reasonable reading, the owner records
+the intended behavior and scoring scope in the rubric or notes rather than silently perfecting the
+question.
 
 The annotation model may receive only the frozen owner-authored questions, the eligible private
 corpus and stable chunk identifiers, the corpus manifest, and the annotation instructions. It may
@@ -223,8 +241,9 @@ evaluation judge for this gold set.
 **The hard rule is independence, not the fiction that a tool touched no draft text.** Allowing a
 model to choose the questions or allowing its plausible annotations to pass without source-level
 owner adjudication would make the benchmark measure model agreement rather than correctness. The
-owner therefore verifies every claim, essential flag, support location, exhaustive relevance set,
-prohibited claim, and note. A rubber-stamp review does not satisfy this contract.
+owner therefore verifies every claim, essential flag, support location, relevance set within the
+declared scoring scope, prohibited-claim tripwire, and note. A rubber-stamp review does not satisfy
+this contract.
 
 Before assistance begins, a text-free hash commits the ordered IDs, questions, strata, and expected
 behaviors. The provenance sidecar records that commitment plus the annotation method, provider,
@@ -233,9 +252,10 @@ drafting completion time, and the owner's explicit attestations. Where a consume
 only a moving alias rather than a dated snapshot, that reproducibility limitation is recorded rather
 than guessed away.
 
-All committed claims, `must_not_claim` entries, and notes are stated **in the owner's own words**,
-never as quoted passages, so the gold set is committable without reproducing the book. Raw AI
-drafts and manuscript-bearing inputs remain private and gitignored.
+All committed claims, `must_not_claim` entries, and notes are paraphrases rather than copied
+manuscript passages, so the gold set is committable without reproducing the book. After direct
+source verification, the owner may adopt accurate AI-drafted wording or revise it as needed. Raw
+AI drafts and manuscript-bearing inputs remain private and gitignored.
 
 ### 3.2 Schema — `archivist.gold/1`
 
@@ -279,9 +299,21 @@ Conflating these is the most likely schema error, and it would silently corrupt 
 | Field | Scope | Consumed by | Meaning |
 |---|---|---|---|
 | **`supporting_chunk_ids`** | per **claim** | §5 citation accuracy | The chunks that actually contain this specific claim. Any one of them is a correct citation for it (see §2.3). |
-| **`relevant_chunk_ids`** | per **question** | §4 recall | Every chunk a complete answer should be able to draw on. A superset of the union of the claim support sets — broad questions have relevant material beyond the minimal set of claims. |
+| **`relevant_chunk_ids`** | per **question** | §4 recall | Every chunk materially useful to a complete answer within the owner-declared scoring scope. A superset of the union of the claim support sets; it may include necessary historical background and broad questions may extend beyond the minimal claim set. |
 
 `relevant_chunk_ids` must be a superset of the union of `supporting_chunk_ids`; this is a validation assertion, not a convention.
+
+Gold claims are **independently scorable rubric units**, not necessarily one grammatical clause
+each. Closely connected facts may stay together when they share the same essentiality, evidence,
+and correctness verdict. Split a unit when its parts could receive different scores, require
+different evidence, or differ in essentiality. Use the smallest set that captures material
+correctness; there is no fixed claim quota.
+
+`must_not_claim` is optional and deliberately non-exhaustive. It contains only a small number of
+plausible, consequential errors directly implicated by the question and affirmatively contradicted
+by the manuscript. An empty list is normal, and omission says nothing about the acceptability of
+other unsupported or false statements. Notes are likewise optional; use them to preserve scoring,
+scope, ambiguity, or provenance decisions that a later evaluator actually needs.
 
 ### 3.4 Strata and composition
 
@@ -321,7 +353,8 @@ A gold set is invalid, and may not be used, if any of the following fail:
 - annotation-assistance metadata identifies the declared blinded method, provider, displayed model
   label, surface, and a completion time within the recorded authoring window
 - every required owner attestation is explicitly true, including assistant blinding, source-level
-  adjudication, owner rewriting of accepted prose, and the prohibition on pre-lock held-out runs
+  adjudication, conscious adoption or revision of accepted annotation prose, and the prohibition
+  on pre-lock held-out runs
 - no normalized held-out question exactly reuses a registered development question, and every
   deterministic fuzzy-match flag has one substantive owner review
 - every `chunk_id` in `supporting_chunk_ids` and `relevant_chunk_ids` exists in the corpus manifest referenced by `authored_against_corpus` **and is retrieval-eligible under that manifest's `ingest.skip_files`**
@@ -335,8 +368,9 @@ A gold set is invalid, and may not be used, if any of the following fail:
   entry, or note
 
 The committed validators enforce the mechanical portions of this list. Historical correctness,
-claim atomicity, exhaustive relevance, and genuine source support remain owner-adjudication duties;
-a validator success cannot substitute for reading the evidence.
+independently scorable claim grouping, complete relevance within the declared scope, and genuine
+source support remain owner-adjudication duties; a validator success cannot substitute for reading
+the evidence.
 
 ---
 
