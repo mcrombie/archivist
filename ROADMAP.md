@@ -60,7 +60,7 @@ received the formal held-out evaluation described below.
 
 ### Gold-set owner-authoring checkpoint
 
-**Owner fields frozen; annotation handoff ready — 2026-08-06.** H039 was removed by owner decision,
+**Owner-adjudicated source preserved — 2026-08-06.** H039 was removed by owner decision,
 leaving 37 questions across the contracted six strata: 8 focused biographical, 8 focused
 analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus, and 2 adversarial-premise. H020 and
 H040 also remain intentionally absent. The final DOCX and canonical private JSON are separate from
@@ -69,15 +69,17 @@ checks pass, and no held-out item has been run through Archivist.
 
 The ordered owner fields are represented in Git only by a text-free commitment and are privately
 bound to candidate `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` under
-`evidence-planned-v26`. The offline handoff contains eight question-only blinded batches and a
-hash-bound manifest. No external annotation request has been made.
+`evidence-planned-v26`. No external annotation request has been made and no H-item has reached
+Archivist.
 
-The earlier private workbook also contains Claude-drafted annotation material, but that material
-is **exploratory and noncanonical**. It predates the required committed question fingerprint, and
-the canonical private draft ledger does not yet contain the exact batch responses and manifests
-required by `archivist.gold_provenance/3`. It may help the owner notice ambiguities, but it cannot be
-treated as protocol-compliant ground truth or bound retroactively as if the pre-assistance
-commitment existed.
+Parts of the completed annotations began as historical Claude drafts, then were directly checked,
+adopted, or revised by the manuscript owner. The owner has elected to retain that adjudicated work
+rather than commission a new pass solely to manufacture prospective records. Provenance v4 records
+the exact limitation: the model/surface and complete raw draft were not captured, and prospective
+blinding is not claimed. The owner adjudication is authoritative; the historical drafting is
+assistance, not ground truth. Two claims responsible for three copied-language flags were
+paraphrased without changing their source bindings, and the private privacy audit now reports zero
+flags.
 
 Until formal lock:
 
@@ -97,7 +99,7 @@ Until formal lock:
 | **0. Project brief and boundaries** | **Complete** | Maintain the book-specific product boundary and links to the governing documents. |
 | **1. Unified Answer Mode path** | **Complete** | Preserve one shared implementation of every retrieval primitive across retrieval-backed surfaces. |
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. A formal run still requires an eligible pinned dated generator snapshot rather than the interactive `gpt-5.6-sol` name. |
-| **3. Held-out gold question set** | **Questions committed; annotation pending** | Run the eight fresh blinded batches, owner-adjudicate every accepted annotation against the manuscript, clear final privacy flags, complete provenance, and lock. |
+| **3. Held-out gold question set** | **Owner-adjudicated source complete; lock pending** | Preserve the synchronized private DOCX/JSON, complete the v4 provenance attestations, commit the final private-safe gold artifact, and lock. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Not run** | Build/run the committed retrieval-only comparison against the untouched locked gold set. Generation is excluded. |
 | **5. Citation-accuracy harness** | **Not run** | Run the locked answer-generation and claim-decomposition workflow, establish mechanical citation measures, and preserve complete run identity. |
 | **6. Faithfulness and abstention calibration** | **Not run** | Hand-label the pilot before judge output, measure judge-human agreement and noise, settle §§6–7, and write the §8 envelopes before the baseline. |
@@ -116,19 +118,17 @@ top of the list.
    H-item or its draft annotation.
 2. **Completed — canonicalize the owner workbook.** H039 was removed, 37 retained items were parsed
    into private canonical JSON, and schema, location, overlap, and privacy diagnostics were run.
-3. **Completed — freeze and fingerprint before fresh assistance.** Candidate
+3. **Completed — freeze and fingerprint before first candidate exposure.** Candidate
    `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` / `evidence-planned-v26` is frozen; the common JSON
    projection closes the old tooling gap; and `fixtures/gold_questions.commitment.json` records the
    text-free owner-field commitment.
-4. **Next owner action — obtain fresh compliant blinded annotation batches.** Use the canonical Claude prompt in
-   five-item batches. Supply only the frozen questions, eligible private chunks, and corpus
-   manifest—never Archivist output, retrieval results, traces, failures, or scores. Preserve the
-   exact raw manifests and responses in the private draft ledger.
-5. **Then adjudicate and lock provenance.** Independently verify every claim, essentiality flag,
-   supporting/relevant chunk ID, prohibited claim, and note against the manuscript; search for
-   omissions within the declared scoring scope; consciously adopt or revise accepted annotation
-   prose; pass schema, leakage, privacy, location, and provenance checks; and lock from a clean
-   tree.
+4. **Completed — preserve owner-adjudicated annotations honestly.** The completed workbook remains
+   the authoritative source. Historical Claude drafting is disclosed retrospectively; no fresh
+   batch, complete raw-draft record, or prospective-blinding claim is being invented.
+5. **Next — complete and lock provenance.** Promote the validated private JSON to the committed
+   gold path, record its exact hash and authoring completion time, set only true owner attestations,
+   pass schema, leakage, privacy, location, candidate-boundary, and provenance checks, and lock from
+   a clean tree.
 6. **Run the retrieval-only benchmark.** Compare vector-only retrieval with dense/BM25
    reciprocal-rank fusion using identical questions, corpus, eligibility, query embeddings, and
    values of `k`. Publish Recall@k/context-recall results only from the predeclared contract.
@@ -149,8 +149,10 @@ top of the list.
 
 The gold set is the ruler. Improving the system before the ruler is frozen makes it impossible to
 know whether later success reflects a better RAG or a test shaped by the system's known behavior.
-Blinded drafting can reduce clerical work, but only a pre-assistance question commitment and
-source-level owner adjudication preserve the distinction between assistance and authority.
+Prospectively blinded drafting can reduce clerical work on a future benchmark, but this cohort does
+not pretend that workflow occurred. Its defensible boundary is narrower: owner-authored questions,
+no candidate exposure before lock, explicit retrospective assistance disclosure, and source-level
+owner adjudication preserve the distinction between assistance and authority.
 
 Retrieval is measured before generation so the result can distinguish “the index did not find the
 evidence” from “the context builder or model did not use evidence that was found.” Citation,
@@ -204,7 +206,8 @@ The numerical Archivist bullets remain blank until all of the following are true
 
 - the evaluated commit, deployed commit, corpus manifest, index, model/configuration, and gold-set
   hashes identify one frozen candidate;
-- the owner-designed, blinded-draft-assisted, owner-adjudicated held-out gold set passes schema,
+- the owner-designed, owner-adjudicated held-out gold set—with historical drafting assistance
+  disclosed under provenance v4—passes schema,
   leakage, privacy, location, and provenance validation;
 - the committed retrieval runner reproduces vector-only and hybrid results from one command;
 - every reported metric states its denominator and measured run-to-run spread;

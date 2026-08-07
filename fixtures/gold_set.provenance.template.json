@@ -1,8 +1,8 @@
 {
-  "schema": "archivist.gold_provenance/3",
+  "schema": "archivist.gold_provenance/4",
   "gold_set_path": "fixtures/gold_set.json",
   "gold_set_sha256": "<replace after the owner locks the complete gold set>",
-  "question_set_sha256": "<record the canonical owner-controlled question projection before assistance>",
+  "question_set_sha256": "<record the canonical owner-controlled question projection before the first held-out run>",
   "candidate_commit": "<replace with the next clean frozen candidate commit>",
   "candidate_rag_policy": "evidence-planned-v26",
   "corpus_manifest_sha256": "b7ff94315a3f1f28c831e2c3ca62c385567d2b1447c19ff45139d175c3ff3c17",
@@ -10,19 +10,17 @@
   "authoring_started_at": "<owner records an ISO-8601 timestamp before authoring>",
   "authoring_completed_at": "<owner records an ISO-8601 timestamp after locking>",
   "annotation_assistance": {
-    "method": "blinded_external_ai_draft_owner_adjudication/1",
-    "provider": "Anthropic",
-    "model": "<record the exact model label displayed by Claude>",
-    "surface": "<record the Claude interface used, such as claude.ai>",
-    "prompt_template_path": "docs/gold_annotation_prompt_claude.md",
-    "prompt_template_sha256": "c44286da84c8d11e6c73b1f7a9ae59bd6ea82bcbc8acb65d7d292d9b70bb2a31",
-    "private_draft_path": "runtime/gold-authoring/claude_annotation_drafts.md",
-    "private_draft_sha256": "<replace with the exact combined private draft hash>",
-    "completed_at": "<record an ISO-8601 timestamp after the final draft batch>"
+    "method": "owner_adjudication_with_historical_ai_drafting/1",
+    "provider": "Anthropic (Claude)",
+    "model": "not recorded",
+    "surface": "not recorded",
+    "raw_draft_record_available": false,
+    "prospective_blinding_record_available": false,
+    "limitation": "Historical Claude drafting assistance preceded the formal question commitment and prospective provenance protocol. The owner later source-verified and adjudicated every retained annotation; this record does not claim prospectively blinded annotation."
   },
   "owner_attestations": {
     "questions_behaviors_and_strata_owner_authored_without_candidate_outputs": false,
-    "annotation_assistant_blinded_to_candidate_outputs": false,
+    "historical_ai_drafting_disclosed_without_prospective_blinding_claim": false,
     "claims_and_essentiality_owner_adjudicated": false,
     "supporting_and_relevant_chunk_ids_owner_verified": false,
     "must_not_claim_and_notes_owner_adjudicated": false,

@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 
@@ -26,8 +27,6 @@ RAG_POLICY = "evidence-planned-v26"
 GOLD_SHA256 = "b" * 64
 MANIFEST_SHA256 = "c" * 64
 REGISTRY_SHA256 = "d" * 64
-PROMPT_SHA256 = "e" * 64
-PRIVATE_DRAFT_SHA256 = "f" * 64
 AUTO_QUESTION_SHA256 = "<computed by _validate>"
 NEAR_DEVELOPMENT_QUESTION = (
     "How did the Alpha Company influence central government policy during the crisis?"
@@ -67,9 +66,20 @@ def _gold(*questions):
     }
 
 
+def _question_commitment(gold):
+    return {
+        "schema": "archivist.gold_question_commitment/1",
+        "question_count": len(gold["items"]),
+        "stratum_counts": dict(
+            sorted(Counter(item["stratum"] for item in gold["items"]).items())
+        ),
+        "question_set_sha256": gold_question_set_sha256(gold),
+    }
+
+
 def _provenance(*, reviews=None):
     return {
-        "schema": "archivist.gold_provenance/3",
+        "schema": "archivist.gold_provenance/4",
         "gold_set_path": "fixtures/gold_set.json",
         "gold_set_sha256": GOLD_SHA256,
         "question_set_sha256": AUTO_QUESTION_SHA256,
@@ -80,19 +90,20 @@ def _provenance(*, reviews=None):
         "authoring_started_at": "2026-07-29T09:00:00-04:00",
         "authoring_completed_at": "2026-07-29T17:00:00-04:00",
         "annotation_assistance": {
-            "method": "blinded_external_ai_draft_owner_adjudication/1",
-            "provider": "Anthropic",
-            "model": "Claude Opus 4.1",
-            "surface": "claude.ai",
-            "prompt_template_path": "docs/gold_annotation_prompt_claude.md",
-            "prompt_template_sha256": PROMPT_SHA256,
-            "private_draft_path": "runtime/gold-authoring/claude_annotation_drafts.md",
-            "private_draft_sha256": PRIVATE_DRAFT_SHA256,
-            "completed_at": "2026-07-29T15:00:00-04:00",
+            "method": "owner_adjudication_with_historical_ai_drafting/1",
+            "provider": "Anthropic (Claude)",
+            "model": "not recorded",
+            "surface": "not recorded",
+            "raw_draft_record_available": False,
+            "prospective_blinding_record_available": False,
+            "limitation": (
+                "Historical drafting assistance preceded the formal commitment and prospective "
+                "provenance protocol; the owner later verified and adjudicated every annotation."
+            ),
         },
         "owner_attestations": {
             "questions_behaviors_and_strata_owner_authored_without_candidate_outputs": True,
-            "annotation_assistant_blinded_to_candidate_outputs": True,
+            "historical_ai_drafting_disclosed_without_prospective_blinding_claim": True,
             "claims_and_essentiality_owner_adjudicated": True,
             "supporting_and_relevant_chunk_ids_owner_verified": True,
             "must_not_claim_and_notes_owner_adjudicated": True,
@@ -104,7 +115,7 @@ def _provenance(*, reviews=None):
     }
 
 
-def _validate(provenance, gold, registry):
+def _validate(provenance, gold, registry, *, question_commitment=None):
     provenance = deepcopy(provenance)
     if provenance.get("question_set_sha256") == AUTO_QUESTION_SHA256:
         provenance["question_set_sha256"] = gold_question_set_sha256(gold)
@@ -112,14 +123,13 @@ def _validate(provenance, gold, registry):
         provenance,
         gold,
         registry,
+        question_commitment or _question_commitment(gold),
         gold_set_sha256=GOLD_SHA256,
         corpus_manifest_sha256=MANIFEST_SHA256,
         development_registry_sha256=REGISTRY_SHA256,
         expected_gold_set_path="fixtures/gold_set.json",
         expected_candidate_commit=CANDIDATE_COMMIT,
         expected_rag_policy=RAG_POLICY,
-        expected_annotation_prompt_sha256=PROMPT_SHA256,
-        expected_private_draft_sha256=PRIVATE_DRAFT_SHA256,
     )
 
 
@@ -168,16 +178,15 @@ def test_provenance_template_binds_candidate_manifest_and_registry_but_is_not_at
         (fixtures / "gold_set.provenance.template.json").read_text(encoding="utf-8")
     )
 
-    assert template["schema"] == "archivist.gold_provenance/3"
+    assert template["schema"] == "archivist.gold_provenance/4"
     assert template["candidate_commit"] == "<replace with the next clean frozen candidate commit>"
     assert template["candidate_rag_policy"] == "evidence-planned-v26"
     assert template["corpus_manifest_sha256"] == sha256_file(fixtures / "corpus_manifest.json")
     assert template["development_registry_sha256"] == sha256_file(
         fixtures / "development_question_registry.json"
     )
-    assert template["annotation_assistance"]["prompt_template_sha256"] == sha256_file(
-        Path("docs/gold_annotation_prompt_claude.md")
-    )
+    assert template["annotation_assistance"]["raw_draft_record_available"] is False
+    assert template["annotation_assistance"]["prospective_blinding_record_available"] is False
     assert set(template["owner_attestations"].values()) == {False}
     assert template["near_match_reviews"] == []
 
@@ -272,8 +281,8 @@ def test_complete_provenance_accepts_every_exact_binding_and_owner_review():
 
     assert summary.candidate_commit == CANDIDATE_COMMIT
     assert summary.candidate_rag_policy == RAG_POLICY
-    assert summary.annotation_provider == "Anthropic"
-    assert summary.annotation_model == "Claude Opus 4.1"
+    assert summary.annotation_provider == "Anthropic (Claude)"
+    assert summary.annotation_model == "not recorded"
     assert summary.near_match_count == 1
 
 
@@ -293,13 +302,35 @@ def test_provenance_rejects_changed_owner_question_projection():
     )
 
 
+def test_provenance_rejects_question_commitment_that_does_not_match_final_projection():
+    gold = _gold("Which musical instruments appear in the final appendix?")
+    commitment = _question_commitment(gold)
+    commitment["question_set_sha256"] = "0" * 64
+
+    with pytest.raises(GoldProvenanceValidationError) as exc_info:
+        _validate(
+            _provenance(),
+            gold,
+            _registry(NEAR_DEVELOPMENT_QUESTION),
+            question_commitment=commitment,
+        )
+
+    errors = "\n".join(exc_info.value.errors)
+    assert "$question_commitment.question_set_sha256" in errors
+    assert "final canonical owner-field projection" in errors
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected_error"),
     [
         ("method", "unblinded/1", ".method: must be exactly"),
         ("provider", "", ".provider: must be a non-empty string"),
-        ("prompt_template_path", "../prompt.md", "safe relative POSIX path"),
-        ("private_draft_sha256", "not-a-hash", "lowercase 64-character SHA-256"),
+        (
+            "raw_draft_record_available",
+            True,
+            "must be false for retrospectively disclosed historical assistance",
+        ),
+        ("limitation", "too short", "must substantively disclose"),
     ],
 )
 def test_provenance_rejects_invalid_annotation_assistance(
@@ -320,9 +351,9 @@ def test_provenance_rejects_invalid_annotation_assistance(
     assert expected_error in "\n".join(exc_info.value.errors)
 
 
-def test_annotation_completion_must_fall_within_authoring_window():
+def test_historical_annotation_assistance_may_not_claim_prospective_blinding_record():
     provenance = _provenance()
-    provenance["annotation_assistance"]["completed_at"] = "2026-07-29T18:00:00-04:00"
+    provenance["annotation_assistance"]["prospective_blinding_record_available"] = True
 
     with pytest.raises(GoldProvenanceValidationError) as exc_info:
         _validate(
@@ -331,7 +362,9 @@ def test_annotation_completion_must_fall_within_authoring_window():
             _registry(NEAR_DEVELOPMENT_QUESTION),
         )
 
-    assert "must not follow authoring_completed_at" in "\n".join(exc_info.value.errors)
+    assert "must be false for retrospectively disclosed historical assistance" in "\n".join(
+        exc_info.value.errors
+    )
 
 
 @pytest.mark.parametrize(
@@ -488,33 +521,27 @@ def test_file_validator_hashes_exact_bytes(tmp_path):
     manifest_path = tmp_path / "manifest.json"
     registry_path = tmp_path / "registry.json"
     provenance_path = tmp_path / "provenance.json"
-    prompt_path = tmp_path / "docs" / "gold_annotation_prompt_claude.md"
-    draft_path = tmp_path / "runtime" / "gold-authoring" / "claude_annotation_drafts.md"
+    commitment_path = tmp_path / "commitment.json"
 
     gold = _gold("Which musical instruments appear in the final appendix?")
     registry = _registry(NEAR_DEVELOPMENT_QUESTION)
     gold_path.write_text(json.dumps(gold), encoding="utf-8")
     manifest_path.write_text(json.dumps({"manifest": "synthetic"}), encoding="utf-8")
     registry_path.write_text(json.dumps(registry), encoding="utf-8")
-    prompt_path.parent.mkdir(parents=True)
-    prompt_path.write_text("canonical prompt", encoding="utf-8")
-    draft_path.parent.mkdir(parents=True)
-    draft_path.write_text("private unverified draft", encoding="utf-8")
-
     provenance = _provenance()
     provenance["gold_set_sha256"] = sha256_file(gold_path)
     provenance["question_set_sha256"] = gold_question_set_sha256(gold)
     provenance["corpus_manifest_sha256"] = sha256_file(manifest_path)
     provenance["development_registry_sha256"] = sha256_file(registry_path)
-    provenance["annotation_assistance"]["prompt_template_sha256"] = sha256_file(prompt_path)
-    provenance["annotation_assistance"]["private_draft_sha256"] = sha256_file(draft_path)
     provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+    commitment_path.write_text(json.dumps(_question_commitment(gold)), encoding="utf-8")
 
     summary = validate_gold_provenance_file(
         provenance_path,
         gold_path,
         manifest_path,
         registry_path,
+        commitment_path,
         expected_gold_set_path="fixtures/gold_set.json",
         expected_candidate_commit=CANDIDATE_COMMIT,
         expected_rag_policy=RAG_POLICY,

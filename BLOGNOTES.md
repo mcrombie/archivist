@@ -16,19 +16,44 @@ anything that still requires measurement.
   quality. The separate full-context-v2 experiment remains disabled on the public server.
 - **Measurement:** the unchanged ten-question cohort is development evidence. No formal held-out
   gold evaluation has run. The 37 owner-controlled questions are now canonicalized and hash-
-  committed; the candidate remains held while fresh annotations are obtained and locked.
+  committed; the candidate remains held while the owner-adjudicated artifact is provenance-locked.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
   remains untouched beside cleaned and final copies. Canonical schema, composition, location, and
-  overlap checks pass. Three privacy flags remain in inherited annotation prose, not questions.
-- **Restart point:** obtain the eight fresh blinded Claude batches using the prepared private
-  question-only packet; owner-adjudicate them against the manuscript; rerun privacy and location
-  checks; lock provenance; then run retrieval, citation,
+  overlap checks pass. Parts of the annotations began as historical Claude drafts, but the owner
+  later source-verified and adjudicated them. This is disclosed without a prospective-blinding
+  claim. The two affected claims were paraphrased and the copied-language audit now has zero flags.
+- **Restart point:** complete provenance v4 and lock the synchronized owner-adjudicated artifact;
+  then run retrieval, citation,
   faithfulness, abstention, baseline, and production measurements in that order.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-06 — Choosing honest retrospective provenance over process theater
+
+- The owner chose not to send the held-out set through a fresh Claude annotation pass merely to
+  create cleaner paperwork. The completed annotations remain authoritative because the owner had
+  already checked and adjudicated them against the manuscript; Claude's earlier contribution is
+  described as drafting assistance rather than ground truth.
+- This required a contract correction before any formal run. Provenance v4 explicitly records
+  that the exact historical model, surface, complete raw draft, and prospective blinding record are
+  unavailable. It does not backfill hashes or claim a process that did not occur.
+- Candidate independence remains intact on the evidence available: the owner controlled the
+  questions and scoring decisions, the question set has no registered development overlap, its
+  text-free projection was frozen before any H-item reaches Archivist, and the answer pipeline
+  remains fixed at V26.
+- Two accurate rubric claims contained manuscript-like runs. They were paraphrased in the private
+  Word source and synchronized JSON without changing essentiality or source bindings. The privacy
+  audit fell from three flags across two claims to zero. No model or paid API call was made.
+- A final guardrail review closed two quiet failure modes: formal lock now checks the committed
+  owner-field fingerprint, and private paraphrases are digest-bound to their intended original
+  claims and must all be consumed. A stale commitment, wrong ordinal, or unused replacement now
+  fails loudly instead of silently changing the evaluation artifact.
+- The evaluation-only checkpoint passed repository-wide Ruff and 774 Python tests with one
+  intentional skip. The 63-page final workbook was rendered and visually checked before the
+  checkpoint was saved.
 
 ## 2026-08-06 — Owner fields frozen and annotation handoff prepared
 
@@ -45,7 +70,7 @@ known at the time they were written and should not be silently rewritten into pr
 - Eight private question-only annotation batches, an exact hash manifest, an owner checklist, and a
   raw-response ledger were prepared offline. No Claude upload, Archivist request, API call, or paid
   operation occurred.
-- The evaluation-only checkpoint passed repository-wide Ruff, 770 Python tests with one intentional
+- The evaluation-only checkpoint passed repository-wide Ruff, 774 Python tests with one intentional
   skip, both focused frontend suites, and the production frontend build.
 
 ## 2026-08-06 — Held Out Evaluation Set Complete

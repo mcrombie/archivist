@@ -21,9 +21,11 @@ than a system with excellent-looking answers and no defensible measurement.
 As of 2026-08-06, the 37 retained owner-controlled held-out questions are canonicalized and bound
 by a committed text-free fingerprint to frozen V26 candidate
 `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`. H020, H039, and H040 are intentionally absent. The
-next permitted action is owner-authorized blinded external annotation from the prepared private
-batches, followed by direct source adjudication and provenance lock. It is still forbidden to send
-an H-item to Archivist or tune the system against one.
+completed owner-adjudicated annotations are the authoritative source for the final gold artifact.
+Historical Claude drafting is disclosed retrospectively under provenance v4; the repository must
+not claim that it was prospectively blinded or fully hash-captured. The next permitted action is
+final provenance completion and lock. It is still forbidden to send an H-item to Archivist or tune
+the system against one.
 
 The product has nevertheless moved beyond the original two-phase description. Reader-facing
 appearance and interpretive modes are implemented and public; they are no longer forbidden work.
@@ -212,6 +214,11 @@ contexts; it does not mean "only on one developer machine":
   development results. This narrow authorization is not permission for any other upload or model
   call.
 
+The present held-out cohort does **not** use that prospective workflow. Parts of its annotations
+began as historical Claude drafts whose exact model, surface, raw response record, and prospective
+blinding evidence were not captured. Retain the owner-adjudicated annotations, disclose those
+limits under `archivist.gold_provenance/4`, and do not reconstruct evidence that does not exist.
+
 The hard boundary rules are:
 
 - **No manuscript text is committed to the repository, ever** — not in fixtures, test data,
@@ -221,9 +228,9 @@ The hard boundary rules are:
   paragraph ranges, document names, edition locators, and SHA-256 digests are the allowed binding
   material.
 - **Gold questions, strata, Behavior values, and inclusion decisions are owner-authored without
-  candidate output.** An authorized blinded model may only draft the annotation fields permitted
-  by the evaluation contract. Its proposals have no authority until the owner verifies and
-  adjudicates every field directly against the private corpus.
+  candidate output.** Model-drafted annotation prose has no authority until the owner verifies and
+  adjudicates every field directly against the private corpus. Any claimed blinding or raw-draft
+  provenance must be supported by records created at the time, never inferred later.
 - **All accepted gold-set annotations are source-verified and consciously adopted or revised by
   the owner.** Accurate AI-drafted wording need not be performatively paraphrased, but committed
   prose must remain a paraphrase rather than copied manuscript text. Raw drafts remain private and

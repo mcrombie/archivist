@@ -3,8 +3,8 @@
 This module never judges historical correctness and never authors gold
 content. It binds owner-authored questions and owner-adjudicated annotations
 to a frozen candidate, corpus manifest, development-question registry, and
-the disclosed blinded-drafting record. It then checks that every fuzzy
-similarity flag received an explicit owner review.
+an honest disclosure of any historical drafting assistance. It then checks
+that every fuzzy similarity flag received an explicit owner review.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -22,10 +23,9 @@ from gold_set import load_json_object, sha256_file
 
 
 DEVELOPMENT_REGISTRY_SCHEMA = "archivist.development_question_registry/1"
-GOLD_PROVENANCE_SCHEMA = "archivist.gold_provenance/3"
-ANNOTATION_METHOD = "blinded_external_ai_draft_owner_adjudication/1"
-ANNOTATION_PROMPT_PATH = "docs/gold_annotation_prompt_claude.md"
-ANNOTATION_DRAFT_PATH = "runtime/gold-authoring/claude_annotation_drafts.md"
+QUESTION_COMMITMENT_SCHEMA = "archivist.gold_question_commitment/1"
+GOLD_PROVENANCE_SCHEMA = "archivist.gold_provenance/4"
+ANNOTATION_METHOD = "owner_adjudication_with_historical_ai_drafting/1"
 QUESTION_NORMALIZATION = "NFKC+casefold+collapse-whitespace/v1"
 
 # A pair is flagged when either independently legible rule is satisfied.
@@ -36,7 +36,7 @@ NEAR_MIN_NORMALIZED_CHARACTERS = 24
 
 OWNER_ATTESTATIONS = {
     "questions_behaviors_and_strata_owner_authored_without_candidate_outputs",
-    "annotation_assistant_blinded_to_candidate_outputs",
+    "historical_ai_drafting_disclosed_without_prospective_blinding_claim",
     "claims_and_essentiality_owner_adjudicated",
     "supporting_and_relevant_chunk_ids_owner_verified",
     "must_not_claim_and_notes_owner_adjudicated",
@@ -47,6 +47,12 @@ OWNER_ATTESTATIONS = {
 
 _REGISTRY_FIELDS = {"schema", "version", "normalization", "questions"}
 _REGISTRY_QUESTION_FIELDS = {"id", "question", "normalized_sha256"}
+_QUESTION_COMMITMENT_FIELDS = {
+    "schema",
+    "question_count",
+    "stratum_counts",
+    "question_set_sha256",
+}
 _PROVENANCE_FIELDS = {
     "schema",
     "gold_set_path",
@@ -67,11 +73,9 @@ _ANNOTATION_ASSISTANCE_FIELDS = {
     "provider",
     "model",
     "surface",
-    "prompt_template_path",
-    "prompt_template_sha256",
-    "private_draft_path",
-    "private_draft_sha256",
-    "completed_at",
+    "raw_draft_record_available",
+    "prospective_blinding_record_available",
+    "limitation",
 }
 _REVIEW_FIELDS = {
     "gold_item_id",
@@ -164,8 +168,8 @@ def gold_question_set_sha256(gold_set: object) -> str:
     """Hash the ordered owner-controlled question projection of a gold set.
 
     Annotation fields are deliberately excluded. The resulting commitment can
-    therefore be recorded before an annotation assistant sees the questions
-    and later compared with the completed gold file.
+    therefore prove that the owner-controlled exam was fixed before any
+    candidate-system exposure and later be compared with the completed file.
     """
 
     if not isinstance(gold_set, dict) or not isinstance(gold_set.get("items"), list):
@@ -335,6 +339,7 @@ def validate_gold_provenance_file(
     gold_set_path: Path,
     corpus_manifest_path: Path,
     development_registry_path: Path,
+    question_commitment_path: Path,
     *,
     expected_gold_set_path: str,
     expected_candidate_commit: str,
@@ -349,31 +354,25 @@ def validate_gold_provenance_file(
         development_registry_path,
         label="development-question registry",
     )
-    root = (repository_root or provenance_path.parent.parent).resolve()
-    prompt_sha256 = _bound_private_file_sha256(
-        provenance,
-        root,
-        object_field="annotation_assistance",
-        path_field="prompt_template_path",
+    question_commitment = load_json_object(
+        question_commitment_path,
+        label="gold-question commitment",
     )
-    private_draft_sha256 = _bound_private_file_sha256(
-        provenance,
-        root,
-        object_field="annotation_assistance",
-        path_field="private_draft_path",
-    )
+    # Kept for API compatibility with callers that already pass an explicit
+    # repository root. Provenance v4 deliberately does not bind a private raw
+    # draft that was not prospectively captured.
+    _ = repository_root
     return validate_gold_provenance(
         provenance,
         gold_set,
         registry,
+        question_commitment,
         gold_set_sha256=sha256_file(gold_set_path),
         corpus_manifest_sha256=sha256_file(corpus_manifest_path),
         development_registry_sha256=sha256_file(development_registry_path),
         expected_gold_set_path=expected_gold_set_path,
         expected_candidate_commit=expected_candidate_commit,
         expected_rag_policy=expected_rag_policy,
-        expected_annotation_prompt_sha256=prompt_sha256,
-        expected_private_draft_sha256=private_draft_sha256,
     )
 
 
@@ -381,6 +380,7 @@ def validate_gold_provenance(
     provenance: object,
     gold_set: object,
     development_registry: object,
+    question_commitment: object,
     *,
     gold_set_sha256: str,
     corpus_manifest_sha256: str,
@@ -388,8 +388,6 @@ def validate_gold_provenance(
     expected_gold_set_path: str,
     expected_candidate_commit: str,
     expected_rag_policy: str,
-    expected_annotation_prompt_sha256: str | None = None,
-    expected_private_draft_sha256: str | None = None,
 ) -> GoldProvenanceSummary:
     """Validate provenance without inspecting manuscript text or model output."""
 
@@ -440,6 +438,13 @@ def validate_gold_provenance(
             "$provenance.question_set_sha256: does not match the canonical ordered "
             "ID/question/stratum/behavior projection"
         )
+    _validate_question_commitment(
+        question_commitment,
+        gold_set,
+        expected_question_set_sha256=expected_question_set_sha256,
+        recorded_question_set_sha256=recorded_question_set_sha256,
+        errors=errors,
+    )
     _validate_binding(
         provenance,
         field="corpus_manifest_sha256",
@@ -504,24 +509,10 @@ def validate_gold_provenance(
     if started is not None and completed is not None and completed < started:
         errors.append("$provenance.authoring_completed_at: must not precede authoring_started_at")
 
-    annotation_completed, annotation_provider, annotation_model = _validate_annotation_assistance(
+    annotation_provider, annotation_model = _validate_annotation_assistance(
         provenance.get("annotation_assistance"),
         errors,
-        expected_prompt_sha256=expected_annotation_prompt_sha256,
-        expected_private_draft_sha256=expected_private_draft_sha256,
     )
-    if started is not None and annotation_completed is not None and annotation_completed < started:
-        errors.append(
-            "$provenance.annotation_assistance.completed_at: must not precede authoring_started_at"
-        )
-    if (
-        completed is not None
-        and annotation_completed is not None
-        and annotation_completed > completed
-    ):
-        errors.append(
-            "$provenance.annotation_assistance.completed_at: must not follow authoring_completed_at"
-        )
 
     attestations = provenance.get("owner_attestations")
     if not isinstance(attestations, dict):
@@ -558,6 +549,81 @@ def validate_gold_provenance(
         annotation_model=annotation_model,
         near_match_count=len(near_matches),
     )
+
+
+def _validate_question_commitment(
+    raw_commitment: object,
+    gold_set: object,
+    *,
+    expected_question_set_sha256: str,
+    recorded_question_set_sha256: object,
+    errors: list[str],
+) -> None:
+    """Bind the final owner fields to the previously frozen text-free commitment."""
+
+    path = "$question_commitment"
+    if not isinstance(raw_commitment, dict):
+        errors.append(f"{path}: must be an object")
+        return
+    _validate_fields(raw_commitment, _QUESTION_COMMITMENT_FIELDS, path, errors)
+    if raw_commitment.get("schema") != QUESTION_COMMITMENT_SCHEMA:
+        errors.append(f"{path}.schema: must be exactly {QUESTION_COMMITMENT_SCHEMA!r}")
+
+    raw_count = raw_commitment.get("question_count")
+    if isinstance(raw_count, bool) or not isinstance(raw_count, int) or raw_count < 1:
+        errors.append(f"{path}.question_count: must be a positive integer")
+
+    raw_counts = raw_commitment.get("stratum_counts")
+    counts_are_valid = isinstance(raw_counts, dict) and all(
+        isinstance(name, str)
+        and bool(name)
+        and not isinstance(count, bool)
+        and isinstance(count, int)
+        and count >= 0
+        for name, count in raw_counts.items()
+    )
+    if not counts_are_valid:
+        errors.append(
+            f"{path}.stratum_counts: must map non-empty stratum names to non-negative integers"
+        )
+
+    gold_items = gold_set.get("items") if isinstance(gold_set, dict) else None
+    if isinstance(gold_items, list):
+        expected_count = len(gold_items)
+        if isinstance(raw_count, int) and not isinstance(raw_count, bool):
+            if raw_count != expected_count:
+                errors.append(
+                    f"{path}.question_count: does not match the final gold item count "
+                    f"{expected_count}"
+                )
+        expected_counts = Counter(
+            item.get("stratum")
+            for item in gold_items
+            if isinstance(item, dict) and isinstance(item.get("stratum"), str)
+        )
+        if counts_are_valid and dict(raw_counts) != dict(sorted(expected_counts.items())):
+            errors.append(
+                f"{path}.stratum_counts: does not match the final gold stratum distribution"
+            )
+
+    commitment_sha256 = raw_commitment.get("question_set_sha256")
+    if not isinstance(commitment_sha256, str) or _SHA256_RE.fullmatch(commitment_sha256) is None:
+        errors.append(
+            f"{path}.question_set_sha256: must be a lowercase 64-character SHA-256"
+        )
+        return
+    if expected_question_set_sha256 and commitment_sha256 != expected_question_set_sha256:
+        errors.append(
+            f"{path}.question_set_sha256: does not match the final canonical owner-field projection"
+        )
+    if (
+        isinstance(recorded_question_set_sha256, str)
+        and _SHA256_RE.fullmatch(recorded_question_set_sha256) is not None
+        and commitment_sha256 != recorded_question_set_sha256
+    ):
+        errors.append(
+            f"{path}.question_set_sha256: does not match provenance.question_set_sha256"
+        )
 
 
 def _extract_gold_questions(gold_set: object) -> tuple[tuple[str, str], ...]:
@@ -643,14 +709,11 @@ def _near_match(
 def _validate_annotation_assistance(
     raw_assistance: object,
     errors: list[str],
-    *,
-    expected_prompt_sha256: str | None,
-    expected_private_draft_sha256: str | None,
-) -> tuple[datetime | None, str, str]:
+) -> tuple[str, str]:
     path = "$provenance.annotation_assistance"
     if not isinstance(raw_assistance, dict):
         errors.append(f"{path}: must be an object")
-        return None, "", ""
+        return "", ""
 
     _validate_fields(raw_assistance, _ANNOTATION_ASSISTANCE_FIELDS, path, errors)
     if raw_assistance.get("method") != ANNOTATION_METHOD:
@@ -665,87 +728,19 @@ def _validate_annotation_assistance(
         else:
             text_values[field] = value
 
-    prompt_path = raw_assistance.get("prompt_template_path")
-    if not _is_safe_relative_posix_path(prompt_path):
-        errors.append(f"{path}.prompt_template_path: must be a safe relative POSIX path")
-    elif prompt_path != ANNOTATION_PROMPT_PATH:
-        errors.append(f"{path}.prompt_template_path: must be exactly {ANNOTATION_PROMPT_PATH!r}")
+    for field in ("raw_draft_record_available", "prospective_blinding_record_available"):
+        if raw_assistance.get(field) is not False:
+            errors.append(
+                f"{path}.{field}: must be false for retrospectively disclosed historical assistance"
+            )
 
-    draft_path = raw_assistance.get("private_draft_path")
-    if not _is_safe_relative_posix_path(draft_path):
-        errors.append(f"{path}.private_draft_path: must be a safe relative POSIX path")
-    elif draft_path != ANNOTATION_DRAFT_PATH:
-        errors.append(f"{path}.private_draft_path: must be exactly {ANNOTATION_DRAFT_PATH!r}")
+    limitation = raw_assistance.get("limitation")
+    if not _is_nonempty_string(limitation):
+        errors.append(f"{path}.limitation: must be a non-empty disclosure")
+    elif len(limitation.split()) < 12:
+        errors.append(f"{path}.limitation: must substantively disclose the provenance limitation")
 
-    _validate_annotation_hash(
-        raw_assistance,
-        field="prompt_template_sha256",
-        path=path,
-        expected=expected_prompt_sha256,
-        errors=errors,
-    )
-    _validate_annotation_hash(
-        raw_assistance,
-        field="private_draft_sha256",
-        path=path,
-        expected=expected_private_draft_sha256,
-        errors=errors,
-    )
-    completed = _validate_timestamp(
-        raw_assistance.get("completed_at"),
-        f"{path}.completed_at",
-        errors,
-    )
-    return completed, text_values.get("provider", ""), text_values.get("model", "")
-
-
-def _validate_annotation_hash(
-    assistance: dict[str, object],
-    *,
-    field: str,
-    path: str,
-    expected: str | None,
-    errors: list[str],
-) -> None:
-    recorded = assistance.get(field)
-    if not isinstance(recorded, str) or _SHA256_RE.fullmatch(recorded) is None:
-        errors.append(f"{path}.{field}: must be a lowercase 64-character SHA-256")
-    elif expected is not None and recorded != expected:
-        errors.append(f"{path}.{field}: does not match the exact local file hash {expected}")
-
-
-def _bound_private_file_sha256(
-    provenance: object,
-    repository_root: Path,
-    *,
-    object_field: str,
-    path_field: str,
-) -> str | None:
-    """Hash a safe provenance-bound local file when its path is structurally usable."""
-
-    if not isinstance(provenance, dict):
-        return None
-    container = provenance.get(object_field)
-    if not isinstance(container, dict):
-        return None
-    raw_path = container.get(path_field)
-    if not _is_safe_relative_posix_path(raw_path):
-        return None
-    candidate = repository_root.joinpath(*PurePosixPath(raw_path).parts).resolve()
-    try:
-        candidate.relative_to(repository_root)
-    except ValueError as exc:
-        raise GoldProvenanceValidationError(
-            [f"$provenance.{object_field}.{path_field}: resolves outside repository root"]
-        ) from exc
-    if not candidate.is_file():
-        raise GoldProvenanceValidationError(
-            [
-                f"$provenance.{object_field}.{path_field}: bound local file does not exist "
-                f"at {raw_path!r}"
-            ]
-        )
-    return sha256_file(candidate)
+    return text_values.get("provider", ""), text_values.get("model", "")
 
 
 def _validate_near_match_reviews(

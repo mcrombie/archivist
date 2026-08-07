@@ -32,6 +32,7 @@ ALLOWED_POST_FREEZE_PATHS = frozenset(
         "AGENTS.md",
         "BLOGNOTES.md",
         "DEFECTS.md",
+        "EVAL_CONTRACT.md",
         "README.MD",
         "ROADMAP.md",
         "docs/gold_set_authoring.md",
@@ -174,6 +175,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=BASE_DIR / "fixtures" / "development_question_registry.json",
     )
     parser.add_argument(
+        "--question-commitment",
+        type=Path,
+        default=BASE_DIR / "fixtures" / "gold_questions.commitment.json",
+        help="Frozen text-free commitment to ordered owner-controlled question fields.",
+    )
+    parser.add_argument(
         "--candidate-commit",
         required=True,
         help="Full frozen candidate commit recorded in the provenance sidecar.",
@@ -212,6 +219,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.gold_set,
             args.manifest,
             args.development_registry,
+            args.question_commitment,
             expected_gold_set_path=args.expected_gold_path,
             expected_candidate_commit=args.candidate_commit,
             expected_rag_policy=args.rag_policy,

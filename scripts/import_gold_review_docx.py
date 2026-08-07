@@ -9,12 +9,13 @@ manifest.  It never prints held-out question or rubric text.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
@@ -45,6 +46,9 @@ DEFAULT_FINAL_DOCX = (
 )
 DEFAULT_GOLD_OUTPUT = BASE_DIR / "runtime" / "gold-authoring" / "gold_set.draft.json"
 DEFAULT_MANIFEST = BASE_DIR / "fixtures" / "corpus_manifest.json"
+DEFAULT_CLAIM_REPLACEMENTS = (
+    BASE_DIR / "runtime" / "gold-authoring" / "gold_claim_paraphrases.json"
+)
 
 ITEM_HEADING_RE = re.compile(r"^(H\d{3})\s*[Â··]\s*(.+?)\s*$")
 BEHAVIOR_RE = re.compile(r"\bBehavior:\s*(answer|abstain)\b", re.IGNORECASE)
@@ -62,7 +66,6 @@ STRATUM_BY_LABEL = {
     "out of corpus": "out_of_corpus",
     "adversarial premise": "adversarial_premise",
 }
-
 
 class GoldReviewImportError(ValueError):
     """Raised when the private workbook cannot be transcribed unambiguously."""
@@ -90,6 +93,13 @@ def _replace_paragraph_text(paragraph: ET.Element, text: str) -> None:
         node.text = ""
 
 
+def _claim_text_sha256(text: str) -> str:
+    """Hash normalized claim prose without exposing it in tracked artifacts."""
+
+    normalized = " ".join(text.split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def _front_matter_replacement(text: str) -> str | None:
     replacements = {
         "Owner-adjudicated edition  ·  38 held-out questions": (
@@ -100,8 +110,8 @@ def _front_matter_replacement(text: str) -> str | None:
         ),
         "38 held-out questions": "37 held-out questions",
         "Resolve H039, transcribe to structured JSON, validate, and complete provenance.": (
-            "Run fresh blinded annotation batches, owner-adjudicate the drafts, and "
-            "complete formal lock."
+            "Preserve the owner-adjudicated annotations, complete final audits and provenance, "
+            "and perform the formal lock."
         ),
         "H020 and H040 removed; identifier gaps are intentional.": (
             "H020, H039, and H040 removed; identifier gaps are intentional."
@@ -118,11 +128,28 @@ def _front_matter_replacement(text: str) -> str | None:
             "and Behavior choices are recorded."
         ): "COMPLETE — All retained question, stratum, and Behavior choices are recorded.",
         (
-            " BLOCKING / REQUIRED   All owner decisions are recorded; the explicit "
+            "BLOCKING / REQUIRED   All owner decisions are recorded; the explicit "
             "H039 question/rubric conflict must be resolved before formal lock."
         ): (
-            " READY FOR CANONICALIZATION   All retained owner decisions are recorded; "
-            "no item-level question/rubric conflict remains."
+            "OWNER-ADJUDICATED SOURCE   All retained decisions are recorded. Historical "
+            "Claude drafting is disclosed without a prospective-blinding claim."
+        ),
+        (
+            "CLAUDE DRAFT   Claims, Relevant, Must not claim, and Notes began as external "
+            "drafts, then were consciously adopted or revised through owner adjudication."
+        ): (
+            "HISTORICAL AI DRAFT   Parts of Claims, Relevant, Must not claim, and Notes began "
+            "as Claude drafts, then were source-verified and consciously adopted or revised "
+            "through owner adjudication. Exact draft provenance was not prospectively captured."
+        ),
+        (
+            "This is an adjudication workspace, not a locked gold artifact. Use Word’s "
+            "Navigation Pane to jump by stratum and question. Collapse any Heading 2 item "
+            "after you finish reviewing it."
+        ): (
+            "This is the authoritative owner-adjudicated source, not yet a locked gold artifact. "
+            "Use Word’s Navigation Pane to jump by stratum and question. The source workbook "
+            "remains preserved separately."
         ),
     }
     if text in replacements:
@@ -138,12 +165,17 @@ def _front_matter_replacement(text: str) -> str | None:
     return None
 
 
-def finalize_document_xml(document_xml: bytes, *, excluded_ids: set[str]) -> bytes:
+def finalize_document_xml(
+    document_xml: bytes,
+    *,
+    excluded_ids: set[str],
+    claim_text_replacements: Mapping[tuple[str, int], tuple[str, str]] | None = None,
+) -> bytes:
     """Return minimally edited document XML with excluded question blocks removed."""
 
     root = ET.fromstring(document_xml)
     for paragraph in root.findall(f".//{W}p"):
-        replacement = _front_matter_replacement(_paragraph_text(paragraph))
+        replacement = _front_matter_replacement(_paragraph_text(paragraph).strip())
         if replacement is not None:
             _replace_paragraph_text(paragraph, replacement)
 
@@ -152,20 +184,46 @@ def finalize_document_xml(document_xml: bytes, *, excluded_ids: set[str]) -> byt
         raise GoldReviewImportError("DOCX has no WordprocessingML body")
 
     remove = False
+    current_item_id: str | None = None
+    claim_number = 0
     found: set[str] = set()
+    replacements = claim_text_replacements or {}
+    applied_replacements: set[tuple[str, int]] = set()
     for child in list(body):
         if child.tag == f"{W}p" and _paragraph_style(child) == "QuestionID":
             heading = ITEM_HEADING_RE.fullmatch(_paragraph_text(child).strip())
             if heading is not None:
                 item_id = heading.group(1)
+                current_item_id = item_id
+                claim_number = 0
                 remove = item_id in excluded_ids
                 if remove:
                     found.add(item_id)
             elif not _paragraph_text(child).strip() and remove:
                 body.remove(child)
                 continue
+        elif child.tag == f"{W}p" and current_item_id is not None and not remove:
+            claim = CLAIM_RE.fullmatch(_paragraph_text(child).strip())
+            if claim is not None:
+                claim_number += 1
+                key = (current_item_id, claim_number)
+                replacement_record = replacements.get(key)
+                if replacement_record is not None:
+                    expected_original_sha256, replacement = replacement_record
+                    actual_original_sha256 = _claim_text_sha256(claim.group(2))
+                    if actual_original_sha256 != expected_original_sha256:
+                        raise GoldReviewImportError(
+                            f"claim replacement {current_item_id}.{claim_number} no longer "
+                            "matches its expected original-text digest"
+                        )
+                    _replace_paragraph_text(
+                        child,
+                        f"{claim.group(1)} {replacement} Supporting chunk IDs: {claim.group(3)}",
+                    )
+                    applied_replacements.add(key)
         if child.tag == f"{W}sectPr":
             remove = False
+            current_item_id = None
         elif remove:
             body.remove(child)
 
@@ -182,6 +240,12 @@ def finalize_document_xml(document_xml: bytes, *, excluded_ids: set[str]) -> byt
     leaked = sorted(excluded_ids.intersection(remaining_ids))
     if leaked:
         raise GoldReviewImportError(f"excluded item blocks remain in DOCX: {leaked!r}")
+    unused_replacements = sorted(set(replacements) - applied_replacements)
+    if unused_replacements:
+        rendered = [f"{item_id}.{claim_number}" for item_id, claim_number in unused_replacements]
+        raise GoldReviewImportError(
+            f"claim replacements did not match a retained source claim: {rendered!r}"
+        )
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -190,6 +254,7 @@ def write_final_docx(
     output: Path,
     *,
     excluded_ids: set[str],
+    claim_text_replacements: Mapping[tuple[str, int], tuple[str, str]],
     force: bool,
 ) -> Path:
     if output.exists() and not force:
@@ -207,7 +272,11 @@ def write_final_docx(
     with ZipFile(output, "w") as archive:
         for entry, payload in members:
             if entry.filename == "word/document.xml":
-                payload = finalize_document_xml(payload, excluded_ids=excluded_ids)
+                payload = finalize_document_xml(
+                    payload,
+                    excluded_ids=excluded_ids,
+                    claim_text_replacements=claim_text_replacements,
+                )
                 replaced = True
             copied = ZipInfo(entry.filename, date_time=entry.date_time)
             copied.compress_type = entry.compress_type or ZIP_DEFLATED
@@ -420,6 +489,54 @@ def parse_gold_from_docx(
     )
 
 
+def load_claim_text_replacements(path: Path) -> dict[tuple[str, int], tuple[str, str]]:
+    """Load private owner-approved paraphrases without emitting their text."""
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GoldReviewImportError(
+            f"cannot read private claim-replacement file {path}: {exc}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise GoldReviewImportError("private claim-replacement file must be a JSON object")
+
+    replacements: dict[tuple[str, int], tuple[str, str]] = {}
+    for raw_key, raw_record in raw.items():
+        if not isinstance(raw_key, str) or re.fullmatch(r"H\d{3}\.\d+", raw_key) is None:
+            raise GoldReviewImportError("claim-replacement keys must use H###.N format")
+        if not isinstance(raw_record, dict) or set(raw_record) != {
+            "expected_original_sha256",
+            "replacement",
+        }:
+            raise GoldReviewImportError(
+                f"claim replacement {raw_key!r} must contain exactly "
+                "expected_original_sha256 and replacement"
+            )
+        expected_original_sha256 = raw_record.get("expected_original_sha256")
+        if (
+            not isinstance(expected_original_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_original_sha256) is None
+        ):
+            raise GoldReviewImportError(
+                f"claim replacement {raw_key!r} must include a lowercase SHA-256 digest"
+            )
+        raw_text = raw_record.get("replacement")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            raise GoldReviewImportError(
+                f"claim replacement {raw_key!r} must be a non-empty string"
+            )
+        item_id, claim_number = raw_key.split(".", maxsplit=1)
+        claim_index = int(claim_number)
+        if claim_index < 1:
+            raise GoldReviewImportError("claim-replacement positions must be one-based")
+        replacements[(item_id, claim_index)] = (
+            expected_original_sha256,
+            " ".join(raw_text.split()),
+        )
+    return replacements
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -430,6 +547,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--final-docx-output", type=Path, default=DEFAULT_FINAL_DOCX)
     parser.add_argument("--gold-output", type=Path, default=DEFAULT_GOLD_OUTPUT)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--claim-replacements",
+        type=Path,
+        default=DEFAULT_CLAIM_REPLACEMENTS,
+        help="Private JSON mapping stable H###.N claim positions to owner-approved paraphrases.",
+    )
     parser.add_argument("--exclude", action="append", default=["H039"])
     parser.add_argument("--force", action="store_true")
     return parser
@@ -443,10 +566,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         manifest = load_json_object(args.manifest, label="corpus manifest")
         manifest_sha256 = sha256_file(args.manifest)
+        claim_text_replacements = load_claim_text_replacements(args.claim_replacements)
         final_docx = write_final_docx(
             args.source,
             args.final_docx_output,
             excluded_ids=set(args.exclude),
+            claim_text_replacements=claim_text_replacements,
             force=args.force,
         )
         gold = parse_gold_from_docx(

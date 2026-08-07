@@ -1,8 +1,14 @@
 # Claude prompt for blinded gold-set annotation drafts
 
+> **Optional future workflow; not used for the current held-out cohort.** The owner retained the
+> completed, source-adjudicated annotations and provenance v4 discloses their historical Claude
+> assistance without claiming prospective blinding. The prepared private batches were never sent.
+> Using this prompt for a future gold set requires separate data/cost authorization and a provenance
+> contract that prospectively captures the resulting records.
+
 Use this prompt in batches of five questions. In a separate message immediately before it, tell
-Claude the exact batch (for example, `Work only on H001-H005`). Do not edit this canonical prompt;
-its committed bytes are hashed in the provenance record.
+Claude the exact batch (for example, `Work only on H001-H005`). Do not edit this canonical prompt
+inside a declared future cohort; hash its exact bytes in that cohort's provenance record.
 
 Provide Claude privately with only:
 

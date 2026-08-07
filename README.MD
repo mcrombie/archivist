@@ -171,7 +171,7 @@ npm run test:modes
 npm run build
 ```
 
-**Verification snapshot — August 6, 2026:** repository-wide Ruff passed; **770 Python tests passed
+**Verification snapshot — August 6, 2026:** repository-wide Ruff passed; **774 Python tests passed
 and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
 built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
@@ -183,9 +183,11 @@ has frozen 37 retained private questions spanning all six contracted strata; H02
 are intentionally absent. A separate final DOCX and canonical private JSON preserve the source
 workbook, and schema, composition, locations, and development-overlap checks pass. The owner-field
 projection is now represented in Git only by a text-free SHA-256 commitment bound privately to the
-frozen V26 candidate. Eight question-only blinded annotation batches are prepared locally, but no
-held-out item has been sent to Archivist or an external model. Fresh annotation, owner source
-verification, final privacy checks, and provenance lock remain before evaluation.
+frozen V26 candidate. The owner elected to retain the completed, source-verified annotations;
+historical Claude drafting is disclosed retrospectively without claiming a prospectively blinded
+or complete raw-draft record. Two copied-language risks were paraphrased, and the private schema,
+location, overlap, and privacy audits now pass. No held-out item has been sent to Archivist.
+Provenance completion and formal lock remain before evaluation.
 
 No formal benchmark result should yet be claimed. A run of record requires one frozen candidate,
 the locked gold set and provenance sidecar, predeclared metrics and thresholds, and dated generator

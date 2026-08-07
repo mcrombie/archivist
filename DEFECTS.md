@@ -45,6 +45,26 @@ Entries below, most recent first.
 
 ---
 
+## [2026-08-06] Contract event: historical annotation assistance disclosed retrospectively
+Phase/Brief: Phase 1, Brief 3 held-out gold authoring
+Symptom: the completed owner-review workbook contained annotations that began as Claude drafts,
+but the fresh blinded workflow then required by provenance v3 had never been run. Treating the
+existing work as prospectively blinded would have invented a raw-draft record, model/surface
+metadata, and pre-assistance commitment that do not exist; discarding the owner-adjudicated work
+and repeating it would create process theater rather than stronger ground truth.
+Cause: owner-authorized contract correction before the first formal held-out run. The prior rule
+mistook a preferred prospective annotation process for the only honest way to preserve
+candidate-independent owner adjudication.
+Resolution and verification: provenance advances to `archivist.gold_provenance/4`. It records the
+method as owner adjudication with historical AI drafting, marks the complete raw-draft and
+prospective-blinding records unavailable, and requires an explicit limitation plus an owner
+attestation that no prospective-blinding claim is being made. The owner-authored question
+commitment still must predate every candidate-system exposure. The synchronized private DOCX/JSON
+retains the completed annotations; two accurate claims responsible for three copied-language flags
+were paraphrased without changing essentiality or source bindings. The run-of-record schema,
+location, overlap, and privacy audits pass with zero privacy flags. No H-item reached Archivist and
+no external or paid call was made. No formal result existed to invalidate.
+
 ## [2026-08-06] Contract event: held-out annotation adopted a practical scoring standard
 Phase/Brief: Phase 1, Brief 3 held-out gold authoring
 Symptom: the authoring materials treated rigor as requiring polished user questions, clause-level

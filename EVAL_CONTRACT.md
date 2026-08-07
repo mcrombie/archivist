@@ -20,6 +20,17 @@ revised without performative rewriting. No held-out run had occurred, so this ch
 formal result. Provenance advances to `archivist.gold_provenance/3` for the revised owner
 attestation; earlier practical runs remain development evidence only.
 
+**Owner-authorized amendment, 2026-08-06 (annotation provenance):** the owner elected to retain
+the completed, source-reviewed annotations rather than commission a new Claude pass solely to
+manufacture cleaner process records. Some annotation prose began as historical Claude drafting,
+but that assistance occurred before the prospective commitment, prompt-hash, raw-draft, and
+blinding protocol existed. The project therefore makes no claim that those drafts were
+prospectively blinded or reproducibly captured. The owner-controlled questions were still authored
+without candidate output, no retained held-out item has been run through Archivist, and the owner
+subsequently verified and adjudicated every retained annotation against the private corpus.
+Provenance advances to `archivist.gold_provenance/4` to record that limitation explicitly. No
+formal held-out run had occurred, so this amendment invalidates no result.
+
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. Both lock after the calibration pilot (Brief 6) answers what only runs can answer; the open questions are enumerated at the end of each section, split by whether they are desk questions or run questions.
 
 ---
@@ -214,14 +225,13 @@ topic already shaped a candidate repair. A near-match review may approve genuine
 questions that share vocabulary; it may not waive a parameter substitution or known tuned failure
 family into the gold set.
 
-An external model may produce a **blinded annotation draft** for the remaining fields: claims,
-essentiality, claim-specific supporting chunk IDs, question-wide relevant chunk IDs,
-`must_not_claim`, and notes. This is assistance with evidence discovery and drafting, not delegated
-ground-truth authority. Every proposed field remains unverified until the
-owner checks it against the private corpus, independently searches for omissions, decides whether
-to accept, revise, or reject it, and explicitly adopts or revises every accepted annotation. The
-owner need not paraphrase accurate draft wording merely to demonstrate authorship; the required
-work is source verification and a conscious scoring decision, not cosmetic rewriting.
+An external model may assist with draft annotations—claims, essentiality, claim-specific supporting
+chunk IDs, question-wide relevant chunk IDs, `must_not_claim`, and notes—but assistance never
+becomes ground-truth authority. Every proposed field remains unverified until the owner checks it
+against the private corpus, independently searches for omissions, decides whether to accept,
+revise, or reject it, and explicitly adopts or revises every accepted annotation. The owner need
+not paraphrase accurate draft wording merely to demonstrate authorship; the required work is source
+verification and a conscious scoring decision, not cosmetic rewriting.
 
 Held-out questions are samples of real user behavior, not polished examination prompts. They may
 preserve ambiguity, awkward wording, typographical errors, compound structure, or a faulty premise.
@@ -230,13 +240,14 @@ scoring interpretation. When wording permits more than one reasonable reading, t
 the intended behavior and scoring scope in the rubric or notes rather than silently perfecting the
 question.
 
-The annotation model may receive only the frozen owner-authored questions, the eligible private
-corpus and stable chunk identifiers, the corpus manifest, and the annotation instructions. It may
-not receive or search for Archivist answers, retrieved chunks selected by Archivist, planner or
-generation traces, development-run answers, scores, known candidate failures, or any other
-candidate-system output. Discovery of such material stops annotation for the affected batch and is
-recorded as possible benchmark contamination. The annotation model may not later serve as the
-evaluation judge for this gold set.
+For any future prospective annotation workflow, the annotation model may receive only the frozen
+owner-authored questions, the eligible private corpus and stable chunk identifiers, the corpus
+manifest, and the annotation instructions. It may not receive or search for Archivist answers,
+retrieved chunks selected by Archivist, planner or generation traces, development-run answers,
+scores, known candidate failures, or any other candidate-system output. Discovery of such material
+stops annotation for the affected batch and is recorded as possible benchmark contamination. The
+annotation model may not later serve as the evaluation judge for that gold set. These prospective
+controls are good practice, but they are not asserted retroactively for the present cohort.
 
 **The hard rule is independence, not the fiction that a tool touched no draft text.** Allowing a
 model to choose the questions or allowing its plausible annotations to pass without source-level
@@ -245,12 +256,13 @@ owner therefore verifies every claim, essential flag, support location, relevanc
 declared scoring scope, prohibited-claim tripwire, and note. A rubber-stamp review does not satisfy
 this contract.
 
-Before assistance begins, a text-free hash commits the ordered IDs, questions, strata, and expected
-behaviors. The provenance sidecar records that commitment plus the annotation method, provider,
-displayed model identifier and surface, canonical prompt path and hash, private draft path and hash,
-drafting completion time, and the owner's explicit attestations. Where a consumer surface exposes
-only a moving alias rather than a dated snapshot, that reproducibility limitation is recorded rather
-than guessed away.
+Before any retained held-out item reaches the candidate system, a text-free hash commits the
+ordered IDs, questions, strata, and expected behaviors. The provenance sidecar records that
+commitment plus the annotation method, known provider/model/surface information, whether a raw
+draft record and prospective blinding record actually exist, an explicit limitation statement, and
+the owner's attestations. Unknown historical metadata is recorded as not recorded rather than
+guessed away. The commitment proves the exam was fixed before its first run; it does not pretend to
+predate historical drafting that had already occurred.
 
 All committed claims, `must_not_claim` entries, and notes are paraphrases rather than copied
 manuscript passages, so the gold set is committable without reproducing the book. After direct
@@ -345,16 +357,16 @@ This is stated in advance, deliberately, and it **bounds what the post-baseline 
 A gold set is invalid, and may not be used, if any of the following fail:
 
 - the ordered owner-controlled projection (`id`, `question`, `stratum`, and
-  `expected_behavior`) exactly matches the text-free question commitment recorded before canonical
-  annotation assistance
+  `expected_behavior`) exactly matches the text-free question commitment recorded before the first
+  candidate-system exposure
 - the provenance sidecar exactly binds the final gold-set bytes, frozen candidate commit and RAG
-  policy, corpus manifest, development-question registry, canonical annotation prompt, and private
-  raw annotation draft
-- annotation-assistance metadata identifies the declared blinded method, provider, displayed model
-  label, surface, and a completion time within the recorded authoring window
-- every required owner attestation is explicitly true, including assistant blinding, source-level
-  adjudication, conscious adoption or revision of accepted annotation prose, and the prohibition
-  on pre-lock held-out runs
+  policy, corpus manifest, development-question registry, and owner-controlled question commitment
+- annotation-assistance metadata identifies the declared method and known provider/model/surface
+  information, truthfully records that no prospective blinding or complete raw-draft record is
+  available for this historical assistance, and states the resulting limitation
+- every required owner attestation is explicitly true, including honest disclosure of historical
+  AI drafting without a prospective-blinding claim, source-level adjudication, conscious adoption
+  or revision of accepted annotation prose, and the prohibition on pre-lock held-out runs
 - no normalized held-out question exactly reuses a registered development question, and every
   deterministic fuzzy-match flag has one substantive owner review
 - every `chunk_id` in `supporting_chunk_ids` and `relevant_chunk_ids` exists in the corpus manifest referenced by `authored_against_corpus` **and is retrieval-eligible under that manifest's `ingest.skip_files`**

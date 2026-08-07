@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 from xml.etree import ElementTree as ET
 
+import pytest
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPOSITORY_ROOT / "scripts"
@@ -13,7 +15,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from fingerprint_gold_questions import fingerprint_json
-from import_gold_review_docx import W, finalize_document_xml
+from import_gold_review_docx import GoldReviewImportError, W, finalize_document_xml
 from prepare_gold_annotation_batches import prepare_batches
 
 
@@ -57,6 +59,92 @@ def test_finalizer_removes_only_excluded_item_and_updates_status() -> None:
     assert "retained private synthetic row" in text
     assert "H039" not in text
     assert "excluded private synthetic row" not in text
+
+
+def test_finalizer_applies_private_claim_paraphrases_by_stable_item_position() -> None:
+    paragraphs = [_paragraph("H006  Â·  Focused biographical", "QuestionID")]
+    paragraphs.extend(
+        _paragraph(
+            f"Essential synthetic claim {index}. Supporting chunk IDs: synthetic_001"
+        )
+        for index in range(1, 7)
+    )
+    paragraphs.append(_paragraph("H029  Â·  Broad thematic", "QuestionID"))
+    paragraphs.extend(
+        _paragraph(
+            f"Essential synthetic claim {index}. Supporting chunk IDs: synthetic_001"
+        )
+        for index in range(1, 7)
+    )
+
+    finalized = finalize_document_xml(
+        _document_xml(paragraphs),
+        excluded_ids=set(),
+        claim_text_replacements={
+            ("H006", 6): (
+                hashlib.sha256(b"synthetic claim 6.").hexdigest(),
+                "Owner-approved private paraphrase A.",
+            ),
+            ("H029", 6): (
+                hashlib.sha256(b"synthetic claim 6.").hexdigest(),
+                "Owner-approved private paraphrase B.",
+            ),
+        },
+    )
+    text = " ".join(
+        node.text or "" for node in ET.fromstring(finalized).findall(f".//{W}t")
+    )
+
+    assert "Owner-approved private paraphrase A." in text
+    assert "Owner-approved private paraphrase B." in text
+    assert "Supporting chunk IDs: synthetic_001" in text
+    assert "synthetic claim 5" in text
+    assert "synthetic claim 6" not in text
+
+
+def test_finalizer_rejects_stale_claim_replacement_digest() -> None:
+    payload = _document_xml(
+        [
+            _paragraph("H006  Ã‚Â·  Focused biographical", "QuestionID"),
+            _paragraph("Essential synthetic claim. Supporting chunk IDs: synthetic_001"),
+        ]
+    )
+    payload_root = ET.fromstring(payload)
+    payload_root.find(f".//{W}t").text = "H006  \u00b7  Focused biographical"
+    payload = ET.tostring(payload_root, encoding="utf-8", xml_declaration=True)
+
+    with pytest.raises(GoldReviewImportError, match="expected original-text digest"):
+        finalize_document_xml(
+            payload,
+            excluded_ids=set(),
+            claim_text_replacements={
+                ("H006", 1): ("0" * 64, "Owner-approved private paraphrase."),
+            },
+        )
+
+
+def test_finalizer_rejects_unused_claim_replacement() -> None:
+    payload = _document_xml(
+        [
+            _paragraph("H006  Ã‚Â·  Focused biographical", "QuestionID"),
+            _paragraph("Essential synthetic claim. Supporting chunk IDs: synthetic_001"),
+        ]
+    )
+    payload_root = ET.fromstring(payload)
+    payload_root.find(f".//{W}t").text = "H006  \u00b7  Focused biographical"
+    payload = ET.tostring(payload_root, encoding="utf-8", xml_declaration=True)
+
+    with pytest.raises(GoldReviewImportError, match="did not match a retained source claim"):
+        finalize_document_xml(
+            payload,
+            excluded_ids=set(),
+            claim_text_replacements={
+                ("H006", 2): (
+                    hashlib.sha256(b"synthetic claim.").hexdigest(),
+                    "Owner-approved private paraphrase.",
+                ),
+            },
+        )
 
 
 def _manifest() -> dict[str, object]:
