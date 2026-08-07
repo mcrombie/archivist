@@ -52,13 +52,16 @@ ALLOWED_POST_FREEZE_PATHS = frozenset(
         "scripts/gold_authoring_workbench.py",
         "scripts/import_gold_review_docx.py",
         "scripts/prepare_gold_annotation_batches.py",
+        "scripts/run_retrieval_benchmark.py",
         "scripts/validate_gold_holdout.py",
         "src/gold_provenance.py",
+        "src/retrieval_benchmark.py",
         "tests/test_gold_holdout_cli.py",
         "tests/test_gold_annotation_preparation.py",
         "tests/test_gold_offline_tools.py",
         "tests/test_gold_provenance.py",
         "tests/test_gold_set.py",
+        "tests/test_retrieval_benchmark.py",
     }
 )
 

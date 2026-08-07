@@ -3576,6 +3576,50 @@ made ruler, and making that ruler can require more historical judgment than writ
 heuristic. Stopping feature development here protects the eventual measurement from becoming one
 more tuned demonstration.
 
+### 2026-08-07 - Making the first held-out comparison executable before seeing a score
+
+- The formal gold lock exposed one final experimental-design gap before any held-out retrieval:
+  the roadmap promised a dense-versus-hybrid comparison, but the contract still defined
+  `S_primary` only as raw Chroma output. It also left empty relevance sets, the comparison
+  statistic, and the ten-item noise subset implicit. Running first and deciding those details
+  afterward would have made metric selection part of the result.
+- Closed the gap prospectively. The Dense arm is the raw `l2` vector ranking. The Hybrid arm is the
+  already-shipped BM25/dense reciprocal-rank-fusion policy at each requested depth. Both receive
+  the same question, corpus, eligible boundary, semantic candidate pool, and cached query vector.
+  Macro Recall@5 over items with non-empty relevance sets is now the declared comparison; the full
+  Recall@k, context, essential-coverage, fallback, displacement, and per-stratum profile remains
+  mandatory rather than selectively reported.
+- Made abstention items honest denominators. Questions with deliberately empty relevance sets do
+  not become automatic zero-recall failures or zero-hit successes; retrieval recall is null for
+  them, while their fallback events remain measured. Every aggregate carries the number of items
+  that actually contributed to it.
+- Built a retrieval-only runner that never calls the planner, generator, answer model, or judge.
+  It sends the 37 question strings to `text-embedding-3-small` at most once, stores only hashes and
+  vectors in a private gitignored cache, disables automatic retries, and reuses those exact vectors
+  for both arms, all six values of `k`, and five fixed-subset repetitions. Result artifacts contain
+  IDs, hashes, numbers, and configuration—not questions, annotations, answers, or manuscript text.
+- Added mechanical brakes around the interesting moment: the runner rejects a changed gold hash,
+  nonmatching candidate, dirty run-of-record tree, altered corpus/index, missing authorization,
+  undersized cost ceiling, or pre-existing output. The owner authorization in conversation remains
+  necessary; a command-line flag cannot manufacture it.
+- A focused pre-run review caught four issues before they could affect a score or spend: noise
+  spreads now cover every stratum and the declared Hybrid-minus-Dense comparison, embedding vectors
+  are bound by validated provider indices rather than response position, an existing result aborts
+  before a missing cache can trigger spending, and non-finite cost ceilings fail closed.
+- The offline preflight verified the frozen 37-item gold binding and the active 481-chunk Chroma
+  index in `l2` space. No cached held-out query embeddings exist yet, no H-item reached retrieval,
+  no held-out content was sent externally, and no paid API request was made. OpenAI's current
+  embedding documentation implies a provider-limit worst case of $0.006 for the one allowed batch,
+  so the proposed authorization ceiling is $0.01.
+- Offline implementation verification closed with repository-wide Ruff clean, **784 Python tests
+  passing and one intentionally skipped**, both focused frontend suites passing, and a successful
+  production frontend build. These checks were local and made no OpenAI request.
+
+Useful blog lesson: pre-registration is often a series of small, unglamorous decisions made before
+the first number appears. Choosing the arms, denominator, primary metric, and noise sample while
+the result is still unknowable is what turns a convenient demo comparison into evidence that can
+surprise its author.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

@@ -45,6 +45,31 @@ Entries below, most recent first.
 
 ---
 
+## [2026-08-07] Contract event: retrieval comparison was not executable as written
+Phase/Brief: Phase 1, Brief 4 held-out retrieval benchmark
+Symptom: the roadmap required a dense-versus-BM25/RRF comparison, while the locked retrieval
+section defined only raw `collection.query` sets. It did not define the Hybrid arm, the treatment
+of empty relevance sets, the macro comparison statistic, or the fixed ten-item noise subset. It
+also described an older context order in which neighbours could displace later primaries even
+though the frozen finalizer now reserves primaries first.
+Cause: owner-authorized contract correction before the first held-out retrieval run. The benchmark
+brief and contract had been written at different stages of the retrieval implementation, leaving
+the implementer to invent mechanics unless the gap was closed prospectively.
+Resolution and verification: §4 now defines raw dense and existing BM25/dense RRF arms, requires one
+cached query embedding per locked item for both arms and all repetitions, declares macro Recall@5
+over non-empty relevance sets as the comparison statistic, makes empty-relevance denominators
+explicit, and fixes a stratified ten-item/five-repeat noise protocol. A committed text-free runner
+enforces the frozen gold/candidate/corpus identities, clean-tree boundary, single no-retry OpenAI
+embedding operation, local reuse, and non-overwrite behavior. Synthetic tests cover cache binding,
+provider-index validation, one-vector-query reuse, denominators, both arms, aggregate and
+per-stratum noise spread (including the declared comparison delta), fixed repetition membership,
+pre-spend output rejection, finite cost ceilings, and text exclusion. The active local
+481-chunk `l2` index passed the offline integrity preflight; the query-embedding cache remains absent.
+Repository-wide Ruff passed, 784 Python tests passed with one intentional skip, both focused
+frontend suites passed, and the production frontend build completed successfully.
+No H-item reached the retriever, no held-out content was sent externally, no paid call was made,
+and no earlier formal result exists to invalidate.
+
 ## [2026-08-06] Contract event: historical annotation assistance disclosed retrospectively
 Phase/Brief: Phase 1, Brief 3 held-out gold authoring
 Symptom: the completed owner-review workbook contained annotations that began as Claude drafts,

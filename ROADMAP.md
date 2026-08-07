@@ -102,7 +102,7 @@ After formal lock:
 | **1. Unified Answer Mode path** | **Complete** | Preserve one shared implementation of every retrieval primitive across retrieval-backed surfaces. |
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. A formal run still requires an eligible pinned dated generator snapshot rather than the interactive `gpt-5.6-sol` name. |
 | **3. Held-out gold question set** | **Complete and formally locked** | Preserve the synchronized private source, committed private-safe gold, provenance sidecar, and frozen-candidate boundary unchanged. |
-| **4. Retrieval recall and dense-vs-hybrid benchmark** | **Next; not run** | Build/run the committed retrieval-only comparison against the untouched locked gold set. Generation is excluded. |
+| **4. Retrieval recall and dense-vs-hybrid benchmark** | **Harness complete; paid run not started** | The text-free runner, arm definitions, macro Recall@5 comparison, denominators, fixed noise subset, single query-embedding cache, and fail-closed preflight are committed. Run it only after explicit authorization for the 37-question OpenAI embedding operation. Generation is excluded. |
 | **5. Citation-accuracy harness** | **Not run** | Run the locked answer-generation and claim-decomposition workflow, establish mechanical citation measures, and preserve complete run identity. |
 | **6. Faithfulness and abstention calibration** | **Not run** | Hand-label the pilot before judge output, measure judge-human agreement and noise, settle §§6–7, and write the §8 envelopes before the baseline. |
 | **7. Formal baseline and evaluation report** | **Not run** | Run the complete held-out set once under the locked contract and publish text-free reproducible artifacts, limitations, and exact denominators. |
@@ -130,9 +130,12 @@ top of the list.
 5. **Completed — complete and lock provenance.** The validated JSON and version-4 provenance are
    committed; exact gold, question commitment, corpus, development-registry, owner-attestation,
    privacy, and clean frozen-candidate checks pass.
-6. **Next — run the retrieval-only benchmark.** Compare vector-only retrieval with dense/BM25
-   reciprocal-rank fusion using identical questions, corpus, eligibility, query embeddings, and
-   values of `k`. Publish Recall@k/context-recall results only from the predeclared contract.
+6. **Next — run the retrieval-only benchmark.** The runner now compares vector-only retrieval with
+   dense/BM25 reciprocal-rank fusion using identical questions, corpus, eligibility, cached query
+   embeddings, and values of `k`; macro Recall@5 is frozen as the comparison statistic. The only
+   remaining pre-run gate is explicit owner authorization for one OpenAI embedding request carrying
+   the 37 locked question strings, bounded by a $0.01 ceiling. Publish Recall@k/context-recall
+   results only from the predeclared contract.
 7. **Run citation measurement and the faithfulness/abstention pilot.** Establish mechanical citation
    metrics, hand-label the calibration subset before judge output, measure judge agreement and
    run-to-run spread, then settle the remaining contract sections and performance envelopes.

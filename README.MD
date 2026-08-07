@@ -171,7 +171,7 @@ npm run test:modes
 npm run build
 ```
 
-**Verification snapshot — August 6, 2026:** repository-wide Ruff passed; **774 Python tests passed
+**Verification snapshot — August 7, 2026:** repository-wide Ruff passed; **784 Python tests passed
 and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
 built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
@@ -188,9 +188,33 @@ composition, locations, development-overlap, privacy, provenance, and frozen-can
 pass. No held-out item has yet been sent to Archivist.
 
 No formal benchmark result should yet be claimed. The next permitted measurement is the
-retrieval-only benchmark against the frozen candidate. Later run-of-record generation still
-requires dated generator and judge model snapshots. The V26 interactive application and earlier
-practical evaluations remain development evidence only.
+retrieval-only benchmark against the frozen candidate. Its committed runner compares raw dense
+retrieval with the existing BM25/dense reciprocal-rank-fusion policy from one cached query
+embedding per held-out item. It invokes no planner, answer model, generator, or judge; writes no
+question or manuscript text to its artifacts; and predeclares macro Recall@5 as the comparison
+statistic.
+
+The offline preflight is safe to run without an API key:
+
+```powershell
+uv run python scripts/run_retrieval_benchmark.py preflight
+```
+
+The first complete run needs a separately recorded owner authorization because a missing cache
+sends exactly the 37 locked question strings—not the gold annotations or manuscript—to OpenAI's
+`text-embedding-3-small` endpoint in one request. Automatic retries are disabled. The command-line
+acknowledgement is a safety interlock, not a substitute for that authorization:
+
+```powershell
+uv run python scripts/run_retrieval_benchmark.py run `
+  --authorize-openai-query-embeddings `
+  --max-cost-usd 0.01
+```
+
+The private, gitignored embedding cache is then reused by both arms, every value of `k`, and the
+five noise-floor repetitions; later offline reproductions do not make another API call. Later
+run-of-record generation still requires dated generator and judge model snapshots. The V26
+interactive application and earlier practical evaluations remain development evidence only.
 
 ## Documentation map
 

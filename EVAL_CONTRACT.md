@@ -388,7 +388,10 @@ the evidence.
 
 ## 4. Retrieval recall
 
-No model is invoked. This is the cheapest measurement and the first one that should run.
+No planner, generator, answer model, or judge is invoked. This is the cheapest measurement and the
+first one that should run. The 37 locked question strings are embedded once with the corpus-pinned
+`text-embedding-3-small` model, cached privately by question hash, and reused unchanged by both
+retrieval arms and every repetition. The embedding operation is not silently repeated.
 
 ### 4.1 Definitions
 
@@ -403,16 +406,44 @@ essential(q, S)   = fraction of q's essential claims c for which
 
 Set membership is exact string equality on `chunk_id`. **A gold `chunk_id` absent from the corpus manifest, or present only in a skipped document, is a hard error that aborts the run**, never a miss — a miss, a typo, and unreachable ground truth must not be able to look the same.
 
-### 4.2 Two retrieved sets, measured separately
+Items with an empty `R(q)` are excluded from recall, hit-rate, and essential-coverage denominators;
+their values for those metrics are `null`, not zero. They remain in the fallback-rate denominator.
+Every aggregate is the macro mean of the applicable per-question values, and every reported number
+includes its exact applicable-item denominator. This keeps the four `out_of_corpus` items from
+manufacturing either retrieval successes or failures for ground truth that deliberately does not
+exist.
 
-This separation is the point of the metric and must not be collapsed.
+### 4.2 Two retrieval arms and two retrieved sets, measured separately
+
+The comparison has exactly two arms. They receive the identical question string, cached query
+embedding, corpus and eligibility boundary, raw 20-candidate semantic pool, and values of `k`.
+Neither arm invokes query planning.
+
+| Arm | Definition |
+|---|---|
+| **Dense** | the raw Chroma `l2` vector ranking produced by `collection.query` from the cached query embedding |
+| **Hybrid** | the existing `build_hybrid_results` BM25/dense reciprocal-rank-fusion policy, including its pinned lexical tokenizer/scorer, distance rule, fallback rule, deterministic tie-break, and broad-query document-diversity policy |
+
+For the Hybrid arm, `build_hybrid_results(..., n_results=k)` is evaluated independently for every
+declared `k`; its returned `primary_chunk_ids` are `S_primary@k`. This mirrors what the existing
+retriever returns at that requested depth and does not assume that hybrid result sets are nested.
+The same raw semantic pool and cached embedding are reused locally for all `k`; BM25/RRF does not
+make another external call.
+
+Within each arm, search and context are then measured separately. This separation is the point of
+the metric and must not be collapsed.
 
 | Symbol | Set | Definition |
 |---|---|---|
-| **`S_primary@k`** | what search returned | the top *k* chunk IDs from `collection.query`, before document filtering, distance filtering, neighbour expansion, and truncation |
-| **`S_context`** | what the model saw | the chunk IDs actually placed in the prompt by `finalize_context_chunks` — post-filter, post-expansion, post-truncation to `max_final_sources` |
+| **`S_primary@k`** | what the arm returned | Dense: the top *k* raw `collection.query` IDs. Hybrid: `primary_chunk_ids` from the pinned BM25/dense RRF policy requested at *k*. |
+| **`S_context`** | what the model would see | the chunk IDs produced for that arm by the shared `finalize_context_chunks` path at the frozen runtime `n_results = 5`, post-filter, post-expansion, and post-truncation to `max_final_sources = 8` |
 
-`S_primary` measures the embedding and the index. `S_context` measures the pipeline built on top of them. The gap between the two is the pipeline's cost, and it is the quantity the broad-thematic hypothesis is about: five primary hits expand to as many as fifteen chunks and are then truncated to eight in primary-rank order, so unscored neighbours of the top hit can displace scored hits ranked fourth and fifth.
+Dense `S_primary` measures the embedding and index alone. Hybrid `S_primary` measures the same
+semantic evidence after the already-shipped lexical/fusion policy. `S_context` measures the shared
+context pipeline built on each arm. The gap between each arm's five returned primaries and its
+context is the downstream pipeline cost. The finalizer now reserves primaries before optional
+neighbours; the benchmark measures rather than assumes whether filtering or the source ceiling
+still displaces any of them.
 
 ### 4.3 Reported figures
 
@@ -428,9 +459,25 @@ k values above the current `n_results = 5` and `max_final_sources = 8` are measu
 
 `expansion_displacement` split by cause is what turns "the pipeline loses things" into "the pipeline loses things *here*."
 
+The prospectively declared dense-versus-hybrid comparison statistic is **macro `recall@5` over all
+items with non-empty `R(q)`**. Report both arm values and `Hybrid - Dense`; do not substitute a more
+favourable `k`, stratum, context metric, or micro average after seeing the result. Other contracted
+figures remain diagnostics and are still reported in full.
+
+For this retrieval measurement, the §1.4 fixed ten-item noise subset is selected mechanically,
+before results, by lexicographic item ID within each stratum: 2 `focused_biographical`, 2
+`focused_analytical`, 1 `conceptual`, 2 `broad_thematic`, 2 `out_of_corpus`, and 1
+`adversarial_premise`. The first pass over those items may be the corresponding slice of the full
+benchmark; four identical local repetitions complete the required five. The same cached embedding
+is used every time.
+
 ### 4.4 Fallback events are counted, not silent
 
-`get_filtered_primary_chunks` falls back to the unfiltered result set when the distance filter removes everything. **Every fallback is recorded per question and reported as a rate.** A high fallback rate on `out_of_corpus` items is the expected finding; a high rate on answerable items means the threshold is wrong.
+Dense `get_filtered_primary_chunks` falls back to the unfiltered result set when the distance
+filter removes everything. Hybrid records the corresponding
+`raw_primary_fallback_used` event from its existing trace. **Every arm's fallback is recorded per
+question and reported as a rate over all items.** A high fallback rate on `out_of_corpus` items is
+the expected finding; a high rate on answerable items means the threshold is suspect.
 
 ---
 
