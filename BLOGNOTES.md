@@ -14,9 +14,10 @@ anything that still requires measurement.
   advanced setting. Ten semantic modes and eleven visual appearances are implemented; they are
   public interpretive prototypes, not formal evidence that perspective changes preserve answer
   quality. The separate full-context-v2 experiment remains disabled on the public server.
-- **Measurement:** the unchanged ten-question cohort is development evidence. No formal held-out
-  result exists yet. The 37-item owner-adjudicated gold set and provenance are formally locked
-  against frozen V26; the next measurement is the retrieval-only benchmark.
+- **Measurement:** the unchanged ten-question cohort is development evidence. The 37-item
+  owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
+  held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
+  (+1.26 points). This is a retrieval-only diagnostic, not an answer-quality score.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
@@ -24,11 +25,41 @@ anything that still requires measurement.
   question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
   annotations began as historical Claude drafts, but the owner later source-verified and
   adjudicated them. This is disclosed without a prospective-blinding claim.
-- **Restart point:** run retrieval, citation, faithfulness, abstention, baseline, and production
-  measurements in that order without changing the locked gold or frozen V26 in response.
+- **Restart point:** run citation measurement and the faithfulness/abstention pilot, then the full
+  answer-quality baseline and production measurement, without changing the locked gold or frozen
+  V26 in response to the retrieval result.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-07 — The first held-out retrieval diagnostic
+
+- Ran the predeclared dense-versus-hybrid benchmark against frozen candidate
+  `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` / `evidence-planned-v26`. The 33 answerable items
+  form the recall denominator; four out-of-corpus items remain reserved for absence behavior.
+- The primary result was 24.71% dense macro Recall@5 versus 25.97% hybrid Recall@5, an absolute
+  hybrid gain of 1.26 percentage points. Hit@5 rose from 90.91% to 93.94%; context recall rose from
+  31.96% to 33.74%; and essential-claim coverage in assembled context rose from 44.98% to 47.22%.
+- The aggregate hides a mixed result. Hybrid improved focused-biographical Recall@5 by 6.49 points
+  and adversarial-premise Recall@5 by 12.50 points, but conceptual Recall@5 fell by 8.40 points.
+  Focused-analytical recall was effectively flat, and its essential coverage was lower under
+  hybrid retrieval. Eleven answerable items improved, thirteen were unchanged, and nine worsened.
+- High Hit@5 alongside low Recall@5 is the central diagnostic: Archivist usually finds at least one
+  relevant passage, but often fails to retrieve enough of the complete expected evidence set.
+  Recall@20 reached 49.58% dense and 53.03% hybrid, showing useful headroom in candidate selection
+  and context assembly rather than proving an answer-generation defect.
+- Five fixed, stratified noise-floor repetitions produced zero spread. That establishes
+  deterministic behavior for this path, not broad statistical significance. Hybrid is therefore a
+  small, reproducible, heterogeneous improvement—not a universal retrieval victory.
+- The run made one no-retry `text-embedding-3-small` request containing only the 37 locked question
+  strings: 521 tokens and an estimated cost of `$0.00001042`. It invoked no planner, generator,
+  answer model, or judge. The private text-free cache and result remain ignored under
+  `runtime/evaluations/`; their SHA-256 digests are
+  `80524b064086d4b677b0f7f5b2cf5f0579256ba7c262c63c06c3807bece7ce09` and
+  `2f1eb1dca6f3713271d17d4cff4da3f659d31cded34a8d98d3f789e9394d9a4f`.
+- The result does not authorize a repair. V26 and the gold set remain untouched so the next
+  citation, faithfulness, abstention, and complete answer-quality measurements retain the same
+  held-out boundary.
 
 ## 2026-08-07 — The held-out ruler is finally locked
 

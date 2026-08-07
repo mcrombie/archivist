@@ -185,14 +185,23 @@ version-4 provenance sidecar bind the exact owner-field commitment, final gold b
 candidate, corpus manifest, and development registry. Historical Claude drafting is disclosed
 retrospectively without claiming a prospectively blinded or complete raw-draft record. Schema,
 composition, locations, development-overlap, privacy, provenance, and frozen-candidate checks all
-pass. No held-out item has yet been sent to Archivist.
+pass.
 
-No formal benchmark result should yet be claimed. The next permitted measurement is the
-retrieval-only benchmark against the frozen candidate. Its committed runner compares raw dense
-retrieval with the existing BM25/dense reciprocal-rank-fusion policy from one cached query
-embedding per held-out item. It invokes no planner, answer model, generator, or judge; writes no
-question or manuscript text to its artifacts; and predeclares macro Recall@5 as the comparison
-statistic.
+The first held-out measurement is now complete: a retrieval-only dense-versus-hybrid diagnostic
+against the untouched frozen candidate. It used one cached query embedding per item, invoked no
+planner, answer model, generator, or judge, and wrote no question or manuscript text to its result.
+Of the 37 items, 33 answerable items contribute to recall; the four out-of-corpus items are excluded
+from that denominator by contract.
+
+| Retrieval arm | Macro Recall@5 | Hit@5 | Context recall | Essential coverage in context |
+|---|---:|---:|---:|---:|
+| Dense | 24.71% | 90.91% | 31.96% | 44.98% |
+| Hybrid BM25/dense RRF | 25.97% | 93.94% | 33.74% | 47.22% |
+
+The predeclared primary delta is **+1.26 percentage points** for hybrid retrieval. Five fixed-subset
+repetitions were deterministic, but the effect is mixed rather than universal: hybrid improved the
+focused-biographical stratum while regressing on conceptual questions. This is retrieval evidence,
+not an answer-quality result and not permission to tune V26 before the complete held-out baseline.
 
 The offline preflight is safe to run without an API key:
 
@@ -200,10 +209,11 @@ The offline preflight is safe to run without an API key:
 uv run python scripts/run_retrieval_benchmark.py preflight
 ```
 
-The first complete run needs a separately recorded owner authorization because a missing cache
-sends exactly the 37 locked question strings—not the gold annotations or manuscript—to OpenAI's
-`text-embedding-3-small` endpoint in one request. Automatic retries are disabled. The command-line
-acknowledgement is a safety interlock, not a substitute for that authorization:
+The completed run used separately recorded owner authorization because a missing cache sent exactly
+the 37 locked question strings—not the gold annotations or manuscript—to OpenAI's
+`text-embedding-3-small` endpoint in one request. Automatic retries were disabled. The operation
+used 521 tokens and recorded an estimated cost of **$0.00001042**. The command-line acknowledgement
+remains a safety interlock for any deliberate cache rebuild, not a substitute for authorization:
 
 ```powershell
 uv run python scripts/run_retrieval_benchmark.py run `
@@ -211,10 +221,12 @@ uv run python scripts/run_retrieval_benchmark.py run `
   --max-cost-usd 0.01
 ```
 
-The private, gitignored embedding cache is then reused by both arms, every value of `k`, and the
-five noise-floor repetitions; later offline reproductions do not make another API call. Later
-run-of-record generation still requires dated generator and judge model snapshots. The V26
-interactive application and earlier practical evaluations remain development evidence only.
+The private, gitignored embedding cache is reused by both arms, every value of `k`, and the five
+noise-floor repetitions; later offline reproductions do not make another API call. The next formal
+stage is citation measurement plus the faithfulness/abstention pilot, followed by the complete
+37-question answer-quality baseline. Those stages still require dated generator and judge model
+snapshots. V26 remains frozen, and the interactive application and earlier practical evaluations
+remain development evidence only.
 
 ## Documentation map
 
