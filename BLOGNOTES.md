@@ -15,22 +15,38 @@ anything that still requires measurement.
   public interpretive prototypes, not formal evidence that perspective changes preserve answer
   quality. The separate full-context-v2 experiment remains disabled on the public server.
 - **Measurement:** the unchanged ten-question cohort is development evidence. No formal held-out
-  gold evaluation has run. Owner authoring and mechanical cleanup of the private held-out workbook
-  are complete; the candidate remains held while the cohort is canonicalized and locked.
-- **Gold-set status:** the private workbook retains 38 questions across all six contracted strata:
+  gold evaluation has run. The 37 owner-controlled questions are now canonicalized and hash-
+  committed; the candidate remains held while fresh annotations are obtained and locked.
+- **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
-  and 3 adversarial-premise items. The original owner-edited DOCX remains untouched beside a
-  cleaned review copy. All 570 recorded supporting/relevant chunk references resolve against the
-  frozen chunk inventory. H020 has been replaced. One explicit H039 question/rubric interpretation
-  conflict is preserved in the cleaned workbook and must be settled before formal lock.
-- **Restart point:** settle the recorded H039 interpretation without reopening the completed
-  cohort wholesale; parse the cleaned workbook into the canonical private gold schema; run the
-  pre-assistance overlap and privacy checks; record the text-free commitment; obtain compliant
-  blinded annotation records where required; lock provenance; then run retrieval, citation,
+  and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
+  remains untouched beside cleaned and final copies. Canonical schema, composition, location, and
+  overlap checks pass. Three privacy flags remain in inherited annotation prose, not questions.
+- **Restart point:** obtain the eight fresh blinded Claude batches using the prepared private
+  question-only packet; owner-adjudicate them against the manuscript; rerun privacy and location
+  checks; lock provenance; then run retrieval, citation,
   faithfulness, abstention, baseline, and production measurements in that order.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-06 — Owner fields frozen and annotation handoff prepared
+
+- Owner decision removed H039, leaving 37 retained questions while preserving the stable gapped
+  identifiers. No other question was rewritten during canonicalization.
+- A deterministic offline importer created a separate final DOCX and private canonical JSON,
+  validated all retained structure and locations, and emitted no held-out prose to Git.
+- The development-overlap audit found zero exact duplicates and zero fuzzy flags. The privacy audit
+  found three long copied-phrase risks in two inherited annotation claims; those findings remain
+  explicit for replacement or adjudication after fresh blinded drafting.
+- Git now receives only a text-free commitment: 37-item count, six-stratum distribution, and the
+  SHA-256 of ordered ID/question/stratum/Behavior fields. The private provenance draft binds it to
+  frozen candidate `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` and V26 policy.
+- Eight private question-only annotation batches, an exact hash manifest, an owner checklist, and a
+  raw-response ledger were prepared offline. No Claude upload, Archivist request, API call, or paid
+  operation occurred.
+- The evaluation-only checkpoint passed repository-wide Ruff, 770 Python tests with one intentional
+  skip, both focused frontend suites, and the production frontend build.
 
 ## 2026-08-06 — Held Out Evaluation Set Complete
 

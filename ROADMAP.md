@@ -60,18 +60,19 @@ received the formal held-out evaluation described below.
 
 ### Gold-set owner-authoring checkpoint
 
-**Held Out Evaluation Set Complete — 2026-08-06.** The owner has finished the private workbook and
-retained 38 held-out questions across the contracted six strata. Mechanical cleanup preserved the
-owner's wording and decisions, produced a separate cleaned DOCX without overwriting the source, and
-verified all 570 recorded chunk references against the frozen derived corpus. No held-out item has
-been run through Archivist.
+**Owner fields frozen; annotation handoff ready — 2026-08-06.** H039 was removed by owner decision,
+leaving 37 questions across the contracted six strata: 8 focused biographical, 8 focused
+analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus, and 2 adversarial-premise. H020 and
+H040 also remain intentionally absent. The final DOCX and canonical private JSON are separate from
+the source workbook. Run-of-record schema, composition, manifest-location, and development-overlap
+checks pass, and no held-out item has been run through Archivist.
 
-H020 has been replaced. The cleaned workbook explicitly surfaces one remaining H039
-question/rubric interpretation conflict. That narrow semantic decision must be settled before the
-cohort is converted to canonical JSON and locked; it does not reopen the completed workbook as a
-general question-design exercise.
+The ordered owner fields are represented in Git only by a text-free commitment and are privately
+bound to candidate `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` under
+`evidence-planned-v26`. The offline handoff contains eight question-only blinded batches and a
+hash-bound manifest. No external annotation request has been made.
 
-The current private workbook also contains Claude-drafted annotation material, but that material
+The earlier private workbook also contains Claude-drafted annotation material, but that material
 is **exploratory and noncanonical**. It predates the required committed question fingerprint, and
 the canonical private draft ledger does not yet contain the exact batch responses and manifests
 required by `archivist.gold_provenance/3`. It may help the owner notice ambiguities, but it cannot be
@@ -96,7 +97,7 @@ Until formal lock:
 | **0. Project brief and boundaries** | **Complete** | Maintain the book-specific product boundary and links to the governing documents. |
 | **1. Unified Answer Mode path** | **Complete** | Preserve one shared implementation of every retrieval primitive across retrieval-backed surfaces. |
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. A formal run still requires an eligible pinned dated generator snapshot rather than the interactive `gpt-5.6-sol` name. |
-| **3. Held-out gold question set** | **Owner authoring complete; lock pending** | Settle the recorded H039 interpretation, parse the 38 retained items into canonical private JSON, fingerprint them, complete required blinded-annotation provenance, pass the audits, and lock. |
+| **3. Held-out gold question set** | **Questions committed; annotation pending** | Run the eight fresh blinded batches, owner-adjudicate every accepted annotation against the manuscript, clear final privacy flags, complete provenance, and lock. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Not run** | Build/run the committed retrieval-only comparison against the untouched locked gold set. Generation is excluded. |
 | **5. Citation-accuracy harness** | **Not run** | Run the locked answer-generation and claim-decomposition workflow, establish mechanical citation measures, and preserve complete run identity. |
 | **6. Faithfulness and abstention calibration** | **Not run** | Hand-label the pilot before judge output, measure judge-human agreement and noise, settle §§6–7, and write the §8 envelopes before the baseline. |
@@ -113,19 +114,17 @@ top of the list.
 1. **Hold the system still until the gold set is locked.** Existing code may be repaired for an
    independently discovered security or correctness defect, but no change may be derived from an
    H-item or its draft annotation.
-2. **Canonicalize the completed owner workbook.** Settle the one explicitly recorded H039 reading,
-   then parse the 38 retained questions and owner decisions into the private canonical gold schema.
-   Treat this as transcription and validation, not a new round of question optimization.
-3. **Freeze the candidate and fingerprint the questions before fresh assistance.** Commit the clean
-   candidate and record its exact policy and corpus identity. First close the current tooling gap
-   between the Markdown question-fingerprint input and the JSON-only leakage audit (or create an
-   equivalent private JSON projection); then run that audit and create
-   `fixtures/gold_questions.commitment.json` from the final ordered owner fields.
-4. **Obtain fresh compliant blinded annotation batches.** Use the canonical Claude prompt in
+2. **Completed — canonicalize the owner workbook.** H039 was removed, 37 retained items were parsed
+   into private canonical JSON, and schema, location, overlap, and privacy diagnostics were run.
+3. **Completed — freeze and fingerprint before fresh assistance.** Candidate
+   `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` / `evidence-planned-v26` is frozen; the common JSON
+   projection closes the old tooling gap; and `fixtures/gold_questions.commitment.json` records the
+   text-free owner-field commitment.
+4. **Next owner action — obtain fresh compliant blinded annotation batches.** Use the canonical Claude prompt in
    five-item batches. Supply only the frozen questions, eligible private chunks, and corpus
    manifest—never Archivist output, retrieval results, traces, failures, or scores. Preserve the
    exact raw manifests and responses in the private draft ledger.
-5. **Adjudicate and lock provenance.** Independently verify every claim, essentiality flag,
+5. **Then adjudicate and lock provenance.** Independently verify every claim, essentiality flag,
    supporting/relevant chunk ID, prohibited claim, and note against the manuscript; search for
    omissions within the declared scoring scope; consciously adopt or revise accepted annotation
    prose; pass schema, leakage, privacy, location, and provenance checks; and lock from a clean

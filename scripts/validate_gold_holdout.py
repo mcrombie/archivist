@@ -29,6 +29,7 @@ _FULL_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 ALLOWED_POST_FREEZE_PATHS = frozenset(
     {
         ".gitattributes",
+        "AGENTS.md",
         "BLOGNOTES.md",
         "DEFECTS.md",
         "README.MD",
@@ -48,9 +49,12 @@ ALLOWED_POST_FREEZE_PATHS = frozenset(
         "scripts/create_gold_authoring_workbook.py",
         "scripts/fingerprint_gold_questions.py",
         "scripts/gold_authoring_workbench.py",
+        "scripts/import_gold_review_docx.py",
+        "scripts/prepare_gold_annotation_batches.py",
         "scripts/validate_gold_holdout.py",
         "src/gold_provenance.py",
         "tests/test_gold_holdout_cli.py",
+        "tests/test_gold_annotation_preparation.py",
         "tests/test_gold_offline_tools.py",
         "tests/test_gold_provenance.py",
         "tests/test_gold_set.py",

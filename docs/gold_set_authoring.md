@@ -10,13 +10,16 @@ It is not the repeatedly used ten-question practical set. Those questions, the e
 questions, opening-screen examples, and known manual smoke questions are development data recorded
 in `fixtures/development_question_registry.json`.
 
-> **Held Out Evaluation Set Complete — 2026-08-06.** Owner review and mechanical cleanup of the
-> private workbook are complete, with 38 retained questions across all six contracted strata. H020
-> has been replaced, the source DOCX remains untouched beside its cleaned copy, and all 570 recorded
-> chunk references resolve against the frozen chunk inventory. Existing Claude-derived material
-> still predates the provenance-v3 question commitment and canonical raw-draft manifest, so it is
-> not by itself a protocol-compliant annotation cohort. The cleaned workbook also records one H039
-> question/rubric reading conflict that must be settled before canonical conversion and lock.
+> **Owner fields frozen; annotation handoff ready — 2026-08-06.** H039 was removed by owner
+> decision, leaving 37 retained questions across all six contracted strata; H020 and H040 also
+> remain intentionally absent. A separate final DOCX and private canonical JSON were generated
+> without overwriting either owner source. The canonical draft passes run-of-record schema,
+> composition, location, and development-overlap checks. Its ordered owner fields are committed as
+> a text-free SHA-256 binding to frozen candidate
+> `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` / `evidence-planned-v26`. Eight private blinded
+> annotation batches are prepared but have not been sent externally or to Archivist. Three copied-
+> phrase flags in inherited noncanonical annotation prose remain for the fresh annotation and final
+> owner-adjudication pass; no held-out question itself triggered the leakage audit.
 
 ## Non-negotiable authority and blinding boundary
 
@@ -71,14 +74,11 @@ only useful scoring, scope, ambiguity, or provenance decisions.
 
 ## Gate 0: freeze a current candidate
 
-The old V21 binding is superseded. The application currently reports policy V26, and commit
-`355f78d` is the verified implementation checkpoint immediately preceding the documentation
-closeout. When the owner is ready to begin Gate 1, verify that `HEAD` is clean, rerun the complete
-offline suite if any executable code has changed, and record that exact clean 40-character commit
-as the candidate before canonical annotation starts:
+The old V21 binding is superseded. The application reports policy V26. The clean implementation
+checkpoint immediately preceding the evaluation-only canonicalization work is now frozen as:
 
 ```text
-candidate commit: <clean frozen 40-character commit selected at Gate 1>
+candidate commit: 8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e
 RAG policy:       evidence-planned-v26
 ```
 
@@ -88,13 +88,15 @@ to candidate output.
 
 ## Gate 1: finish and fingerprint the owner-controlled fields
 
-Create a deliberately incomplete draft under the ignored `runtime/` directory:
+The private owner workbook was finalized and transcribed without overwriting the source:
 
 ```powershell
-uv run python scripts\create_gold_authoring_workbook.py
-Copy-Item fixtures\gold_set.provenance.template.json `
-  runtime\gold-authoring\gold_set.provenance.draft.json
+uv run python scripts\import_gold_review_docx.py --force
 ```
+
+The importer removes only declared excluded blocks, updates mechanical workbook status text,
+transcribes claims and locations, and refuses ambiguous rows. It validates the result in
+run-of-record mode against the exact corpus manifest before writing the ignored private JSON.
 
 The workbook contains 40 blank slots with this neutral allocation:
 
@@ -118,18 +120,17 @@ Before Claude sees any question, run the leakage audit over the completed owner 
 Exact development reuse is forbidden. A fuzzy flag requires substantive review, not a cosmetic
 word substitution. Preserve the resulting review decision in provenance before this gate passes.
 
-**Current tooling gap:** `scripts/fingerprint_gold_questions.py` reads the private Markdown form,
-while `scripts/audit_gold_leakage.py` currently reads JSON. The fingerprint is not a leakage audit.
-Canonical annotation must therefore wait until a later tooling change gives the overlap checker the
-same Markdown projection (or emits an equivalent private JSON projection) and the owner resolves
-every resulting flag. Do not work around this gap by committing the held-out questions or by
-calling the existing exploratory Claude material canonical.
+The earlier Markdown/JSON tooling gap is closed. `scripts/fingerprint_gold_questions.py` accepts
+the same private canonical JSON used by the overlap checker, including intentionally gapped stable
+H-identifiers. `scripts/audit_gold_leakage.py --output` preserves a private text-free audit report.
+The 37-item projection has zero exact duplicates and zero deterministic near-match flags against
+the committed development registry.
 
 After every ID, question, stratum, and Behavior value is final, write a text-free commitment:
 
 ```powershell
 uv run python scripts\fingerprint_gold_questions.py `
-  runtime\gold-authoring\gold_set_questions.md `
+  runtime\gold-authoring\gold_set.draft.json `
   --output fixtures\gold_questions.commitment.json
 ```
 
@@ -144,14 +145,27 @@ This gate applies to **fresh batches requested after Gate 1 is complete**. The C
 already present in the private review form may inform owner editing, but it cannot supply the raw
 draft hash or pre-assistance proof required by provenance v2.
 
-Use `docs/gold_annotation_prompt_claude.md` verbatim and name one five-item batch in the message
-immediately before it. Supply only those five private question blocks, `output/chunks.json`, and
+The offline packet generator verifies the commitment and creates seven five-item batches plus one
+two-item final batch:
+
+```powershell
+uv run python scripts\prepare_gold_annotation_batches.py `
+  --candidate-commit 8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e
+```
+
+The packet lives under ignored
+`runtime/gold-authoring/annotation-ready/` and contains an exact-ID handoff checklist, question-only
+batch files, a text-free hash manifest, and a raw-response ledger. Packet creation is offline and
+does not authorize external disclosure.
+
+Use `docs/gold_annotation_prompt_claude.md` verbatim and name the exact IDs in the message
+immediately before it. Supply only the declared private question batch, `output/chunks.json`, and
 `fixtures/corpus_manifest.json`. The chunk payload contains the commercial manuscript; upload it
 only under data controls the owner accepts. This repository action does not authorize that external
 disclosure.
 
-Append Claude's manifest and five returned blocks to
-`runtime/gold-authoring/claude_annotation_drafts.md`. Record the exact displayed model label,
+Append Claude's manifest and returned blocks unchanged to
+`runtime/gold-authoring/annotation-ready/claude_annotation_drafts.md`. Record the exact displayed model label,
 provider, surface, final drafting timestamp, canonical prompt hash, and combined private-draft hash
 in `annotation_assistance`. If Claude reports candidate output, web use, or contamination, stop the
 batch.

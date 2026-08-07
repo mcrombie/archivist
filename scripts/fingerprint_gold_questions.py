@@ -17,13 +17,43 @@ from gold_provenance import gold_question_set_sha256  # noqa: E402
 
 
 COMMITMENT_SCHEMA = "archivist.gold_question_commitment/1"
-_HEADING_RE = re.compile(r"^## (H\d{3}) · ([a-z_]+)$")
+_HEADING_RE = re.compile(r"^## (H\d{3})\s+(?:Â·|·)\s+([a-z_]+)$")
 _QUESTION_PREFIX = "**Q:** "
 _BEHAVIOR_PREFIX = "**Behavior:** "
 
 
 class GoldQuestionFingerprintError(ValueError):
     """Raised when the private Markdown question form is incomplete or ambiguous."""
+
+
+def _fingerprint_items(items: list[dict[str, str]]) -> dict[str, object]:
+    """Validate and hash an ordered owner-controlled question projection."""
+
+    if not items:
+        raise GoldQuestionFingerprintError("no H### question blocks were found")
+    actual_ids = [item.get("id", "") for item in items]
+    if any(re.fullmatch(r"H\d{3}", item_id) is None for item_id in actual_ids):
+        raise GoldQuestionFingerprintError("question IDs must use the H### form")
+    if len(actual_ids) != len(set(actual_ids)):
+        raise GoldQuestionFingerprintError("question IDs must be unique")
+    if actual_ids != sorted(actual_ids, key=lambda value: int(value[1:])):
+        raise GoldQuestionFingerprintError("question IDs must be strictly ascending")
+    for item in items:
+        for field in ("question", "stratum", "expected_behavior"):
+            if not item.get(field, "").strip():
+                raise GoldQuestionFingerprintError(f"{item['id']} has an empty or missing {field}")
+        if item["expected_behavior"] not in {"answer", "abstain"}:
+            raise GoldQuestionFingerprintError(
+                f"{item['id']} has invalid Behavior {item['expected_behavior']!r}"
+            )
+
+    projection = {"items": items}
+    return {
+        "schema": COMMITMENT_SCHEMA,
+        "question_count": len(items),
+        "stratum_counts": dict(sorted(Counter(item["stratum"] for item in items).items())),
+        "question_set_sha256": gold_question_set_sha256(projection),
+    }
 
 
 def fingerprint_markdown(text: str) -> dict[str, object]:
@@ -48,37 +78,44 @@ def fingerprint_markdown(text: str) -> dict[str, object]:
     if current is not None:
         items.append(current)
 
-    if not items:
-        raise GoldQuestionFingerprintError("no H### question blocks were found")
-    expected_ids = [f"H{index:03d}" for index in range(1, len(items) + 1)]
-    actual_ids = [item.get("id", "") for item in items]
-    if actual_ids != expected_ids:
-        raise GoldQuestionFingerprintError(
-            "question IDs must be unique, ordered, and contiguous from H001"
-        )
-    for item in items:
-        for field in ("question", "stratum", "expected_behavior"):
-            if not item.get(field, "").strip():
-                raise GoldQuestionFingerprintError(f"{item['id']} has an empty or missing {field}")
-        if item["expected_behavior"] not in {"answer", "abstain"}:
-            raise GoldQuestionFingerprintError(
-                f"{item['id']} has invalid Behavior {item['expected_behavior']!r}"
-            )
+    return _fingerprint_items(items)
 
-    projection = {"items": items}
-    return {
-        "schema": COMMITMENT_SCHEMA,
-        "question_count": len(items),
-        "stratum_counts": dict(sorted(Counter(item["stratum"] for item in items).items())),
-        "question_set_sha256": gold_question_set_sha256(projection),
-    }
+
+def fingerprint_json(value: object) -> dict[str, object]:
+    """Fingerprint owner-controlled fields from a private canonical gold object."""
+
+    if not isinstance(value, dict) or not isinstance(value.get("items"), list):
+        raise GoldQuestionFingerprintError("JSON question form must contain an items array")
+    items: list[dict[str, str]] = []
+    for index, raw_item in enumerate(value["items"]):
+        if not isinstance(raw_item, dict):
+            raise GoldQuestionFingerprintError(f"items[{index}] must be an object")
+        projected: dict[str, str] = {}
+        for field in ("id", "question", "stratum", "expected_behavior"):
+            member = raw_item.get(field)
+            if not isinstance(member, str):
+                raise GoldQuestionFingerprintError(f"items[{index}].{field} must be a string")
+            projected[field] = member
+        items.append(projected)
+    return _fingerprint_items(items)
+
+
+def fingerprint_file(path: Path) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.casefold() == ".json":
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise GoldQuestionFingerprintError(f"invalid JSON: {exc}") from exc
+        return fingerprint_json(value)
+    return fingerprint_markdown(text)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Create a text-free hash commitment to IDs, questions, strata, and "
-            "Behavior fields in the private gold authoring form."
+            "Behavior fields in a private canonical JSON or Markdown authoring form."
         )
     )
     parser.add_argument("question_form", type=Path)
@@ -89,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        commitment = fingerprint_markdown(args.question_form.read_text(encoding="utf-8"))
+        commitment = fingerprint_file(args.question_form)
     except (OSError, GoldQuestionFingerprintError) as exc:
         print(f"Gold question fingerprint failed: {exc}", file=sys.stderr)
         return 1

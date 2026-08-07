@@ -33,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=BASE_DIR / "fixtures" / "development_question_registry.json",
     )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Optionally write the text-free report to a private JSON file.",
+    )
     return parser
 
 
@@ -69,7 +74,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             for match in near_matches
         ],
     }
-    print(json.dumps(report, indent=2, sort_keys=True))
+    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.output is None:
+        print(payload, end="")
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(payload, encoding="utf-8", newline="\n")
+        print(f"Wrote leakage report: {args.output}")
     return 1 if near_matches else 0
 
 

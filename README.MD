@@ -171,7 +171,7 @@ npm run test:modes
 npm run build
 ```
 
-**Verification snapshot — August 6, 2026:** repository-wide Ruff passed; **768 Python tests passed
+**Verification snapshot — August 6, 2026:** repository-wide Ruff passed; **770 Python tests passed
 and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
 built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
@@ -179,12 +179,13 @@ still requires the release smoke checks in the deployment runbook.
 ## Evaluation status
 
 The familiar ten-question cohort is a development regression set, not held-out evidence. The owner
-has completed and mechanically cleaned a private 38-item held-out workbook spanning all six
-contracted strata. Its questions, expected behaviors, inclusion decisions, and evidence annotations
-remain private and unexposed to Archivist. Naturalistic questions need not be polished into exam
-prompts, accurate source-verified draft paraphrases do not require performative rewriting, and
-optional error tripwires remain deliberately bounded. One explicit H039 question/rubric reading
-conflict must be settled while converting the workbook to the canonical schema.
+has frozen 37 retained private questions spanning all six contracted strata; H020, H039, and H040
+are intentionally absent. A separate final DOCX and canonical private JSON preserve the source
+workbook, and schema, composition, locations, and development-overlap checks pass. The owner-field
+projection is now represented in Git only by a text-free SHA-256 commitment bound privately to the
+frozen V26 candidate. Eight question-only blinded annotation batches are prepared locally, but no
+held-out item has been sent to Archivist or an external model. Fresh annotation, owner source
+verification, final privacy checks, and provenance lock remain before evaluation.
 
 No formal benchmark result should yet be claimed. A run of record requires one frozen candidate,
 the locked gold set and provenance sidecar, predeclared metrics and thresholds, and dated generator

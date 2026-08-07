@@ -1,0 +1,13 @@
+{
+  "schema": "archivist.gold_question_commitment/1",
+  "question_count": 37,
+  "stratum_counts": {
+    "adversarial_premise": 2,
+    "broad_thematic": 10,
+    "conceptual": 5,
+    "focused_analytical": 8,
+    "focused_biographical": 8,
+    "out_of_corpus": 4
+  },
+  "question_set_sha256": "4bd59fb7cb56a77402dac5f59a1bd092eb6ae2353553ab1c9e85743289e8c6d8"
+}
