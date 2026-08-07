@@ -58,7 +58,12 @@ V25 subsequently added source-bounded completeness and explicit complete/partial
 outcomes. V26 added corpus-agnostic comparison grammar before premise adjudication. Neither has
 received the formal held-out evaluation described below.
 
-### Gold-set owner-authoring checkpoint
+### Formal held-out gold lock
+
+**Locked — 2026-08-07.** The private-safe gold JSON and version-4 provenance sidecar are committed
+against the frozen V26 candidate. Schema, composition, source-location, question-commitment,
+development-overlap, privacy, provenance, and clean candidate-boundary checks pass. No held-out
+item had reached Archivist at lock time.
 
 **Owner-adjudicated source preserved — 2026-08-06.** H039 was removed by owner decision,
 leaving 37 questions across the contracted six strata: 8 focused biographical, 8 focused
@@ -67,8 +72,8 @@ H040 also remain intentionally absent. The final DOCX and canonical private JSON
 the source workbook. Run-of-record schema, composition, manifest-location, and development-overlap
 checks pass, and no held-out item has been run through Archivist.
 
-The ordered owner fields are represented in Git only by a text-free commitment and are privately
-bound to candidate `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` under
+The ordered owner fields and final annotations are bound to candidate
+`8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` under
 `evidence-planned-v26`. No external annotation request has been made and no H-item has reached
 Archivist.
 
@@ -81,16 +86,13 @@ assistance, not ground truth. Two claims responsible for three copied-language f
 paraphrased without changing their source bindings, and the private privacy audit now reports zero
 flags.
 
-Until formal lock:
+After formal lock:
 
-- do not send any retained H-item to Archivist, its retriever, planner, answer model, or evaluation
-  judge;
-- do not tune retrieval, prompts, or validation against the private questions or draft
-  annotations;
+- run H-items only through the predeclared measurement sequence and preserve every result;
+- never revise the locked gold or V26 in response to a held-out result;
+- treat any later answer-pipeline change as a new cohort rather than a repair to this baseline;
 - keep the workbook, DOCX review copy, raw drafts, and manuscript evidence private and ignored;
-  and
-- treat any later answer-pipeline change as requiring a newly frozen candidate and rebound
-  provenance before the first held-out run.
+  and preserve the committed private-safe gold and provenance artifacts unchanged.
 
 ## Workstreams and brief status
 
@@ -99,8 +101,8 @@ Until formal lock:
 | **0. Project brief and boundaries** | **Complete** | Maintain the book-specific product boundary and links to the governing documents. |
 | **1. Unified Answer Mode path** | **Complete** | Preserve one shared implementation of every retrieval primitive across retrieval-backed surfaces. |
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. A formal run still requires an eligible pinned dated generator snapshot rather than the interactive `gpt-5.6-sol` name. |
-| **3. Held-out gold question set** | **Owner-adjudicated source complete; lock pending** | Preserve the synchronized private DOCX/JSON, complete the v4 provenance attestations, commit the final private-safe gold artifact, and lock. |
-| **4. Retrieval recall and dense-vs-hybrid benchmark** | **Not run** | Build/run the committed retrieval-only comparison against the untouched locked gold set. Generation is excluded. |
+| **3. Held-out gold question set** | **Complete and formally locked** | Preserve the synchronized private source, committed private-safe gold, provenance sidecar, and frozen-candidate boundary unchanged. |
+| **4. Retrieval recall and dense-vs-hybrid benchmark** | **Next; not run** | Build/run the committed retrieval-only comparison against the untouched locked gold set. Generation is excluded. |
 | **5. Citation-accuracy harness** | **Not run** | Run the locked answer-generation and claim-decomposition workflow, establish mechanical citation measures, and preserve complete run identity. |
 | **6. Faithfulness and abstention calibration** | **Not run** | Hand-label the pilot before judge output, measure judge-human agreement and noise, settle §§6–7, and write the §8 envelopes before the baseline. |
 | **7. Formal baseline and evaluation report** | **Not run** | Run the complete held-out set once under the locked contract and publish text-free reproducible artifacts, limitations, and exact denominators. |
@@ -125,11 +127,10 @@ top of the list.
 4. **Completed — preserve owner-adjudicated annotations honestly.** The completed workbook remains
    the authoritative source. Historical Claude drafting is disclosed retrospectively; no fresh
    batch, complete raw-draft record, or prospective-blinding claim is being invented.
-5. **Next — complete and lock provenance.** Promote the validated private JSON to the committed
-   gold path, record its exact hash and authoring completion time, set only true owner attestations,
-   pass schema, leakage, privacy, location, candidate-boundary, and provenance checks, and lock from
-   a clean tree.
-6. **Run the retrieval-only benchmark.** Compare vector-only retrieval with dense/BM25
+5. **Completed — complete and lock provenance.** The validated JSON and version-4 provenance are
+   committed; exact gold, question commitment, corpus, development-registry, owner-attestation,
+   privacy, and clean frozen-candidate checks pass.
+6. **Next — run the retrieval-only benchmark.** Compare vector-only retrieval with dense/BM25
    reciprocal-rank fusion using identical questions, corpus, eligibility, query embeddings, and
    values of `k`. Publish Recall@k/context-recall results only from the predeclared contract.
 7. **Run citation measurement and the faithfulness/abstention pilot.** Establish mechanical citation

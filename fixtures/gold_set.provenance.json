@@ -1,0 +1,32 @@
+{
+  "schema": "archivist.gold_provenance/4",
+  "gold_set_path": "fixtures/gold_set.json",
+  "gold_set_sha256": "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2",
+  "question_set_sha256": "4bd59fb7cb56a77402dac5f59a1bd092eb6ae2353553ab1c9e85743289e8c6d8",
+  "candidate_commit": "8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e",
+  "candidate_rag_policy": "evidence-planned-v26",
+  "corpus_manifest_sha256": "b7ff94315a3f1f28c831e2c3ca62c385567d2b1447c19ff45139d175c3ff3c17",
+  "development_registry_sha256": "005b9cc3ba3031ac0f0359b5584ae2b7a772d0badb0a7eb212edab55943ffc4d",
+  "authoring_started_at": "2026-07-29T18:10:39-04:00",
+  "authoring_completed_at": "2026-08-07T08:26:44.3806896-04:00",
+  "annotation_assistance": {
+    "method": "owner_adjudication_with_historical_ai_drafting/1",
+    "provider": "Anthropic (Claude)",
+    "model": "not recorded",
+    "surface": "not recorded",
+    "raw_draft_record_available": false,
+    "prospective_blinding_record_available": false,
+    "limitation": "Historical Claude drafting assistance preceded the formal question commitment and prospective provenance protocol. The owner later source-verified and adjudicated every retained annotation; this record does not claim prospectively blinded annotation."
+  },
+  "owner_attestations": {
+    "questions_behaviors_and_strata_owner_authored_without_candidate_outputs": true,
+    "historical_ai_drafting_disclosed_without_prospective_blinding_claim": true,
+    "claims_and_essentiality_owner_adjudicated": true,
+    "supporting_and_relevant_chunk_ids_owner_verified": true,
+    "must_not_claim_and_notes_owner_adjudicated": true,
+    "accepted_annotation_prose_source_verified_and_owner_adopted_or_revised": true,
+    "held_out_items_not_run_before_lock": true,
+    "near_match_flags_reviewed": true
+  },
+  "near_match_reviews": []
+}

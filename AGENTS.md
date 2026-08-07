@@ -18,14 +18,14 @@ faithfulness, citation, and abstention behavior must be measured, bounded, repro
 their failures written down. A system with mediocre but characterized numbers is better evidence
 than a system with excellent-looking answers and no defensible measurement.
 
-As of 2026-08-06, the 37 retained owner-controlled held-out questions are canonicalized and bound
-by a committed text-free fingerprint to frozen V26 candidate
-`8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`. H020, H039, and H040 are intentionally absent. The
-completed owner-adjudicated annotations are the authoritative source for the final gold artifact.
+As of 2026-08-07, the 37 retained owner-controlled held-out questions and their owner-adjudicated
+annotations are formally locked against frozen V26 candidate
+`8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`. H020, H039, and H040 are intentionally absent.
 Historical Claude drafting is disclosed retrospectively under provenance v4; the repository must
-not claim that it was prospectively blinded or fully hash-captured. The next permitted action is
-final provenance completion and lock. It is still forbidden to send an H-item to Archivist or tune
-the system against one.
+not claim that it was prospectively blinded or fully hash-captured. No H-item has yet reached the
+candidate. The next permitted action is the predeclared retrieval-only benchmark. Once an H-item
+is run, never change the gold set or V26 in response to its result; any later system change opens a
+new cohort rather than repairing this baseline in place.
 
 The product has nevertheless moved beyond the original two-phase description. Reader-facing
 appearance and interpretive modes are implemented and public; they are no longer forbidden work.

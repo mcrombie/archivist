@@ -4,7 +4,7 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-06
+## Current checkpoint — 2026-08-07
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
   local code reports `evidence-planned-v26`, `query-planner-v11`, and
@@ -15,21 +15,33 @@ anything that still requires measurement.
   public interpretive prototypes, not formal evidence that perspective changes preserve answer
   quality. The separate full-context-v2 experiment remains disabled on the public server.
 - **Measurement:** the unchanged ten-question cohort is development evidence. No formal held-out
-  gold evaluation has run. The 37 owner-controlled questions are now canonicalized and hash-
-  committed; the candidate remains held while the owner-adjudicated artifact is provenance-locked.
+  result exists yet. The 37-item owner-adjudicated gold set and provenance are formally locked
+  against frozen V26; the next measurement is the retrieval-only benchmark.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
-  remains untouched beside cleaned and final copies. Canonical schema, composition, location, and
-  overlap checks pass. Parts of the annotations began as historical Claude drafts, but the owner
-  later source-verified and adjudicated them. This is disclosed without a prospective-blinding
-  claim. The two affected claims were paraphrased and the copied-language audit now has zero flags.
-- **Restart point:** complete provenance v4 and lock the synchronized owner-adjudicated artifact;
-  then run retrieval, citation,
-  faithfulness, abstention, baseline, and production measurements in that order.
+  remains untouched beside cleaned and final copies. Canonical schema, composition, location,
+  question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
+  annotations began as historical Claude drafts, but the owner later source-verified and
+  adjudicated them. This is disclosed without a prospective-blinding claim.
+- **Restart point:** run retrieval, citation, faithfulness, abstention, baseline, and production
+  measurements in that order without changing the locked gold or frozen V26 in response.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-07 — The held-out ruler is finally locked
+
+- The owner explicitly confirmed the final attestation after completing the workbook review. The
+  37-item private-safe gold JSON and provenance v4 sidecar were promoted to their committed paths;
+  the original workbook and manuscript evidence remain private and ignored.
+- The lock binds frozen candidate `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`, V26 policy, the
+  text-free owner-field commitment, exact gold bytes, corpus manifest, and development registry.
+- Offline gates report all six required strata, zero exact or near development-question overlap,
+  zero copied-language flags, and valid source locations. No H-item was sent to Archivist while
+  constructing or locking the ruler.
+- The important transition is methodological: future misses are now evidence about the system,
+  not invitations to edit the exam. Retrieval measurement comes next.
 
 ## 2026-08-06 — Choosing honest retrospective provenance over process theater
 

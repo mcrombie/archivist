@@ -25,6 +25,13 @@ in `fixtures/development_question_registry.json`.
 > draft. The two inherited claims responsible for three copied-phrase flags were paraphrased without
 > changing their rubric meaning or source bindings; no held-out question triggered the privacy audit.
 
+> **Formal gold lock completed — 2026-08-07.** The private-safe final gold JSON and version-4
+> provenance sidecar are now committed. The lock binds the exact owner-field commitment, gold
+> bytes, corpus manifest, development registry, frozen candidate
+> `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`, and `evidence-planned-v26`. Schema, composition,
+> location, overlap, privacy, provenance, and clean candidate-boundary checks pass. No held-out item
+> had been sent to Archivist at lock time.
+
 ## Non-negotiable authority and candidate-independence boundary
 
 Only the manuscript owner decides:

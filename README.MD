@@ -178,21 +178,19 @@ still requires the release smoke checks in the deployment runbook.
 
 ## Evaluation status
 
-The familiar ten-question cohort is a development regression set, not held-out evidence. The owner
-has frozen 37 retained private questions spanning all six contracted strata; H020, H039, and H040
-are intentionally absent. A separate final DOCX and canonical private JSON preserve the source
-workbook, and schema, composition, locations, and development-overlap checks pass. The owner-field
-projection is now represented in Git only by a text-free SHA-256 commitment bound privately to the
-frozen V26 candidate. The owner elected to retain the completed, source-verified annotations;
-historical Claude drafting is disclosed retrospectively without claiming a prospectively blinded
-or complete raw-draft record. Two copied-language risks were paraphrased, and the private schema,
-location, overlap, and privacy audits now pass. No held-out item has been sent to Archivist.
-Provenance completion and formal lock remain before evaluation.
+The familiar ten-question cohort is a development regression set, not held-out evidence. On
+August 7, 2026, the owner formally locked 37 retained held-out questions spanning all six
+contracted strata; H020, H039, and H040 are intentionally absent. `fixtures/gold_set.json` and its
+version-4 provenance sidecar bind the exact owner-field commitment, final gold bytes, frozen V26
+candidate, corpus manifest, and development registry. Historical Claude drafting is disclosed
+retrospectively without claiming a prospectively blinded or complete raw-draft record. Schema,
+composition, locations, development-overlap, privacy, provenance, and frozen-candidate checks all
+pass. No held-out item has yet been sent to Archivist.
 
-No formal benchmark result should yet be claimed. A run of record requires one frozen candidate,
-the locked gold set and provenance sidecar, predeclared metrics and thresholds, and dated generator
-and judge model snapshots. The V26 interactive application and earlier practical evaluations are
-development evidence only.
+No formal benchmark result should yet be claimed. The next permitted measurement is the
+retrieval-only benchmark against the frozen candidate. Later run-of-record generation still
+requires dated generator and judge model snapshots. The V26 interactive application and earlier
+practical evaluations remain development evidence only.
 
 ## Documentation map
 
