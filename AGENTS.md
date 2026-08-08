@@ -13,7 +13,7 @@ The corpus is also the moat. Rigorous evaluation depends on knowing the source m
 ## Current priorities and answer surfaces
 
 The highest-leverage unfinished work remains the formal held-out evaluation described in
-`EVAL_CONTRACT.md` and `ROADMAP.md`. The gate is not "the answers look good." Retrieval,
+`EVAL_CONTRACT.md` and `ROADMAP.md`. The objective is not "the answers look good." Retrieval,
 faithfulness, citation, and abstention behavior must be measured, bounded, reproducible, and have
 their failures written down. A system with mediocre but characterized numbers is better evidence
 than a system with excellent-looking answers and no defensible measurement.
@@ -22,10 +22,13 @@ As of 2026-08-07, the 37 retained owner-controlled held-out questions and their 
 annotations are formally locked against frozen V26 candidate
 `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`. H020, H039, and H040 are intentionally absent.
 Historical Claude drafting is disclosed retrospectively under provenance v4; the repository must
-not claim that it was prospectively blinded or fully hash-captured. No H-item has yet reached the
-candidate. The next permitted action is the predeclared retrieval-only benchmark. Once an H-item
-is run, never change the gold set or V26 in response to its result; any later system change opens a
-new cohort rather than repairing this baseline in place.
+not claim that it was prospectively blinded or fully hash-captured. The predeclared retrieval-only
+benchmark is complete; no held-out answer has yet been generated. The next sequence is fixed: the
+prospectively selected ten-item scoring calibration produces the first ten answers of the same
+37-item V26 cohort, then the remaining 27 run immediately after the scoring lock. Do not insert a
+RAG, prompt, retrieval, model, or UI repair between those operations. Once an H-item is run, never
+change the gold set or V26 in response to its result; any later system change opens a new cohort
+rather than repairing this baseline in place.
 
 The product has nevertheless moved beyond the original two-phase description. Reader-facing
 appearance and interpretive modes are implemented and public; they are no longer forbidden work.
@@ -144,23 +147,26 @@ The reason is measurement, not taste. `[Source 3]` resolves to exactly one chunk
 
 A question does not identify a run, and neither does a date. Every eval run records, and reproduction requires, all of:
 
-**corpus manifest hash · gold-set version and hash · prompt version hash · generator model snapshot · judge model snapshot · retrieval parameters · commit hash · `working_tree` · `dirty_fingerprint` · dependency-lock hash**
+**corpus manifest hash · gold-set version and hash · prompt version hash · generator model identity · judge model identity · retrieval parameters · commit hash · `working_tree` · `dirty_fingerprint` · dependency-lock hash**
 
 Runs of record require a **clean working tree**. A dirty run is permitted — exploration is the normal case — and records `"working_tree": "dirty"` plus `dirty_fingerprint`: SHA-256 over `git diff HEAD` concatenated with the contents of every untracked non-ignored file, in `git status --porcelain` order. Untracked content belongs in the fingerprint because a new source file otherwise changes behaviour while leaving the fingerprint unchanged. **A dirty run may never be cited as a run of record**, and may never appear in `docs/evaluation.md`.
 
-**Model aliases are forbidden in run-of-record configuration.** The interactive application
-currently uses `gpt-5.6-sol`; that convenient named model is **not** a dated snapshot and is not
-eligible for a formal run of record. An alias can silently re-point, so a number recorded against
-one is not reproducible. For formal evaluation, record and request exact dated generator and judge
-snapshots ending in `YYYY-MM-DD`, and fail closed when the provider does not expose one. Do not
-invent a dated identifier from a marketing name.
+**Prefer immutable dated model snapshots and never invent one.** When the provider exposes a dated
+snapshot, request and record it. OpenAI's catalog currently exposes only the canonical current-
+snapshot identifiers `gpt-5.6-sol` and `gpt-5.6-terra`, with no immutable dated variants. The first
+answer-quality cohort may therefore use those exact identifiers only while binding the committed
+provider-catalog observation, recording both requested and provider-returned IDs for every paid
+operation, preserving role-specific settings and response IDs, and stating that provider-side
+weights may change behind those names. A returned identifier that differs from the predeclared
+catalog identifier invalidates the cohort. The generator and judge remain different predeclared
+identifiers; a future dated snapshot opens a new cohort.
 
 **Two different things invalidate a comparison, and they are not the same:**
 
 | | Changed | Consequence |
 |---|---|---|
 | **Contract change** | a definition in `EVAL_CONTRACT.md`, or a gold entry | earlier runs invalid as evidence about system quality; log in `DEFECTS.md` |
-| **New cohort** | prompt text, model snapshot, `n_results`, `MAX_PRIMARY_DISTANCE`, `MAX_FINAL_SOURCES`, chunking parameters, the corpus snapshot | earlier runs stay valid; they belong to a different cohort |
+| **New cohort** | prompt text, model identity or settings, `n_results`, `MAX_PRIMARY_DISTANCE`, `MAX_FINAL_SOURCES`, chunking parameters, the corpus snapshot | earlier runs stay valid; they belong to a different cohort |
 
 Runs are comparable **within** a cohort, never across. Raising `MAX_FINAL_SOURCES` from 8 to 12 opens a cohort; it is not a contract edit, because no definition moved. Redefining what counts as a retrieval hit is a contract edit even if no code changes.
 
@@ -168,12 +174,24 @@ Runs are comparable **within** a cohort, never across. Raising `MAX_FINAL_SOURCE
 
 The success criterion is a before-and-after comparison across code versions, so controlling variance is load-bearing rather than housekeeping.
 
-- **Pin the generator snapshot explicitly**, never an alias. Interactive `gpt-5.6-sol` is not a
-  valid run-of-record pin. Record the exact dated identifier in the run identity.
-- **The judge model is a separate pinned snapshot from the generator**, recorded independently. If the two are the same string, a generator upgrade silently moves the judge and every faithfulness delta becomes uninterpretable. They must be able to move independently, and in general the judge should not be the model under test.
+- **Pin the generator identifier explicitly.** Use an immutable dated snapshot when one exists.
+  When the provider exposes only a canonical current-snapshot identifier, the narrow catalog-bound
+  exception in Run identity applies and its reproducibility limitation must be reported.
+- **The judge model is a separate pinned identity from the generator**, recorded independently. If the two are the same string, a generator upgrade silently moves the judge and every faithfulness delta becomes uninterpretable. They must be able to move independently, and in general the judge should not be the model under test.
 - **Set every sampling parameter the API exposes and record it** — temperature, top_p, seed, reasoning effort, verbosity — rather than relying on defaults, which are not stable across snapshots.
-- **Residual non-determinism is expected and must be measured, not assumed away.** Repeated identical requests to the same pinned snapshot can differ. Before any metric is reported as a single number, the pilot establishes its run-to-run spread by repeating one fixed subset **five times unchanged**; that spread is reported alongside every later figure. A change smaller than the measured spread is not a result.
+- **Residual non-determinism is expected and must be measured, not assumed away.** The first
+  complete 37-item run is a descriptive baseline and may report exact denominators while stating
+  explicitly that generator spread has not yet been measured. Before any later before/after,
+  significance, or production-guarantee claim, repeat one fixed subset **five times unchanged**
+  and report that spread alongside the comparison. A change smaller than the measured spread is
+  not a result.
 - **Judge calls carry no conversation state.** One question per call, no shared history, no batching several gold items into one prompt — batching lets one item's judgement contaminate the next.
+
+The fixed ten-item calibration is not a preliminary quality gate or a disposable pilot. Those ten
+answers are the first ten members of the same frozen 37-item cohort. Calibration locks how answers
+are scored, not whether the candidate deserves to finish the cohort. If the automatic judge misses
+its predeclared agreement thresholds, use manual scoring for the affected dimensions or report
+them pending; judge failure must not block generation and preservation of the remaining 27 answers.
 
 ## Define what you test
 
@@ -195,7 +213,8 @@ Its answer-quality score is never a promotion veto. Once the focused measurement
 valid, run the complete unchanged practical cohort and report the difficult item inside that
 profile, even when it misses a previously used claim-coverage or target-coverage threshold.
 Formal quality gates belong to the owner-designed and owner-adjudicated held-out gold contract, its
-noise floor, and its predeclared §8 envelopes—not to one question repeatedly used to guide repairs.
+scoring lock, and any later predeclared comparison criteria—not to one question repeatedly used to
+guide repairs. The first complete 37-item answer cohort is descriptive rather than a pass/fail gate.
 
 ## Controlled private corpus boundary
 
@@ -280,8 +299,8 @@ Use the entry format at the top of that file.
 | Lint & format | **ruff** | |
 | Vector store | **ChromaDB, persistent; HNSW `l2`** | The corpus manifest pins the store contract. |
 | Embeddings | **`text-embedding-3-small`** | Current, not deprecated, and re-embedding is expensive — no reason to move. |
-| Interactive generation | **`gpt-5.6-sol` with explicit settings** | Convenient product model; not run-of-record eligible. |
-| Formal generation/judging | **Exact dated snapshots** | Generator and judge are pinned independently. |
+| Interactive generation | **`gpt-5.6-sol` with explicit settings** | Product configuration; separately identified from formal cohorts. |
+| Formal generation/judging | **Dated snapshots when exposed; otherwise catalog-bound canonical IDs** | Bind the catalog observation plus requested/returned IDs, report the limitation, and keep generator and judge independent. |
 
 ### Distance contract
 

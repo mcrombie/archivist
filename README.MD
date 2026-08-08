@@ -74,11 +74,14 @@ grounding, citation, premise, completeness, and exposure validation
 FastAPI service + React/Vite conversation interface
 ```
 
-The interactive generator, follow-up resolver, and planner currently use the undated
-`gpt-5.6-sol` identifier with explicit role-specific settings. That is a development and public-demo
-configuration, not a reproducible evaluation pin. A future formal run of record must use separately
-declared **dated model snapshots** for the generator and judge; Archivist rejects an undated alias
-when run-of-record eligibility is checked.
+The interactive generator, follow-up resolver, and planner use `gpt-5.6-sol` with explicit
+role-specific settings. For formal evaluation, Archivist prefers immutable dated snapshots, but
+OpenAI's current catalog exposes only the canonical current-snapshot IDs `gpt-5.6-sol` and
+`gpt-5.6-terra`, not dated variants. The first answer-quality cohort therefore binds the committed
+provider-catalog observation, exact requested and provider-returned IDs, role-specific settings,
+and response IDs, while disclosing that provider-side weights may change behind those names. The
+generator and judge use different predeclared identifiers; Archivist never manufactures a dated
+snapshot name.
 
 ## Local quickstart
 
@@ -222,11 +225,18 @@ uv run python scripts/run_retrieval_benchmark.py run `
 ```
 
 The private, gitignored embedding cache is reused by both arms, every value of `k`, and the five
-noise-floor repetitions; later offline reproductions do not make another API call. The next formal
-stage is citation measurement plus the faithfulness/abstention pilot, followed by the complete
-37-question answer-quality baseline. Those stages still require dated generator and judge model
-snapshots. V26 remains frozen, and the interactive application and earlier practical evaluations
-remain development evidence only.
+retrieval repetitions; later offline reproductions do not make another API call. The next formal
+stage is one continuous answer-quality cohort: generate and decompose the fixed ten-item
+calibration subset, bind human labels before revealing semantic judge verdicts, and lock the
+scoring instrument. This calibration determines scoring mode; it is not a candidate-quality gate.
+Those ten answers are the first ten of the same 37-item V26 run. The remaining
+27 run immediately after that lock, with no intervening RAG, prompt, retrieval, model, or UI repair.
+If the judge misses its agreement checks, affected dimensions use manual scoring or remain
+explicitly pending; the cohort still completes. The first complete 37-item result is a descriptive
+baseline with exact denominators. Five-repeat generator noise measurement is required before a
+later comparative or significance claim, not before this first baseline. No paid call has occurred
+while implementing this answer-evaluation protocol. V26 remains frozen, and the interactive
+application and earlier practical evaluations remain development evidence only.
 
 ## Documentation map
 

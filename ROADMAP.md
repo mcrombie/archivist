@@ -12,10 +12,11 @@ is a roadmap, not the detailed experimental contract or the historical developme
 - [`BLOGNOTES.md`](BLOGNOTES.md) preserves the development history and article material.
 
 Archivist remains a retrieval-augmented question-answering system over one long-form historical
-manuscript. Its public reader experience is already live; its formal held-out evaluation has not
-yet run. Those are different accomplishments and must not be conflated.
+manuscript. Its public reader experience is already live; its retrieval-only held-out diagnostic
+is complete, while its formal held-out answer-quality baseline has not yet run. Those are different
+accomplishments and must not be conflated.
 
-## Current checkpoint — 2026-08-06
+## Current checkpoint — 2026-08-07
 
 The repository's current Answer Mode is `evidence-planned-v26`, with
 `query-planner-v11` and `evidence-coverage-v11`. It searches 481 retrieval-eligible chunks from the
@@ -74,8 +75,9 @@ checks pass, and no held-out item has been run through Archivist.
 
 The ordered owner fields and final annotations are bound to candidate
 `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` under
-`evidence-planned-v26`. No external annotation request has been made and no H-item has reached
-Archivist.
+`evidence-planned-v26`. No external annotation request has been made and no H-item has reached the
+answer generator. The later retrieval-only diagnostic sent the 37 locked question strings to the
+declared embedding endpoint, but no gold annotation or manuscript passage accompanied them.
 
 Parts of the completed annotations began as historical Claude drafts, then were directly checked,
 adopted, or revised by the manuscript owner. The owner has elected to retain that adjudicated work
@@ -100,11 +102,11 @@ After formal lock:
 |---|---|---|
 | **0. Project brief and boundaries** | **Complete** | Maintain the book-specific product boundary and links to the governing documents. |
 | **1. Unified Answer Mode path** | **Complete** | Preserve one shared implementation of every retrieval primitive across retrieval-backed surfaces. |
-| **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. A formal run still requires an eligible pinned dated generator snapshot rather than the interactive `gpt-5.6-sol` name. |
+| **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. Because OpenAI currently exposes canonical `gpt-5.6-sol` and `gpt-5.6-terra` IDs but no immutable dated snapshots, the first answer cohort must bind the committed catalog observation plus requested/returned IDs and disclose the limitation. |
 | **3. Held-out gold question set** | **Complete and formally locked** | Preserve the synchronized private source, committed private-safe gold, provenance sidecar, and frozen-candidate boundary unchanged. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Complete** | The frozen run found 24.71% dense versus 25.97% hybrid macro Recall@5 (+1.26 points), with a mixed per-stratum effect. Preserve the private text-free result and do not tune V26 from it before the answer-quality baseline. |
 | **5. Citation-accuracy harness** | **Not run** | Run the locked answer-generation and claim-decomposition workflow, establish mechanical citation measures, and preserve complete run identity. |
-| **6. Faithfulness and abstention calibration** | **Not run** | Hand-label the pilot before judge output, measure judge-human agreement and noise, settle §§6–7, and write the §8 envelopes before the baseline. |
+| **6. Faithfulness and abstention calibration** | **Not run** | Generate/decompose the fixed ten answers, bind human labels before semantic judge output, measure judge agreement, and settle §§6–7. These are the first ten answers of the same 37-item cohort, not a quality gate in front of it. Judge failure selects manual/pending scoring rather than blocking completion. |
 | **7. Formal baseline and evaluation report** | **Not run** | Run the complete held-out set once under the locked contract and publish text-free reproducible artifacts, limitations, and exact denominators. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
 | **8A. Production observability and latency evidence** | **Partial and unmeasured** | Stage timing and token/cost records exist. Add/confirm privacy-safe request correlation and run the declared warm production cohort before publishing latency statistics. |
@@ -115,7 +117,7 @@ The order below is the shortest credible path from the completed owner-authoring
 publishable measurement. Do not substitute another retrieval iteration for the lock work at the
 top of the list.
 
-1. **Hold the system still until the gold set is locked.** Existing code may be repaired for an
+1. **Completed — hold the system still until the gold set is locked.** Existing code may be repaired for an
    independently discovered security or correctness defect, but no change may be derived from an
    H-item or its draft annotation.
 2. **Completed — canonicalize the owner workbook.** H039 was removed, 37 retained items were parsed
@@ -135,12 +137,18 @@ top of the list.
    predeclared +1.26-point delta. Hit@5 was 90.91% versus 93.94%. The five fixed-subset repetitions
    had zero spread, while the per-stratum result remained mixed. No generator or judge ran, and V26
    was not changed.
-7. **Next — run citation measurement and the faithfulness/abstention pilot.** Establish mechanical citation
-   metrics, hand-label the calibration subset before judge output, measure judge agreement and
-   run-to-run spread, then settle the remaining contract sections and performance envelopes.
-8. **Run the formal baseline once.** Execute the untouched held-out set against the frozen candidate
-   and publish a text-free machine-readable result, readable report, exact rerun command, cohort
-   identity, limitations, and per-stratum denominators.
+7. **Next — begin the 37-item answer-quality cohort with its fixed ten-item calibration.** Generate
+   and preserve those ten V26 answers, establish mechanical citation metrics, decompose each answer,
+   bind the human labels before semantic judge output, measure judge agreement, and lock the scorer.
+   These ten answers remain the first ten of the final cohort. If automatic judging fails its
+   agreement checks, select manual scoring for the affected dimensions or report them pending; do
+   not stop the cohort.
+8. **Immediately complete the descriptive baseline.** Run the remaining 27 untouched held-out
+   items with no intervening RAG, prompt, retrieval, model, or UI repair, then publish a text-free
+   machine-readable result, readable report, exact rerun command, cohort identity, limitations,
+   and per-stratum denominators. The first complete 37 may state that generator spread is not yet
+   measured; the five-repeat noise floor is required before a later comparative or significance
+   claim, not before this descriptive baseline.
 9. **Measure production behavior.** Deploy the exact evaluated candidate, verify the production
    commit, and collect the predeclared 30–50 successful warm first-turn cohort while reporting
    failures, cold starts, follow-ups, p50, p95, and cost.
@@ -213,10 +221,12 @@ The numerical Archivist bullets remain blank until all of the following are true
   disclosed under provenance v4—passes schema,
   leakage, privacy, location, and provenance validation;
 - the committed retrieval runner reproduces vector-only and hybrid results from one command;
-- every reported metric states its denominator and measured run-to-run spread;
+- every reported metric states its denominator; the first descriptive baseline explicitly states
+  that generator spread is not yet measured, and every later comparative claim reports it;
 - the dense-vs-hybrid comparison uses the predeclared metric rather than a favorable metric chosen
   after results;
-- the faithfulness judge clears the owner-ratified agreement requirement;
+- faithfulness dimensions use either an owner-ratified qualifying judge or the declared
+  manual/pending fallback;
 - the production report covers the declared warm cohort and states p50, p95, error rate, spend,
   and cold-start handling; and
 - public artifacts contain no manuscript text, held-out question text, private prompts,

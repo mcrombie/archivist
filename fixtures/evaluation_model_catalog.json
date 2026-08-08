@@ -1,0 +1,22 @@
+{
+  "schema": "archivist.provider_model_catalog/1",
+  "observed_on": "2026-08-07",
+  "provider": "OpenAI",
+  "models": [
+    {
+      "role": "generator_and_planner",
+      "requested_model": "gpt-5.6-sol",
+      "provider_current_snapshot": "gpt-5.6-sol",
+      "immutable_dated_snapshot_exposed": false,
+      "official_model_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    {
+      "role": "evaluation_judge",
+      "requested_model": "gpt-5.6-terra",
+      "provider_current_snapshot": "gpt-5.6-terra",
+      "immutable_dated_snapshot_exposed": false,
+      "official_model_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+    }
+  ],
+  "limitation": "The provider catalog exposes only canonical current-snapshot identifiers for these GPT-5.6 variants, not immutable dated snapshot IDs. Evaluation artifacts must therefore record both requested and provider-returned model identifiers and may not claim byte-for-byte model reproducibility."
+}

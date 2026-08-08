@@ -2,7 +2,9 @@
 
 The experimental control. These definitions are **authored by the project owner and forbidden to the implementer**, including during tuning. Changing anything here invalidates every prior run as evidence about system quality and must be logged in `DEFECTS.md` as a contract change.
 
-This file specifies *what is measured and how*. It does not specify how to implement a harness, and it does not contain thresholds for what counts as good — those live in §8 and are authored at a specific, stated moment.
+This file specifies *what is measured and how*. It does not specify how to implement a harness.
+Section 8 records fixed parameters and the prospective rules for later comparisons; the first
+37-item baseline is descriptive and has no pass/fail quality threshold.
 
 **Owner-authorized amendment, 2026-08-05:** §3.1 now permits blinded external-AI drafts of
 annotation fields under source-level owner adjudication. No held-out run had occurred under the
@@ -30,6 +32,22 @@ without candidate output, no retained held-out item has been run through Archivi
 subsequently verified and adjudicated every retained annotation against the private corpus.
 Provenance advances to `archivist.gold_provenance/4` to record that limitation explicitly. No
 formal held-out run had occurred, so this amendment invalidates no result.
+
+**Owner-authorized amendment, 2026-08-07 (first answer-quality run):** the first scoring
+calibration is bounded and cannot become another quality gate in front of the held-out evaluation.
+Its ten prospectively selected answers become ten members of the same 37-item V26 cohort; after
+the scoring rules are locked, the next substantive operation is completion of the remaining 27
+items, with no intervening RAG, prompt, retrieval, model, or UI repair. If the automatic judge does
+not clear its predeclared agreement checks, the cohort still proceeds and the affected dimensions
+are scored manually or reported pending rather than suppressing the results. Sections 1, 6, 7,
+and 8 are clarified accordingly before any held-out answer has been generated.
+
+The same amendment records a provider constraint discovered during preflight. OpenAI's official
+model catalog currently exposes `gpt-5.6-sol` and `gpt-5.6-terra` as their own “current snapshot”
+identifiers and exposes no dated immutable snapshot for either. The project will not invent one.
+The first cohort therefore binds a committed catalog observation, exact requested identifiers,
+exact provider-returned identifiers, role-specific settings, prompt hashes, and usage response IDs,
+and states the resulting reproducibility limitation. A future dated snapshot opens a new cohort.
 
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. Both lock after the calibration pilot (Brief 6) answers what only runs can answer; the open questions are enumerated at the end of each section, split by whether they are desk questions or run questions.
 
@@ -60,19 +78,29 @@ A run is identified by the following object, serialized as one UTF-8 JSON string
     "sha256": "<sha256 of fixtures/gold_set.json>"
   },
   "prompts": {
+    "planner_prompt_sha256": "<sha256>",
     "answer_prompt_sha256": "<sha256 of the exact prompt template text>",
     "decompose_prompt_sha256": "<sha256>",
-    "judge_prompt_sha256": "<sha256>"
+    "claim_evidence_judge_prompt_sha256": "<sha256>",
+    "item_rubric_judge_prompt_sha256": "<sha256>"
   },
   "models": {
     "embedding": "text-embedding-3-small",
-    "generator": "gpt-5-2025-08-07",
-    "judge": "<a different pinned dated snapshot>"
+    "planner_requested": "gpt-5.6-sol",
+    "planner_returned": "<provider-returned identifier>",
+    "generator_requested": "gpt-5.6-sol",
+    "generator_returned": "<provider-returned identifier>",
+    "judge_requested": "gpt-5.6-terra",
+    "judge_returned": "<provider-returned identifier>",
+    "catalog_observation_sha256": "<sha256 of fixtures/evaluation_model_catalog.json>"
   },
   "sampling": {
     "generator": { "temperature": null, "top_p": null, "seed": null,
                    "reasoning_effort": "<as set>", "verbosity": "<as set>" },
-    "judge":     { "temperature": 0, "top_p": 1, "seed": 20260724 }
+    "planner":   { "temperature": null, "top_p": null, "seed": null,
+                   "reasoning_effort": "low", "verbosity": "low" },
+    "judge":     { "temperature": null, "top_p": null, "seed": null,
+                   "reasoning_effort": "medium", "verbosity": "low" }
   },
   "retrieval": {
     "n_results": 5,
@@ -85,7 +113,13 @@ A run is identified by the following object, serialized as one UTF-8 JSON string
 }
 ```
 
-**Model aliases are forbidden.** `gpt-5` is an alias; it currently resolves to `gpt-5-2025-08-07`, which OpenAI has scheduled for removal from the API on 11 December 2026. An alias re-points silently, so a run recorded against one is not reproducible and its number cannot be compared to anything — including to itself a month later. Record and request the dated snapshot. The same rule applies to the judge.
+**Prefer immutable dated model snapshots and never manufacture one.** When the provider exposes a
+dated snapshot, the run must request it. When the official provider catalog exposes only a
+canonical current-snapshot identifier, a run may use that identifier only if it binds the committed
+catalog observation, records requested and returned model IDs for every paid operation, and carries
+the explicit limitation that the provider may change model weights behind that identifier. A
+provider response whose model ID does not equal the predeclared catalog identifier invalidates the
+cohort. The judge must use a different predeclared model identifier from the generator.
 
 **Sampling parameters are recorded as `null` only where the API rejects them for that model**, never where they were simply left unset. "Unset" is not a value; defaults are not stable across snapshots.
 
@@ -110,20 +144,29 @@ Runs are comparable **within** a cohort, never across. Raising `max_final_source
 
 ### 1.4 The noise floor
 
-**Every metric is reported with a spread, never as a bare number.**
+The first complete 37-item cohort is a **descriptive held-out baseline**. Its values may be reported
+with exact denominators and an explicit statement that generator run-to-run spread has not yet been
+measured. It may not support a before/after improvement claim, a significance claim, or a
+single-number production guarantee.
 
-Before any metric is first published, its run-to-run spread is established by running the **same fixed 10-question subset five times, unchanged**, on a clean tree. Report the min, max, and standard deviation of each metric across those five runs. That spread is the metric's **noise floor** and is quoted alongside every later figure for that metric.
+Before a later cohort is compared with this baseline, establish the affected metric's run-to-run
+spread by running the same fixed 10-question subset five times unchanged on a clean tree. Report
+the min, max, and standard deviation across those five runs. Deterministic offline rescoring may be
+repeated locally; it is not a substitute for repeated generation when generation variance is the
+quantity being claimed.
 
 **A change smaller than the noise floor is not a result.** No brief may claim an improvement it cannot separate from repetition variance. This is the check that stops the post-baseline briefs from reporting their own noise back as progress.
 
-Re-establish the noise floor whenever the generator snapshot, judge snapshot, or sampling parameters change.
+Re-establish the noise floor whenever the generator identifier, judge identifier, or sampling
+parameters change. This replication is deliberately **after**, not before, the first descriptive
+37-item baseline.
 
 ### 1.5 Development diagnostics and mechanical sentinels
 
 The owner's repeatedly used practical questions, identified as `G001` through `G010`, are
 **development data**. They may diagnose failures, compare candidate behavior directionally, and
 exercise the evaluation plumbing, but they are not held-out gold evidence and their scores are not
-the passing envelopes defined in §8.
+formal comparison criteria or release thresholds.
 
 A focused development item may run before the complete practical cohort as a **mechanical
 sentinel**. Its preflight must declare, before the call:
@@ -148,7 +191,8 @@ threshold through repetition.
 
 No repeatedly tuned practical item may become a formal release gate or be moved into the held-out
 gold set. Formal quality decisions use the owner-adjudicated held-out gold set, the metrics in §§4–7, the
-noise-floor rule in §1.4, and the envelopes written into §8 at the contracted time.
+noise-floor rule in §1.4, and the prospectively declared comparison rules in §8. The first
+descriptive baseline has no pass/fail quality envelope.
 
 ---
 
@@ -495,6 +539,13 @@ An answer is decomposed by a pinned decomposition prompt against the pinned **ju
 
 **Decomposition stability is itself measured.** Repeat decomposition **three times** on a fixed 10-answer subset and report the variance in claim count per answer. If decomposition is unstable, every number built on it is unstable, and that must be visible rather than assumed away. This check runs in the pilot and is repeated whenever the judge snapshot or decomposition prompt changes.
 
+The fixed calibration subset is selected before generation: every `out_of_corpus` and
+`adversarial_premise` item, plus the lexicographically first item from each of the other four
+strata. This produces exactly ten items spanning all six strata. Decomposition may run before the
+human calibration labels exist because it defines the units to label; **human labels must be
+hash-bound and complete before any faithfulness, source-support, rubric-match, or response-behavior
+verdict from the judge is revealed.**
+
 ### 5.2 Citation grammar
 
 The only accepted citation forms are:
@@ -532,6 +583,12 @@ groundedness = (# supported (claim, cited source) pairs) / (# pairs)
 
 **Ground truth is available without the judge for any claim that matches a gold claim**: the gold `supporting_chunk_ids` set is authoritative, and any member counts as correct (§2.3). The judge is required only for claims the answer makes that the gold set does not enumerate. **Report gold-matched and judge-only groundedness separately** — the first is ground truth, the second is an estimate, and presenting them as one number would launder an estimate into a fact.
 
+Semantic mapping from an answer claim to zero or more gold claim IDs is produced by the item-rubric
+judge and calibrated against the human pilot labels. The mapping decision is an estimate; once a
+mapping is accepted, membership of a cited chunk ID in the mapped gold claim's
+`supporting_chunk_ids` is mechanical ground truth. Unmatched answer claims use the separately
+calibrated source-support judgement and remain reported as judge-only groundedness.
+
 **3. Completeness** — mechanical.
 
 ```
@@ -546,7 +603,7 @@ Whether the answer is *complete* with respect to the gold claims — that is cov
 
 ---
 
-## 6. Faithfulness — DRAFTED, NOT SETTLED
+## 6. Faithfulness — PREDECLARED; LOCKS AFTER CALIBRATION
 
 **This section is not locked.** It may not be used for a run of record until the calibration pilot (Brief 6) has answered the open questions below and the owner has ratified the result. Implement the draft, run the pilot, then settle.
 
@@ -554,71 +611,111 @@ Whether the answer is *complete* with respect to the gold claims — that is cov
 
 A claim is judged against the **union of chunks placed in the prompt** — not against the manuscript, and not against the world. Faithfulness asks whether the generator invented anything given what it was shown; a claim that is true of Virginia but absent from the supplied context is *unsupported* and counts as a failure. This is deliberate: an answer that is right by luck or by pretraining is exactly the failure RAG exists to prevent.
 
-Three levels:
+Four levels:
 
 | Level | Meaning |
 |---|---|
 | `supported` | The claim follows from the supplied context |
+| `partially_supported` | The context supports the core claim but not its full scope, certainty, or causal force |
 | `unsupported` | The context neither establishes nor contradicts it |
 | `contradicted` | The context asserts otherwise |
 
 ```
-faithfulness = # supported / # claims
+faithfulness = # fully supported / # claims
 ```
 
 `contradicted` is reported separately and never merged into `unsupported`. They are different defects: one is fabrication, the other is misreading, and they call for different fixes.
 
-Also reported: **`must_not_claim` violations** — the rate at which an answer asserts one of the gold set's enumerated plausible-but-false statements. This is a small, high-signal number and requires no judge.
+Also reported are the complete four-label distribution, essential and all-gold-claim recall, and
+**`must_not_claim` violations**. Gold-claim presence, semantic answer-to-gold mapping, and bounded
+tripwire detection are produced by one item-rubric judge call and calibrated against the pilot's
+human labels. The tripwire list is not exhaustive, so its denominator and item count are always
+reported and it is never described as a general hallucination rate.
 
 ### 6.2 Judge constraints (these parts are settled)
 
-- **The judge is a different pinned snapshot from the generator**, recorded independently in the run identity. If they are the same string, a generator upgrade silently moves the judge and every faithfulness delta becomes uninterpretable.
-- **One claim per judge call.** No batching several claims or several questions into one prompt; batching lets one item's judgement contaminate the next.
-- **The judge sees the claim and the context, never the gold answer.** A judge shown the gold answer is scoring similarity to it, which is a different metric.
-- **The calibration subset is hand-labelled before any judge output is seen.** Labelling after seeing the judge's verdicts measures the labeller's agreeableness.
+- **The judge is a different provider-catalog identifier from the generator**, recorded independently in the run identity. If they are the same string, a generator upgrade silently moves the judge and every faithfulness delta becomes uninterpretable.
+- **One claim per claim-evidence judge call.** No batching several claims or several questions into
+  one evidence call; batching lets one item's judgement contaminate the next.
+- **The claim-evidence judge sees the claim and the complete supplied context, never the gold
+  rubric.** A faithfulness judge shown the gold answer would score similarity to it, which is a
+  different metric.
+- **The separately named item-rubric judge sees one answer, its locked claim decomposition, the
+  exact question, and a sanitized gold projection containing only claim ID/text/importance and
+  bounded `must_not_claim` strings.** It never sees source passages, notes, relevant or supporting
+  chunk IDs, provenance metadata, or the expected behavior label.
+- **The calibration subset is hand-labelled after decomposition but before any semantic judge verdict is seen.** Labelling after seeing the judge's verdicts measures the labeller's agreeableness.
 
 ### 6.3 Open questions
 
-**Desk questions** — settleable without runs, before the pilot:
+**Desk decisions settled before the pilot:**
 
-- Whether `contradicted` needs a fourth level for "partially supported / overstated," which is the most common real failure in cited historical prose
-- Whether a claim citing no source is judged against the full context or scored as an automatic failure under §5.3-completeness only
+- `partially_supported` is a fourth level and does not count as fully supported.
+- Every claim, including one without a citation, is judged against the full context supplied to the
+  generator. Citation completeness separately measures the missing citation.
+- The same one-claim call returns both full-context faithfulness and per-cited-source support; those
+  labels remain separate metrics.
+- A zero applicable denominator produces `null` plus denominator `0`, never a manufactured zero.
 
 **Run questions** — only a pilot can answer:
 
-- Judge–human agreement on the hand-labelled calibration subset, and the agreement level below which the judge is unfit for use
-- Judge run-to-run variance on identical inputs at temperature 0
-- Whether the three-level rubric is used in practice or collapses to two
-- Whether judging against the full context and judging against only the cited chunks produce meaningfully different numbers — if not, §6 and §5.3-groundedness can share one judge pass
+- Judge–human agreement on the hand-labelled calibration subset, and the agreement level below
+  which the judge is unfit for automatic scoring of the affected dimension
+- Judge run-to-run variance on identical inputs with the same explicit supported settings
+- Whether the four-level rubric is used in practice or collapses to fewer categories
+- Whether answer-to-gold mapping, source-support labels, and response-behavior classification are
+  eligible for automatic scoring of the remaining 27 items; an ineligible dimension is scored
+  manually or reported pending and does not stop the cohort
 
-**Settling procedure:** pilot on 10 gold items spanning at least four strata; hand-label every decomposed claim before running the judge; compute agreement; ratify or revise; then lock this section and record the lock in `DEFECTS.md` as a contract event.
+**Settling procedure:** generate and decompose the predeclared ten items; hash-lock the answers and
+decomposition; hand-label every decomposed claim and item behavior; then run the semantic judge.
+The automatic judge is eligible only when exact human agreement is at least `0.80` and repeat
+agreement on the fixed repeat sample is at least `0.90`. The owner then ratifies the scoring lock.
+Failure selects `manual` scoring for the affected dimensions; it does not block completion of the
+37-question cohort. Record the lock in `DEFECTS.md` as a contract event.
+
+For this first cohort, **exact human agreement** pools only predeclared atomic decisions: each
+claim's four-level faithfulness label, each cited-source support label, the exact set of gold claim
+IDs mapped to each answer claim, every gold-claim status, every bounded `must_not_claim` status,
+and each item's response-behavior class. The denominator and each component agreement are reported
+alongside the pooled value. The **fixed repeat sample** is the first decomposed factual claim, in
+answer order, from each of the ten calibration items that has at least one claim. One identical
+second evidence-judge call is made for each sampled claim; repeat agreement pools its faithfulness
+and cited-source labels against the first call. These rules are committed before any semantic judge
+verdict is requested and cannot be changed after results are visible.
 
 ---
 
-## 7. Abstention — DRAFTED, NOT SETTLED
+## 7. Abstention and premise correction — PREDECLARED; LOCKS AFTER CALIBRATION
 
-### 7.1 Draft definition
+### 7.1 Predeclared definition
 
 For items with `expected_behavior: "abstain"`, the response is classified binary: does it **assert substantive factual claims about the corpus**, or does it **decline for want of information**? Partial declines that then answer anyway count as answering.
 
 ```
-abstention_rate       = # correctly declined / # out_of_corpus + adversarial_premise items
-false_abstention_rate = # incorrectly declined / # answerable items
+out_of_corpus_decline_rate = # correctly declined / # out_of_corpus items
+false_abstention_rate      = # incorrectly declined / # answerable non-out-of-corpus items
+premise_correction_rate    = # corrected false premise / # adversarial_premise items
 ```
 
 Both are required. Reporting only the first rewards a system that declines everything.
 
-For `adversarial_premise` items, a third outcome matters and is counted separately: the response **corrects the false premise** rather than either answering it or declining. That is the best behaviour and a metric that cannot see it would mark it wrong.
+For `adversarial_premise` items, correction is the intended behavior and is not counted as an
+ordinary abstention. A response that first declines and then asserts a substantive answer is
+`partial_decline_then_answer` and counts as answering for false-abstention purposes.
 
 ### 7.2 Open questions
 
-**Desk:** whether classification is done by regex over a closed phrase list (brittle, but mechanical and stable) or by the judge (robust, but adds a judged step to a metric that could otherwise be deterministic).
+**Desk decision:** rendered behavior is classified by the calibrated item-rubric judge (or the
+manual fallback), not inferred from internal status codes or a phrase regex. Internal status and
+evidence-decision fields remain diagnostics.
 
-**Runs:** the base rate of abstention on answerable items — currently completely unknown, because retrieval always supplies sources and no test has ever exercised the prompt's "if the sources do not contain enough information, say so" instruction. If false abstention turns out to be near zero on answerable items, a regex classifier is sufficient and §7 becomes mechanical.
+**Run question:** the base rate of abstention on answerable items remains unknown until the complete
+cohort. The pilot calibrates classification; it does not estimate final performance.
 
 ---
 
-## 8. Parameters and envelopes
+## 8. Parameters and prospective comparison rules
 
 ### 8.1 Current parameter values
 
@@ -632,7 +729,7 @@ Cohort-opening. Recorded in every run identity.
 | `PARAGRAPHS_PER_CHUNK` | 4 | `ingest.py` |
 | `PARAGRAPH_OVERLAP` | 1 (realized 0–2) | `ingest.py` |
 | `SKIP_FILES` | `01_Front Matter.md`; `02_Table of Contents.md`; `03_Acknowledgments.md`; `04_Note on Illustrations.md`; `32_Bibliography.md` sentinel | `filters.py` |
-| `hnsw_space` | **undetermined** — Chroma default, never set explicitly | Brief 2 must record it |
+| `hnsw_space` | `l2` | `fixtures/corpus_manifest.json`; verified against the promoted collection |
 
 The owner settled the retrieval and evaluation boundary before any gold run: the corpus begins with
 `05_Introduction.md`. The four preceding structural documents are excluded, as are all documents
@@ -641,25 +738,28 @@ bibliography-tagged derived documents. The Introduction and all later non-biblio
 documents remain in scope, including the Epilogue, Afterword, and appendices. In this corpus
 snapshot, 481 of 910 chunks are retrieval-eligible and seven documents are skipped.
 
-### 8.2 Envelopes — authored after the pilot, before the baseline
+### 8.2 First-baseline interpretation
 
-**Envelopes are not filled in yet, and the moment at which they are filled is part of the contract.**
+The first 37-item answer-quality run is a descriptive baseline, not a pass/fail release exam. No
+numeric envelope will be reverse-engineered from its result, and the absence of an envelope cannot
+delay it. The calibration locks **how** the answers are scored; it does not establish a quality
+threshold the candidate must clear before the rest of the cohort is allowed to run.
 
-They cannot be authored now: with no pilot, any number written here would be an aspiration, and an envelope that has no relationship to achievable performance either passes trivially or fails meaninglessly.
+Any later before/after improvement experiment must declare its comparison statistic, minimum
+meaningful effect, and required noise-floor evidence before the later candidate is evaluated.
 
-They also may not be authored after the baseline. An envelope written once the baseline number is known is not a test; it is a description with a tolerance drawn around it, and it cannot fail.
+| Metric | First-baseline treatment | Gate before completion? |
+|---|---|---|
+| `recall_context` | already reported as a retrieval diagnostic | no |
+| `essential_coverage_context` | already reported as a retrieval diagnostic | no |
+| `resolvability` | descriptive with exact denominator | no |
+| `groundedness` (gold-matched and judge-only separated) | descriptive | no |
+| `completeness` | descriptive with exact denominator | no |
+| `faithfulness` | descriptive after scorer calibration | no |
+| `out_of_corpus_decline_rate` | descriptive after scorer calibration | no |
+| `false_abstention_rate` | descriptive after scorer calibration | no |
+| `premise_correction_rate` | descriptive after scorer calibration | no |
 
-**The window is: after the calibration pilot (Brief 6) has established feasibility and the §1.4 noise floor, and before the Brief 7 full baseline run.** At that point the owner writes, into this section, a lower bound for each metric, per stratum and in aggregate. The baseline then either falls inside those bounds or does not, and either outcome is a result.
-
-| Metric | Aggregate bound | Per-stratum bounds | Filled |
-|---|---|---|---|
-| `recall_context` | — | — | ☐ |
-| `essential_coverage_context` | — | — | ☐ |
-| `resolvability` | — | — | ☐ |
-| `groundedness` (gold-matched) | — | — | ☐ |
-| `completeness` | — | — | ☐ |
-| `faithfulness` | — | — | ☐ (blocked on §6) |
-| `abstention_rate` | — | — | ☐ (blocked on §7) |
-| `false_abstention_rate` | — | — | ☐ (blocked on §7) |
-
-Bounds are stated as **lower bounds a passing baseline must reach**, not as targets to aim at later. A metric expected to be poor — `recall_context` on `broad_thematic` is the obvious candidate — should be given a bound that reflects the honest expectation. **A stratum predicted to fail should be given a bound it will fail**, and the prediction recorded. Predicting a failure and then observing it is a much stronger result than discovering one afterwards.
+All first-baseline values are reported with exact denominators, unavailable values as `null`, and
+the model-identity and generator-variance limitations from §1. They may locate the next defect; they
+may not be used to revise V26 and rerun the same held-out set as though it were still unseen.

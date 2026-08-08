@@ -23,13 +23,17 @@ Log an entry whenever:
 - a Phase 2 concern — Index Mode, persona, perspective modes — has crept into Phase 1 work
 - a metric's run-to-run spread exceeds the effect being claimed from it
 - manuscript text has entered a committed file
-- a model alias appears in a run configuration where a dated snapshot was required
+- a formal run uses an unbound model alias or canonical ID without the required catalog observation,
+  requested/returned IDs, and reproducibility limitation
 - a run cited as a run of record turns out to have had a dirty working tree
 - **the brief itself was underspecified and the implementer had to invent a mechanic**
 
 ## Two entry kinds that are not defects but are logged here anyway
 
-**Contract events.** Locking `EVAL_CONTRACT.md` §6 or §7 after the calibration pilot, and filling the §8.2 envelopes, are logged as dated contract events. They are not faults, but they are the moments at which comparability changes, and a reader tracing an old number back needs to find them.
+**Contract events.** Locking `EVAL_CONTRACT.md` §6 or §7 after calibration, or declaring criteria
+for a later comparative experiment, is logged as a dated contract event. These are not faults, but
+they are moments at which interpretation or comparability changes, and a reader tracing an old
+number back needs to find them.
 
 **Cohort openings.** Any change to prompt text, model snapshot, sampling parameters, retrieval parameters, chunking parameters, or the corpus snapshot. Not a fault — this is the normal way the system improves — but earlier runs stop being comparable and the boundary has to be findable.
 
@@ -43,7 +47,38 @@ Log an entry whenever:
 
 Entries below, most recent first.
 
+**Historical-status note.** Older entries are preserved as a chronology of the rules and failures
+that governed work at the time. Any older statement that G007 reader quality could veto a broader
+cohort was superseded by the 2026-07-30 contract event below. Any older statement that a formal run
+strictly required a date-suffixed model ID was superseded by the 2026-08-07 catalog-bound exception:
+dated immutable snapshots remain preferred, but the exact canonical IDs are permitted when the
+catalog observation, requested/returned IDs, settings, response IDs, and limitation are bound.
+
 ---
+
+## [2026-08-07] Contract event: scoring calibration could have become a second gate
+Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
+Symptom: the roadmap placed citation, faithfulness, and abstention calibration ahead of the full
+held-out answer run without stating whether those answers belonged to the final cohort, what would
+happen if the automatic judge failed calibration, or whether an unmeasured generator noise floor
+could postpone the first baseline. The run-identity rules also required dated model snapshots even
+though OpenAI's catalog currently exposes only canonical `gpt-5.6-sol` and `gpt-5.6-terra` current-
+snapshot IDs for the selected roles.
+Cause: owner-authorized contract clarification before any held-out answer-quality call. The prior
+wording allowed a ten-item calibration to become a disposable pilot or quality veto and imposed a
+provider capability the selected official model catalog does not currently offer.
+Resolution and verification: the fixed ten calibration answers are now the first ten members of
+the same 37-item frozen V26 cohort. Once the scoring instrument is locked, the remaining 27 run
+immediately with no intervening RAG, prompt, retrieval, model, or UI repair. Failure of automatic
+judge agreement selects manual scoring for affected dimensions or an explicit pending result; it
+does not block cohort completion. The first 37-item answer result is descriptive, with exact
+denominators and an explicit unmeasured-generator-spread limitation; five-repeat noise measurement
+is required before later comparative or significance claims. Formal identity now binds the
+committed provider-catalog observation, requested and returned model IDs, settings, and response
+IDs, and states the canonical-ID reproducibility limitation rather than inventing dated snapshots.
+The earlier retrieval-only diagnostic remains a separate valid measurement. No paid or external
+call occurred during this implementation work, and no held-out answer-quality result existed to
+invalidate.
 
 ## [2026-08-07] Contract event: retrieval comparison was not executable as written
 Phase/Brief: Phase 1, Brief 4 held-out retrieval benchmark

@@ -25,9 +25,11 @@ anything that still requires measurement.
   question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
   annotations began as historical Claude drafts, but the owner later source-verified and
   adjudicated them. This is disclosed without a prospective-blinding claim.
-- **Restart point:** run citation measurement and the faithfulness/abstention pilot, then the full
-  answer-quality baseline and production measurement, without changing the locked gold or frozen
-  V26 in response to the retrieval result.
+- **Restart point:** begin the single 37-item answer-quality cohort with the fixed ten calibration
+  answers, lock the scorer, and then run the remaining 27 immediately. Judge failure selects
+  manual/pending scoring instead of blocking the cohort; no RAG, prompt, retrieval, model, or UI
+  repair may intervene. The completed 37 is a descriptive baseline, followed later by noise-floor
+  repetition and production measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
@@ -3650,6 +3652,46 @@ Useful blog lesson: pre-registration is often a series of small, unglamorous dec
 the first number appears. Choosing the arms, denominator, primary metric, and noise sample while
 the result is still unknowable is what turns a convenient demo comparison into evidence that can
 surprise its author.
+
+### 2026-08-07 - Making calibration part of the evaluation instead of another delay
+
+- Reframed the citation, faithfulness, and abstention calibration as the opening segment of one
+  continuous answer-quality cohort. The fixed ten calibration answers are now the first ten of the
+  same 37-item frozen V26 run, not a throwaway pilot. After the scoring instrument locks, the next
+  substantive operation is the remaining 27 answers; no RAG, prompt, retrieval, model, or UI repair
+  may be inserted between them.
+- Removed a hidden veto from automatic judging. Human labels are still bound before semantic judge
+  verdicts are revealed, and judge agreement is still measured, but a judge that misses its
+  predeclared thresholds sends the affected dimensions to manual scoring or an explicit pending
+  state. It cannot prevent the owner from learning how the full frozen candidate performed.
+- Clarified what the first answer-quality result can honestly claim. The complete 37-item result is
+  a descriptive held-out baseline with exact denominators. It may disclose that generator spread
+  has not yet been measured; five unchanged repetitions become mandatory before a later
+  before/after, significance, or production-guarantee claim rather than another prerequisite to
+  seeing the baseline.
+- Recorded a provider-level reproducibility limit instead of fabricating precision. OpenAI's
+  current model catalog exposes `gpt-5.6-sol` and `gpt-5.6-terra` as canonical current-snapshot IDs
+  but no immutable dated snapshots for them. The cohort will bind a committed catalog observation,
+  every requested and provider-returned model ID, role-specific settings, and response IDs, and
+  will say plainly that the names may not pin provider-side weights forever.
+- Synchronized the standing rules, README, roadmap, and defect history before any held-out answer
+  was generated. This documentation and harness implementation work made no paid or external model
+  call. The separately completed retrieval-only diagnostic remains valid, and V26 remains frozen.
+- Finished the resumable run-of-record harness before spending on the cohort. It seals the exact
+  ten calibration answers and three answer-only decompositions apiece, requires owner labels before
+  revealing semantic judge verdicts, projects those first calls unchanged into the 37-item result,
+  and then permits only the remaining 27 frozen questions. Separate ledgers and authorization caps,
+  no-retry orphan detection, hash-bound artifacts, and a text-free public report make interrupted or
+  partially manual runs visible instead of silently rerunning or overwriting them.
+- Offline verification passed Ruff, 121 focused evaluation/governance tests, and the production
+  frontend build. The repository-wide Python suite reached its end twice, but the Windows test
+  environment made Pytest's temporary directory unreadable during cleanup and prevented a valid
+  final summary; this was recorded as an environment limitation rather than misreported as a pass.
+  No OpenAI client was constructed during this implementation and verification work.
+
+Useful blog lesson: calibration should make the ruler legible, not keep the object being measured
+off the scale. A fallback from automatic to manual scoring preserves rigor without allowing the
+measurement apparatus to suppress an inconvenient or incomplete result.
 
 ## Update convention
 
