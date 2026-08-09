@@ -33,11 +33,14 @@ DECOMPOSED_PILOT_ITEM_SCHEMA = "archivist.answer_evaluation.decomposition/1"
 CALIBRATION_LABEL_SCHEMA = "archivist.answer_evaluation.calibration_labels/1"
 INSTRUMENT_LOCK_SCHEMA = "archivist.answer_evaluation.instrument_lock/1"
 PUBLIC_SUMMARY_SCHEMA = "archivist.answer_evaluation.public_summary/2"
-PRECALIBRATION_PUBLIC_SUMMARY_SCHEMA = "archivist.answer_evaluation.precalibration_public_summary/2"
+PRECALIBRATION_PUBLIC_SUMMARY_SCHEMA = "archivist.answer_evaluation.precalibration_public_summary/3"
 COHORT_MANIFEST_SCHEMA = "archivist.answer_evaluation.cohort_manifest/1"
 PRIVATE_GENERATION_CHECKPOINT_SCHEMA = "archivist.answer_evaluation.private_generation_checkpoint/1"
 PRIVATE_DECOMPOSITION_CHECKPOINT_SCHEMA = (
     "archivist.answer_evaluation.private_decomposition_checkpoint/1"
+)
+PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA = (
+    "archivist.answer_evaluation.private_decomposition_failure_checkpoint/1"
 )
 
 JUDGE_EXACT_AGREEMENT_MINIMUM = 0.80
@@ -149,6 +152,17 @@ class MetricAvailability(StrEnum):
     PENDING = "pending"
 
 
+class DecompositionFailureCode(StrEnum):
+    """Closed technical failures from one canonical decomposition attempt."""
+
+    EXACT_SPAN_MISMATCH = "exact_span_mismatch"
+
+
+class DecompositionOutcomeStatus(StrEnum):
+    SUCCESS = "success"
+    TECHNICAL_FAILURE = "technical_failure"
+
+
 class PublicMetricId(StrEnum):
     CITATION_RESOLVABILITY = "citation_resolvability"
     CITATION_COMPLETENESS = "citation_completeness"
@@ -203,6 +217,7 @@ class PublicLimitationId(StrEnum):
     MANUAL_RESPONSE_BEHAVIOR_PENDING = "manual_response_behavior_pending"
     SEMANTIC_SCORING_PENDING = "semantic_scoring_pending_calibration"
     TRACE_RECOVERED_ITEM_PRESENT = "trace_recovered_item_present"
+    DECOMPOSITION_TECHNICAL_FAILURE_PRESENT = "canonical_decomposition_technical_failure_present"
 
 
 class _ClosedModel(BaseModel):
@@ -1238,6 +1253,156 @@ def validate_private_decomposition_checkpoint(
     return checkpoint
 
 
+class PrivateDecompositionFailureCheckpoint(_ClosedModel):
+    """One paid decomposition attempt whose output failed local canonicalization.
+
+    The provider response is retained separately as a private snapshot.  This
+    checkpoint binds only its SHA-256, so neither provider output nor answer
+    text can leak through later aggregate or public result schemas.
+    """
+
+    schema_version: Literal[PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA] = Field(
+        PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA,
+        alias="schema",
+    )
+    cohort_manifest_sha256: Sha256
+    item_id: Identifier
+    answer_sha256: Sha256
+    repetition: Annotated[int, Field(strict=True, ge=1, le=3)]
+    prompt_version: Identifier
+    prompt_sha256: Sha256
+    judge_model: NonemptyString
+    judge_settings: dict[str, JsonValue]
+    provider: PrivateProviderMetadata
+    usage_events: tuple[PrivateUsageEvent, ...] = Field(min_length=1, max_length=1)
+    failure_code: DecompositionFailureCode
+    provider_response_snapshot_sha256: Sha256
+    checkpoint_sha256: Sha256
+
+    @property
+    def schema(self) -> str:
+        return self.schema_version
+
+    @model_validator(mode="after")
+    def identities_and_hash_are_exact(self) -> "PrivateDecompositionFailureCheckpoint":
+        event = self.usage_events[0]
+        if event.sequence != 1:
+            raise ValueError("decomposition failure usage-event sequence must be exactly 1")
+        if event.operation != "eval_claim_decomposition":
+            raise ValueError("decomposition failure usage-event operation changed")
+        if event.response_id != self.provider.response_id:
+            raise ValueError("decomposition failure provider and usage response IDs differ")
+        if event.requested_model != self.judge_model:
+            raise ValueError("decomposition failure requested model differs from judge model")
+        if event.actual_model != self.provider.model:
+            raise ValueError("decomposition failure provider and usage actual models differ")
+        if self.provider.model != self.judge_model:
+            raise ValueError("decomposition failure provider model differs from judge model")
+        payload = self.model_dump(mode="json", exclude={"checkpoint_sha256"})
+        if self.checkpoint_sha256 != canonical_json_sha256(payload):
+            raise ValueError(
+                "checkpoint_sha256 does not bind the exact decomposition failure checkpoint"
+            )
+        return self
+
+
+PrivateDecompositionOutcome = PrivateDecompositionCheckpoint | PrivateDecompositionFailureCheckpoint
+
+
+def build_private_decomposition_failure_checkpoint(
+    *,
+    cohort_manifest_sha256: str,
+    item_id: str,
+    answer_sha256: str,
+    repetition: int,
+    prompt_version: str,
+    prompt_sha256: str,
+    judge_model: str,
+    judge_settings: Mapping[str, JsonValue],
+    provider: PrivateProviderMetadata | Mapping[str, object],
+    usage_event: PrivateUsageEvent | Mapping[str, object],
+    failure_code: DecompositionFailureCode | str,
+    provider_response_snapshot_sha256: str,
+) -> PrivateDecompositionFailureCheckpoint:
+    """Seal one non-retried provider call that failed local decomposition checks."""
+
+    normalized_provider = (
+        provider
+        if isinstance(provider, PrivateProviderMetadata)
+        else PrivateProviderMetadata.model_validate(provider)
+    )
+    normalized_usage = (
+        usage_event
+        if isinstance(usage_event, PrivateUsageEvent)
+        else PrivateUsageEvent.model_validate(usage_event)
+    )
+    normalized_settings = json.loads(canonical_json_bytes(dict(judge_settings)))
+    if not isinstance(normalized_settings, dict):  # pragma: no cover - defensive
+        raise ValueError("judge settings must be a JSON object")
+    raw: dict[str, object] = {
+        "schema": PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA,
+        "cohort_manifest_sha256": cohort_manifest_sha256,
+        "item_id": item_id,
+        "answer_sha256": answer_sha256,
+        "repetition": repetition,
+        "prompt_version": prompt_version,
+        "prompt_sha256": prompt_sha256,
+        "judge_model": judge_model,
+        "judge_settings": normalized_settings,
+        "provider": normalized_provider.model_dump(mode="json"),
+        "usage_events": [normalized_usage.model_dump(mode="json")],
+        "failure_code": failure_code,
+        "provider_response_snapshot_sha256": provider_response_snapshot_sha256,
+    }
+    raw["checkpoint_sha256"] = canonical_json_sha256(raw)
+    return PrivateDecompositionFailureCheckpoint.model_validate(raw)
+
+
+def validate_private_decomposition_failure_checkpoint(
+    value: PrivateDecompositionFailureCheckpoint | Mapping[str, object],
+    *,
+    cohort_manifest_sha256: str,
+    generated_item: PrivateGeneratedItem,
+    repetition: int,
+    prompt_version: str,
+    prompt_sha256: str,
+    judge_model: str,
+    judge_settings: Mapping[str, JsonValue],
+) -> PrivateDecompositionFailureCheckpoint:
+    """Reject a stale, copied, or configuration-drifted failed attempt."""
+
+    checkpoint = (
+        value
+        if isinstance(value, PrivateDecompositionFailureCheckpoint)
+        else PrivateDecompositionFailureCheckpoint.model_validate(value)
+    )
+    expected_settings = json.loads(canonical_json_bytes(dict(judge_settings)))
+    expected = {
+        "cohort_manifest_sha256": cohort_manifest_sha256,
+        "item_id": generated_item.item_id,
+        "answer_sha256": generated_item.answer_sha256,
+        "repetition": repetition,
+        "prompt_version": prompt_version,
+        "prompt_sha256": prompt_sha256,
+        "judge_model": judge_model,
+        "judge_settings": expected_settings,
+    }
+    actual = {
+        "cohort_manifest_sha256": checkpoint.cohort_manifest_sha256,
+        "item_id": checkpoint.item_id,
+        "answer_sha256": checkpoint.answer_sha256,
+        "repetition": checkpoint.repetition,
+        "prompt_version": checkpoint.prompt_version,
+        "prompt_sha256": checkpoint.prompt_sha256,
+        "judge_model": checkpoint.judge_model,
+        "judge_settings": checkpoint.judge_settings,
+    }
+    for field, expected_value in expected.items():
+        if actual[field] != expected_value:
+            raise ValueError(f"decomposition failure checkpoint {field} changed")
+    return checkpoint
+
+
 class CalibrationClaimLabel(_ClosedModel):
     claim_id: Identifier
     claim_text: NonemptyString
@@ -1905,6 +2070,9 @@ class PublicPrecalibrationSummary(_ClosedModel):
     gold_set_sha256: Sha256
     migration_artifact_sha256: Sha256 | None
     recovered_item_count: Literal[0, 1]
+    decomposition_attempt_count: Literal[37]
+    usable_decomposition_count: NonnegativeInt
+    decomposition_technical_failure_count: NonnegativeInt
     limitation_ids: tuple[PublicLimitationId, ...]
     run_status: BaselineRunStatus
     latency_scope: Literal["generation_pipeline"] = "generation_pipeline"
@@ -1954,6 +2122,21 @@ class PublicPrecalibrationSummary(_ClosedModel):
             raise ValueError("ordinary precalibration summary cannot bind a migration artifact")
         elif recovery_limitation in self.limitation_ids:
             raise ValueError("ordinary precalibration summary cannot claim a recovered item")
+        decomposition_failure_limitation = (
+            PublicLimitationId.DECOMPOSITION_TECHNICAL_FAILURE_PRESENT
+        )
+        if self.decomposition_attempt_count != self.item_count:
+            raise ValueError("decomposition attempts must cover every item exactly once")
+        if (
+            self.usable_decomposition_count + self.decomposition_technical_failure_count
+            != self.decomposition_attempt_count
+        ):
+            raise ValueError("usable and failed decompositions must cover every attempt")
+        if self.decomposition_technical_failure_count:
+            if decomposition_failure_limitation not in self.limitation_ids:
+                raise ValueError("decomposition technical failure is missing its public limitation")
+        elif decomposition_failure_limitation in self.limitation_ids:
+            raise ValueError("successful decomposition cohort cannot claim a technical failure")
         if self.generation_latency_denominator != self.item_count:
             raise ValueError("generation latency denominator must equal item_count")
         if self.generation_latency_observed_count != (self.item_count - self.recovered_item_count):

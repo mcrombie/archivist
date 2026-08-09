@@ -27,8 +27,12 @@ from answer_evaluation import (
     CalibrationLabelFile,
     DecomposedClaim,
     DecomposedPilotItem,
+    DecompositionOutcomeStatus,
     InstrumentLock,
+    PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA,
     PrivateDecompositionCheckpoint,
+    PrivateDecompositionFailureCheckpoint,
+    PrivateDecompositionOutcome,
     PrivateGeneratedItem,
     PrivateOrderedSource,
     PrivateProviderMetadata,
@@ -53,7 +57,7 @@ BASELINE_SEMANTIC_ITEM_SCHEMA = "archivist.answer_evaluation.baseline_semantic_i
 BASELINE_SEMANTIC_AGGREGATE_SCHEMA = "archivist.answer_evaluation.baseline_semantic_aggregate/1"
 PRIVATE_FULL_RUN_ARTIFACT_SCHEMA = "archivist.answer_evaluation.private_full_run/1"
 PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA = (
-    "archivist.answer_evaluation.precalibration_private_artifact/2"
+    "archivist.answer_evaluation.precalibration_private_artifact/3"
 )
 DECOMPOSITION_STABILITY_SCHEMA = "archivist.answer_evaluation.decomposition_stability/1"
 MANUAL_SCORING_AGGREGATE_SCHEMA = "archivist.answer_evaluation.manual_scoring_aggregate/1"
@@ -1228,12 +1232,19 @@ class PrecalibrationItemBinding(_ClosedModel):
     item_id: Identifier
     generated_item_sha256: Sha256
     answer_sha256: Sha256
-    decomposition_sha256: Sha256
+    decomposition_status: DecompositionOutcomeStatus
+    decomposition_sha256: Sha256 | None
+    decomposition_checkpoint_sha256: Sha256
     gold_item_sha256: Sha256
     binding_sha256: Sha256
 
     @model_validator(mode="after")
     def hash_is_exact(self) -> "PrecalibrationItemBinding":
+        if self.decomposition_status is DecompositionOutcomeStatus.SUCCESS:
+            if self.decomposition_sha256 is None:
+                raise ValueError("successful item binding requires a decomposition")
+        elif self.decomposition_sha256 is not None:
+            raise ValueError("failed item binding cannot carry a decomposition")
         payload = self.model_dump(mode="json", exclude={"binding_sha256"})
         if self.binding_sha256 != canonical_json_sha256(payload):
             raise ValueError("binding_sha256 does not bind the precalibration item")
@@ -1257,7 +1268,10 @@ class PrecalibrationPrivateArtifact(_ClosedModel):
     recovered_item_ids: tuple[Identifier, ...]
     generation_latency_denominator: NonnegativeInt
     generation_latency_observed_count: NonnegativeInt
-    decomposition_checkpoint_count: Literal[37]
+    decomposition_attempt_count: Literal[37]
+    usable_decomposition_count: NonnegativeInt
+    decomposition_technical_failure_count: NonnegativeInt
+    decomposition_technical_failure_item_ids: tuple[Identifier, ...]
     decomposition_checkpoints_sha256: Sha256
     decomposition_usage_events_sha256: Sha256
     item_ids: tuple[Identifier, ...] = Field(min_length=37, max_length=37)
@@ -1292,6 +1306,31 @@ class PrecalibrationPrivateArtifact(_ClosedModel):
             self.generation_latency_denominator - self.recovered_item_count
         ):
             raise ValueError("generation latency observations must exclude recovered items")
+        if self.decomposition_attempt_count != len(self.item_ids):
+            raise ValueError("decomposition attempts must cover all 37 items")
+        if (
+            self.usable_decomposition_count + self.decomposition_technical_failure_count
+            != self.decomposition_attempt_count
+        ):
+            raise ValueError("usable and failed decompositions must cover every attempt")
+        _require_unique(
+            self.decomposition_technical_failure_item_ids,
+            label="decomposition technical failure item IDs",
+        )
+        if (
+            len(self.decomposition_technical_failure_item_ids)
+            != self.decomposition_technical_failure_count
+        ):
+            raise ValueError("decomposition failure count must match failure item IDs")
+        if not set(self.decomposition_technical_failure_item_ids) <= set(self.item_ids):
+            raise ValueError("decomposition failure item IDs must belong to the cohort")
+        failed_bindings = tuple(
+            item.item_id
+            for item in self.items
+            if item.decomposition_status is DecompositionOutcomeStatus.TECHNICAL_FAILURE
+        )
+        if failed_bindings != self.decomposition_technical_failure_item_ids:
+            raise ValueError("decomposition failure item bindings changed")
         payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
         if self.artifact_sha256 != canonical_json_sha256(payload):
             raise ValueError("artifact_sha256 does not bind the precalibration artifact")
@@ -1300,17 +1339,32 @@ class PrecalibrationPrivateArtifact(_ClosedModel):
 
 def _precalibration_item_binding(
     generated: PrivateGeneratedItem,
-    decomposition: DecomposedPilotItem,
+    outcome: PrivateDecompositionOutcome,
+    decomposition: DecomposedPilotItem | None,
     gold_item: Mapping[str, object],
 ) -> PrecalibrationItemBinding:
-    _validate_decomposition(generated, decomposition)
     if gold_item.get("id") != generated.item_id:
         raise ValueError("precalibration gold item order or identity changed")
+    if outcome.item_id != generated.item_id or outcome.answer_sha256 != generated.answer_sha256:
+        raise ValueError("precalibration decomposition outcome binding changed")
+    if isinstance(outcome, PrivateDecompositionCheckpoint):
+        if decomposition is None or outcome.decomposition != decomposition:
+            raise ValueError("successful decomposition outcome changed")
+        _validate_decomposition(generated, decomposition)
+        status = DecompositionOutcomeStatus.SUCCESS
+        decomposition_sha256 = decomposition.decomposition_sha256
+    else:
+        if decomposition is not None:
+            raise ValueError("failed decomposition outcome cannot bind a decomposition")
+        status = DecompositionOutcomeStatus.TECHNICAL_FAILURE
+        decomposition_sha256 = None
     raw: dict[str, object] = {
         "item_id": generated.item_id,
         "generated_item_sha256": generated.item_sha256,
         "answer_sha256": generated.answer_sha256,
-        "decomposition_sha256": decomposition.decomposition_sha256,
+        "decomposition_status": status,
+        "decomposition_sha256": decomposition_sha256,
+        "decomposition_checkpoint_sha256": outcome.checkpoint_sha256,
         "gold_item_sha256": canonical_json_sha256(dict(gold_item)),
     }
     raw["binding_sha256"] = canonical_json_sha256(raw)
@@ -1322,12 +1376,24 @@ def _validate_precalibration_checkpoints(
     cohort_manifest_sha256: str,
     generated_items: Sequence[PrivateGeneratedItem],
     decompositions: Sequence[DecomposedPilotItem],
-    checkpoints: Sequence[PrivateDecompositionCheckpoint],
-) -> tuple[PrivateDecompositionCheckpoint, ...]:
-    normalized = tuple(
-        PrivateDecompositionCheckpoint.model_validate(checkpoint.model_dump(mode="json"))
-        for checkpoint in checkpoints
-    )
+    checkpoints: Sequence[PrivateDecompositionOutcome | Mapping[str, object]],
+) -> tuple[PrivateDecompositionOutcome, ...]:
+    normalized_list: list[PrivateDecompositionOutcome] = []
+    for checkpoint in checkpoints:
+        if isinstance(
+            checkpoint,
+            (PrivateDecompositionCheckpoint, PrivateDecompositionFailureCheckpoint),
+        ):
+            normalized_list.append(checkpoint)
+            continue
+        schema = checkpoint.get("schema")
+        model = (
+            PrivateDecompositionFailureCheckpoint
+            if schema == PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA
+            else PrivateDecompositionCheckpoint
+        )
+        normalized_list.append(model.model_validate(checkpoint))
+    normalized = tuple(normalized_list)
     if len(normalized) != 37:
         raise ValueError("precalibration cost closure requires exactly 37 decomposition calls")
     item_ids = tuple(item.item_id for item in generated_items)
@@ -1339,6 +1405,8 @@ def _validate_precalibration_checkpoints(
         )
     generated_by_id = {item.item_id: item for item in generated_items}
     decomposition_by_id = {item.item_id: item for item in decompositions}
+    successful_ids: list[str] = []
+    failed_ids: list[str] = []
     response_ids: list[str] = []
     for checkpoint in normalized:
         generated = generated_by_id[checkpoint.item_id]
@@ -1346,9 +1414,21 @@ def _validate_precalibration_checkpoints(
             raise ValueError("decomposition checkpoint belongs to another cohort")
         if checkpoint.answer_sha256 != generated.answer_sha256:
             raise ValueError("decomposition checkpoint belongs to another answer")
-        if checkpoint.decomposition != decomposition_by_id[checkpoint.item_id]:
-            raise ValueError("canonical decomposition checkpoint changed")
+        if isinstance(checkpoint, PrivateDecompositionCheckpoint):
+            decomposition = decomposition_by_id.get(checkpoint.item_id)
+            if decomposition is None or checkpoint.decomposition != decomposition:
+                raise ValueError("canonical decomposition checkpoint changed")
+            _validate_decomposition(generated, decomposition)
+            successful_ids.append(checkpoint.item_id)
+        else:
+            if checkpoint.item_id in decomposition_by_id:
+                raise ValueError("failed decomposition attempt cannot have a usable decomposition")
+            failed_ids.append(checkpoint.item_id)
         response_ids.append(checkpoint.usage_events[0].response_id)
+    if successful_ids != [item.item_id for item in decompositions]:
+        raise ValueError("usable decompositions must follow successful outcomes in cohort order")
+    if len(successful_ids) + len(failed_ids) != 37:
+        raise ValueError("decomposition outcomes do not cover all 37 attempts")
     _require_unique(response_ids, label="precalibration decomposition response IDs")
     generated_response_ids = [
         event.response_id for generated in generated_items for event in generated.usage_events
@@ -1371,33 +1451,46 @@ def build_precalibration_private_artifact(
     generated_items: Sequence[PrivateGeneratedItem],
     decompositions: Sequence[DecomposedPilotItem],
     gold_items: Sequence[Mapping[str, object]],
-    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+    decomposition_checkpoints: Sequence[PrivateDecompositionOutcome | Mapping[str, object]],
     migration_artifact_sha256: str | None = None,
     recovered_item_ids: Sequence[str] = (),
 ) -> PrecalibrationPrivateArtifact:
-    if {len(generated_items), len(decompositions), len(gold_items)} != {37}:
-        raise ValueError("precalibration artifact requires exactly 37 paired items")
+    if len(generated_items) != 37 or len(gold_items) != 37:
+        raise ValueError("precalibration artifact requires exactly 37 generated and gold items")
     item_ids = tuple(item.item_id for item in generated_items)
     recovered_ids = tuple(recovered_item_ids)
     _require_unique(item_ids, label="precalibration generated item IDs")
-    if [item.item_id for item in decompositions] != list(item_ids):
-        raise ValueError("precalibration decomposition item order changed")
+    decomposition_ids = [item.item_id for item in decompositions]
+    if decomposition_ids != [item_id for item_id in item_ids if item_id in decomposition_ids]:
+        raise ValueError("usable decompositions must retain their cohort-relative order")
+    _require_unique(decomposition_ids, label="precalibration usable decomposition IDs")
     normalized_checkpoints = _validate_precalibration_checkpoints(
         cohort_manifest_sha256=cohort_manifest_sha256,
         generated_items=generated_items,
         decompositions=decompositions,
         checkpoints=decomposition_checkpoints,
     )
+    decomposition_by_id = {item.item_id: item for item in decompositions}
     bindings = tuple(
-        _precalibration_item_binding(generated, decomposition, gold_item)
-        for generated, decomposition, gold_item in zip(
+        _precalibration_item_binding(
+            generated,
+            outcome,
+            decomposition_by_id.get(generated.item_id),
+            gold_item,
+        )
+        for generated, outcome, gold_item in zip(
             generated_items,
-            decompositions,
+            normalized_checkpoints,
             gold_items,
             strict=True,
         )
     )
     usage_events = tuple(checkpoint.usage_events[0] for checkpoint in normalized_checkpoints)
+    failure_ids = tuple(
+        checkpoint.item_id
+        for checkpoint in normalized_checkpoints
+        if isinstance(checkpoint, PrivateDecompositionFailureCheckpoint)
+    )
     raw: dict[str, object] = {
         "schema": PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA,
         "cohort_manifest_sha256": cohort_manifest_sha256,
@@ -1410,7 +1503,10 @@ def build_precalibration_private_artifact(
         "recovered_item_ids": list(recovered_ids),
         "generation_latency_denominator": len(item_ids),
         "generation_latency_observed_count": len(item_ids) - len(recovered_ids),
-        "decomposition_checkpoint_count": len(normalized_checkpoints),
+        "decomposition_attempt_count": len(normalized_checkpoints),
+        "usable_decomposition_count": len(decompositions),
+        "decomposition_technical_failure_count": len(failure_ids),
+        "decomposition_technical_failure_item_ids": list(failure_ids),
         "decomposition_checkpoints_sha256": canonical_json_sha256(
             [checkpoint.model_dump(mode="json") for checkpoint in normalized_checkpoints]
         ),
@@ -1434,7 +1530,7 @@ def validate_precalibration_private_artifact(
     generated_items: Sequence[PrivateGeneratedItem],
     decompositions: Sequence[DecomposedPilotItem],
     gold_items: Sequence[Mapping[str, object]],
-    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+    decomposition_checkpoints: Sequence[PrivateDecompositionOutcome | Mapping[str, object]],
     migration_artifact_sha256: str | None = None,
     recovered_item_ids: Sequence[str] = (),
 ) -> PrecalibrationPrivateArtifact:

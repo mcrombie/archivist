@@ -59,6 +59,31 @@ before calibration.
 
 ---
 
+## [2026-08-09] Terra returned an invalid canonical claim-to-span mapping for H001
+Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
+Symptom: after the audited H003 recovery, the unchanged run sealed all 37 frozen V26 answers and
+began canonical decomposition. The first and only Terra call, for H001, completed and was charged,
+but strict validation found that several returned claim strings did not exactly equal the frozen
+answer substrings at their declared character spans. The harness stopped fail-closed before H002.
+Cumulative recorded spend is `$5.42436647`.
+Cause: measurement-instrument/model-output contract failure, not a candidate-answer defect. The
+judge returned structurally parseable JSON but violated the exact `text`/`char_span` audit
+invariant. Accepting approximate offsets or silently realigning the claims would change the
+measurement after seeing the held-out output.
+Resolution and verification: do not repair the returned spans or text, do not retry H001, and do
+not promote its output as a canonical decomposition. The completed provider response was retrieved
+by exact response ID through `responses.retrieve`, which made no model call, and preserved in a
+private snapshot bound by SHA-256
+`dd6ca585e3d1f8fac6af4070187b0230115ded0482837c23b4f12beda82c1f1e`.
+Leave the answer-complete recovery root immutable. An exact provider-free sibling migration must
+bind the 37 answer checkpoints, cohort, ledger, H001 response ID and usage, retrieved snapshot,
+answer and prompt hashes, validation failure, runners, and both roots. It records H001 as one
+technical decomposition failure and resumes only H002–H038's 36 missing Terra calls under the same
+cumulative `$20.00` cap. Final closure requires 37 sealed answers, 37 attempted canonical calls,
+36 valid decompositions, one technical failure, and unique response IDs. H001 is excluded only from
+decomposition-dependent denominators; it is not imputed as zero claims and not scored as an answer
+failure. This repairs the harness's representation of an instrument failure, not V26 or H001.
+
 ## [2026-08-09] Harness rejected H003's valid deterministic early release
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
 Symptom: the authorized run sealed H001 and H002. H003 then made one embedding call, produced a

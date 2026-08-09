@@ -225,13 +225,13 @@ uv run python scripts/run_retrieval_benchmark.py run `
 ```
 
 The private, gitignored embedding cache is reused by both arms, every value of `k`, and the five
-retrieval repetitions; later offline reproductions do not make another API call. The next formal
-stage is the complete answer-quality cohort: generate and preserve all 37 frozen V26 answers, then
-create one canonical claim decomposition for every answer, in one uninterrupted paid operation.
-There is no ten-item calibration stop and no semantic quality gate before completion. The initial
-baseline report includes every immediately computable result—cohort identity, costs, latency,
-response status, and mechanical citation measures—with semantic fields explicitly pending where a
-calibrated judgment is required.
+retrieval repetitions; later offline reproductions do not make another API call. The complete
+answer-quality cohort has now sealed all 37 frozen V26 answers. Canonical decomposition is still in
+progress after its first call exposed a strict span/text validation failure. There is no ten-item
+calibration stop and no semantic quality gate before completion. The initial baseline report
+includes every immediately computable result—cohort identity, costs, latency, response status,
+mechanical citation measures, and technical decomposition failures—with semantic fields explicitly
+pending where a calibrated judgment is required.
 
 The answer-evaluation preflight is offline and makes no provider call:
 
@@ -249,16 +249,15 @@ uv run python scripts/run_answer_evaluation.py run-37 `
 ```
 
 The command-line acknowledgement is a safety interlock, not authorization by itself. It runs all
-37 answers first, creates exactly one canonical answer-only decomposition per answer, and then
-writes the sealed private binding plus the closed, text-free mechanical JSON and Markdown reports.
-It performs no calibration repeats or semantic-judge calls.
+37 answers first, makes exactly one canonical answer-only decomposition attempt per answer, and
+then writes the sealed private binding plus the closed, text-free mechanical JSON and Markdown
+reports. It performs no calibration repeats or semantic-judge calls.
 
-The first authorized execution stopped fail-closed at H003. H001 and H002 are sealed. H003 made
+The first authorized execution stopped fail-closed at H003. H001 and H002 were sealed; H003 made
 exactly one embedding call and reached a trace-backed deterministic `clean_abstention` before
-answer generation, but the original harness rejected that valid early-release checkpoint shape.
-No retry and no H003 answer-generation call occurred. Cumulative recorded spend is approximately
-**`$0.2957022`**. The abstention remains evaluation behavior—likely a false abstention—not an item
-to repair or rerun.
+answer generation. No retry and no H003 answer-generation call occurred. The exact offline
+migration below preserved those results, and the resumed run then sealed all 37 V26 answers. The
+abstention remains evaluation behavior—likely a false abstention—not an item repaired or rerun.
 
 Recovery is deliberately offline and non-destructive. After committing and verifying the harness
 correction, leave the original partial root
@@ -287,14 +286,34 @@ public report carries that limitation. “Uninterrupted” forbids calibration o
 prompts, models, retrieval, corpus, gold, or UI—not exact provider-free recovery after a harness
 stop.
 
+Canonical decomposition then stopped fail-closed on its first item. The one H001 Terra response
+completed and was charged, but several returned claim strings did not exactly equal the answer
+substrings declared by their character spans. The existing response was retrieved afterward by
+provider response ID through `responses.retrieve`, which made no model call, and preserved in a
+private snapshot with SHA-256
+`dd6ca585e3d1f8fac6af4070187b0230115ded0482837c23b4f12beda82c1f1e`. The harness did not correct
+the text or spans, retry H001, or promote an invalid canonical decomposition. Cumulative recorded
+spend at this stop is **`$5.42436647`**.
+
+The answer-complete recovery root now remains immutable. A second provider-free sibling migration
+must bind all 37 answer checkpoints, the ledger, the H001 response snapshot and validation failure,
+and the source and destination runner identities. H001 is recorded as one technical decomposition
+failure; resume skips it and makes exactly one Terra call for each of the remaining 36 cohort
+items under the same cumulative `$20.00` cap. The completed baseline reports **37 answers, 37
+canonical decomposition attempts, 36 usable decompositions, and one technical failure**. H001 is
+excluded only from decomposition-dependent denominators and is never imputed as an empty claim set
+or scored as a candidate answer failure. This recovery repairs the measurement harness, not the
+frozen answer.
+
 Faithfulness and abstention calibration is later, lower-priority scoring-instrument work. Only
-after all 37 answers and canonical decompositions are preserved may the predeclared ten-item subset
-receive human labels, repeated decompositions, and semantic judge checks. That work may add a
-hash-bound scoring supplement; it cannot delay, overwrite, or suppress the baseline. Five-repeat
-generator noise measurement is likewise required before a later comparative or significance
-claim, not before this first descriptive result. The partial answer-quality run has recorded about
-`$0.2957022`; completion remains pending. V26 remains frozen, and the interactive application and
-earlier practical evaluations remain development evidence only.
+after all 37 answers, all 37 canonical attempts, every usable decomposition, and the technical
+failure are preserved may the predeclared subset receive human labels, repeated decompositions,
+and semantic judge checks. That work may add a hash-bound scoring supplement; it cannot delay,
+overwrite, or suppress the baseline. Five-repeat generator noise measurement is likewise required
+before a later comparative or significance claim, not before this first descriptive result. The
+answer-quality run has recorded `$5.42436647`; completion of the remaining 36 decomposition calls
+is pending. V26 remains frozen, and the interactive application and earlier practical evaluations
+remain development evidence only.
 
 ## Documentation map
 

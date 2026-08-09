@@ -18,8 +18,9 @@ anything that still requires measurement.
   owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
   held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
   (+1.26 points). This is a retrieval-only diagnostic, not an answer-quality score. The authorized
-  answer-quality run has now begun: H001/H002 are sealed, H003 ended in a trace-backed deterministic
-  `clean_abstention`, and the harness stopped fail-closed after about `$0.2957022` recorded spend.
+  answer-quality run has now sealed all 37 V26 answers. Its first Terra decomposition call, for
+  H001, completed once but failed strict claim-text/character-span validation. No retry or repair
+  occurred; cumulative recorded spend is `$5.42436647`.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
@@ -27,13 +28,13 @@ anything that still requires measurement.
   question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
   annotations began as historical Claude drafts, but the owner later source-verified and
   adjudicated them. This is disclosed without a prospective-blinding claim.
-- **Restart point:** commit and verify the narrow harness correction, leave the original H001–H003
-  partial root immutable, and run the exact provider-free migration into its sibling recovery root.
-  Preserve H001/H002 inner payloads unchanged, mark H003 trace-recovered, and resume only missing
-  operations under the existing `$20.00` cumulative cap. No retry, calibration, RAG, prompt,
-  retrieval, model, UI, gold, or corpus change may intervene. Publish the mechanically available
-  37-item baseline with H003's likely false abstention intact and generation latency explicitly
-  measured over 36/37 items. Calibration remains later and lower priority.
+- **Restart point:** leave the answer-complete recovery root immutable. Preserve the provider-
+  retrieved H001 response as a private hash-bound snapshot, record it as one technical
+  decomposition failure, and create a provider-free sibling migration before making the 36 missing
+  Terra calls under the same `$20.00` cumulative cap. Do not correct H001's text or spans and do not
+  retry it. Publish 37 sealed answers, 37 canonical attempts, 36 usable decompositions, one
+  technical failure, and exact affected denominators. This is instrument recovery, not candidate
+  repair; calibration remains later and lower priority.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
@@ -3764,6 +3765,35 @@ the underlying evidence from being created.
 Useful blog lesson: fail-closed does not have to mean throw everything away. If completed work is
 cryptographically and operationally provable, the honest recovery is to preserve it, disclose the
 migration, and continue without giving an unfavorable result a second chance.
+
+### 2026-08-09 - When the measuring tool failed before the answer did
+
+- The audited recovery worked: Archivist completed and sealed all 37 frozen V26 answers without
+  retrying H003. That changed the state of the project from “answer generation interrupted” to
+  “answer evidence complete.” The generation-latency limitation remains 36 observed turns out of
+  37 because H003's original full-turn clock could not be reconstructed.
+- Canonical claim decomposition then failed on its very first Terra call. H001's response was valid
+  JSON, but five of its eight claim strings did not exactly match the frozen answer slices named by
+  their character offsets. The strict check rejected it rather than quietly nudging the offsets
+  into place. That is an evaluation-instrument failure, not evidence that the H001 answer itself is
+  defective.
+- The call was not repeated. Its completed provider response was retrieved later by exact response
+  ID through a non-generating `responses.retrieve` operation and preserved in a private snapshot.
+  The snapshot SHA-256 is
+  `dd6ca585e3d1f8fac6af4070187b0230115ded0482837c23b4f12beda82c1f1e`.
+  Cumulative recorded spend at the stop is `$5.42436647`.
+- The recovery rule is intentionally asymmetric. H001 keeps its one failed attempt forever; the
+  next run calls Terra only for the 36 items that have never received a decomposition attempt. A
+  provider-free sibling migration binds the 37 answers, usage ledger, retrieved response,
+  validation failure, prompts, runners, and both roots before any paid continuation begins.
+- The eventual report will say exactly what happened: 37 answers, 37 attempted canonical
+  decompositions, 36 usable decompositions, and one technical failure. Claim-based denominators
+  exclude H001 explicitly. It will not be disguised as an answer with zero claims, counted as a
+  candidate failure, or repaired into a passing instrument output.
+
+Useful blog lesson: a held-out evaluation measures two systems at once—the candidate and the
+ruler. When the ruler produces an invalid reading, preserving the failed reading and narrowing the
+denominator is more honest than polishing it into data after the fact.
 
 ## Update convention
 

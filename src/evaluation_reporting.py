@@ -31,10 +31,13 @@ from answer_evaluation import (
     InstrumentLock,
     MetricAvailability,
     MustNotClaimStatus,
+    PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA,
     PrecalibrationMetricId,
     PrecalibrationPublicMetric,
     PrecalibrationPublicStratumSummary,
     PrivateDecompositionCheckpoint,
+    PrivateDecompositionFailureCheckpoint,
+    PrivateDecompositionOutcome,
     PrivateGeneratedItem,
     PrivateUsageEvent,
     PublicCost,
@@ -858,6 +861,10 @@ def _cost(
     events.extend(result.usage_event for result in claim_evidence_results)
     events.extend(result.usage_event for result in item_rubric_results)
     events.extend(additional_usage_events)
+    return _cost_from_usage_events(events)
+
+
+def _cost_from_usage_events(events: Sequence[PrivateUsageEvent]) -> PublicCost:
     response_ids = [event.response_id for event in events]
     if len(response_ids) != len(set(response_ids)):
         raise ValueError("public cost inputs contain duplicate provider response IDs")
@@ -887,7 +894,12 @@ def _percentile(values: Sequence[float], percentile: float) -> float:
 
 
 def _latency(bundles: Sequence[_ItemBundle]) -> PublicLatency:
-    values = [bundle.generated.elapsed_seconds for bundle in bundles]
+    return _latency_from_seconds([bundle.generated.elapsed_seconds for bundle in bundles])
+
+
+def _latency_from_seconds(values: Sequence[float]) -> PublicLatency:
+    if not values:
+        raise ValueError("latency requires at least one exact observation")
     total = sum(values)
     return PublicLatency(
         total_seconds=total,
@@ -942,10 +954,13 @@ def _gold_location_ids(gold: _GoldItem) -> frozenset[str]:
 
 def _precalibration_metrics(
     bundles: Sequence[_ItemBundle],
+    *,
+    generated_items: Sequence[PrivateGeneratedItem],
+    gold_items: Sequence[_GoldItem],
 ) -> tuple[PrecalibrationPublicMetric, ...]:
     audits = [
-        audit_citations(bundle.generated.answer, source_count=len(bundle.generated.sources))
-        for bundle in bundles
+        audit_citations(generated.answer, source_count=len(generated.sources))
+        for generated in generated_items
     ]
     citation_references = sum(audit.source_reference_count for audit in audits)
     resolved_references = sum(audit.resolvable_reference_count for audit in audits)
@@ -963,11 +978,13 @@ def _precalibration_metrics(
         for bundle, source_number in cited_pairs
     )
     gold_location_pairs = [
-        (bundle, chunk_id) for bundle in bundles for chunk_id in _gold_location_ids(bundle.gold)
+        (generated, gold, chunk_id)
+        for generated, gold in zip(generated_items, gold_items, strict=True)
+        for chunk_id in _gold_location_ids(gold)
     ]
     retrieved_gold_locations = sum(
-        chunk_id in {source.chunk_id for source in bundle.generated.sources}
-        for bundle, chunk_id in gold_location_pairs
+        chunk_id in {source.chunk_id for source in generated.sources}
+        for generated, _gold, chunk_id in gold_location_pairs
     )
     gold_claim_count = sum(len(bundle.gold.claims) for bundle in bundles)
     essential_gold_claim_count = sum(
@@ -975,15 +992,15 @@ def _precalibration_metrics(
     )
     tripwire_count = sum(len(bundle.gold.must_not_claim) for bundle in bundles)
     out_of_corpus_count = sum(
-        bundle.gold.stratum is EvaluationStratum.OUT_OF_CORPUS for bundle in bundles
+        gold.stratum is EvaluationStratum.OUT_OF_CORPUS for gold in gold_items
     )
     adversarial_count = sum(
-        bundle.gold.stratum is EvaluationStratum.ADVERSARIAL_PREMISE for bundle in bundles
+        gold.stratum is EvaluationStratum.ADVERSARIAL_PREMISE for gold in gold_items
     )
     answerable_count = sum(
-        bundle.gold.expected_behavior is ExpectedBehavior.ANSWER
-        and bundle.gold.stratum is not EvaluationStratum.OUT_OF_CORPUS
-        for bundle in bundles
+        gold.expected_behavior is ExpectedBehavior.ANSWER
+        and gold.stratum is not EvaluationStratum.OUT_OF_CORPUS
+        for gold in gold_items
     )
     metrics = (
         _precalibration_metric(
@@ -1089,14 +1106,24 @@ def _precalibration_metrics(
 
 
 def _normalize_decomposition_checkpoints(
-    values: Sequence[PrivateDecompositionCheckpoint | Mapping[str, object]],
-) -> tuple[PrivateDecompositionCheckpoint, ...]:
-    return tuple(
-        value
-        if isinstance(value, PrivateDecompositionCheckpoint)
-        else PrivateDecompositionCheckpoint.model_validate(value)
-        for value in values
-    )
+    values: Sequence[PrivateDecompositionOutcome | Mapping[str, object]],
+) -> tuple[PrivateDecompositionOutcome, ...]:
+    normalized: list[PrivateDecompositionOutcome] = []
+    for value in values:
+        if isinstance(
+            value,
+            (PrivateDecompositionCheckpoint, PrivateDecompositionFailureCheckpoint),
+        ):
+            normalized.append(value)
+            continue
+        schema = value.get("schema")
+        model = (
+            PrivateDecompositionFailureCheckpoint
+            if schema == PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA
+            else PrivateDecompositionCheckpoint
+        )
+        normalized.append(model.model_validate(value))
+    return tuple(normalized)
 
 
 def build_public_precalibration_summary(
@@ -1106,7 +1133,7 @@ def build_public_precalibration_summary(
     generated_items: Sequence[PrivateGeneratedItem | Mapping[str, object]],
     decompositions: Sequence[DecomposedPilotItem | Mapping[str, object]],
     gold_items: Sequence[Mapping[str, object]],
-    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint | Mapping[str, object]],
+    decomposition_checkpoints: Sequence[PrivateDecompositionOutcome | Mapping[str, object]],
     private_artifact: PrecalibrationPrivateArtifact | Mapping[str, object],
     migration_artifact_sha256: str | None = None,
     recovered_item_ids: Sequence[str] = (),
@@ -1128,24 +1155,26 @@ def build_public_precalibration_summary(
         if isinstance(private_artifact, PrecalibrationPrivateArtifact)
         else PrecalibrationPrivateArtifact.model_validate(private_artifact)
     )
-    if not (len(generated) == len(decomposed) == len(gold) == 37):
+    if len(generated) != 37 or len(gold) != 37 or len(checkpoints) != 37:
         raise ValueError(
-            "public precalibration result requires exactly 37 generated, decomposed, and gold items"
+            "public precalibration result requires 37 generated items, gold items, and attempts"
         )
     ids = [item.item_id for item in generated]
     if len(ids) != len(set(ids)):
         raise ValueError("generated precalibration item IDs must be unique")
-    if [item.item_id for item in decomposed] != ids or [item.item_id for item in gold] != ids:
-        raise ValueError("generated, decomposition, and gold order must match exactly")
+    if [item.item_id for item in gold] != ids:
+        raise ValueError("generated and gold order must match exactly")
+    decomposition_ids = [item.item_id for item in decomposed]
+    if decomposition_ids != [item_id for item_id in ids if item_id in decomposition_ids]:
+        raise ValueError("usable decompositions must retain cohort-relative order")
     if [item.item_id for item in manifest.items] != ids:
         raise ValueError("cohort manifest item order differs from the frozen cohort")
     cohort_manifest_file_sha256 = hashlib.sha256(
         canonical_json_bytes(manifest, pretty=True)
     ).hexdigest()
-    for manifest_item, generated_item, decomposition, gold_item in zip(
+    for manifest_item, generated_item, gold_item in zip(
         manifest.items,
         generated,
-        decomposed,
         gold,
         strict=True,
     ):
@@ -1161,21 +1190,35 @@ def build_public_precalibration_summary(
             raise ValueError(
                 f"{generated_item.item_id}: cohort, generation, or gold binding changed"
             )
-        _validate_decomposition(generated_item, decomposition)
     if artifact.cohort_manifest_sha256 != cohort_manifest_file_sha256:
         raise ValueError("precalibration artifact belongs to another cohort manifest")
     if artifact.gold_set_sha256 != manifest.gold_set_sha256:
         raise ValueError("precalibration artifact belongs to another gold set")
     decomposition_prompt = _manifest_prompt(manifest, "claim_decomposition")
-    for checkpoint in checkpoints:
+    generated_by_id = {item.item_id: item for item in generated}
+    decomposition_by_id = {item.item_id: item for item in decomposed}
+    successful_ids: list[str] = []
+    for expected_item_id, checkpoint in zip(ids, checkpoints, strict=True):
         if (
-            checkpoint.cohort_manifest_sha256 != cohort_manifest_file_sha256
+            checkpoint.item_id != expected_item_id
+            or checkpoint.answer_sha256 != generated_by_id[expected_item_id].answer_sha256
+            or checkpoint.cohort_manifest_sha256 != cohort_manifest_file_sha256
             or checkpoint.prompt_version != decomposition_prompt.version
             or checkpoint.prompt_sha256 != decomposition_prompt.prompt_sha256
             or checkpoint.judge_model != manifest.judge.model_id
             or checkpoint.judge_settings != manifest.judge.settings
         ):
             raise ValueError("decomposition checkpoint differs from the cohort contract")
+        if isinstance(checkpoint, PrivateDecompositionCheckpoint):
+            decomposition = decomposition_by_id.get(checkpoint.item_id)
+            if decomposition is None or checkpoint.decomposition != decomposition:
+                raise ValueError("successful decomposition checkpoint changed")
+            _validate_decomposition(generated_by_id[checkpoint.item_id], decomposition)
+            successful_ids.append(checkpoint.item_id)
+        elif checkpoint.item_id in decomposition_by_id:
+            raise ValueError("failed decomposition checkpoint has a usable decomposition")
+    if successful_ids != decomposition_ids:
+        raise ValueError("usable decomposition set differs from successful checkpoints")
     validate_precalibration_private_artifact(
         artifact,
         cohort_manifest_sha256=cohort_manifest_file_sha256,
@@ -1189,28 +1232,26 @@ def build_public_precalibration_summary(
         migration_artifact_sha256=migration_artifact_sha256,
         recovered_item_ids=recovered_item_ids,
     )
+    gold_by_id = {item.item_id: item for item in gold}
     bundles = tuple(
         _ItemBundle(
-            generated=generated_item,
+            generated=generated_by_id[decomposition.item_id],
             decomposition=decomposition,
-            gold=gold_item,
+            gold=gold_by_id[decomposition.item_id],
             evidence={},
             rubric=None,
             manual=None,
         )
-        for generated_item, decomposition, gold_item in zip(
-            generated,
-            decomposed,
-            gold,
-            strict=True,
-        )
+        for decomposition in decomposed
     )
-    metrics = _precalibration_metrics(bundles)
+    metrics = _precalibration_metrics(
+        bundles,
+        generated_items=generated,
+        gold_items=gold,
+    )
     checkpoint_usage = tuple(checkpoint.usage_events[0] for checkpoint in checkpoints)
     recovered_ids = frozenset(artifact.recovered_item_ids)
-    exact_latency_bundles = tuple(
-        bundle for bundle in bundles if bundle.generated.item_id not in recovered_ids
-    )
+    exact_latency_items = tuple(item for item in generated if item.item_id not in recovered_ids)
     limitations = (
         PublicLimitationId.CANONICAL_MODEL_ID_MUTABILITY,
         PublicLimitationId.GENERATOR_SPREAD_UNMEASURED,
@@ -1219,6 +1260,11 @@ def build_public_precalibration_summary(
         *(
             (PublicLimitationId.TRACE_RECOVERED_ITEM_PRESENT,)
             if artifact.recovered_item_count
+            else ()
+        ),
+        *(
+            (PublicLimitationId.DECOMPOSITION_TECHNICAL_FAILURE_PRESENT,)
+            if artifact.decomposition_technical_failure_count
             else ()
         ),
     )
@@ -1243,39 +1289,42 @@ def build_public_precalibration_summary(
         gold_set_sha256=manifest.gold_set_sha256,
         migration_artifact_sha256=artifact.migration_artifact_sha256,
         recovered_item_count=artifact.recovered_item_count,
+        decomposition_attempt_count=artifact.decomposition_attempt_count,
+        usable_decomposition_count=artifact.usable_decomposition_count,
+        decomposition_technical_failure_count=(artifact.decomposition_technical_failure_count),
         limitation_ids=limitations,
         run_status=BaselineRunStatus.COMPLETE,
         generation_latency_denominator=artifact.generation_latency_denominator,
         generation_latency_observed_count=(artifact.generation_latency_observed_count),
         item_count=37,
-        source_count=sum(len(bundle.generated.sources) for bundle in bundles),
+        source_count=sum(len(item.sources) for item in generated),
         claim_count=sum(len(bundle.decomposition.claims) for bundle in bundles),
         citation_count=sum(
             audit_citations(
-                bundle.generated.answer,
-                source_count=len(bundle.generated.sources),
+                item.answer,
+                source_count=len(item.sources),
             ).source_reference_count
-            for bundle in bundles
+            for item in generated
         ),
-        completed_answer_count=sum(
-            bundle.generated.status in _SUCCESSFUL_RELEASES for bundle in bundles
-        ),
-        technical_error_count=sum(
-            bundle.generated.status in _TECHNICAL_FAILURES for bundle in bundles
-        ),
+        completed_answer_count=sum(item.status in _SUCCESSFUL_RELEASES for item in generated),
+        technical_error_count=sum(item.status in _TECHNICAL_FAILURES for item in generated),
         metrics=metrics,
         strata=tuple(
             PrecalibrationPublicStratumSummary(
                 stratum=stratum,
-                item_count=sum(bundle.gold.stratum is stratum for bundle in bundles),
+                item_count=sum(item.stratum is stratum for item in gold),
                 metrics=_precalibration_metrics(
-                    [bundle for bundle in bundles if bundle.gold.stratum is stratum]
+                    [bundle for bundle in bundles if bundle.gold.stratum is stratum],
+                    generated_items=[item for item in generated if item.stratum is stratum],
+                    gold_items=[item for item in gold if item.stratum is stratum],
                 ),
             )
             for stratum in EvaluationStratum
         ),
-        cost=_cost(bundles, (), (), checkpoint_usage),
-        latency=_latency(exact_latency_bundles),
+        cost=_cost_from_usage_events(
+            [event for item in generated for event in item.usage_events] + list(checkpoint_usage)
+        ),
+        latency=_latency_from_seconds([item.elapsed_seconds for item in exact_latency_items]),
     )
 
 
@@ -1738,6 +1787,9 @@ def render_public_precalibration_markdown(
         f"- Completed answers: {public.completed_answer_count}",
         f"- Technical errors: {public.technical_error_count}",
         f"- Trace-recovered items: {public.recovered_item_count}",
+        f"- Canonical decomposition attempts: {public.decomposition_attempt_count}",
+        f"- Usable decompositions: {public.usable_decomposition_count}",
+        (f"- Decomposition technical failures: {public.decomposition_technical_failure_count}"),
         f"- Sources: {public.source_count}",
         f"- Claims: {public.claim_count}",
         f"- Citation references: {public.citation_count}",

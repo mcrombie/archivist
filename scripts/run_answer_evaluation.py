@@ -8,7 +8,7 @@ import os
 import sqlite3
 import sys
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -30,9 +30,12 @@ from answer_evaluation import (  # noqa: E402
     AnswerEvaluationCohortManifest,
     CalibrationLabelFile,
     CohortItemBinding,
+    DecompositionFailureCode,
     DecomposedPilotItem,
     InstrumentLock,
     PrivateDecompositionCheckpoint,
+    PrivateDecompositionFailureCheckpoint,
+    PrivateDecompositionOutcome,
     PrivateGeneratedItem,
     PrivateGenerationCheckpoint,
     PrivateTraceReference,
@@ -42,12 +45,14 @@ from answer_evaluation import (  # noqa: E402
     ScoringDimension,
     ScoringMode,
     PRIVATE_DECOMPOSITION_CHECKPOINT_SCHEMA,
+    PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA,
     build_cohort_manifest,
     build_calibration_label_template,
     build_decomposed_claim,
     build_decomposed_pilot_item,
     build_instrument_lock,
     build_private_decomposition_checkpoint,
+    build_private_decomposition_failure_checkpoint,
     build_private_generated_item,
     build_private_generation_checkpoint,
     build_private_source,
@@ -57,6 +62,7 @@ from answer_evaluation import (  # noqa: E402
     validate_calibration_labels_for_judge,
     validate_cohort_manifest,
     validate_private_decomposition_checkpoint,
+    validate_private_decomposition_failure_checkpoint,
     validate_private_generation_checkpoint,
     validate_public_precalibration_summary,
     validate_public_summary,
@@ -157,6 +163,9 @@ CALIBRATION_GENERATION_SCHEMA = "archivist.answer_evaluation.calibration_generat
 CALIBRATION_DECOMPOSITION_SCHEMA = "archivist.answer_evaluation.calibration_decomposition/1"
 BASELINE_GENERATION_SCHEMA = "archivist.answer_evaluation.baseline_generation/1"
 BASELINE_DECOMPOSITION_SCHEMA = "archivist.answer_evaluation.baseline_decomposition/1"
+DECOMPOSITION_FAILURE_MIGRATION_SCHEMA = (
+    "archivist.answer_evaluation.decomposition_failure_migration/1"
+)
 DECOMPOSITION_CHECKPOINT_SCHEMA = PRIVATE_DECOMPOSITION_CHECKPOINT_SCHEMA
 CALIBRATION_REPETITIONS = 3
 FIXED_CALIBRATION_IDS = (
@@ -190,6 +199,31 @@ INTERRUPTED_GENERATED_CHECKPOINT_SHA256S = {
     "H002": "cd57cf9a2caf4e23f7b561443ba9b90a1996f565709659c6d1d4decdcf865618",
 }
 INTERRUPTED_H003_TRACE_SHA256 = "ad968ef4d972bd738a387149bf578ccc9a1b9fe0b8de8e0f4387225c73f19e20"
+DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256 = (
+    "7a9f2cdb075152b065a9a27a2f58f93017af872b35f669c3dd74af7c854d17e2"
+)
+DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256 = (
+    "7dacb84689bbfaf64f1380f22df73c7e35e070589295ca0b1b1b9f2c8c3795c8"
+)
+DECOMPOSITION_FAILURE_SOURCE_MIGRATION_FILE_SHA256 = (
+    "2f782bf74a228c4be1e468f086bbc516853f3d393531d0dac8540867b42a2c11"
+)
+DECOMPOSITION_FAILURE_SOURCE_CALIBRATION_GENERATION_SHA256 = (
+    "7503ff7d34a92e8edc4532e46198f18f834f902029596fbfcc95f9fbf5c0965c"
+)
+DECOMPOSITION_FAILURE_SOURCE_BASELINE_GENERATION_SHA256 = (
+    "7a419fff58e680b0c3d7a2801ff01285d7fa556562ca1898f29342f4b5414a0e"
+)
+DECOMPOSITION_FAILURE_SOURCE_LEDGER_SHA256 = (
+    "5538d75bb60192195116b801dd4f332dc7c989e6b4b277fac7aecf4ea89fba0b"
+)
+DECOMPOSITION_FAILURE_SOURCE_USAGE_EVENT_COUNT = 89
+DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256 = (
+    "dd6ca585e3d1f8fac6af4070187b0230115ded0482837c23b4f12beda82c1f1e"
+)
+DECOMPOSITION_FAILURE_RESPONSE_ID = "resp_064bc74500d7688e006a788c6005dc819cb99580c4bd78cc71"
+DECOMPOSITION_FAILURE_ITEM_ID = "H001"
+DECOMPOSITION_FAILURE_VALIDATION_MESSAGE = "decomposition claim text no longer matches its span"
 
 DEFAULT_GOLD = BASE_DIR / "fixtures" / "gold_set.json"
 DEFAULT_PROVENANCE = BASE_DIR / "fixtures" / "gold_set.provenance.json"
@@ -200,6 +234,12 @@ DEFAULT_CATALOG = BASE_DIR / "fixtures" / "evaluation_model_catalog.json"
 DEFAULT_CHUNKS = BASE_DIR / "output" / "chunks.json"
 DEFAULT_RUN_ROOT = BASE_DIR / "runtime" / "evaluations" / EVALUATION_ID
 DEFAULT_RECOVERY_ROOT = DEFAULT_RUN_ROOT.with_name(EVALUATION_ID + "-harness-recovery-01")
+DEFAULT_DECOMPOSITION_FAILURE_RECOVERY_ROOT = DEFAULT_RUN_ROOT.with_name(
+    EVALUATION_ID + "-harness-recovery-02"
+)
+DEFAULT_DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT = (
+    BASE_DIR / "runtime" / "evaluations" / (EVALUATION_ID + "-h001-decomposition-response.json")
+)
 DEFAULT_LABELS = DEFAULT_RUN_ROOT / "calibration-labels.json"
 PRIVATE_EVALUATION_ROOT = (BASE_DIR / "runtime" / "evaluations").resolve()
 
@@ -258,6 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "preflight",
             "recover-interrupted",
+            "recover-decomposition-failure",
             "run-37",
             "calibration-generate",
             "validate-labels",
@@ -1478,6 +1519,201 @@ def _validate_decomposition_checkpoint_payload(
     return checkpoint.decomposition
 
 
+def _validate_decomposition_failure_checkpoint_payload(
+    payload: Mapping[str, object],
+    *,
+    generated: PrivateGeneratedItem,
+    repetition: int,
+    cohort_manifest_sha256: str,
+) -> PrivateDecompositionFailureCheckpoint:
+    return validate_private_decomposition_failure_checkpoint(
+        PrivateDecompositionFailureCheckpoint.model_validate(payload),
+        cohort_manifest_sha256=cohort_manifest_sha256,
+        generated_item=generated,
+        repetition=repetition,
+        prompt_version=CLAIM_DECOMPOSITION_PROMPT_VERSION,
+        prompt_sha256=CLAIM_DECOMPOSITION_PROMPT_SHA256,
+        judge_model=JUDGE_MODEL,
+        judge_settings={
+            "reasoning_effort": JUDGE_SETTINGS.reasoning_effort,
+            "verbosity": JUDGE_SETTINGS.verbosity,
+        },
+    )
+
+
+def _validate_decomposition_outcome_checkpoint_payload(
+    payload: Mapping[str, object],
+    *,
+    generated: PrivateGeneratedItem,
+    repetition: int,
+    cohort_manifest_sha256: str,
+) -> PrivateDecompositionOutcome:
+    if payload.get("schema") == PRIVATE_DECOMPOSITION_FAILURE_CHECKPOINT_SCHEMA:
+        return _validate_decomposition_failure_checkpoint_payload(
+            payload,
+            generated=generated,
+            repetition=repetition,
+            cohort_manifest_sha256=cohort_manifest_sha256,
+        )
+    _validate_decomposition_checkpoint_payload(
+        payload,
+        generated=generated,
+        repetition=repetition,
+        cohort_manifest_sha256=cohort_manifest_sha256,
+    )
+    return PrivateDecompositionCheckpoint.model_validate(payload)
+
+
+def _snapshot_usage_int(value: object, *, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise AnswerEvaluationError(f"retrieved H001 decomposition response has invalid {field}")
+    return value
+
+
+def _prove_h001_decomposition_failure(
+    *,
+    snapshot_path: Path,
+    generated: PrivateGeneratedItem,
+    usage_db: Path,
+) -> tuple[dict[str, object | None], PrivateUsageEvent, DecomposedPilotItem]:
+    if sha256_file(snapshot_path) != DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256:
+        raise AnswerEvaluationError(
+            "H001 decomposition response snapshot is not the exact retrieved response"
+        )
+    snapshot = _load_json_object(
+        snapshot_path,
+        label="retrieved H001 decomposition response",
+    )
+    expected_fields = {
+        "schema",
+        "retrieval_kind",
+        "response_id",
+        "model",
+        "created_at",
+        "status",
+        "output_text",
+        "usage",
+    }
+    if set(snapshot) != expected_fields:
+        raise AnswerEvaluationError("retrieved H001 decomposition response fields changed")
+    if (
+        snapshot.get("schema") != "archivist.answer_evaluation.retrieved_provider_response/1"
+        or snapshot.get("retrieval_kind") != "responses.retrieve"
+        or snapshot.get("response_id") != DECOMPOSITION_FAILURE_RESPONSE_ID
+        or snapshot.get("model") != JUDGE_MODEL
+        or snapshot.get("status") != "completed"
+    ):
+        raise AnswerEvaluationError("retrieved H001 decomposition response identity changed")
+    created_at = snapshot.get("created_at")
+    if (
+        not isinstance(created_at, (int, float, str))
+        or isinstance(created_at, bool)
+        or (isinstance(created_at, float) and not math.isfinite(created_at))
+    ):
+        raise AnswerEvaluationError("retrieved H001 decomposition response created_at changed")
+    usage = snapshot.get("usage")
+    if not isinstance(usage, Mapping) or set(usage) != {
+        "input_tokens",
+        "input_tokens_details",
+        "output_tokens",
+        "output_tokens_details",
+        "total_tokens",
+    }:
+        raise AnswerEvaluationError("retrieved H001 decomposition usage fields changed")
+    input_details = usage.get("input_tokens_details")
+    output_details = usage.get("output_tokens_details")
+    if not isinstance(input_details, Mapping) or set(input_details) != {
+        "cache_write_tokens",
+        "cached_tokens",
+    }:
+        raise AnswerEvaluationError("retrieved H001 decomposition input-token details changed")
+    if not isinstance(output_details, Mapping) or set(output_details) != {"reasoning_tokens"}:
+        raise AnswerEvaluationError("retrieved H001 decomposition output-token details changed")
+    snapshot_usage = {
+        "input_tokens": _snapshot_usage_int(usage.get("input_tokens"), field="input_tokens"),
+        "cached_tokens": _snapshot_usage_int(
+            input_details.get("cached_tokens"), field="cached_tokens"
+        ),
+        "cache_write_tokens": _snapshot_usage_int(
+            input_details.get("cache_write_tokens"), field="cache_write_tokens"
+        ),
+        "output_tokens": _snapshot_usage_int(usage.get("output_tokens"), field="output_tokens"),
+        "reasoning_tokens": _snapshot_usage_int(
+            output_details.get("reasoning_tokens"), field="reasoning_tokens"
+        ),
+        "total_tokens": _snapshot_usage_int(usage.get("total_tokens"), field="total_tokens"),
+    }
+    if snapshot_usage["total_tokens"] != (
+        snapshot_usage["input_tokens"] + snapshot_usage["output_tokens"]
+    ):
+        raise AnswerEvaluationError("retrieved H001 decomposition token total is inconsistent")
+    events = _private_usage_events(
+        usage_db,
+        turn_id="H001:decomposition:1",
+        phase="decomposition",
+        provider_observations=(
+            _ProviderObservation(
+                response_id=DECOMPOSITION_FAILURE_RESPONSE_ID,
+                model=JUDGE_MODEL,
+            ),
+        ),
+    )
+    if len(events) != 1:
+        raise AnswerEvaluationError(
+            "H001 decomposition response does not bind exactly one usage event"
+        )
+    event = events[0]
+    for field, expected in snapshot_usage.items():
+        if getattr(event, field) != expected:
+            raise AnswerEvaluationError(
+                f"retrieved H001 decomposition {field} differs from tracked usage"
+            )
+    output_text = snapshot.get("output_text")
+    if not isinstance(output_text, str) or not output_text:
+        raise AnswerEvaluationError(
+            "retrieved H001 decomposition response has no structured output text"
+        )
+    try:
+        parsed = ClaimDecomposition.model_validate_json(output_text)
+    except Exception as exc:
+        raise AnswerEvaluationError(
+            "retrieved H001 decomposition output no longer matches the closed schema"
+        ) from exc
+    claims = tuple(
+        build_decomposed_claim(
+            claim_id=claim.claim_id,
+            text=claim.text,
+            char_start=claim.char_start,
+            char_end=claim.char_end,
+            cited_source_numbers=claim.cited_sources,
+        )
+        for claim in parsed.claims
+    )
+    candidate = build_decomposed_pilot_item(
+        item_id=generated.item_id,
+        answer_sha256=generated.answer_sha256,
+        claims=claims,
+    )
+    try:
+        _validate_decomposition_against_generated(candidate, generated)
+    except AnswerEvaluationError as exc:
+        if str(exc) != DECOMPOSITION_FAILURE_VALIDATION_MESSAGE:
+            raise AnswerEvaluationError(
+                "retrieved H001 decomposition failed for an unexpected reason"
+            ) from exc
+    else:
+        raise AnswerEvaluationError(
+            "retrieved H001 decomposition no longer proves the recorded validation failure"
+        )
+    provider = {
+        "id": DECOMPOSITION_FAILURE_RESPONSE_ID,
+        "model": JUDGE_MODEL,
+        "created_at": created_at,
+        "system_fingerprint": None,
+    }
+    return provider, event, candidate
+
+
 def _decomposition_checkpoint(
     *,
     args: argparse.Namespace,
@@ -1490,7 +1726,7 @@ def _decomposition_checkpoint(
     path = args.run_root / "items" / generated.item_id / f"decomposition-{repetition}.json"
     if path.is_file():
         payload = _load_json_object(path, label="decomposition checkpoint")
-        _validate_decomposition_checkpoint_payload(
+        _validate_decomposition_outcome_checkpoint_payload(
             payload,
             generated=generated,
             repetition=repetition,
@@ -2052,23 +2288,23 @@ def _load_canonical_decomposition_checkpoints(
     run_root: Path,
     generated_items: Sequence[PrivateGeneratedItem],
     cohort_manifest_sha256: str,
-) -> tuple[PrivateDecompositionCheckpoint, ...]:
-    checkpoints: list[PrivateDecompositionCheckpoint] = []
+) -> tuple[PrivateDecompositionOutcome, ...]:
+    checkpoints: list[PrivateDecompositionOutcome] = []
     for generated in generated_items:
         payload = _load_json_object(
             run_root / "items" / generated.item_id / "decomposition-1.json",
             label=f"canonical decomposition checkpoint {generated.item_id}/1",
         )
-        _validate_decomposition_checkpoint_payload(
+        checkpoint = _validate_decomposition_outcome_checkpoint_payload(
             payload,
             generated=generated,
             repetition=1,
             cohort_manifest_sha256=cohort_manifest_sha256,
         )
-        checkpoints.append(PrivateDecompositionCheckpoint.model_validate(payload))
+        checkpoints.append(checkpoint)
     if len(checkpoints) != 37:
         raise AnswerEvaluationError(
-            "immediate evaluation result requires exactly 37 canonical decompositions"
+            "immediate evaluation result requires exactly 37 canonical decomposition outcomes"
         )
     return tuple(checkpoints)
 
@@ -2084,7 +2320,7 @@ def _load_or_write_precalibration_private_artifact(
     generated_items: Sequence[PrivateGeneratedItem],
     decompositions: Sequence[DecomposedPilotItem],
     gold_items: Sequence[Mapping[str, object]],
-    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+    decomposition_checkpoints: Sequence[PrivateDecompositionOutcome],
     migration_artifact_sha256: str | None = None,
     recovered_item_ids: Sequence[str] = (),
 ) -> PrecalibrationPrivateArtifact:
@@ -2199,6 +2435,183 @@ def _emit_precalibration_results(
     return private_path, summary_path, report_path
 
 
+def _validate_decomposition_failure_migration_binding(
+    *,
+    run_root: Path,
+    context: EvaluationContext,
+    runner_sha256: str,
+    cohort_manifest: AnswerEvaluationCohortManifest,
+    cohort_manifest_sha256: str,
+    usage_db: Path,
+    expected_destination_root: Path | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    audit_path = run_root / "migration-audit.json"
+    audit = _load_json_object(audit_path, label="decomposition-failure migration audit")
+    if audit.get("schema") != DECOMPOSITION_FAILURE_MIGRATION_SCHEMA:
+        raise AnswerEvaluationError("decomposition-failure migration audit schema changed")
+    artifact_hash = audit.get("artifact_sha256")
+    if (
+        not isinstance(artifact_hash, str)
+        or canonical_json_sha256(
+            {key: value for key, value in audit.items() if key != "artifact_sha256"}
+        )
+        != artifact_hash
+    ):
+        raise AnswerEvaluationError("decomposition-failure migration audit seal changed")
+    final_root = expected_destination_root or run_root
+    expected_destination = final_root.relative_to(PRIVATE_EVALUATION_ROOT).as_posix()
+    if (
+        audit.get("source_run_root")
+        != DEFAULT_RECOVERY_ROOT.relative_to(PRIVATE_EVALUATION_ROOT).as_posix()
+        or audit.get("destination_run_root") != expected_destination
+        or audit.get("source_runner_sha256") != DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256
+        or audit.get("destination_runner_sha256") != runner_sha256
+        or audit.get("source_cohort_manifest_file_sha256")
+        != DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256
+        or audit.get("destination_cohort_manifest_file_sha256") != cohort_manifest_sha256
+        or audit.get("source_prior_migration_file_sha256")
+        != DECOMPOSITION_FAILURE_SOURCE_MIGRATION_FILE_SHA256
+        or audit.get("source_calibration_generation_file_sha256")
+        != DECOMPOSITION_FAILURE_SOURCE_CALIBRATION_GENERATION_SHA256
+        or audit.get("source_baseline_generation_file_sha256")
+        != DECOMPOSITION_FAILURE_SOURCE_BASELINE_GENERATION_SHA256
+        or audit.get("source_usage_ledger_file_sha256")
+        != DECOMPOSITION_FAILURE_SOURCE_LEDGER_SHA256
+        or audit.get("provider_calls_repeated") is not False
+        or audit.get("failed_item_id") != DECOMPOSITION_FAILURE_ITEM_ID
+        or audit.get("failure_code") != DecompositionFailureCode.EXACT_SPAN_MISMATCH.value
+        or audit.get("validation_failure_message") != DECOMPOSITION_FAILURE_VALIDATION_MESSAGE
+        or audit.get("inherited_trace_recovered_item_ids") != ["H003"]
+        or audit.get("full_turn_latency_recovered") is not False
+    ):
+        raise AnswerEvaluationError("decomposition-failure migration identity changed")
+    if sha256_file(run_root / "cohort-manifest.json") != cohort_manifest_sha256:
+        raise AnswerEvaluationError("decomposition-failure cohort file changed")
+    if audit.get("destination_calibration_generation_file_sha256") != sha256_file(
+        run_root / "calibration-generated.json"
+    ) or audit.get("destination_baseline_generation_file_sha256") != sha256_file(
+        run_root / "baseline-generated.json"
+    ):
+        raise AnswerEvaluationError("decomposition-failure generation artifact changed")
+
+    preserved = audit.get("logical_usage_events")
+    if (
+        not isinstance(preserved, list)
+        or len(preserved) != DECOMPOSITION_FAILURE_SOURCE_USAGE_EVENT_COUNT
+        or audit.get("logical_usage_event_count") != len(preserved)
+    ):
+        raise AnswerEvaluationError(
+            "decomposition-failure migration has no exact logical usage prefix"
+        )
+    current = list(_logical_usage_bindings(usage_db))
+    if current[: len(preserved)] != preserved:
+        raise AnswerEvaluationError("decomposition-failure preserved logical usage prefix changed")
+    response_ids = [str(event.get("response_id")) for event in current]
+    if len(response_ids) != len(set(response_ids)):
+        raise AnswerEvaluationError("evaluation usage contains duplicate provider response IDs")
+
+    raw_bindings = audit.get("generated_item_bindings")
+    raw_traces = audit.get("trace_bindings")
+    if not isinstance(raw_bindings, list) or len(raw_bindings) != 37:
+        raise AnswerEvaluationError(
+            "decomposition-failure migration has no 37-item checkpoint binding"
+        )
+    if not isinstance(raw_traces, list) or len(raw_traces) != 37:
+        raise AnswerEvaluationError("decomposition-failure migration has no 37-item trace binding")
+    bindings_by_id = {
+        str(binding.get("item_id")): binding
+        for binding in raw_bindings
+        if isinstance(binding, Mapping)
+    }
+    traces_by_id = {
+        str(binding.get("item_id")): binding
+        for binding in raw_traces
+        if isinstance(binding, Mapping)
+    }
+    if len(bindings_by_id) != 37 or len(traces_by_id) != 37:
+        raise AnswerEvaluationError(
+            "decomposition-failure generated or trace bindings are not unique"
+        )
+    cohort_by_id = {item.item_id: item for item in cohort_manifest.items}
+    gold_by_id = {
+        _required_string(item, "id", label="gold item"): item for item in context.gold_items
+    }
+    generated_by_id: dict[str, PrivateGeneratedItem] = {}
+    for item_id in gold_by_id:
+        generated = _load_generated_checkpoint(
+            run_root / "items" / item_id / "generated.json",
+            item=gold_by_id[item_id],
+            cohort_manifest_sha256=cohort_manifest_sha256,
+            cohort_item=cohort_by_id[item_id],
+        )
+        generated_by_id[item_id] = generated
+        binding = bindings_by_id.get(item_id)
+        if (
+            not isinstance(binding, Mapping)
+            or binding.get("unchanged_generated_item_sha256") != generated.item_sha256
+            or binding.get("destination_checkpoint_file_sha256")
+            != sha256_file(run_root / "items" / item_id / "generated.json")
+        ):
+            raise AnswerEvaluationError(
+                f"{item_id} decomposition-failure checkpoint binding changed"
+            )
+        trace_binding = traces_by_id.get(item_id)
+        if len(generated.trace_references) != 1 or not isinstance(trace_binding, Mapping):
+            raise AnswerEvaluationError(f"{item_id} decomposition-failure trace binding changed")
+        trace = generated.trace_references[0]
+        trace_path = run_root / "items" / item_id / trace.path
+        if (
+            trace_binding.get("path") != trace_path.relative_to(run_root).as_posix()
+            or trace_binding.get("sha256") != trace.sha256
+            or sha256_file(trace_path) != trace.sha256
+        ):
+            raise AnswerEvaluationError(f"{item_id} decomposition-failure trace archive changed")
+
+    snapshot_relative = audit.get("provider_response_snapshot_path")
+    if snapshot_relative != "provider-responses/H001-decomposition-1.json":
+        raise AnswerEvaluationError("decomposition-failure snapshot path changed")
+    snapshot_path = run_root / str(snapshot_relative)
+    if (
+        sha256_file(snapshot_path) != DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256
+        or audit.get("provider_response_snapshot_sha256")
+        != DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256
+    ):
+        raise AnswerEvaluationError("decomposition-failure response snapshot changed")
+    provider, usage_event, candidate = _prove_h001_decomposition_failure(
+        snapshot_path=snapshot_path,
+        generated=generated_by_id[DECOMPOSITION_FAILURE_ITEM_ID],
+        usage_db=usage_db,
+    )
+    if (
+        audit.get("failed_candidate_decomposition_sha256") != candidate.decomposition_sha256
+        or provider.get("id") != DECOMPOSITION_FAILURE_RESPONSE_ID
+        or usage_event.response_id != DECOMPOSITION_FAILURE_RESPONSE_ID
+    ):
+        raise AnswerEvaluationError("decomposition-failure proof binding changed")
+    checkpoint_path = run_root / "items" / DECOMPOSITION_FAILURE_ITEM_ID / "decomposition-1.json"
+    payload = _load_json_object(
+        checkpoint_path,
+        label="H001 decomposition technical-failure checkpoint",
+    )
+    failure = _validate_decomposition_failure_checkpoint_payload(
+        payload,
+        generated=generated_by_id[DECOMPOSITION_FAILURE_ITEM_ID],
+        repetition=1,
+        cohort_manifest_sha256=cohort_manifest_sha256,
+    )
+    if (
+        failure.failure_code is not DecompositionFailureCode.EXACT_SPAN_MISMATCH
+        or failure.provider_response_snapshot_sha256
+        != DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256
+        or failure.provider.response_id != DECOMPOSITION_FAILURE_RESPONSE_ID
+        or failure.usage_events[0] != usage_event
+        or audit.get("failure_checkpoint_sha256") != failure.checkpoint_sha256
+        or audit.get("failure_checkpoint_file_sha256") != sha256_file(checkpoint_path)
+    ):
+        raise AnswerEvaluationError("H001 decomposition technical-failure checkpoint changed")
+    return sha256_file(audit_path), ("H003",)
+
+
 def _validated_recovery_reporting_binding(
     *,
     run_root: Path,
@@ -2212,6 +2625,15 @@ def _validated_recovery_reporting_binding(
     if not audit_path.is_file():
         return None, ()
     audit = _load_json_object(audit_path, label="interrupted-run migration audit")
+    if audit.get("schema") == DECOMPOSITION_FAILURE_MIGRATION_SCHEMA:
+        return _validate_decomposition_failure_migration_binding(
+            run_root=run_root,
+            context=context,
+            runner_sha256=runner_sha256,
+            cohort_manifest=cohort_manifest,
+            cohort_manifest_sha256=cohort_manifest_sha256,
+            usage_db=usage_db,
+        )
     if audit.get("schema") != "archivist.answer_evaluation.interrupted_run_migration/1":
         raise AnswerEvaluationError("interrupted-run migration audit schema changed")
     artifact_hash = audit.get("artifact_sha256")
@@ -2495,6 +2917,377 @@ def _recover_interrupted_run(args: argparse.Namespace, context: EvaluationContex
     )
 
 
+def _recover_decomposition_failure(
+    args: argparse.Namespace,
+    context: EvaluationContext,
+) -> None:
+    requested_source = _require_private_run_root(args.source_run_root)
+    source_root = (
+        DEFAULT_RECOVERY_ROOT.resolve()
+        if requested_source == DEFAULT_RUN_ROOT.resolve()
+        else requested_source
+    )
+    if source_root != DEFAULT_RECOVERY_ROOT.resolve():
+        raise AnswerEvaluationError(
+            "decomposition-failure recovery is restricted to the exact recovery-01 source"
+        )
+    requested_destination = _require_private_run_root(args.run_root)
+    destination_root = (
+        DEFAULT_DECOMPOSITION_FAILURE_RECOVERY_ROOT.resolve()
+        if requested_destination == DEFAULT_RUN_ROOT.resolve()
+        else requested_destination
+    )
+    destination_root = _require_private_run_root(destination_root)
+    if destination_root == source_root:
+        raise AnswerEvaluationError(
+            "decomposition-failure recovery requires a distinct destination run root"
+        )
+
+    runner_sha256 = sha256_file(Path(__file__))
+    expected_manifest = _expected_cohort_manifest(context, runner_sha256=runner_sha256)
+    audit_path = destination_root / "migration-audit.json"
+    if audit_path.is_file():
+        manifest, manifest_sha = _load_or_write_cohort_manifest(
+            destination_root / "cohort-manifest.json",
+            context=context,
+            runner_sha256=runner_sha256,
+        )
+        _validate_decomposition_failure_migration_binding(
+            run_root=destination_root,
+            context=context,
+            runner_sha256=runner_sha256,
+            cohort_manifest=manifest,
+            cohort_manifest_sha256=manifest_sha,
+            usage_db=destination_root / "full-evaluation-usage.sqlite3",
+        )
+        print(f"VALIDATED EXISTING DECOMPOSITION-FAILURE RECOVERY: {destination_root}")
+        print(
+            "Resume with: python scripts/run_answer_evaluation.py run-37 "
+            f"--run-root {destination_root} --authorize-openai-full-evaluation "
+            "--max-cost-usd 20"
+        )
+        return
+    if destination_root.exists():
+        raise AnswerEvaluationError(
+            "decomposition-failure recovery destination exists without a complete audit"
+        )
+
+    source_manifest_path = source_root / "cohort-manifest.json"
+    source_prior_migration_path = source_root / "migration-audit.json"
+    source_calibration_path = source_root / "calibration-generated.json"
+    source_baseline_path = source_root / "baseline-generated.json"
+    source_usage_path = source_root / "full-evaluation-usage.sqlite3"
+    exact_source_hashes = {
+        source_manifest_path: DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256,
+        source_prior_migration_path: DECOMPOSITION_FAILURE_SOURCE_MIGRATION_FILE_SHA256,
+        source_calibration_path: DECOMPOSITION_FAILURE_SOURCE_CALIBRATION_GENERATION_SHA256,
+        source_baseline_path: DECOMPOSITION_FAILURE_SOURCE_BASELINE_GENERATION_SHA256,
+        source_usage_path: DECOMPOSITION_FAILURE_SOURCE_LEDGER_SHA256,
+    }
+    for path, expected_hash in exact_source_hashes.items():
+        if sha256_file(path) != expected_hash:
+            raise AnswerEvaluationError(
+                f"decomposition-failure source artifact changed: {path.name}"
+            )
+    if sha256_file(DEFAULT_DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT) != (
+        DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256
+    ):
+        raise AnswerEvaluationError("H001 decomposition response snapshot changed")
+    if list((source_root / "items").glob("H*/decomposition-*.json")):
+        raise AnswerEvaluationError(
+            "decomposition-failure source unexpectedly contains a decomposition checkpoint"
+        )
+    source_bindings = list(_logical_usage_bindings(source_usage_path))
+    if len(source_bindings) != DECOMPOSITION_FAILURE_SOURCE_USAGE_EVENT_COUNT:
+        raise AnswerEvaluationError("decomposition-failure source usage count changed")
+    expected_turn_ids = tuple(
+        sorted(
+            [
+                *(_required_string(item, "id", label="gold item") for item in context.gold_items),
+                "H001:decomposition:1",
+            ]
+        )
+    )
+    if _usage_turn_ids(source_usage_path) != expected_turn_ids:
+        raise AnswerEvaluationError(
+            "decomposition-failure source usage contains an unknown or missing turn"
+        )
+
+    source_manifest = AnswerEvaluationCohortManifest.model_validate(
+        _load_json_object(source_manifest_path, label="decomposition-failure source cohort")
+    )
+    validate_cohort_manifest(
+        source_manifest,
+        expected=_expected_cohort_manifest(
+            context,
+            runner_sha256=DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256,
+        ),
+    )
+    _validated_recovery_reporting_binding(
+        run_root=source_root,
+        context=context,
+        runner_sha256=DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256,
+        cohort_manifest=source_manifest,
+        cohort_manifest_sha256=DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256,
+        usage_db=source_usage_path,
+    )
+    source_calibration_payload = _load_json_object(
+        source_calibration_path,
+        label="decomposition-failure source calibration generation",
+    )
+    source_run_identity = source_calibration_payload.get("run_identity")
+    if not isinstance(source_run_identity, Mapping):
+        raise AnswerEvaluationError("decomposition-failure source calibration has no run identity")
+    source_context = replace(context, run_identity=dict(source_run_identity))
+    source_args = argparse.Namespace(run_root=source_root)
+    source_calibration, source_calibration_sha = _validate_generation_artifact(
+        source_calibration_path,
+        args=source_args,
+        context=source_context,
+        runner_sha256=DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256,
+        cohort_manifest=source_manifest,
+        cohort_manifest_sha256=DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256,
+    )
+    source_generated, source_baseline_sha = _validate_baseline_generation_artifact(
+        source_baseline_path,
+        args=source_args,
+        context=source_context,
+        runner_sha256=DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256,
+        cohort_manifest=source_manifest,
+        cohort_manifest_sha256=DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256,
+        calibration_generation_sha256=source_calibration_sha,
+    )
+    if len(source_generated) != 37 or len(source_calibration) != 10:
+        raise AnswerEvaluationError("decomposition-failure source generation cardinality changed")
+
+    staging_root = destination_root.with_name(f".{destination_root.name}.staging-{uuid4().hex}")
+    staging_root.mkdir(parents=True, exist_ok=False)
+    usage_destination = staging_root / "full-evaluation-usage.sqlite3"
+    _archive_bytes_no_overwrite(source=source_usage_path, destination=usage_destination)
+    if sha256_file(usage_destination) != DECOMPOSITION_FAILURE_SOURCE_LEDGER_SHA256:
+        raise AnswerEvaluationError("decomposition-failure usage ledger copy changed bytes")
+    write_json_atomic_no_overwrite(staging_root / "cohort-manifest.json", expected_manifest)
+    new_manifest_sha256 = sha256_file(staging_root / "cohort-manifest.json")
+    source_by_id = {item.item_id: item for item in source_manifest.items}
+    destination_by_id = {item.item_id: item for item in expected_manifest.items}
+    checkpoint_bindings: list[dict[str, object]] = []
+    trace_bindings: list[dict[str, object]] = []
+    rebound_generated: list[PrivateGeneratedItem] = []
+    for generated in source_generated:
+        item_id = generated.item_id
+        source_checkpoint_path = source_root / "items" / item_id / "generated.json"
+        source_checkpoint_sha = sha256_file(source_checkpoint_path)
+        source_checkpoint = validate_private_generation_checkpoint(
+            PrivateGenerationCheckpoint.model_validate(
+                _load_json_object(
+                    source_checkpoint_path,
+                    label=f"{item_id} decomposition-failure source checkpoint",
+                )
+            ),
+            cohort_manifest_sha256=DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256,
+            expected_item=source_by_id[item_id],
+        )
+        if source_checkpoint.item != generated:
+            raise AnswerEvaluationError(
+                f"{item_id} source checkpoint differs from baseline generation artifact"
+            )
+        destination_item_root = staging_root / "items" / item_id
+        for trace in generated.trace_references:
+            source_trace = source_root / "items" / item_id / trace.path
+            destination_trace = destination_item_root / trace.path
+            if sha256_file(source_trace) != trace.sha256:
+                raise AnswerEvaluationError(f"{item_id} source trace changed")
+            _archive_bytes_no_overwrite(
+                source=source_trace,
+                destination=destination_trace,
+            )
+            trace_bindings.append(
+                {
+                    "item_id": item_id,
+                    "path": destination_trace.relative_to(staging_root).as_posix(),
+                    "sha256": trace.sha256,
+                }
+            )
+        rebound = build_private_generation_checkpoint(
+            cohort_manifest_sha256=new_manifest_sha256,
+            item=generated,
+        )
+        destination_checkpoint = destination_item_root / "generated.json"
+        write_json_atomic_no_overwrite(destination_checkpoint, rebound)
+        validate_private_generation_checkpoint(
+            rebound,
+            cohort_manifest_sha256=new_manifest_sha256,
+            expected_item=destination_by_id[item_id],
+        )
+        checkpoint_bindings.append(
+            {
+                "item_id": item_id,
+                "unchanged_generated_item_sha256": generated.item_sha256,
+                "source_checkpoint_file_sha256": source_checkpoint_sha,
+                "destination_checkpoint_file_sha256": sha256_file(destination_checkpoint),
+            }
+        )
+        rebound_generated.append(generated)
+    if len(checkpoint_bindings) != 37 or len(trace_bindings) != 37:
+        raise AnswerEvaluationError(
+            "decomposition-failure migration requires 37 checkpoints and 37 traces"
+        )
+
+    new_calibration_payload = dict(source_calibration_payload)
+    new_calibration_payload["runner_sha256"] = runner_sha256
+    new_calibration_payload["cohort_manifest_sha256"] = new_manifest_sha256
+    new_calibration_payload["run_identity"] = dict(context.run_identity)
+    new_calibration_path = staging_root / "calibration-generated.json"
+    write_json_atomic_no_overwrite(new_calibration_path, new_calibration_payload)
+    migration_args = argparse.Namespace(run_root=staging_root)
+    new_calibration, new_calibration_sha = _validate_generation_artifact(
+        new_calibration_path,
+        args=migration_args,
+        context=context,
+        runner_sha256=runner_sha256,
+        cohort_manifest=expected_manifest,
+        cohort_manifest_sha256=new_manifest_sha256,
+    )
+    if tuple(item.item_sha256 for item in new_calibration) != tuple(
+        item.item_sha256 for item in source_calibration
+    ):
+        raise AnswerEvaluationError("decomposition-failure calibration generated items changed")
+    new_baseline_path = staging_root / "baseline-generated.json"
+    baseline_fields = _baseline_generation_fields(
+        context=context,
+        runner_sha256=runner_sha256,
+        cohort_manifest_sha256=new_manifest_sha256,
+        calibration_generation_sha256=new_calibration_sha,
+        generated_items=rebound_generated,
+    )
+    write_json_atomic_no_overwrite(new_baseline_path, _sealed_artifact(baseline_fields))
+    validated_generated, _new_baseline_sha = _validate_baseline_generation_artifact(
+        new_baseline_path,
+        args=migration_args,
+        context=context,
+        runner_sha256=runner_sha256,
+        cohort_manifest=expected_manifest,
+        cohort_manifest_sha256=new_manifest_sha256,
+        calibration_generation_sha256=new_calibration_sha,
+    )
+    if tuple(item.item_sha256 for item in validated_generated) != tuple(
+        item.item_sha256 for item in source_generated
+    ):
+        raise AnswerEvaluationError("decomposition-failure generated items changed")
+
+    snapshot_destination = staging_root / "provider-responses" / "H001-decomposition-1.json"
+    _archive_bytes_no_overwrite(
+        source=DEFAULT_DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT,
+        destination=snapshot_destination,
+    )
+    h001 = next(
+        item for item in validated_generated if item.item_id == DECOMPOSITION_FAILURE_ITEM_ID
+    )
+    provider, usage_event, failed_candidate = _prove_h001_decomposition_failure(
+        snapshot_path=snapshot_destination,
+        generated=h001,
+        usage_db=usage_destination,
+    )
+    failure_checkpoint = build_private_decomposition_failure_checkpoint(
+        cohort_manifest_sha256=new_manifest_sha256,
+        item_id=h001.item_id,
+        answer_sha256=h001.answer_sha256,
+        repetition=1,
+        prompt_version=CLAIM_DECOMPOSITION_PROMPT_VERSION,
+        prompt_sha256=CLAIM_DECOMPOSITION_PROMPT_SHA256,
+        judge_model=JUDGE_MODEL,
+        judge_settings={
+            "reasoning_effort": JUDGE_SETTINGS.reasoning_effort,
+            "verbosity": JUDGE_SETTINGS.verbosity,
+        },
+        provider=provider,
+        usage_event=usage_event,
+        failure_code=DecompositionFailureCode.EXACT_SPAN_MISMATCH,
+        provider_response_snapshot_sha256=(DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256),
+    )
+    failure_checkpoint_path = (
+        staging_root / "items" / DECOMPOSITION_FAILURE_ITEM_ID / "decomposition-1.json"
+    )
+    write_json_atomic_no_overwrite(failure_checkpoint_path, failure_checkpoint)
+    _validate_decomposition_failure_checkpoint_payload(
+        failure_checkpoint.model_dump(mode="json"),
+        generated=h001,
+        repetition=1,
+        cohort_manifest_sha256=new_manifest_sha256,
+    )
+
+    audit = _sealed_artifact(
+        {
+            "schema": DECOMPOSITION_FAILURE_MIGRATION_SCHEMA,
+            "source_run_root": source_root.relative_to(PRIVATE_EVALUATION_ROOT).as_posix(),
+            "destination_run_root": destination_root.relative_to(
+                PRIVATE_EVALUATION_ROOT
+            ).as_posix(),
+            "source_runner_sha256": DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256,
+            "destination_runner_sha256": runner_sha256,
+            "source_cohort_manifest_file_sha256": (DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256),
+            "destination_cohort_manifest_file_sha256": new_manifest_sha256,
+            "source_prior_migration_file_sha256": (
+                DECOMPOSITION_FAILURE_SOURCE_MIGRATION_FILE_SHA256
+            ),
+            "source_calibration_generation_file_sha256": source_calibration_sha,
+            "destination_calibration_generation_file_sha256": sha256_file(new_calibration_path),
+            "source_baseline_generation_file_sha256": source_baseline_sha,
+            "destination_baseline_generation_file_sha256": sha256_file(new_baseline_path),
+            "source_usage_ledger_file_sha256": DECOMPOSITION_FAILURE_SOURCE_LEDGER_SHA256,
+            "destination_initial_usage_ledger_file_sha256": sha256_file(usage_destination),
+            "logical_usage_event_count": len(source_bindings),
+            "logical_usage_events": source_bindings,
+            "generated_item_bindings": checkpoint_bindings,
+            "trace_bindings": trace_bindings,
+            "failed_item_id": DECOMPOSITION_FAILURE_ITEM_ID,
+            "failure_code": DecompositionFailureCode.EXACT_SPAN_MISMATCH.value,
+            "validation_failure_message": DECOMPOSITION_FAILURE_VALIDATION_MESSAGE,
+            "failed_candidate_decomposition_sha256": (failed_candidate.decomposition_sha256),
+            "failure_checkpoint_sha256": failure_checkpoint.checkpoint_sha256,
+            "failure_checkpoint_file_sha256": sha256_file(failure_checkpoint_path),
+            "provider_response_snapshot_path": (
+                snapshot_destination.relative_to(staging_root).as_posix()
+            ),
+            "provider_response_snapshot_sha256": (DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256),
+            "provider_response_id": DECOMPOSITION_FAILURE_RESPONSE_ID,
+            "inherited_trace_recovered_item_ids": ["H003"],
+            "full_turn_latency_recovered": False,
+            "provider_calls_repeated": False,
+        }
+    )
+    write_json_atomic_no_overwrite(staging_root / "migration-audit.json", audit)
+    for path, expected_hash in exact_source_hashes.items():
+        if sha256_file(path) != expected_hash:
+            raise AnswerEvaluationError(
+                f"decomposition-failure source changed during migration: {path.name}"
+            )
+    if list(_logical_usage_bindings(source_usage_path)) != source_bindings:
+        raise AnswerEvaluationError(
+            "decomposition-failure source logical usage changed during migration"
+        )
+    _validate_decomposition_failure_migration_binding(
+        run_root=staging_root,
+        expected_destination_root=destination_root,
+        context=context,
+        runner_sha256=runner_sha256,
+        cohort_manifest=expected_manifest,
+        cohort_manifest_sha256=new_manifest_sha256,
+        usage_db=usage_destination,
+    )
+    os.replace(staging_root, destination_root)
+    print(f"OFFLINE DECOMPOSITION FAILURE RECOVERED WITHOUT PROVIDER CALLS: {destination_root}")
+    print(
+        "H001 remains a sealed technical-failure outcome; no decomposition was fabricated "
+        "and its paid call will not be repeated."
+    )
+    print(
+        "Resume with: python scripts/run_answer_evaluation.py run-37 "
+        f"--run-root {destination_root} --authorize-openai-full-evaluation "
+        "--max-cost-usd 20"
+    )
+
+
 def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
     maximum = _require_paid_authorization(
         args,
@@ -2676,13 +3469,14 @@ def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
                     cohort_manifest_sha256=cohort_manifest_sha256,
                 )
                 _require_cost_within_cap(ensure_ledger(), maximum)
-                canonical = _validate_decomposition_checkpoint_payload(
+                outcome = _validate_decomposition_outcome_checkpoint_payload(
                     checkpoint_payload,
                     generated=generated,
                     repetition=1,
                     cohort_manifest_sha256=cohort_manifest_sha256,
                 )
-                canonical_decompositions.append(canonical)
+                if isinstance(outcome, PrivateDecompositionCheckpoint):
+                    canonical_decompositions.append(outcome.decomposition)
                 canonical_records.append(
                     {
                         "item_id": generated.item_id,
@@ -2715,7 +3509,8 @@ def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
 
     spent = _ledger_total_cost(ensure_ledger())
     print(f"Preserved all 37 generated answers: {generation_path}")
-    print(f"Preserved all 37 canonical decompositions: {decomposition_path}")
+    print(f"Preserved all 37 canonical decomposition outcomes: {decomposition_path}")
+    print(f"Usable canonical decompositions: {len(decompositions)}/37")
     print(f"Preserved immediate private result binding: {private_result}")
     print(f"Preserved immediate public mechanical summary: {public_summary}")
     print(f"Preserved immediate public mechanical report: {public_report}")
@@ -3799,7 +4594,7 @@ def _validate_baseline_decomposition_artifact(
         raw_checkpoint = raw_record.get("checkpoint")
         if not isinstance(raw_checkpoint, Mapping):
             raise AnswerEvaluationError("baseline decomposition checkpoint is malformed")
-        decomposition = _validate_decomposition_checkpoint_payload(
+        outcome = _validate_decomposition_outcome_checkpoint_payload(
             raw_checkpoint,
             generated=generated,
             repetition=1,
@@ -3813,10 +4608,10 @@ def _validate_baseline_decomposition_artifact(
             raise AnswerEvaluationError(
                 f"decomposition checkpoint {generated.item_id}/1 differs from baseline"
             )
-        checkpoint = PrivateDecompositionCheckpoint.model_validate(raw_checkpoint)
         records.append(dict(raw_record))
-        decompositions.append(decomposition)
-        usage_events.append(checkpoint.usage_event)
+        if isinstance(outcome, PrivateDecompositionCheckpoint):
+            decompositions.append(outcome.decomposition)
+        usage_events.append(outcome.usage_events[0])
     fields = _baseline_decomposition_fields(
         context=context,
         generation_artifact_sha256=generation_artifact_sha256,
@@ -3881,7 +4676,9 @@ def _calibration_decomposition_usage_events(
                 repetition=repetition,
                 cohort_manifest_sha256=cohort_manifest_sha256,
             )
-            events.append(PrivateDecompositionCheckpoint.model_validate(raw_checkpoint).usage_event)
+            events.append(
+                PrivateDecompositionCheckpoint.model_validate(raw_checkpoint).usage_events[0]
+            )
     return tuple(events)
 
 
@@ -4239,7 +5036,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                 )
                 checkpoint = PrivateDecompositionCheckpoint.model_validate(checkpoint_payload)
                 decomposition_list.append(decomposition)
-                decomposition_event_list.append(checkpoint.usage_event)
+                decomposition_event_list.append(checkpoint.usage_events[0])
                 records.append(
                     {
                         "item_id": generated.item_id,
@@ -4882,6 +5679,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_preflight(context)
         elif args.command == "recover-interrupted":
             _recover_interrupted_run(args, context)
+        elif args.command == "recover-decomposition-failure":
+            _recover_decomposition_failure(args, context)
         elif args.command == "run-37":
             _run_37(args, context)
         elif args.command == "calibration-generate":

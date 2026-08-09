@@ -19,12 +19,14 @@ from answer_evaluation import (
     build_decomposed_pilot_item,
     build_instrument_lock,
     build_private_decomposition_checkpoint,
+    build_private_decomposition_failure_checkpoint,
     build_private_generated_item,
     build_private_source,
     build_private_usage_event,
     canonical_json_bytes,
     canonical_json_sha256,
     sha256_text,
+    validate_private_decomposition_failure_checkpoint,
 )
 from evaluation_judge import ItemRubricInput
 from evaluation_reporting import (
@@ -571,6 +573,43 @@ def _canonical_decomposition_checkpoints(fixture: _Fixture) -> tuple[Any, ...]:
     return tuple(checkpoints)
 
 
+def _decomposition_failure_inputs(
+    fixture: _Fixture,
+    *,
+    item_id: str,
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    decompositions = tuple(
+        decomposition
+        for decomposition in fixture.decompositions
+        if decomposition.item_id != item_id
+    )
+    outcomes = list(_canonical_decomposition_checkpoints(fixture))
+    index = next(
+        index for index, generated in enumerate(fixture.generated) if generated.item_id == item_id
+    )
+    generated = fixture.generated[index]
+    response_id = f"resp_precal_decomposition_{item_id}"
+    outcomes[index] = build_private_decomposition_failure_checkpoint(
+        cohort_manifest_sha256=COHORT_SHA,
+        item_id=item_id,
+        answer_sha256=generated.answer_sha256,
+        repetition=1,
+        prompt_version="evaluation-claim-decomposition-v2",
+        prompt_sha256=DECOMPOSITION_PROMPT_SHA,
+        judge_model=JUDGE_MODEL,
+        judge_settings=JUDGE_SETTINGS,
+        provider=_provider(response_id),
+        usage_event=_usage(
+            response_id=response_id,
+            operation="eval_claim_decomposition",
+            model=JUDGE_MODEL,
+        ),
+        failure_code="exact_span_mismatch",
+        provider_response_snapshot_sha256="a" * 64,
+    )
+    return decompositions, tuple(outcomes)
+
+
 def _precalibration_summary(
     fixture: _Fixture,
     *,
@@ -972,7 +1011,13 @@ def test_precalibration_result_is_complete_mechanical_text_free_and_semantic_pen
     assert summary.claim_count == 34
     assert summary.citation_count == 33
     assert summary.private_artifact_sha256 == artifact.artifact_sha256
-    assert artifact.decomposition_checkpoint_count == 37
+    assert artifact.decomposition_attempt_count == 37
+    assert artifact.usable_decomposition_count == 37
+    assert artifact.decomposition_technical_failure_count == 0
+    assert artifact.decomposition_technical_failure_item_ids == ()
+    assert summary.decomposition_attempt_count == 37
+    assert summary.usable_decomposition_count == 37
+    assert summary.decomposition_technical_failure_count == 0
     assert summary.cost.priced_event_count == 74
     assert summary.cost.unpriced_event_count == 0
     assert summary.cost.estimated_cost_usd == pytest.approx(0.074)
@@ -1072,6 +1117,117 @@ def test_precalibration_markdown_is_deterministic_and_text_free() -> None:
             invented,
             public_summary_json_sha256=public_json_sha256,
         )
+
+
+def test_precalibration_seals_one_decomposition_failure_without_losing_answer() -> None:
+    fixture = _make_fixture()
+    decompositions, outcomes = _decomposition_failure_inputs(fixture, item_id="H001")
+    failure = validate_private_decomposition_failure_checkpoint(
+        outcomes[0],
+        cohort_manifest_sha256=COHORT_SHA,
+        generated_item=fixture.generated[0],
+        repetition=1,
+        prompt_version="evaluation-claim-decomposition-v2",
+        prompt_sha256=DECOMPOSITION_PROMPT_SHA,
+        judge_model=JUDGE_MODEL,
+        judge_settings=JUDGE_SETTINGS,
+    )
+    assert failure.failure_code.value == "exact_span_mismatch"
+    with pytest.raises(ValueError, match="prompt_sha256 changed"):
+        validate_private_decomposition_failure_checkpoint(
+            failure,
+            cohort_manifest_sha256=COHORT_SHA,
+            generated_item=fixture.generated[0],
+            repetition=1,
+            prompt_version="evaluation-claim-decomposition-v2",
+            prompt_sha256="f" * 64,
+            judge_model=JUDGE_MODEL,
+            judge_settings=JUDGE_SETTINGS,
+        )
+    artifact = build_precalibration_private_artifact(
+        cohort_manifest_sha256=COHORT_SHA,
+        generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+        decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+        gold_set_sha256=GOLD_SHA,
+        generated_items=fixture.generated,
+        decompositions=decompositions,
+        gold_items=fixture.gold,
+        decomposition_checkpoints=outcomes,
+        migration_artifact_sha256="4" * 64,
+        recovered_item_ids=("H003",),
+    )
+    summary = build_public_precalibration_summary(
+        candidate_id="evidence-planned-v26",
+        cohort_manifest=COHORT_MANIFEST,
+        generated_items=fixture.generated,
+        decompositions=decompositions,
+        gold_items=fixture.gold,
+        decomposition_checkpoints=outcomes,
+        private_artifact=artifact,
+        migration_artifact_sha256="4" * 64,
+        recovered_item_ids=("H003",),
+    )
+
+    assert artifact.decomposition_attempt_count == 37
+    assert artifact.usable_decomposition_count == 36
+    assert artifact.decomposition_technical_failure_count == 1
+    assert artifact.decomposition_technical_failure_item_ids == ("H001",)
+    assert summary.item_count == 37
+    assert summary.completed_answer_count == 37
+    assert summary.decomposition_attempt_count == 37
+    assert summary.usable_decomposition_count == 36
+    assert summary.decomposition_technical_failure_count == 1
+    assert summary.claim_count == 32
+    assert summary.citation_count == 33
+    assert summary.cost.priced_event_count == 74
+    assert summary.generation_latency_denominator == 37
+    assert summary.generation_latency_observed_count == 36
+    assert PublicLimitationId.DECOMPOSITION_TECHNICAL_FAILURE_PRESENT in (summary.limitation_ids)
+    assert PublicLimitationId.TRACE_RECOVERED_ITEM_PRESENT in summary.limitation_ids
+
+    assert _precal_metric(summary, PrecalibrationMetricId.CITATION_RESOLVABILITY).denominator == 33
+    completeness = _precal_metric(summary, PrecalibrationMetricId.CITATION_COMPLETENESS)
+    assert (completeness.numerator, completeness.denominator) == (31, 32)
+    cited_location = _precal_metric(
+        summary,
+        PrecalibrationMetricId.CITED_SOURCE_GOLD_LOCATION_MATCH,
+    )
+    assert (cited_location.numerator, cited_location.denominator) == (31, 31)
+    assert (
+        _precal_metric(
+            summary,
+            PrecalibrationMetricId.GOLD_LOCATION_RETRIEVAL_COVERAGE,
+        ).denominator
+        == 33
+    )
+    assert _precal_metric(summary, PrecalibrationMetricId.FAITHFULNESS_SUPPORTED).denominator == 32
+    assert _precal_metric(summary, PrecalibrationMetricId.GOLD_CLAIM_RECALL).denominator == 32
+    assert (
+        _precal_metric(summary, PrecalibrationMetricId.MUST_NOT_CLAIM_VIOLATION).denominator == 36
+    )
+    assert _precal_metric(summary, PrecalibrationMetricId.FALSE_ABSTENTION).denominator == 33
+
+    public_json = json.dumps(summary.model_dump(mode="json"), sort_keys=True)
+    assert "H001" not in public_json
+    assert "exact_span_mismatch" not in public_json
+    assert PRIVATE_SENTINEL not in public_json
+    injected = summary.model_dump(mode="json")
+    injected["decomposition_failure_code"] = "exact_span_mismatch"
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        render_public_precalibration_markdown(
+            injected,
+            public_summary_json_sha256="b" * 64,
+        )
+    markdown = render_public_precalibration_markdown(
+        summary,
+        public_summary_json_sha256=canonical_json_sha256(summary.model_dump(mode="json")),
+    )
+    assert "Canonical decomposition attempts: 37" in markdown
+    assert "Usable decompositions: 36" in markdown
+    assert "Decomposition technical failures: 1" in markdown
+    assert "`canonical_decomposition_technical_failure_present`" in markdown
+    assert "Exact latency observations: 36" in markdown
+    assert PRIVATE_SENTINEL not in markdown
 
 
 def test_precalibration_trace_recovery_is_bound_and_excluded_from_latency() -> None:

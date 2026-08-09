@@ -82,6 +82,32 @@ item and migration artifact. Resume then continues at the first genuinely missin
 operation under the original cumulative spending ceiling. This narrow recovery changes no V26
 behavior and repeats no provider call.
 
+**Technical incident clarification, 2026-08-09 (canonical-decomposition validation failure):**
+the recovered cohort subsequently sealed all 37 frozen V26 answers before canonical
+decomposition began. Terra's first canonical call, for H001, completed and was charged exactly
+once, but multiple returned `text` values did not equal the frozen answer substrings named by their
+`char_span` offsets. Strict §5.1 validation therefore rejected the output and stopped the harness.
+This is a measurement-instrument failure: it does not change, repair, or invalidate the sealed H001
+candidate answer. The failed output may not be span-corrected, text-corrected, parsed leniently,
+retried, or promoted as H001's canonical decomposition.
+
+The provider response was retrieved afterward by exact response ID through `responses.retrieve`,
+which made no model call, and was preserved as a private hash-bound snapshot. Honest continuation
+requires a second provider-free sibling migration that leaves the answer-complete source root
+immutable and binds the 37 answer checkpoints, cohort manifest, usage ledger, H001 response ID and
+usage, retrieved-response snapshot, answer hash, prompt hash, validation failure, source and
+destination runner hashes, and migration audit. H001 is represented by one explicit technical
+decomposition failure. Resume skips H001 and makes exactly one canonical Terra call for each of the
+remaining 36 cohort items under the original cumulative `$20.00` ceiling. The resulting baseline
+must close at exactly 37 sealed answers, 37 attempted canonical decomposition calls, 36 valid
+canonical decomposition checkpoints, one technical decomposition failure, and unique response
+IDs. Decomposition-dependent measures use the 36 valid decompositions and disclose that exact
+denominator; they may not impute zero H001 claims or treat the instrument failure as a candidate
+answer failure. Mechanical answer-level measures that do not require decomposition remain defined
+over their original eligible denominators. No calibration, semantic verdict, owner-labeling step,
+V26 change, prompt change, model change, retrieval change, corpus change, gold change, or answer
+regeneration is permitted during this continuation.
+
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. The complete
 37-question generation/decomposition baseline runs before either section is calibrated. Sections 6
 and 7 lock later after the calibration work answers what only runs can answer; until then, affected
@@ -592,18 +618,21 @@ An answer is decomposed by a pinned decomposition prompt against the pinned **ju
 - `char_span` — offsets into the answer, so decomposition is auditable
 
 **Decomposition stability is itself measured.** Every one of the 37 preserved answers first receives
-one canonical decomposition in the uninterrupted baseline pass. Later, repeat decomposition
-**three times total** on a fixed 10-answer subset and report the variance in claim count per answer.
-If decomposition is unstable, every number built on it is unstable, and that must be visible rather
-than assumed away. The repeated calibration decompositions may not delay or replace preservation
-of the 37 canonical decompositions, and the check is repeated whenever the judge snapshot or
+exactly one canonical decomposition attempt in the uninterrupted baseline pass. A response becomes
+the canonical decomposition only after its claim text, character spans, answer binding, and source
+indices validate exactly. A failed attempt remains an explicit technical failure and is neither
+repaired nor treated as an empty claim list. Later, repeat decomposition **three times total** on a
+fixed 10-answer subset and report the variance in claim count per answer. If decomposition is
+unstable, every number built on it is unstable, and that must be visible rather than assumed away.
+The repeated calibration decompositions may not delay or replace preservation of the 37 canonical
+attempts and every valid output, and the check is repeated whenever the judge snapshot or
 decomposition prompt changes.
 
 The fixed later-calibration subset is selected before generation: every `out_of_corpus` and
 `adversarial_premise` item, plus the lexicographically first item from each of the other four
-strata. This produces exactly ten items spanning all six strata. All 37 canonical decompositions
-run before human calibration labels exist because they define the units to preserve and later
-score; **human labels must be
+strata. This produces exactly ten items spanning all six strata. All 37 canonical attempts run
+before human calibration labels exist because the valid outputs define the units to preserve and
+later score; a technical failure remains missing with no silent substitute. **Human labels must be
 hash-bound and complete before any faithfulness, source-support, rubric-match, or response-behavior
 verdict from the judge is revealed.**
 
@@ -667,8 +696,9 @@ Whether the answer is *complete* with respect to the gold claims — that is cov
 ## 6. Faithfulness — PREDECLARED; CALIBRATION FOLLOWS THE BASELINE
 
 **This section is not locked for automatic semantic scoring.** That does not block a run of record:
-generate and canonically decompose all 37 answers first, preserve and report every immediately
-computable result, and mark the semantic fields defined here `pending`. Calibration and owner
+generate all 37 answers and make one strict canonical-decomposition attempt for each, preserve and
+report every valid output and technical failure, and mark the semantic fields defined here
+`pending`. Calibration and owner
 ratification may later qualify an automatic judge or select manual scoring, producing a separate
 hash-bound supplement to the preserved baseline.
 
@@ -735,9 +765,11 @@ reported and it is never described as a general hallucination rate.
   eligible for automatic scoring of the complete preserved 37-item cohort; an ineligible
   dimension is scored manually or reported pending and does not alter the baseline
 
-**Settling procedure:** after all 37 answers and canonical decompositions are generated and
-hash-locked, hand-label every decomposed claim and item behavior in the predeclared ten-item subset;
-then run the semantic judge and the repeated decomposition check.
+**Settling procedure:** after all 37 answers, all 37 canonical attempts, every valid decomposition,
+and every technical failure are hash-locked, hand-label every available decomposed claim and item
+behavior in the predeclared ten-item subset; then run the semantic judge and the repeated
+decomposition check. A missing decomposition caused by a preserved technical failure remains
+pending and receives no substitute item.
 The automatic judge is eligible only when exact human agreement is at least `0.80` and repeat
 agreement on the fixed repeat sample is at least `0.90`. The owner then ratifies the scoring lock.
 Failure selects `manual` scoring for the affected dimensions or leaves them `pending`; it cannot
@@ -813,8 +845,9 @@ snapshot, 481 of 910 chunks are retrieval-eligible and seven documents are skipp
 
 The first 37-item answer-quality run is a descriptive baseline, not a pass/fail release exam. No
 numeric envelope will be reverse-engineered from its result, and the absence of an envelope cannot
-delay it. All 37 answers and canonical decompositions are generated and preserved before
-calibration. Calibration later locks **how** semantic dimensions are scored; it does not establish
+delay it. All 37 answers and all 37 canonical-decomposition attempts are preserved before
+calibration; valid decompositions and technical failures are reported separately with exact
+denominators. Calibration later locks **how** semantic dimensions are scored; it does not establish
 a quality threshold the candidate must clear and is not a prerequisite for the initial result.
 
 Any later before/after improvement experiment must declare its comparison statistic, minimum

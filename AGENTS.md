@@ -23,21 +23,27 @@ annotations are formally locked against frozen V26 candidate
 `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`. H020, H039, and H040 are intentionally absent.
 Historical Claude drafting is disclosed retrospectively under provenance v4; the repository must
 not claim that it was prospectively blinded or fully hash-captured. The predeclared retrieval-only
-benchmark is complete. The authorized answer-quality run has begun: H001 and H002 are sealed, and
-H003 made one embedding call before a trace-backed deterministic `clean_abstention` with no answer-
-generation call. The harness rejected that valid early-release shape and stopped fail-closed. It
-made no retry; cumulative recorded spend is approximately `$0.2957022`. H003 remains evaluation
-behavior and is likely a false abstention, not permission to repair V26. The next sequence is fixed:
-perform the exact provider-free sibling-root migration, then resume the missing operations for the
-same 37 frozen V26 answers under the existing cumulative cap. Do not insert a
-calibration stop, owner-labeling step, semantic-judge gate, RAG, prompt, retrieval, model, or UI
-repair inside that pass. Publish immediately computable baseline results with semantic fields
-explicitly pending; calibration is later, lower-priority scoring-instrument work and may only add a
-hash-bound supplement. The original partial root is immutable. The recovery sibling preserves the
-H001/H002 inner payloads unchanged, marks H003 as trace-recovered, and publicly reports a 36/37
-generation-latency denominator. Once an H-item is run, never change the gold set or V26 in response
-to its result; any later system change opens a new cohort rather than repairing this baseline in
-place.
+benchmark is complete. The authorized answer-quality run has now sealed all 37 V26 answers. The
+earlier H003 local-release incident remains preserved through its audited sibling migration, with
+no provider replay and a 36/37 generation-latency denominator. Canonical claim decomposition then
+began. The first and only Terra call for H001 completed, but its returned claim text did not exactly
+match its declared character spans in the frozen answer. Strict validation stopped fail-closed.
+The response was retrieved by provider response ID without another model call and preserved in a
+private hash-bound snapshot; its spans were not corrected, the response was not retried, and no
+canonical H001 decomposition was manufactured. Cumulative recorded spend at this second stop is
+`$5.42436647`.
+
+The next sequence is fixed: leave the answer-complete recovery root immutable, create an audited
+provider-free sibling migration that records H001 as one technical decomposition failure, and call
+Terra exactly once for each of the remaining 36 answers under the same cumulative `$20.00` cap.
+The baseline must report 37 sealed answers, 37 attempted canonical decomposition calls, 36 usable
+decompositions, and one technical decomposition failure. Decomposition-dependent denominators
+exclude H001 with the exclusion disclosed; they must not impute zero claims or score the failure as
+an answer-quality defect. Do not insert a calibration stop, owner-labeling step, semantic-judge
+gate, RAG, prompt, retrieval, model, UI, gold, or corpus repair inside that pass. This is recovery
+of a measurement-instrument failure, not repair of the candidate answer. Once an H-item is run,
+never change the gold set or V26 in response to its result; any later system change opens a new
+cohort rather than repairing this baseline in place.
 
 The product has nevertheless moved beyond the original two-phase description. Reader-facing
 appearance and interpretive modes are implemented and public; they are no longer forbidden work.
