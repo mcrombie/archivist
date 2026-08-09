@@ -65,7 +65,8 @@ Symptom: the frozen V26 baseline completed with exactly 37 answer-only `gpt-5.6-
 decomposition attempts, but only ten produced usable canonical decompositions. Twenty-six completed
 outputs failed the exact answer-substring/character-span invariant and H029 produced one terminal
 `incomplete_response`. The claim-derived portion of the report therefore contains 41 claims from
-only ten usable outcomes. These 27 technical outcomes are measurement-instrument failures; they do
+ten schema-valid outcomes, but two are zero-claim generation-error records: those claims cover only
+eight substantive releases. These 27 technical outcomes are measurement-instrument failures; they do
 not establish that V26 failed 27 answers.
 Cause: the pinned Terra decomposition instrument did not reliably satisfy its exact-span output
 contract. The harness correctly refused to realign spans, parse nonexistent output, fabricate empty

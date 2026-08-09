@@ -35,12 +35,14 @@ measurement failures—26 `exact_span_mismatch` and H029's one `incomplete_respo
 failures of the Terra decomposition instrument, not findings that V26 failed 27 answers.
 
 The completed baseline contains 198 sources, 251 citation references, and 41 claims from the ten
-usable decompositions. Its immediately available mechanical results are citation resolvability
+schema-valid decompositions. Two of those ten belong to generation-error artifacts and contain zero
+claims, so claim-derived metrics cover eight substantive releases. Its immediately available
+mechanical results are citation resolvability
 251/251 (1.000), malformed citations 0/250, citation completeness 34/41 (0.829), cited-source to
 gold-location match 23/34 (0.676), and gold-location retrieval coverage 75/428 (0.175). Answer-level
 citation syntax measures retain their full applicable denominators; claim- and decomposition-
-dependent measures use only the ten usable decompositions. Semantic answer-quality measures remain
-pending by design, so this is a complete descriptive baseline rather than a complete semantic
+dependent measures use only those eight substantively decomposed releases. Semantic answer-quality
+measures remain pending by design, so this is a complete descriptive baseline rather than a complete semantic
 scorecard. The closed ledger has 125 priced events, zero unpriced events, and `$7.02298147` in
 recorded spend, safely below the authorized `$20.00` cap.
 

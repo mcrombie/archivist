@@ -133,7 +133,8 @@ are failures of the measurement instrument, not 27 failed V26 answers.
 The report covers 198 sources and 251 citation references. Available mechanical results are
 citation resolvability 251/251 (1.000), malformed citations 0/250, citation completeness 34/41
 (0.829), cited-source to gold-location match 23/34 (0.676), and gold-location retrieval coverage
-75/428 (0.175). The 41-claim denominator comes only from the ten usable decompositions; answer-level
+75/428 (0.175). Two of the ten schema-valid decompositions are zero-claim generation-error records,
+so the 41-claim denominator covers eight substantive releases; answer-level
 citation syntax measures retain all applicable answers. Semantic measures remain pending by design.
 The exact ledger records 125 priced events, zero unpriced events, and `$7.02298147` total spend.
 This is a complete descriptive baseline, but the 27/37 instrument-failure rate sharply limits
@@ -210,8 +211,8 @@ top of the list.
    Semantic fields remain explicitly pending rather than blocking publication.
 9. **Next — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26 of
    37 outputs violated exact-span validation, then prospectively declare and test a revised
-   instrument without changing or rerunning this baseline. The current ten usable decompositions
-   are enough to preserve limited mechanical measurements, not enough to support strong
+   instrument without changing or rerunning this baseline. The eight substantively decomposed
+   releases are enough to preserve limited mechanical measurements, not enough to support strong
    claim-derived conclusions.
 10. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
    subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the

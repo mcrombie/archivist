@@ -359,8 +359,9 @@ uv run python scripts/run_answer_evaluation.py run-37 `
   --max-cost-usd 20
 ```
 
-The resulting report covers 198 sources, 251 citation references, and 41 claims from the ten usable
-decompositions:
+The resulting report covers 198 sources, 251 citation references, and 41 claims from ten
+schema-valid decompositions. Two of those ten are zero-claim records attached to the two generation-
+error artifacts, so the 41 claim-derived observations cover eight substantive releases:
 
 | Mechanical metric | Result |
 |---|---:|
@@ -371,8 +372,8 @@ decompositions:
 | Gold-location retrieval coverage | 75/428 (0.175) |
 
 Answer-level citation syntax metrics retain all applicable answer/citation observations;
-claim- and decomposition-dependent metrics use only the ten usable outcomes. The high 27/37
-decomposition-instrument failure rate therefore sharply limits interpretation of the latter. The
+claim- and decomposition-dependent metrics use only the eight substantively decomposed releases.
+The high 27/37 decomposition-instrument failure rate therefore sharply limits interpretation of the latter. The
 generation pipeline has 36 exact latency observations in its 37-item scope because of the disclosed
 H003 recovery: 1,817.196 seconds total, 50.478-second mean, 47.928-second p50, 91.695-second p95,
 and 108.685-second maximum. The closed ledger contains 125 priced events, zero unpriced events, and
@@ -387,6 +388,9 @@ generation, decomposition, and migration artifact hashes are respectively
 `61a58409b18025487d04f68ef2057005e757a91eb32223e71455e97cd4f13083`,
 `1d7c759821e8a71fad70886878be06cb81b731f320a9cc30bf5d6f51b3d77d7b`, and
 `41b5f8f5ca98753ee3297a4dc9a9285d51ddcaf9cec4adc1f8067245c444f8a8`.
+The sealed run identity records harness commit
+`c7cd58bcdc0963e13b4626854cdfc3e786be5b72`; exact replay validation should use that producing
+commit in a detached worktree rather than the later documentation-only head.
 
 This is a complete **descriptive baseline**, not yet a full semantic answer-quality scorecard.
 Faithfulness, abstention, gold-claim recall, and related semantic measures remain pending by design.

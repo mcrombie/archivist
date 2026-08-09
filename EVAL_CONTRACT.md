@@ -153,12 +153,14 @@ and one `incomplete_response`. The latter 27 describe the decomposition instrume
 candidate answers.
 
 The initial descriptive report contains 198 sources, 251 citation references, and 41 claims from
-the ten usable decompositions. Citation resolvability is 251/251 (1.000), malformed citations are
+ten schema-valid decompositions. Two of those ten are zero-claim records attached to generation-
+error artifacts, so the 41 claim-derived observations cover eight substantive releases. Citation
+resolvability is 251/251 (1.000), malformed citations are
 0/250, citation completeness is 34/41 (0.829), cited-source to gold-location match is 23/34
 (0.676), and gold-location retrieval coverage is 75/428 (0.175). Answer-level citation syntax
 measures retain every applicable answer/citation denominator; claim- and decomposition-dependent
-measures use only the ten usable outcomes. The high 27/37 instrument-failure rate materially limits
-interpretation of those claim-derived results. Semantic fields remain pending by design and may be
+measures use only the eight substantively decomposed releases. The high 27/37 instrument-failure
+rate materially limits interpretation of those claim-derived results. Semantic fields remain pending by design and may be
 added only as a separate supplement. Completion cost is `$7.02298147` across 125 priced events and
 zero unpriced events, below the authorized `$20.00` cap. Generation latency has 36 exact
 observations in the 37-item scope: 1,817.196 seconds total, 50.478-second mean, 47.928-second p50,
@@ -172,7 +174,9 @@ migration are bound respectively by SHA-256
 `1d7c759821e8a71fad70886878be06cb81b731f320a9cc30bf5d6f51b3d77d7b`, and
 `41b5f8f5ca98753ee3297a4dc9a9285d51ddcaf9cec4adc1f8067245c444f8a8`.
 This completes the pre-calibration baseline; it does not settle or retroactively calibrate the
-semantic scoring sections.
+semantic scoring sections. Its sealed run identity records harness commit
+`c7cd58bcdc0963e13b4626854cdfc3e786be5b72`; later documentation commits do not alter that identity,
+and exact replay validation must use the producing commit (for example in a detached worktree).
 
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. The complete
 37-question generation/decomposition baseline is complete before either section is calibrated.
