@@ -226,10 +226,11 @@ uv run python scripts/run_retrieval_benchmark.py run `
 
 The private, gitignored embedding cache is reused by both arms, every value of `k`, and the five
 retrieval repetitions; later offline reproductions do not make another API call. The complete
-answer-quality cohort has now sealed all 37 frozen V26 answers. Canonical decomposition is still in
-progress after its first two calls exposed strict span/text validation failures. There is no ten-item
-calibration stop and no semantic quality gate before completion. The initial baseline report
-includes every immediately computable result—cohort identity, costs, latency, response status,
+answer-quality cohort has now sealed all 37 frozen V26 answers. Canonical decomposition has made
+28 of its 37 one-attempt-only calls: 27 have sealed outcomes, while H029 returned the provider status
+`incomplete` with no output and awaits provider-free recovery as a technical outcome. There is no
+ten-item calibration stop and no semantic quality gate before completion. The initial baseline
+report includes every immediately computable result—cohort identity, costs, latency, response status,
 mechanical citation measures, and technical decomposition failures—with semantic fields explicitly
 pending where a calibrated judgment is required.
 
@@ -318,12 +319,45 @@ uv run python scripts/run_answer_evaluation.py run-37 `
 
 A completed parseable result that fails one of the four predeclared local claim-ID/span invariants
 is sealed immediately as a technical measurement failure and is never corrected or retried; the
-run continues to the next untouched item. Every other unexpected condition stops fail-closed. The
+run continues to the next untouched item. An exact provider status of `incomplete` is likewise
+sealed as a technical measurement failure and may continue after its one attempt is durably bound.
+An unknown status, provider or network failure, returned-model mismatch, missing parse, or unavailable
+citation number still stops fail-closed. The
 completed baseline reports **37 answers and exactly 37 canonical decomposition attempts,
 partitioned into `N` usable decompositions and `37 - N` technical failures**. Failures are excluded
 only from decomposition-dependent denominators and are never imputed as empty claim sets or scored
 as candidate answer failures. This recovery repairs the measurement harness, not the frozen
 answers.
+
+Recovery-03 made exactly one `gpt-5.6-terra` call for H029 before stopping on provider status
+`incomplete`. Response `resp_04c5799aa1b46c76006a78a779f5e8819f84b2edbf39a416c5` contained no
+output and recorded 923 input tokens, 8,000 output tokens—all 8,000 reasoning tokens—and 8,923 total
+tokens, costing `$0.1223075`. The existing response was retrieved afterward by exact ID without a
+model call and preserved at
+`runtime/evaluations/v26-held-out-answer-quality-2026-08-07-h029-decomposition-response.json`, with
+SHA-256 `84503bc1cd861bafc09cb33bbe32f581ee56a63ed15c66e8d5ccb7562d1d8617`. It was not retried,
+parsed from nonexistent output, or attributed to the candidate answer. Recovery-03 is now immutable
+at 116 priced provider events, `$6.80227647` cumulative recorded spend, and zero unpriced events.
+
+Create recovery-04 from recovery-03 with the exact provider-free command below. The migration seals
+H029 as technical `incomplete_response`, preserves all 37 answers and the 27 earlier decomposition
+outcomes, and changes no candidate, prompt, gold, or provider evidence:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py recover-decomposition-failure `
+  --source-run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-03 `
+  --run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04
+```
+
+Resume only the nine untouched items, H030–H038, against recovery-04 under the original cumulative
+cap:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py run-37 `
+  --run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04 `
+  --authorize-openai-full-evaluation `
+  --max-cost-usd 20
+```
 
 Faithfulness and abstention calibration is later, lower-priority scoring-instrument work. Only
 after all 37 answers, all 37 canonical attempts, every usable decomposition, and all technical
@@ -331,9 +365,10 @@ failures are preserved may the predeclared subset receive human labels, repeated
 and semantic judge checks. That work may add a hash-bound scoring supplement; it cannot delay,
 overwrite, or suppress the baseline. Five-repeat generator noise measurement is likewise required
 before a later comparative or significance claim, not before this first descriptive result. The
-answer-quality run has recorded `$5.46195397`; completion of the remaining 35 decomposition calls
-is pending. V26 remains frozen, and the interactive application and earlier practical evaluations
-remain development evidence only.
+answer-quality run has recorded `$6.80227647`; completion of the remaining nine decomposition calls
+is pending. Answer-level metrics retain `n = 37`; only decomposition-dependent metrics use the
+eventual `N` usable outcomes. V26 remains frozen, and the interactive application and earlier
+practical evaluations remain development evidence only.
 
 ## Documentation map
 

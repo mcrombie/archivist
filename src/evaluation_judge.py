@@ -291,6 +291,15 @@ class ClaimDecompositionValidationError(EvaluationJudgeParseError):
         super().__init__(self.failure_message)
 
 
+class EvaluationJudgeIncompleteResponseError(EvaluationJudgeError):
+    """One tracked provider call ended incomplete and must not be retried."""
+
+    def __init__(self, *, provider: ProviderResponseMetadata) -> None:
+        self.provider = provider
+        self.status = "incomplete"
+        super().__init__("evaluation judge provider response was incomplete")
+
+
 class EvaluationJudgeModelMismatchError(EvaluationJudgeError):
     """The provider did not report the exact model that was requested."""
 
@@ -355,11 +364,6 @@ def _call_judge(
         max_output_tokens=max_output_tokens,
         **JUDGE_SETTINGS.responses_create_kwargs(),
     )
-    response_status = _response_value(response, "status")
-    if response_status != "completed":
-        raise EvaluationJudgeParseError(
-            f"{operation} returned provider status {response_status!r}, not 'completed'"
-        )
     provider = _metadata(response)
     if provider.model != JUDGE_MODEL:
         # The tracked call has already retained provider usage before this
@@ -367,6 +371,15 @@ def _call_judge(
         raise EvaluationJudgeModelMismatchError(
             requested=JUDGE_MODEL,
             actual=provider.model,
+        )
+
+    raw_response_status = _response_value(response, "status")
+    response_status = None if raw_response_status is None else str(raw_response_status)
+    if response_status == "incomplete":
+        raise EvaluationJudgeIncompleteResponseError(provider=provider)
+    if response_status != "completed":
+        raise EvaluationJudgeParseError(
+            f"{operation} returned provider status {response_status!r}, not 'completed'"
         )
 
     parsed_value = _response_value(response, "output_parsed")

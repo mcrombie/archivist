@@ -59,6 +59,31 @@ before calibration.
 
 ---
 
+## [2026-08-09] Terra returned H029 incomplete without output
+Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
+Symptom: recovery-03 preserved all 37 frozen V26 answers and reached 28 of the 37 contracted
+answer-only decomposition attempts. H029's one `gpt-5.6-terra` call returned provider status
+`incomplete` with an empty output. It used 923 input tokens, 8,000 output tokens, all 8,000 as
+reasoning tokens, and 8,923 total tokens; the call cost `$0.1223075`. The harness stopped before
+H030. The exact ledger now contains 116 priced events, `$6.80227647` cumulative spend, and zero
+unpriced events.
+Cause: a terminal provider-declared incomplete response from the measurement instrument, not a
+candidate-answer defect and not parseable decomposition evidence. Retrying H029 would violate the
+one-attempt contract, while treating its empty output as a claim set would fabricate a reading. The
+existing response `resp_04c5799aa1b46c76006a78a779f5e8819f84b2edbf39a416c5` was retrieved by
+exact ID without another model call and preserved privately with SHA-256
+`84503bc1cd861bafc09cb33bbe32f581ee56a63ed15c66e8d5ccb7562d1d8617`.
+Resolution and verification: preserve recovery-03 unchanged and use one provider-free recovery-04
+migration to seal H029 as technical `incomplete_response`, alongside the 27 earlier decomposition
+outcomes. Resume only H030–H038's nine untouched Terra calls under the same cumulative `$20.00`
+cap. A future exact `incomplete` status may be sealed and followed by the next untouched item;
+unknown statuses, provider or network failures, model-identity mismatch, missing parse, and an
+unavailable citation number still stop fail-closed. Final answer-level metrics retain all 37 items;
+decomposition-dependent metrics use only `N` usable decompositions and disclose `37 - N` technical
+failures. This prospectively narrows the earlier H002 rule that treated every incomplete status as
+an unrecoverable stop. It authorizes no retry, parsing fabrication, calibration, semantic judgment,
+gold change, or candidate repair.
+
 ## [2026-08-09] Terra repeated the exact-span instrument failure for H002
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
 Symptom: after provider-free recovery-02 sealed H001 as a technical decomposition failure, the

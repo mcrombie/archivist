@@ -3816,6 +3816,47 @@ Useful blog lesson: a held-out evaluation measures two systems at once—the can
 ruler. When the ruler produces an invalid reading, preserving the failed reading and narrowing the
 denominator is more honest than polishing it into data after the fact.
 
+### 2026-08-09 - When the ruler ran out of thought before it produced a reading
+
+- Recovery-03 advanced canonical decomposition from H003 through H028, then made H029's one
+  contracted `gpt-5.6-terra` call. The provider returned `incomplete` with no output after using
+  923 input tokens and 8,000 output tokens, all categorized as reasoning. The call cost
+  `$0.1223075`.
+  At the stop, all 37 V26 answers remained sealed, 28 decomposition attempts had occurred, and 27
+  decomposition outcomes were already preserved.
+- The empty result was not retried and was not turned into a fictional zero-claim answer. The
+  existing response `resp_04c5799aa1b46c76006a78a779f5e8819f84b2edbf39a416c5` was retrieved by
+  exact ID without a model call and stored in a private snapshot whose SHA-256 is
+  `84503bc1cd861bafc09cb33bbe32f581ee56a63ed15c66e8d5ccb7562d1d8617`. The ledger now closes at
+  116 priced events, `$6.80227647`, and zero unpriced events.
+- Recovery-03 remains immutable. A provider-free migration to recovery-04 will record H029 as an
+  `incomplete_response` measurement failure, preserve the 27 prior outcomes, and resume only the
+  nine never-attempted items H030–H038. No V26 behavior, question, gold annotation, prompt, model,
+  answer, or citation is being changed.
+- The intended migration and resume commands are:
+
+  ```powershell
+  uv run python scripts/run_answer_evaluation.py recover-decomposition-failure `
+    --source-run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-03 `
+    --run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04
+
+  uv run python scripts/run_answer_evaluation.py run-37 `
+    --run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04 `
+    --authorize-openai-full-evaluation `
+    --max-cost-usd 20
+  ```
+
+- The continuation rule stays narrow. Another exact provider status of `incomplete` can be sealed
+  once as a technical outcome and followed by the next untouched item. Unknown statuses, provider
+  or network failures, a model mismatch, a missing parse, or an unavailable citation number still
+  stop fail-closed. Answer-level measurements remain `n = 37`; only claim-decomposition metrics use
+  the eventual `N` usable readings. Calibration and semantic judging remain later work and cannot
+  delay this baseline.
+
+Useful blog lesson: sometimes the model being evaluated has already answered, while a second model
+used as a ruler consumes its entire allowance and says nothing. The honest result is neither a
+retry nor a blank score—it is a disclosed instrument failure, preserved exactly once.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:

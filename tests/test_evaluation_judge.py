@@ -18,6 +18,7 @@ from evaluation_judge import (
     ClaimDecompositionValidationError,
     ClaimEvidenceVerdict,
     EvaluationJudgeModelMismatchError,
+    EvaluationJudgeIncompleteResponseError,
     EvaluationJudgeParseError,
     ItemRubricInput,
     ItemRubricVerdict,
@@ -320,7 +321,7 @@ def test_missing_parsed_output_raises_after_exactly_one_call(monkeypatch):
     assert len(calls) == 1
 
 
-def test_incomplete_response_with_parsed_payload_stops_before_local_validation(monkeypatch):
+def test_unknown_response_status_with_parsed_payload_is_not_continuable(monkeypatch):
     calls: list[dict] = []
     parsed = ClaimDecomposition(claims=[])
 
@@ -335,6 +336,29 @@ def test_incomplete_response_with_parsed_payload_stops_before_local_validation(m
 
     assert len(calls) == 1
     assert not isinstance(exc_info.value, ClaimDecompositionValidationError)
+    assert not isinstance(exc_info.value, EvaluationJudgeIncompleteResponseError)
+
+
+def test_incomplete_response_preserves_metadata_without_fabricating_parsed_output(monkeypatch):
+    calls: list[dict] = []
+    response = provider_response(None, status="incomplete")
+
+    def fake_parse(client, *, operation, **request):
+        calls.append({"client": client, "operation": operation, **request})
+        return response
+
+    monkeypatch.setattr(evaluation_judge, "tracked_responses_parse", fake_parse)
+
+    with pytest.raises(EvaluationJudgeIncompleteResponseError) as exc_info:
+        decompose_answer_claims(object(), answer="A factual answer.")
+
+    assert len(calls) == 1
+    assert exc_info.value.status == "incomplete"
+    assert exc_info.value.provider.id == response.id
+    assert exc_info.value.provider.model == response.model
+    assert exc_info.value.provider.created_at == response.created_at
+    assert exc_info.value.provider.system_fingerprint == response.system_fingerprint
+    assert not hasattr(exc_info.value, "parsed")
 
 
 def test_decomposition_preserves_completed_response_when_exact_span_fails(monkeypatch):

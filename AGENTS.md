@@ -28,26 +28,29 @@ earlier H003 local-release incident remains preserved through its audited siblin
 no provider replay and a 36/37 generation-latency denominator. Canonical claim decomposition then
 began. H001 and H002 each received exactly one Terra call; both completed with parseable output
 whose claim text did not exactly match its declared character spans in the corresponding frozen
-answer. Strict validation stopped fail-closed after each call. Both responses were retrieved by
-provider response ID without another model call and preserved in private hash-bound snapshots;
-their spans were not corrected, neither response was retried, and no canonical decomposition was
-manufactured. Recovery-02 now contains 90 provider events and cumulative recorded spend of
-`$5.46195397`.
+answer. Recovery-03 preserved them as no-retry technical failures and advanced through 27 sealed
+outcomes. H029 then received one Terra call that ended with provider status `incomplete`, no output
+text, and all 8,000 output tokens reported as reasoning. It is priced but cannot be parsed as a
+canonical decomposition. No item has been retried or repaired. Recovery-03 now contains 116
+provider events and cumulative recorded spend of `$6.80227647`.
 
-The next sequence is fixed: leave recovery-02 immutable, create an audited provider-free
-recovery-03 sibling that records H001 and H002 as technical decomposition failures, and call Terra
-exactly once for each of the remaining 35 answers under the same cumulative `$20.00` cap. A
-completed, parseable Terra result that fails one of the four closed local invariants—sequential
-claim IDs, in-bounds spans, ordered non-overlapping spans, or exact answer substrings—is sealed as
-a technical measurement failure and the run continues without correction or retry. Provider,
-network, model-identity, missing-parse, or unknown failures still stop fail-closed. Final closure is
-37 sealed answers and exactly 37 Terra attempts, partitioned into `N` usable decompositions and
-`37 - N` disclosed technical failures. Decomposition-dependent denominators use only `N`; failures
-are never imputed as zero claims or scored as answer-quality defects. Do not insert a calibration
-stop, owner-labeling step, semantic-judge gate, RAG, prompt, retrieval, model, UI, gold, or corpus
-repair inside that pass. This is recovery of a measurement-instrument failure, not repair of the
-candidate answers. Once an H-item is run, never change the gold set or V26 in response to its
-result; any later system change opens a new cohort rather than repairing this baseline in place.
+The next sequence is fixed: leave recovery-03 immutable, create an audited provider-free
+recovery-04 sibling that preserves all 27 prior outcomes and records H029 as the technical outcome
+`incomplete_response`, then call Terra exactly once for H030–H038—the nine untouched answers—under
+the same cumulative `$20.00` cap. A completed, parseable Terra result that fails one of the four
+closed local invariants—sequential claim IDs, in-bounds spans, ordered non-overlapping spans, or
+exact answer substrings—is sealed as a technical measurement failure and the run continues without
+correction or retry. A terminal `incomplete` response is likewise sealed, without parsing or
+fabricating claims. Provider/network errors, model-identity mismatch, missing parsed output from a
+nominally completed response, unavailable citation numbers, or unknown statuses still stop
+fail-closed. Final closure is 37 sealed answers and exactly 37 Terra attempts, partitioned into `N`
+usable decompositions and `37 - N` disclosed technical failures. Decomposition-dependent
+denominators use only `N`; failures are never imputed as zero claims or scored as answer-quality
+defects. Do not insert a calibration stop, owner-labeling step, semantic-judge gate, RAG, prompt,
+retrieval, model, UI, gold, or corpus repair inside that pass. This is recovery of a measurement-
+instrument failure, not repair of the candidate answers. Once an H-item is run, never change the
+gold set or V26 in response to its result; any later system change opens a new cohort rather than
+repairing this baseline in place.
 
 The product has nevertheless moved beyond the original two-phase description. Reader-facing
 appearance and interpretive modes are implemented and public; they are no longer forbidden work.

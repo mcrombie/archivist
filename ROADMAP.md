@@ -116,6 +116,19 @@ and exactly 37 attempted canonical decomposition calls, partitioned into `N` usa
 and `37 - N` disclosed technical failures. Only decomposition-dependent denominators exclude those
 failed attempts. This is measurement-instrument recovery, not candidate repair.
 
+**Recovery-03 advanced, then H029 ended incomplete — 2026-08-09.** The provider-free migration
+preserved H001/H002, and the resumed pass sealed 27 ordered outcomes. H029's one Terra call then
+ended with provider status `incomplete`: 8,000 output tokens, all reported as reasoning, and no
+output text. No retry occurred. The existing response was retrieved by ID without a model call and
+privately snapshotted. Recovery-03 has 116 provider events and cumulative spend of `$6.80227647`.
+
+Preserve recovery-03 unchanged. Recovery-04 must bind all 27 prior outcomes and seal H029 as
+`incomplete_response`, then resume only H030–H038's nine untouched calls. Future terminal-
+incomplete responses may be sealed and skipped without retry; unknown status, provider/network,
+model-identity, nominally-completed missing-parse, and unavailable-citation failures still stop.
+Final closure remains exactly 37 attempts partitioned into `N` usable decompositions and `37 - N`
+technical outcomes.
+
 Parts of the completed annotations began as historical Claude drafts, then were directly checked,
 adopted, or revised by the manuscript owner. The owner has elected to retain that adjudicated work
 rather than commission a new pass solely to manufacture prospective records. Provenance v4 records
@@ -142,9 +155,9 @@ After formal lock:
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. Because OpenAI currently exposes canonical `gpt-5.6-sol` and `gpt-5.6-terra` IDs but no immutable dated snapshots, the first answer cohort must bind the committed catalog observation plus requested/returned IDs and disclose the limitation. |
 | **3. Held-out gold question set** | **Complete and formally locked** | Preserve the synchronized private source, committed private-safe gold, provenance sidecar, and frozen-candidate boundary unchanged. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Complete** | The frozen run found 24.71% dense versus 25.97% hybrid macro Recall@5 (+1.26 points), with a mixed per-stratum effect. Preserve the private text-free result and do not tune V26 from it before the answer-quality baseline. |
-| **5. Citation-accuracy harness** | **All answers sealed; decomposition recovery required** | Preserve recovery-02, migrate provider-free with H001/H002 recorded as technical failures, run exactly the remaining 35 Terra calls, and report `N/37` usable decompositions without retry or repair. |
+| **5. Citation-accuracy harness** | **All answers sealed; decomposition recovery required** | Preserve recovery-03, migrate provider-free with H029 recorded as `incomplete_response`, run exactly H030–H038's nine untouched Terra calls, and report `N/37` usable decompositions without retry or repair. |
 | **6. Faithfulness and abstention calibration** | **Deferred, lower priority** | After the full baseline is preserved, label the fixed ten-item subset, measure judge agreement, and settle §§6–7. This work may fill semantic fields in a separate supplement; it may not delay or overwrite the baseline. |
-| **7. Formal baseline and evaluation report** | **In progress; 37 answers sealed, 2/37 decompositions attempted** | Finish the 35 missing decomposition calls through the audited no-retry recovery path, then publish text-free reproducible artifacts with all technical failures, exact denominators, and all mechanically available results. Semantic metrics may remain explicitly pending. |
+| **7. Formal baseline and evaluation report** | **In progress; 37 answers sealed, 28/37 decompositions attempted** | Finish H030–H038 through the audited no-retry recovery path, then publish text-free reproducible artifacts with all technical failures, exact denominators, and all mechanically available results. Semantic metrics may remain explicitly pending. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
 | **8A. Production observability and latency evidence** | **Partial and unmeasured** | Stage timing and token/cost records exist. Add/confirm privacy-safe request correlation and run the declared warm production cohort before publishing latency statistics. |
 
@@ -175,16 +188,16 @@ top of the list.
    had zero spread, while the per-stratum result remained mixed. No generator or judge ran, and V26
    was not changed.
 7. **In progress — finish canonical decomposition without retrying failed instrument calls.**
-   All 37 V26 answers are sealed, including H003's trace-recovered local `clean_abstention`. H001
-   and H002 each received one Terra call and failed strict exact span/text validation. Both existing
-   responses were retrieved by ID without model calls, privately snapshotted, and hash-bound; no
-   returned text or span was corrected and no retry occurred. Create the exact provider-free
-   recovery-03 sibling, preserve recovery-02, record H001/H002 as technical failures, and make
-   exactly one Terra call for each of the remaining 35 items under the already authorized `$20.00`
-   cumulative cap. Seal any later predeclared local ID/span failure and continue without retry;
-   other unexpected failures stop fail-closed. No owner labeling, semantic verdict, agreement
-   threshold, RAG repair, prompt change, retrieval change, model change, gold change, corpus change,
-   or UI work may intervene.
+   All 37 V26 answers are sealed, including H003's trace-recovered local `clean_abstention`.
+   Recovery-03 advanced to 27 sealed decomposition outcomes before H029's one call ended terminal-
+   incomplete with no output text. Its existing response was retrieved by ID without a model call,
+   privately snapshotted, and hash-bound; no retry occurred. Create the exact provider-free
+   recovery-04 sibling, preserve recovery-03, record H029 as `incomplete_response`, and make exactly
+   one Terra call for H030–H038 under the already authorized `$20.00` cumulative cap. Seal later
+   predeclared local ID/span or terminal-incomplete failures and continue without retry; other
+   unexpected failures stop fail-closed. No owner labeling, semantic verdict, agreement threshold,
+   RAG repair, prompt change, retrieval change, model change, gold change, corpus change, or UI work
+   may intervene.
 8. **Immediately publish the descriptive baseline artifacts.** Produce the private machine-readable
    result and text-free readable/public report with exact cohort identity, costs, latency, response
    status, mechanical citation measures, limitations, and per-stratum denominators. Bind and

@@ -106,8 +106,8 @@ post-parse failure only when its first failure is one of four closed §5.1 invar
 claim IDs, an out-of-bounds span, overlapping or out-of-order spans, or claim text unequal to the
 exact answer substring. The exact response, parsed payload, provider identity, usage, answer hash,
 and reproduced failure are sealed as a technical outcome, and the item is never corrected or
-retried. A provider, network, model-identity, missing-parse, unavailable-source-number, incomplete-
-status, or unknown failure still stops fail-closed. Before each new call, a durable item-bound
+retried. A provider, network, model-identity, missing-parse, unavailable-source-number, or unknown-
+status failure still stops fail-closed. Before each new call, a durable item-bound
 attempt-intent record is written; an unresolved intent blocks automatic resume rather than risking
 a duplicate call.
 
@@ -120,6 +120,27 @@ do not require decomposition remain defined over their original eligible denomin
 calibration, semantic verdict, owner-labeling step, V26 change, prompt change, model change,
 retrieval change, corpus change, gold change, or answer regeneration is permitted during this
 continuation.
+
+**Technical incident clarification, 2026-08-09 (terminal incomplete decomposition response):**
+recovery-03 preserved H001/H002 and advanced through 27 sealed decomposition outcomes. H029 then
+received exactly one Terra call. The provider returned terminal status `incomplete` after consuming
+the full 8,000-token output allowance entirely as reasoning, with no output text. The call is
+priced and belongs to the authorized 37 attempts, but it cannot produce a canonical decomposition.
+It may not be retried, assigned an empty claim set, or scored as a candidate-answer defect.
+
+The existing H029 response was retrieved by exact ID without a model call and preserved in a
+private snapshot bound to its response metadata, exact usage, empty output, attempt intent, frozen
+answer, ledger row, and SHA-256. Honest continuation requires a provider-free recovery-03-to-
+recovery-04 migration that leaves recovery-03 immutable, retains the prior 27 outcomes unchanged,
+and seals H029 as `incomplete_response`. Resume skips all 28 attempted items and makes exactly one
+Terra call for each of H030–H038 under the same cumulative `$20.00` ceiling.
+
+A later Terra response with exact terminal status `incomplete` is likewise a technical
+decomposition outcome: seal its provider metadata, usage, status, snapshot, and answer binding,
+then continue without parsing, fabrication, or retry. Other non-completed or unknown statuses,
+provider/network errors, model mismatches, and unbound results remain fail-closed. This adds an
+honest representation for a paid attempt with no usable measurement; it does not change
+V26, the answer, the prompt, the model, the 37-attempt cardinality, or any quality threshold.
 
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. The complete
 37-question generation/decomposition baseline runs before either section is calibrated. Sections 6
