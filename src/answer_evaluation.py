@@ -33,13 +33,9 @@ DECOMPOSED_PILOT_ITEM_SCHEMA = "archivist.answer_evaluation.decomposition/1"
 CALIBRATION_LABEL_SCHEMA = "archivist.answer_evaluation.calibration_labels/1"
 INSTRUMENT_LOCK_SCHEMA = "archivist.answer_evaluation.instrument_lock/1"
 PUBLIC_SUMMARY_SCHEMA = "archivist.answer_evaluation.public_summary/2"
-PRECALIBRATION_PUBLIC_SUMMARY_SCHEMA = (
-    "archivist.answer_evaluation.precalibration_public_summary/1"
-)
+PRECALIBRATION_PUBLIC_SUMMARY_SCHEMA = "archivist.answer_evaluation.precalibration_public_summary/2"
 COHORT_MANIFEST_SCHEMA = "archivist.answer_evaluation.cohort_manifest/1"
-PRIVATE_GENERATION_CHECKPOINT_SCHEMA = (
-    "archivist.answer_evaluation.private_generation_checkpoint/1"
-)
+PRIVATE_GENERATION_CHECKPOINT_SCHEMA = "archivist.answer_evaluation.private_generation_checkpoint/1"
 PRIVATE_DECOMPOSITION_CHECKPOINT_SCHEMA = (
     "archivist.answer_evaluation.private_decomposition_checkpoint/1"
 )
@@ -196,9 +192,7 @@ class PrecalibrationMetricId(StrEnum):
 class PublicLimitationId(StrEnum):
     """Closed, prose-free limitations that qualify the public baseline."""
 
-    CANONICAL_MODEL_ID_MUTABILITY = (
-        "canonical_current_model_ids_are_not_immutable_snapshots"
-    )
+    CANONICAL_MODEL_ID_MUTABILITY = "canonical_current_model_ids_are_not_immutable_snapshots"
     GENERATOR_SPREAD_UNMEASURED = "generator_output_variance_not_measured"
     DESCRIPTIVE_NOT_GATE = "evaluation_is_descriptive_not_a_release_gate"
     MANUAL_FAITHFULNESS_PENDING = "manual_faithfulness_pending"
@@ -208,6 +202,7 @@ class PublicLimitationId(StrEnum):
     MANUAL_MUST_NOT_TRIPWIRES_PENDING = "manual_must_not_tripwires_pending"
     MANUAL_RESPONSE_BEHAVIOR_PENDING = "manual_response_behavior_pending"
     SEMANTIC_SCORING_PENDING = "semantic_scoring_pending_calibration"
+    TRACE_RECOVERED_ITEM_PRESENT = "trace_recovered_item_present"
 
 
 class _ClosedModel(BaseModel):
@@ -244,9 +239,7 @@ def canonical_json_bytes(value: object, *, pretty: bool = False) -> bytes:
         options["indent"] = 2
     else:
         options["separators"] = (",", ":")
-    return (json.dumps(_jsonable(value), **options) + ("\n" if pretty else "")).encode(
-        "utf-8"
-    )
+    return (json.dumps(_jsonable(value), **options) + ("\n" if pretty else "")).encode("utf-8")
 
 
 def canonical_json_sha256(value: object) -> str:
@@ -350,9 +343,7 @@ class CohortStructuredOutputBinding(_ClosedModel):
     def binding_is_exact(self) -> "CohortStructuredOutputBinding":
         payload = self.model_dump(mode="json", exclude={"binding_sha256"})
         if self.binding_sha256 != canonical_json_sha256(payload):
-            raise ValueError(
-                "structured-output binding_sha256 does not bind schema identity"
-            )
+            raise ValueError("structured-output binding_sha256 does not bind schema identity")
         return self
 
 
@@ -363,9 +354,9 @@ class CohortRetrievalBinding(_ClosedModel):
     max_primary_distance: Literal[1.05] = 1.05
     max_final_sources: Literal[8] = 8
     hnsw_space: Literal["l2"] = "l2"
-    neighbor_expansion_policy: Literal[
+    neighbor_expansion_policy: Literal["primaries_first_then_immediate_neighbors"] = (
         "primaries_first_then_immediate_neighbors"
-    ] = "primaries_first_then_immediate_neighbors"
+    )
     merge_adjacent_chunks: Literal[False] = False
     collection_name: NonemptyString
     collection_count: Annotated[int, Field(strict=True, ge=1)]
@@ -421,9 +412,9 @@ class AnswerEvaluationCohortManifest(_ClosedModel):
         min_length=5,
         max_length=5,
     )
-    model_identity_limitation: Literal[
+    model_identity_limitation: Literal["canonical_provider_ids_are_not_immutable_snapshots"] = (
         "canonical_provider_ids_are_not_immutable_snapshots"
-    ] = "canonical_provider_ids_are_not_immutable_snapshots"
+    )
     calibration_items_immutable: Literal[True] = True
     remaining_phase_may_regenerate_calibration: Literal[False] = False
     manifest_sha256: Sha256
@@ -599,9 +590,7 @@ def _normalize_cohort_prompt(
     version = value.get("version")
     prompt_sha256 = value.get("prompt_sha256")
     if not all(isinstance(part, str) for part in (prompt_id, version, prompt_sha256)):
-        raise ValueError(
-            "cohort prompt bindings require prompt_id, version, and prompt_sha256"
-        )
+        raise ValueError("cohort prompt bindings require prompt_id, version, and prompt_sha256")
     return build_cohort_prompt_binding(
         prompt_id=prompt_id,
         version=version,
@@ -619,9 +608,7 @@ def _normalize_cohort_structured_output(
     output_id = value.get("output_id")
     schema_sha256 = value.get("schema_sha256")
     if not isinstance(output_id, str) or not isinstance(schema_sha256, str):
-        raise ValueError(
-            "structured-output bindings require output_id and schema_sha256"
-        )
+        raise ValueError("structured-output bindings require output_id and schema_sha256")
     return build_cohort_structured_output_binding(
         output_id=output_id,
         schema_sha256=schema_sha256,
@@ -669,9 +656,7 @@ def build_cohort_manifest(
     embedding_model: str,
     retrieval: CohortRetrievalBinding | Mapping[str, object],
     prompts: Sequence[CohortPromptBinding | Mapping[str, object]],
-    structured_outputs: Sequence[
-        CohortStructuredOutputBinding | Mapping[str, object]
-    ],
+    structured_outputs: Sequence[CohortStructuredOutputBinding | Mapping[str, object]],
 ) -> AnswerEvaluationCohortManifest:
     """Build the deterministic, closed ten-plus-twenty-seven cohort contract."""
 
@@ -700,17 +685,12 @@ def build_cohort_manifest(
         "judge": _normalize_cohort_model(judge).model_dump(mode="json"),
         "embedding_model": embedding_model,
         "retrieval": _normalize_cohort_retrieval(retrieval).model_dump(mode="json"),
-        "prompts": [
-            _normalize_cohort_prompt(prompt).model_dump(mode="json")
-            for prompt in prompts
-        ],
+        "prompts": [_normalize_cohort_prompt(prompt).model_dump(mode="json") for prompt in prompts],
         "structured_outputs": [
             _normalize_cohort_structured_output(output).model_dump(mode="json")
             for output in structured_outputs
         ],
-        "model_identity_limitation": (
-            "canonical_provider_ids_are_not_immutable_snapshots"
-        ),
+        "model_identity_limitation": ("canonical_provider_ids_are_not_immutable_snapshots"),
         "calibration_items_immutable": True,
         "remaining_phase_may_regenerate_calibration": False,
     }
@@ -914,9 +894,7 @@ def build_private_generated_item(
         for value in sources
     )
     normalized_usage = tuple(
-        value
-        if isinstance(value, PrivateUsageEvent)
-        else PrivateUsageEvent.model_validate(value)
+        value if isinstance(value, PrivateUsageEvent) else PrivateUsageEvent.model_validate(value)
         for value in usage_events
     )
     normalized_traces = tuple(
@@ -966,9 +944,7 @@ class PrivateGenerationCheckpoint(_ClosedModel):
     def checkpoint_hash_is_exact(self) -> "PrivateGenerationCheckpoint":
         payload = self.model_dump(mode="json", exclude={"checkpoint_sha256"})
         if self.checkpoint_sha256 != canonical_json_sha256(payload):
-            raise ValueError(
-                "checkpoint_sha256 does not bind the exact generation checkpoint"
-            )
+            raise ValueError("checkpoint_sha256 does not bind the exact generation checkpoint")
         return self
 
 
@@ -1092,9 +1068,7 @@ def build_decomposed_pilot_item(
     claims: Sequence[DecomposedClaim | Mapping[str, object]],
 ) -> DecomposedPilotItem:
     normalized = tuple(
-        claim
-        if isinstance(claim, DecomposedClaim)
-        else DecomposedClaim.model_validate(claim)
+        claim if isinstance(claim, DecomposedClaim) else DecomposedClaim.model_validate(claim)
         for claim in claims
     )
     raw: dict[str, object] = {
@@ -1161,9 +1135,7 @@ class PrivateDecompositionCheckpoint(_ClosedModel):
             raise ValueError("decomposition provider model differs from judge model")
         payload = self.model_dump(mode="json", exclude={"checkpoint_sha256"})
         if self.checkpoint_sha256 != canonical_json_sha256(payload):
-            raise ValueError(
-                "checkpoint_sha256 does not bind the exact decomposition checkpoint"
-            )
+            raise ValueError("checkpoint_sha256 does not bind the exact decomposition checkpoint")
         return self
 
 
@@ -1528,9 +1500,7 @@ def validate_calibration_labels_for_judge(
                 or owner_status.claim_text != must_not_text
                 or owner_status.claim_text_sha256 != sha256_text(must_not_text)
             ):
-                raise ValueError(
-                    f"{item_label.item_id}: must-not-claim rubric identity changed"
-                )
+                raise ValueError(f"{item_label.item_id}: must-not-claim rubric identity changed")
             if owner_status.status is None:
                 raise ValueError(
                     f"{item_label.item_id}: must-not-claim status {index} is not labelled"
@@ -1539,9 +1509,7 @@ def validate_calibration_labels_for_judge(
 
 
 class JudgeEligibility(_ClosedModel):
-    exact_agreement_minimum: Literal[JUDGE_EXACT_AGREEMENT_MINIMUM] = (
-        JUDGE_EXACT_AGREEMENT_MINIMUM
-    )
+    exact_agreement_minimum: Literal[JUDGE_EXACT_AGREEMENT_MINIMUM] = JUDGE_EXACT_AGREEMENT_MINIMUM
     repeat_agreement_minimum: Literal[JUDGE_REPEAT_AGREEMENT_MINIMUM] = (
         JUDGE_REPEAT_AGREEMENT_MINIMUM
     )
@@ -1599,9 +1567,9 @@ class InstrumentLock(_ClosedModel):
         if [entry.dimension for entry in self.dimensions] != expected_dimensions:
             raise ValueError("instrument dimensions must appear exactly once in fixed order")
         denominator = sum(entry.denominator for entry in self.dimensions)
-        weighted = sum(
-            entry.agreement * entry.denominator for entry in self.dimensions
-        ) / denominator
+        weighted = (
+            sum(entry.agreement * entry.denominator for entry in self.dimensions) / denominator
+        )
         if not math.isclose(
             self.judge_eligibility.pooled_agreement,
             weighted,
@@ -1611,8 +1579,7 @@ class InstrumentLock(_ClosedModel):
         expected_dimension_modes = [
             (
                 ScoringMode.JUDGE
-                if self.judge_eligibility.repeat_agreement
-                >= JUDGE_REPEAT_AGREEMENT_MINIMUM
+                if self.judge_eligibility.repeat_agreement >= JUDGE_REPEAT_AGREEMENT_MINIMUM
                 and entry.agreement >= JUDGE_EXACT_AGREEMENT_MINIMUM
                 else ScoringMode.MANUAL
             )
@@ -1889,9 +1856,7 @@ class PublicEvaluationSummary(_ClosedModel):
             }
             actual_strata = {entry.stratum: entry.item_count for entry in self.strata}
             if actual_strata != expected_strata:
-                raise ValueError(
-                    "complete evaluation stratum counts must be exactly 8/8/5/10/4/2"
-                )
+                raise ValueError("complete evaluation stratum counts must be exactly 8/8/5/10/4/2")
             if set(metric_ids) != set(PublicMetricId):
                 raise ValueError(
                     "complete evaluation must include every required metric exactly once"
@@ -1938,9 +1903,13 @@ class PublicPrecalibrationSummary(_ClosedModel):
     generation_artifact_sha256: Sha256
     decomposition_artifact_sha256: Sha256
     gold_set_sha256: Sha256
+    migration_artifact_sha256: Sha256 | None
+    recovered_item_count: Literal[0, 1]
     limitation_ids: tuple[PublicLimitationId, ...]
     run_status: BaselineRunStatus
     latency_scope: Literal["generation_pipeline"] = "generation_pipeline"
+    generation_latency_denominator: NonnegativeInt
+    generation_latency_observed_count: NonnegativeInt
     item_count: NonnegativeInt
     source_count: NonnegativeInt
     claim_count: NonnegativeInt
@@ -1973,6 +1942,22 @@ class PublicPrecalibrationSummary(_ClosedModel):
         }
         if not required_limitations <= set(self.limitation_ids):
             raise ValueError("precalibration summary is missing a fixed limitation")
+        recovery_limitation = PublicLimitationId.TRACE_RECOVERED_ITEM_PRESENT
+        if self.recovered_item_count:
+            if self.migration_artifact_sha256 is None:
+                raise ValueError(
+                    "trace-recovered precalibration summary requires a migration artifact"
+                )
+            if recovery_limitation not in self.limitation_ids:
+                raise ValueError("trace-recovered precalibration summary is missing its limitation")
+        elif self.migration_artifact_sha256 is not None:
+            raise ValueError("ordinary precalibration summary cannot bind a migration artifact")
+        elif recovery_limitation in self.limitation_ids:
+            raise ValueError("ordinary precalibration summary cannot claim a recovered item")
+        if self.generation_latency_denominator != self.item_count:
+            raise ValueError("generation latency denominator must equal item_count")
+        if self.generation_latency_observed_count != (self.item_count - self.recovered_item_count):
+            raise ValueError("generation latency observations must exclude each recovered item")
         if sum(entry.item_count for entry in self.strata) != self.item_count:
             raise ValueError("precalibration stratum counts must sum to item_count")
         if self.completed_answer_count + self.technical_error_count != self.item_count:
@@ -1991,10 +1976,7 @@ class PublicPrecalibrationSummary(_ClosedModel):
             if metric.metric_id in mechanical_ids:
                 if metric.availability is not MetricAvailability.AVAILABLE:
                     raise ValueError("mechanical precalibration metrics must be available")
-            elif (
-                metric.denominator > 0
-                and metric.availability is not MetricAvailability.PENDING
-            ):
+            elif metric.denominator > 0 and metric.availability is not MetricAvailability.PENDING:
                 raise ValueError("semantic precalibration metrics must remain pending")
         if self.run_status is BaselineRunStatus.COMPLETE:
             if self.item_count != 37:
@@ -2009,16 +1991,13 @@ class PublicPrecalibrationSummary(_ClosedModel):
             }
             actual_strata = {entry.stratum: entry.item_count for entry in self.strata}
             if actual_strata != expected_strata:
-                raise ValueError(
-                    "complete precalibration strata must be exactly 8/8/5/10/4/2"
-                )
+                raise ValueError("complete precalibration strata must be exactly 8/8/5/10/4/2")
             if set(metric_ids) != set(PrecalibrationMetricId):
                 raise ValueError(
                     "complete precalibration result must include every metric exactly once"
                 )
             if any(
-                set(metric.metric_id for metric in stratum.metrics)
-                != set(PrecalibrationMetricId)
+                set(metric.metric_id for metric in stratum.metrics) != set(PrecalibrationMetricId)
                 for stratum in self.strata
             ):
                 raise ValueError(
@@ -2115,9 +2094,7 @@ def _paired_pilot_items(
         for item in generated_items
     )
     decomposed = tuple(
-        item
-        if isinstance(item, DecomposedPilotItem)
-        else DecomposedPilotItem.model_validate(item)
+        item if isinstance(item, DecomposedPilotItem) else DecomposedPilotItem.model_validate(item)
         for item in decomposed_items
     )
     if not generated or len(generated) != len(decomposed):

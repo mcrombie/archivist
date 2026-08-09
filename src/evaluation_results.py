@@ -50,19 +50,13 @@ CALIBRATION_SEMANTIC_AGGREGATE_SCHEMA = (
 )
 AGREEMENT_PROJECTION_SCHEMA = "archivist.answer_evaluation.agreement_projection/1"
 BASELINE_SEMANTIC_ITEM_SCHEMA = "archivist.answer_evaluation.baseline_semantic_item/1"
-BASELINE_SEMANTIC_AGGREGATE_SCHEMA = (
-    "archivist.answer_evaluation.baseline_semantic_aggregate/1"
-)
+BASELINE_SEMANTIC_AGGREGATE_SCHEMA = "archivist.answer_evaluation.baseline_semantic_aggregate/1"
 PRIVATE_FULL_RUN_ARTIFACT_SCHEMA = "archivist.answer_evaluation.private_full_run/1"
 PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA = (
-    "archivist.answer_evaluation.precalibration_private_artifact/1"
+    "archivist.answer_evaluation.precalibration_private_artifact/2"
 )
-DECOMPOSITION_STABILITY_SCHEMA = (
-    "archivist.answer_evaluation.decomposition_stability/1"
-)
-MANUAL_SCORING_AGGREGATE_SCHEMA = (
-    "archivist.answer_evaluation.manual_scoring_aggregate/1"
-)
+DECOMPOSITION_STABILITY_SCHEMA = "archivist.answer_evaluation.decomposition_stability/1"
+MANUAL_SCORING_AGGREGATE_SCHEMA = "archivist.answer_evaluation.manual_scoring_aggregate/1"
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$"
@@ -335,9 +329,7 @@ class ClaimEvidenceResult(_ClosedModel):
         if [entry.source_number for entry in self.verdict.source_verdicts] != sorted(
             self.claim.cited_source_numbers
         ):
-            raise ValueError(
-                "claim evidence verdict changed cited source order or cardinality"
-            )
+            raise ValueError("claim evidence verdict changed cited source order or cardinality")
         _validate_provider_usage(
             provider=self.provider,
             usage_event=self.usage_event,
@@ -367,9 +359,7 @@ def build_claim_evidence_result(
 ) -> ClaimEvidenceResult:
     _validate_decomposition(generated_item, decomposition)
     matching_claims = [
-        candidate
-        for candidate in decomposition.claims
-        if candidate.claim_id == claim.claim_id
+        candidate for candidate in decomposition.claims if candidate.claim_id == claim.claim_id
     ]
     if len(matching_claims) != 1 or matching_claims[0] != claim:
         raise ValueError("claim is not the exact locked claim in this decomposition")
@@ -666,8 +656,7 @@ class CalibrationSemanticItem(_ClosedModel):
                 result.item_id != self.item_id
                 or result.answer_sha256 != self.answer_sha256
                 or result.decomposition_sha256 != self.decomposition_sha256
-                or result.cohort_manifest_sha256
-                != self.item_rubric.cohort_manifest_sha256
+                or result.cohort_manifest_sha256 != self.item_rubric.cohort_manifest_sha256
             ):
                 raise ValueError("first-call evidence belongs to another semantic item")
             if (
@@ -725,9 +714,7 @@ def build_calibration_semantic_item(
         "item_id": normalized_rubric.item_id,
         "answer_sha256": normalized_rubric.answer_sha256,
         "decomposition_sha256": normalized_rubric.decomposition_sha256,
-        "first_call_claim_evidence": [
-            value.model_dump(mode="json") for value in normalized_first
-        ],
+        "first_call_claim_evidence": [value.model_dump(mode="json") for value in normalized_first],
         "item_rubric": normalized_rubric.model_dump(mode="json"),
         "repeat_first_claim_evidence": (
             None if normalized_repeat is None else normalized_repeat.model_dump(mode="json")
@@ -835,9 +822,7 @@ def _instrument_lane_activity(instrument_lock: InstrumentLock) -> tuple[bool, bo
     evidence_active = any(
         modes[dimension] is ScoringMode.JUDGE for dimension in _EVIDENCE_DIMENSIONS
     )
-    rubric_active = any(
-        modes[dimension] is ScoringMode.JUDGE for dimension in _RUBRIC_DIMENSIONS
-    )
+    rubric_active = any(modes[dimension] is ScoringMode.JUDGE for dimension in _RUBRIC_DIMENSIONS)
     return evidence_active, rubric_active
 
 
@@ -898,15 +883,11 @@ class BaselineSemanticItem(_ClosedModel):
         if self.evidence_lane_active and len(self.first_call_claim_evidence) != len(
             self.locked_claims
         ):
-            raise ValueError(
-                "active baseline evidence lane must cover every locked claim in order"
-            )
+            raise ValueError("active baseline evidence lane must cover every locked claim in order")
         expected_claims = list(self.locked_claims)
         actual_claims = [result.claim for result in self.first_call_claim_evidence]
         if actual_claims and actual_claims != expected_claims:
-            raise ValueError(
-                "baseline first-call evidence must cover every locked claim in order"
-            )
+            raise ValueError("baseline first-call evidence must cover every locked claim in order")
         for result in self.first_call_claim_evidence:
             if result.call_ordinal != 1:
                 raise ValueError("baseline evidence must have call_ordinal 1")
@@ -921,9 +902,7 @@ class BaselineSemanticItem(_ClosedModel):
                 result.judge_model != rubric.judge_model
                 or result.judge_settings != rubric.judge_settings
             ):
-                raise ValueError(
-                    "baseline judge model or settings differ between semantic lanes"
-                )
+                raise ValueError("baseline judge model or settings differ between semantic lanes")
         payload = self.model_dump(mode="json", exclude={"item_result_sha256"})
         if self.item_result_sha256 != canonical_json_sha256(payload):
             raise ValueError("item_result_sha256 does not bind the baseline semantic item")
@@ -971,9 +950,7 @@ def build_baseline_semantic_item(
             result.model_dump(mode="json") for result in normalized_evidence
         ],
         "item_rubric": (
-            None
-            if normalized_rubric is None
-            else normalized_rubric.model_dump(mode="json")
+            None if normalized_rubric is None else normalized_rubric.model_dump(mode="json")
         ),
     }
     raw["item_result_sha256"] = canonical_json_sha256(raw)
@@ -1057,13 +1034,13 @@ def validate_baseline_semantic_item(
     for field, expected_value in expected_identity.items():
         if getattr(item, field) != expected_value:
             raise ValueError(f"baseline semantic {field} changed")
-    if evidence_active and len(item.first_call_claim_evidence) != len(
-        decomposition.claims
-    ):
+    if evidence_active and len(item.first_call_claim_evidence) != len(decomposition.claims):
         raise ValueError("active baseline evidence result count changed")
-    if not evidence_active and item.first_call_claim_evidence and len(
-        item.first_call_claim_evidence
-    ) != len(decomposition.claims):
+    if (
+        not evidence_active
+        and item.first_call_claim_evidence
+        and len(item.first_call_claim_evidence) != len(decomposition.claims)
+    ):
         raise ValueError("inactive baseline evidence lane is incomplete")
     if item.first_call_claim_evidence:
         for result, claim in zip(
@@ -1275,6 +1252,11 @@ class PrecalibrationPrivateArtifact(_ClosedModel):
     decomposition_artifact_sha256: Sha256
     gold_set_sha256: Sha256
     gold_items_sha256: Sha256
+    migration_artifact_sha256: Sha256 | None
+    recovered_item_count: Literal[0, 1]
+    recovered_item_ids: tuple[Identifier, ...]
+    generation_latency_denominator: NonnegativeInt
+    generation_latency_observed_count: NonnegativeInt
     decomposition_checkpoint_count: Literal[37]
     decomposition_checkpoints_sha256: Sha256
     decomposition_usage_events_sha256: Sha256
@@ -1289,8 +1271,27 @@ class PrecalibrationPrivateArtifact(_ClosedModel):
     @model_validator(mode="after")
     def joins_and_hash_are_exact(self) -> "PrecalibrationPrivateArtifact":
         _require_unique(self.item_ids, label="precalibration item IDs")
+        _require_unique(
+            self.recovered_item_ids,
+            label="precalibration recovered item IDs",
+        )
         if [item.item_id for item in self.items] != list(self.item_ids):
             raise ValueError("precalibration artifact must bind all 37 items in exact order")
+        if len(self.recovered_item_ids) != self.recovered_item_count:
+            raise ValueError("recovered item count must match recovered item IDs")
+        if not set(self.recovered_item_ids) <= set(self.item_ids):
+            raise ValueError("recovered item IDs must belong to the precalibration cohort")
+        if self.recovered_item_count:
+            if self.migration_artifact_sha256 is None:
+                raise ValueError("recovered item requires a migration artifact")
+        elif self.migration_artifact_sha256 is not None:
+            raise ValueError("migration artifact requires a recovered item")
+        if self.generation_latency_denominator != len(self.item_ids):
+            raise ValueError("generation latency denominator must cover all items")
+        if self.generation_latency_observed_count != (
+            self.generation_latency_denominator - self.recovered_item_count
+        ):
+            raise ValueError("generation latency observations must exclude recovered items")
         payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
         if self.artifact_sha256 != canonical_json_sha256(payload):
             raise ValueError("artifact_sha256 does not bind the precalibration artifact")
@@ -1324,22 +1325,17 @@ def _validate_precalibration_checkpoints(
     checkpoints: Sequence[PrivateDecompositionCheckpoint],
 ) -> tuple[PrivateDecompositionCheckpoint, ...]:
     normalized = tuple(
-        PrivateDecompositionCheckpoint.model_validate(
-            checkpoint.model_dump(mode="json")
-        )
+        PrivateDecompositionCheckpoint.model_validate(checkpoint.model_dump(mode="json"))
         for checkpoint in checkpoints
     )
     if len(normalized) != 37:
         raise ValueError("precalibration cost closure requires exactly 37 decomposition calls")
     item_ids = tuple(item.item_id for item in generated_items)
     expected_layout = tuple((item_id, 1) for item_id in item_ids)
-    actual_layout = tuple(
-        (checkpoint.item_id, checkpoint.repetition) for checkpoint in normalized
-    )
+    actual_layout = tuple((checkpoint.item_id, checkpoint.repetition) for checkpoint in normalized)
     if actual_layout != expected_layout:
         raise ValueError(
-            "decomposition checkpoints must be the 37 canonical repetition-1 "
-            "calls in cohort order"
+            "decomposition checkpoints must be the 37 canonical repetition-1 calls in cohort order"
         )
     generated_by_id = {item.item_id: item for item in generated_items}
     decomposition_by_id = {item.item_id: item for item in decompositions}
@@ -1355,9 +1351,7 @@ def _validate_precalibration_checkpoints(
         response_ids.append(checkpoint.usage_events[0].response_id)
     _require_unique(response_ids, label="precalibration decomposition response IDs")
     generated_response_ids = [
-        event.response_id
-        for generated in generated_items
-        for event in generated.usage_events
+        event.response_id for generated in generated_items for event in generated.usage_events
     ]
     _require_unique(
         generated_response_ids,
@@ -1378,10 +1372,13 @@ def build_precalibration_private_artifact(
     decompositions: Sequence[DecomposedPilotItem],
     gold_items: Sequence[Mapping[str, object]],
     decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+    migration_artifact_sha256: str | None = None,
+    recovered_item_ids: Sequence[str] = (),
 ) -> PrecalibrationPrivateArtifact:
     if {len(generated_items), len(decompositions), len(gold_items)} != {37}:
         raise ValueError("precalibration artifact requires exactly 37 paired items")
     item_ids = tuple(item.item_id for item in generated_items)
+    recovered_ids = tuple(recovered_item_ids)
     _require_unique(item_ids, label="precalibration generated item IDs")
     if [item.item_id for item in decompositions] != list(item_ids):
         raise ValueError("precalibration decomposition item order changed")
@@ -1400,9 +1397,7 @@ def build_precalibration_private_artifact(
             strict=True,
         )
     )
-    usage_events = tuple(
-        checkpoint.usage_events[0] for checkpoint in normalized_checkpoints
-    )
+    usage_events = tuple(checkpoint.usage_events[0] for checkpoint in normalized_checkpoints)
     raw: dict[str, object] = {
         "schema": PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA,
         "cohort_manifest_sha256": cohort_manifest_sha256,
@@ -1410,6 +1405,11 @@ def build_precalibration_private_artifact(
         "decomposition_artifact_sha256": decomposition_artifact_sha256,
         "gold_set_sha256": gold_set_sha256,
         "gold_items_sha256": canonical_json_sha256([dict(item) for item in gold_items]),
+        "migration_artifact_sha256": migration_artifact_sha256,
+        "recovered_item_count": len(recovered_ids),
+        "recovered_item_ids": list(recovered_ids),
+        "generation_latency_denominator": len(item_ids),
+        "generation_latency_observed_count": len(item_ids) - len(recovered_ids),
         "decomposition_checkpoint_count": len(normalized_checkpoints),
         "decomposition_checkpoints_sha256": canonical_json_sha256(
             [checkpoint.model_dump(mode="json") for checkpoint in normalized_checkpoints]
@@ -1435,6 +1435,8 @@ def validate_precalibration_private_artifact(
     decompositions: Sequence[DecomposedPilotItem],
     gold_items: Sequence[Mapping[str, object]],
     decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+    migration_artifact_sha256: str | None = None,
+    recovered_item_ids: Sequence[str] = (),
 ) -> PrecalibrationPrivateArtifact:
     artifact = (
         value
@@ -1450,6 +1452,8 @@ def validate_precalibration_private_artifact(
         decompositions=decompositions,
         gold_items=gold_items,
         decomposition_checkpoints=decomposition_checkpoints,
+        migration_artifact_sha256=migration_artifact_sha256,
+        recovered_item_ids=recovered_item_ids,
     )
     if artifact != expected:
         raise ValueError("precalibration artifact changed from its exact inputs")
@@ -1519,12 +1523,10 @@ def _validate_manual_item_layout(
     ):
         raise ValueError(f"{generated.item_id}: manual-scoring item identity changed")
     expected_claims = [
-        (claim.claim_id, claim.text, claim.claim_sha256)
-        for claim in decomposition.claims
+        (claim.claim_id, claim.text, claim.claim_sha256) for claim in decomposition.claims
     ]
     actual_claims = [
-        (claim.claim_id, claim.claim_text, claim.claim_sha256)
-        for claim in label.claims
+        (claim.claim_id, claim.claim_text, claim.claim_sha256) for claim in label.claims
     ]
     if actual_claims != expected_claims:
         raise ValueError(f"{generated.item_id}: manual-scoring claim layout changed")
@@ -1544,8 +1546,7 @@ def _validate_manual_item_layout(
     if actual_gold != expected_gold:
         raise ValueError(f"{generated.item_id}: manual-scoring gold layout changed")
     expected_tripwires = [
-        (index, text, sha256_text(text))
-        for index, text in enumerate(rubric.must_not_claim)
+        (index, text, sha256_text(text)) for index, text in enumerate(rubric.must_not_claim)
     ]
     actual_tripwires = [
         (entry.index, entry.claim_text, entry.claim_text_sha256)
@@ -1697,9 +1698,7 @@ def _represented_usage_response_ids(
     semantic_aggregate: BaselineSemanticAggregate,
 ) -> set[str]:
     generated_ids = [
-        event.response_id
-        for generated in generated_items
-        for event in generated.usage_events
+        event.response_id for generated in generated_items for event in generated.usage_events
     ]
     response_ids = set(generated_ids)
     if len(generated_ids) != len(response_ids):
@@ -1707,8 +1706,7 @@ def _represented_usage_response_ids(
     semantic_ids: list[str] = []
     for item in semantic_aggregate.items:
         semantic_ids.extend(
-            result.usage_event.response_id
-            for result in item.first_call_claim_evidence
+            result.usage_event.response_id for result in item.first_call_claim_evidence
         )
         if item.item_rubric is not None:
             semantic_ids.append(item.item_rubric.usage_event.response_id)
@@ -1727,17 +1725,14 @@ def _validate_additional_usage_events(
     calibration_semantic_aggregate: CalibrationSemanticAggregate,
 ) -> tuple[PrivateUsageEvent, ...]:
     normalized = tuple(
-        PrivateUsageEvent.model_validate(event.model_dump(mode="json"))
-        for event in events
+        PrivateUsageEvent.model_validate(event.model_dump(mode="json")) for event in events
     )
     response_ids = [event.response_id for event in normalized]
     _require_unique(response_ids, label="additional usage response IDs")
     overlap = represented_response_ids & set(response_ids)
     if overlap:
         raise ValueError("additional usage events duplicate represented provider calls")
-    decomposition_count = sum(
-        event.operation == "eval_claim_decomposition" for event in normalized
-    )
+    decomposition_count = sum(event.operation == "eval_claim_decomposition" for event in normalized)
     if decomposition_count != 57:
         raise ValueError("additional usage must contain exactly 57 decomposition calls")
     expected_repeats = tuple(
@@ -1773,10 +1768,7 @@ def build_private_full_run_artifact(
         raise ValueError("semantic aggregate binds another scoring instrument")
     if calibration_semantic_aggregate.cohort_manifest_sha256 != cohort_manifest_sha256:
         raise ValueError("calibration semantic aggregate belongs to another cohort")
-    if (
-        instrument_lock.judge_results_sha256
-        != calibration_semantic_aggregate.aggregate_sha256
-    ):
+    if instrument_lock.judge_results_sha256 != calibration_semantic_aggregate.aggregate_sha256:
         raise ValueError("instrument lock does not bind the calibration semantic aggregate")
     if semantic_aggregate.generation_artifact_sha256 != generation_artifact_sha256:
         raise ValueError("semantic aggregate binds another generation artifact")
@@ -1824,9 +1816,7 @@ def build_private_full_run_artifact(
         "instrument_id": instrument_lock.instrument_id,
         "instrument_sha256": instrument_lock.instrument_sha256,
         "manual_scoring_aggregate_sha256": (
-            None
-            if manual_scoring_aggregate is None
-            else manual_scoring_aggregate.aggregate_sha256
+            None if manual_scoring_aggregate is None else manual_scoring_aggregate.aggregate_sha256
         ),
         "additional_usage_event_count": len(normalized_additional_usage),
         "additional_usage_events_sha256": canonical_json_sha256(
@@ -1957,9 +1947,7 @@ def _decomposition_stability_item(
     raw: dict[str, object] = {
         "item_id": item_id,
         "answer_sha256": repetitions[0].answer_sha256,
-        "decomposition_sha256s": [
-            item.decomposition_sha256 for item in repetitions
-        ],
+        "decomposition_sha256s": [item.decomposition_sha256 for item in repetitions],
         "claim_counts": list(claim_counts),
         "population_variance": population_variance,
     }
@@ -2163,12 +2151,8 @@ def project_calibration_agreement(
             source_verdicts = {
                 entry.source_number: entry.label for entry in evidence.verdict.source_verdicts
             }
-            if set(owner_claim.cited_source_labels) != set(
-                locked_claim.cited_source_numbers
-            ):
-                raise ValueError(
-                    f"{owner_claim.claim_id}: owner cited-source cardinality changed"
-                )
+            if set(owner_claim.cited_source_labels) != set(locked_claim.cited_source_numbers):
+                raise ValueError(f"{owner_claim.claim_id}: owner cited-source cardinality changed")
             for source_number in locked_claim.cited_source_numbers:
                 counts[ScoringDimension.CITED_SOURCE_SUPPORT][1] += 1
                 counts[ScoringDimension.CITED_SOURCE_SUPPORT][0] += int(
@@ -2202,9 +2186,7 @@ def project_calibration_agreement(
                 owner_status.status.value == verdict.status
             )
 
-        if len(owner_item.must_not_claim_statuses) != len(
-            rubric_result.verdict.must_not_claim
-        ):
+        if len(owner_item.must_not_claim_statuses) != len(rubric_result.verdict.must_not_claim):
             raise ValueError(f"{owner_item.item_id}: owner tripwire count changed")
         for owner_status, text_hash, verdict in zip(
             owner_item.must_not_claim_statuses,
@@ -2261,9 +2243,7 @@ def project_calibration_agreement(
             agreement_count=counts[dimension][0],
             denominator=counts[dimension][1],
             agreement_rate=(
-                counts[dimension][0] / counts[dimension][1]
-                if counts[dimension][1]
-                else None
+                counts[dimension][0] / counts[dimension][1] if counts[dimension][1] else None
             ),
         )
         for dimension in ScoringDimension

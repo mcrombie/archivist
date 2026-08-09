@@ -90,9 +90,7 @@ def _cohort_manifest():
             "question": f"Private evaluation question H{index:03d}?",
             "stratum": _stratum(index).value,
             "expected_behavior": (
-                "abstain"
-                if _stratum(index) is EvaluationStratum.OUT_OF_CORPUS
-                else "answer"
+                "abstain" if _stratum(index) is EvaluationStratum.OUT_OF_CORPUS else "answer"
             ),
         }
         for index in range(1, 38)
@@ -170,9 +168,7 @@ def _cohort_manifest():
 
 
 COHORT_MANIFEST = _cohort_manifest()
-COHORT_SHA = hashlib.sha256(
-    canonical_json_bytes(COHORT_MANIFEST, pretty=True)
-).hexdigest()
+COHORT_SHA = hashlib.sha256(canonical_json_bytes(COHORT_MANIFEST, pretty=True)).hexdigest()
 
 
 def _usage(*, response_id: str, operation: str, model: str):
@@ -380,8 +376,7 @@ def _make_fixture(
             ),
             verdict={
                 "gold_claims": [
-                    {"claim_id": claim["claim_id"], "status": "present"}
-                    for claim in gold_claims
+                    {"claim_id": claim["claim_id"], "status": "present"} for claim in gold_claims
                 ],
                 "answer_claim_matches": [
                     {
@@ -576,7 +571,12 @@ def _canonical_decomposition_checkpoints(fixture: _Fixture) -> tuple[Any, ...]:
     return tuple(checkpoints)
 
 
-def _precalibration_summary(fixture: _Fixture):
+def _precalibration_summary(
+    fixture: _Fixture,
+    *,
+    migration_artifact_sha256: str | None = None,
+    recovered_item_ids: tuple[str, ...] = (),
+):
     checkpoints = _canonical_decomposition_checkpoints(fixture)
     artifact = build_precalibration_private_artifact(
         cohort_manifest_sha256=COHORT_SHA,
@@ -587,6 +587,8 @@ def _precalibration_summary(fixture: _Fixture):
         decompositions=fixture.decompositions,
         gold_items=fixture.gold,
         decomposition_checkpoints=checkpoints,
+        migration_artifact_sha256=migration_artifact_sha256,
+        recovered_item_ids=recovered_item_ids,
     )
     summary = build_public_precalibration_summary(
         candidate_id="evidence-planned-v26",
@@ -596,6 +598,8 @@ def _precalibration_summary(fixture: _Fixture):
         gold_items=fixture.gold,
         decomposition_checkpoints=checkpoints,
         private_artifact=artifact,
+        migration_artifact_sha256=migration_artifact_sha256,
+        recovered_item_ids=recovered_item_ids,
     )
     return summary, artifact, checkpoints
 
@@ -612,14 +616,8 @@ def _summary(
     gold_items=None,
     additional_usage_events=None,
 ):
-    evidence = (
-        fixture.evidence
-        if claim_evidence_results is None
-        else tuple(claim_evidence_results)
-    )
-    rubrics = (
-        fixture.rubrics if item_rubric_results is None else tuple(item_rubric_results)
-    )
+    evidence = fixture.evidence if claim_evidence_results is None else tuple(claim_evidence_results)
+    rubrics = fixture.rubrics if item_rubric_results is None else tuple(item_rubric_results)
     calibration_semantic = _calibration_semantic(fixture)
     instrument = _instrument(
         judge_results_sha256=calibration_semantic.aggregate_sha256,
@@ -691,9 +689,7 @@ def _summary(
         candidate_id="evidence-planned-v26",
         cohort_manifest=COHORT_MANIFEST,
         generated_items=fixture.generated if generated_items is None else generated_items,
-        decompositions=(
-            fixture.decompositions if decompositions is None else decompositions
-        ),
+        decompositions=(fixture.decompositions if decompositions is None else decompositions),
         gold_items=fixture.gold if gold_items is None else gold_items,
         semantic_aggregate=semantic,
         calibration_semantic_aggregate=calibration_semantic,
@@ -825,12 +821,11 @@ def test_manual_evidence_lane_can_be_absent_without_blocking_judge_rubric_metric
     assert judge_grounded.numerator is None
     assert judge_grounded.denominator == 1
     assert _metric(summary, PublicMetricId.GOLD_CLAIM_RECALL).availability.value == "available"
-    assert _metric(summary, PublicMetricId.OUT_OF_CORPUS_ABSTENTION).availability.value == "available"
-    assert PublicLimitationId.MANUAL_FAITHFULNESS_PENDING in summary.limitation_ids
     assert (
-        PublicLimitationId.MANUAL_CITED_SOURCE_SUPPORT_PENDING
-        in summary.limitation_ids
+        _metric(summary, PublicMetricId.OUT_OF_CORPUS_ABSTENTION).availability.value == "available"
     )
+    assert PublicLimitationId.MANUAL_FAITHFULNESS_PENDING in summary.limitation_ids
+    assert PublicLimitationId.MANUAL_CITED_SOURCE_SUPPORT_PENDING in summary.limitation_ids
 
 
 def _manual_items(fixture: _Fixture) -> tuple[CalibrationItemLabel, ...]:
@@ -846,8 +841,7 @@ def _manual_items(fixture: _Fixture) -> tuple[CalibrationItemLabel, ...]:
         rubric_raw = {
             "item_id": generated.item_id,
             "gold_claims": [
-                {"claim_id": claim["claim_id"], "text": claim["text"]}
-                for claim in gold_claims
+                {"claim_id": claim["claim_id"], "text": claim["text"]} for claim in gold_claims
             ],
             "must_not_claims": must_not,
         }
@@ -962,6 +956,16 @@ def test_precalibration_result_is_complete_mechanical_text_free_and_semantic_pen
     summary, artifact, checkpoints = _precalibration_summary(fixture)
 
     assert summary.item_count == 37
+    assert artifact.migration_artifact_sha256 is None
+    assert artifact.recovered_item_count == 0
+    assert artifact.recovered_item_ids == ()
+    assert artifact.generation_latency_denominator == 37
+    assert artifact.generation_latency_observed_count == 37
+    assert summary.migration_artifact_sha256 is None
+    assert summary.recovered_item_count == 0
+    assert summary.generation_latency_denominator == 37
+    assert summary.generation_latency_observed_count == 37
+    assert PublicLimitationId.TRACE_RECOVERED_ITEM_PRESENT not in summary.limitation_ids
     assert summary.completed_answer_count == 37
     assert summary.technical_error_count == 0
     assert summary.source_count == 37
@@ -973,10 +977,13 @@ def test_precalibration_result_is_complete_mechanical_text_free_and_semantic_pen
     assert summary.cost.unpriced_event_count == 0
     assert summary.cost.estimated_cost_usd == pytest.approx(0.074)
     assert summary.latency_scope == "generation_pipeline"
-    assert _precal_metric(
-        summary,
-        PrecalibrationMetricId.CITATION_RESOLVABILITY,
-    ).numerator == 33
+    assert (
+        _precal_metric(
+            summary,
+            PrecalibrationMetricId.CITATION_RESOLVABILITY,
+        ).numerator
+        == 33
+    )
     completeness = _precal_metric(
         summary,
         PrecalibrationMetricId.CITATION_COMPLETENESS,
@@ -1057,15 +1064,112 @@ def test_precalibration_markdown_is_deterministic_and_text_free() -> None:
 
     invented = summary.model_dump(mode="json")
     semantic_metric = next(
-        metric
-        for metric in invented["metrics"]
-        if metric["metric_id"] == "faithfulness_supported"
+        metric for metric in invented["metrics"] if metric["metric_id"] == "faithfulness_supported"
     )
     semantic_metric.update(availability="available", numerator=0, value=0.0)
     with pytest.raises(ValueError, match="must remain pending"):
         render_public_precalibration_markdown(
             invented,
             public_summary_json_sha256=public_json_sha256,
+        )
+
+
+def test_precalibration_trace_recovery_is_bound_and_excluded_from_latency() -> None:
+    fixture = _make_fixture()
+    migration_sha256 = "4" * 64
+    summary, artifact, checkpoints = _precalibration_summary(
+        fixture,
+        migration_artifact_sha256=migration_sha256,
+        recovered_item_ids=("H003",),
+    )
+
+    assert artifact.migration_artifact_sha256 == migration_sha256
+    assert artifact.recovered_item_count == 1
+    assert artifact.recovered_item_ids == ("H003",)
+    assert artifact.generation_latency_denominator == 37
+    assert artifact.generation_latency_observed_count == 36
+    assert summary.migration_artifact_sha256 == migration_sha256
+    assert summary.recovered_item_count == 1
+    assert summary.generation_latency_denominator == 37
+    assert summary.generation_latency_observed_count == 36
+    assert PublicLimitationId.TRACE_RECOVERED_ITEM_PRESENT in summary.limitation_ids
+    assert summary.latency.total_seconds == pytest.approx(sum(range(1, 38)) - 3)
+    assert summary.latency.mean_seconds == pytest.approx((sum(range(1, 38)) - 3) / 36)
+    assert summary.cost.priced_event_count == 74
+
+    serialized = json.dumps(summary.model_dump(mode="json"), sort_keys=True)
+    assert "H003" not in serialized
+    assert PRIVATE_SENTINEL not in serialized
+    markdown = render_public_precalibration_markdown(
+        summary,
+        public_summary_json_sha256=canonical_json_sha256(summary.model_dump(mode="json")),
+    )
+    assert f"Migration artifact SHA-256: `{migration_sha256}`" in markdown
+    assert "Trace-recovered items: 1" in markdown
+    assert "Latency denominator: 37" in markdown
+    assert "Exact latency observations: 36" in markdown
+    assert "`trace_recovered_item_present`" in markdown
+    assert PRIVATE_SENTINEL not in markdown
+    assert len(checkpoints) == 37
+
+
+@pytest.mark.parametrize(
+    ("migration_artifact_sha256", "recovered_item_ids", "error"),
+    (
+        (None, ("H003",), "requires a migration artifact"),
+        ("4" * 64, (), "requires a recovered item"),
+        ("4" * 64, ("H999",), "must belong"),
+        ("4" * 64, ("H003", "H004"), "0 or 1"),
+    ),
+)
+def test_precalibration_recovery_binding_rejects_incoherent_inputs(
+    migration_artifact_sha256: str | None,
+    recovered_item_ids: tuple[str, ...],
+    error: str,
+) -> None:
+    fixture = _make_fixture()
+    checkpoints = _canonical_decomposition_checkpoints(fixture)
+
+    with pytest.raises(ValueError, match=error):
+        build_precalibration_private_artifact(
+            cohort_manifest_sha256=COHORT_SHA,
+            generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+            decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+            gold_set_sha256=GOLD_SHA,
+            generated_items=fixture.generated,
+            decompositions=fixture.decompositions,
+            gold_items=fixture.gold,
+            decomposition_checkpoints=checkpoints,
+            migration_artifact_sha256=migration_artifact_sha256,
+            recovered_item_ids=recovered_item_ids,
+        )
+
+
+def test_public_precalibration_revalidates_external_recovery_binding() -> None:
+    fixture = _make_fixture()
+    checkpoints = _canonical_decomposition_checkpoints(fixture)
+    artifact = build_precalibration_private_artifact(
+        cohort_manifest_sha256=COHORT_SHA,
+        generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+        decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+        gold_set_sha256=GOLD_SHA,
+        generated_items=fixture.generated,
+        decompositions=fixture.decompositions,
+        gold_items=fixture.gold,
+        decomposition_checkpoints=checkpoints,
+        migration_artifact_sha256="4" * 64,
+        recovered_item_ids=("H003",),
+    )
+
+    with pytest.raises(ValueError, match="changed from its exact inputs"):
+        build_public_precalibration_summary(
+            candidate_id="evidence-planned-v26",
+            cohort_manifest=COHORT_MANIFEST,
+            generated_items=fixture.generated,
+            decompositions=fixture.decompositions,
+            gold_items=fixture.gold,
+            decomposition_checkpoints=checkpoints,
+            private_artifact=artifact,
         )
 
 

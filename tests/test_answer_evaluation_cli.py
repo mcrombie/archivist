@@ -219,7 +219,8 @@ def test_run_37_makes_37_generation_and_37_decomposition_calls_without_semantic_
     generation_calls: list[str] = []
     decomposition_calls: list[tuple[str, int]] = []
     calibration_subsets: list[tuple[str, ...]] = []
-    emitted: list[tuple[int, int]] = []
+    emitted: list[tuple[int, int, str | None, tuple[str, ...]]] = []
+    call_order: list[str] = []
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(runner, "UsageLedger", _ZeroCostLedger)
@@ -227,7 +228,11 @@ def test_run_37_makes_37_generation_and_37_decomposition_calls_without_semantic_
     monkeypatch.setattr(Path, "mkdir", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(Path, "is_file", lambda _path: False)
     monkeypatch.setattr(runner, "sha256_file", lambda _path: "f" * 64)
-    monkeypatch.setattr(runner, "_create_openai_client", lambda _key: object())
+    monkeypatch.setattr(
+        runner,
+        "_create_openai_client",
+        lambda _key: call_order.append("client") or object(),
+    )
     cohort = SimpleNamespace(
         items=tuple(SimpleNamespace(item_id=str(item["id"])) for item in context.gold_items)
     )
@@ -235,6 +240,11 @@ def test_run_37_makes_37_generation_and_37_decomposition_calls_without_semantic_
         runner,
         "_load_or_write_cohort_manifest",
         lambda *_args, **_kwargs: (cohort, "c" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validated_recovery_reporting_binding",
+        lambda **_kwargs: call_order.append("recovery-binding") or ("9" * 64, ("H003",)),
     )
 
     def generate(*, item, **_kwargs):
@@ -273,9 +283,7 @@ def test_run_37_makes_37_generation_and_37_decomposition_calls_without_semantic_
     monkeypatch.setattr(
         runner,
         "PrivateDecompositionCheckpoint",
-        SimpleNamespace(
-            model_validate=lambda _payload: SimpleNamespace(usage_event=object())
-        ),
+        SimpleNamespace(model_validate=lambda _payload: SimpleNamespace(usage_event=object())),
     )
     monkeypatch.setattr(runner, "_baseline_generation_fields", lambda **_kwargs: {})
     monkeypatch.setattr(runner, "_baseline_decomposition_fields", lambda **_kwargs: {})
@@ -284,8 +292,15 @@ def test_run_37_makes_37_generation_and_37_decomposition_calls_without_semantic_
     monkeypatch.setattr(
         runner,
         "_emit_precalibration_results",
-        lambda *, generated_items, decompositions, **_kwargs: (
-            emitted.append((len(generated_items), len(decompositions)))
+        lambda *, generated_items, decompositions, migration_artifact_sha256, recovered_item_ids, **_kwargs: (
+            emitted.append(
+                (
+                    len(generated_items),
+                    len(decompositions),
+                    migration_artifact_sha256,
+                    tuple(recovered_item_ids),
+                )
+            )
             or (Path("private.json"), Path("public.json"), Path("public.md"))
         ),
     )
@@ -314,7 +329,8 @@ def test_run_37_makes_37_generation_and_37_decomposition_calls_without_semantic_
     assert generation_calls == expected_ids
     assert decomposition_calls == [(item_id, 1) for item_id in expected_ids]
     assert calibration_subsets == [context.calibration_ids]
-    assert emitted == [(37, 37)]
+    assert emitted == [(37, 37, "9" * 64, ("H003",))]
+    assert call_order[:2] == ["recovery-binding", "client"]
 
 
 def test_completed_run_37_resumes_without_provider_calls_or_overwrite(
@@ -322,8 +338,7 @@ def test_completed_run_37_resumes_without_provider_calls_or_overwrite(
 ) -> None:
     context = _context()
     generated = tuple(
-        _generated_item(item, sequence)
-        for sequence, item in enumerate(context.gold_items, start=1)
+        _generated_item(item, sequence) for sequence, item in enumerate(context.gold_items, start=1)
     )
     by_id = {item.item_id: item for item in generated}
     calibration_generated = tuple(by_id[item_id] for item_id in context.calibration_ids)
@@ -341,6 +356,11 @@ def test_completed_run_37_resumes_without_provider_calls_or_overwrite(
         runner,
         "_load_or_write_cohort_manifest",
         lambda *_args, **_kwargs: (cohort, "c" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validated_recovery_reporting_binding",
+        lambda **_kwargs: (None, ()),
     )
     monkeypatch.setattr(
         runner,
@@ -408,14 +428,17 @@ def test_retired_calibration_generate_cannot_make_paid_calls(
         "_create_openai_client",
         lambda _key: pytest.fail("retired command constructed a provider client"),
     )
-    assert runner.main(
-        [
-            "calibration-generate",
-            "--authorize-openai-calibration-generation",
-            "--max-cost-usd",
-            "4",
-        ]
-    ) == 1
+    assert (
+        runner.main(
+            [
+                "calibration-generate",
+                "--authorize-openai-calibration-generation",
+                "--max-cost-usd",
+                "4",
+            ]
+        )
+        == 1
+    )
 
 
 def test_openai_client_disables_sdk_retries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -473,9 +496,7 @@ def test_completed_calibration_is_validated_and_reused_without_calls_or_overwrit
     monkeypatch.setattr(Path, "is_file", completed_artifact_is_file)
     monkeypatch.setattr(Path, "mkdir", lambda *_args, **_kwargs: None)
     cohort = SimpleNamespace(
-        items=tuple(
-            SimpleNamespace(item_id=item_id) for item_id in context.calibration_ids
-        )
+        items=tuple(SimpleNamespace(item_id=item_id) for item_id in context.calibration_ids)
     )
     monkeypatch.setattr(
         runner,
@@ -626,6 +647,204 @@ def test_orphan_usage_refuses_a_repeat_call(monkeypatch: pytest.MonkeyPatch) -> 
         runner._require_no_orphan_usage(Path("usage.sqlite3"), turn_id="H001")
 
 
+def _early_release_row() -> dict[str, object]:
+    return {
+        "response_id": "req_embedding_H003",
+        "recorded_at": "2026-08-09T13:09:36+00:00",
+        "operation": "query_embedding",
+        "requested_model": runner.EMBEDDING_MODEL,
+        "actual_model": runner.EMBEDDING_MODEL,
+        "input_tokens": 45,
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 45,
+        "estimated_cost_nano_usd": 160,
+        "pricing_version": "test-v1",
+        "unpriced": False,
+    }
+
+
+def _clean_abstention_trace(question: str) -> dict[str, object]:
+    plan = runner.build_question_plan(
+        runner.ResolvedTurn(
+            standalone_question=question,
+            trusted_user_texts=(question,),
+        )
+    )
+    target = plan.targets[0].query_surface_span
+    return {
+        "schema": "archivist.retrieval_trace/13",
+        "trace_id": "1" * 32,
+        "created_at": "2026-08-09T13:09:37+00:00",
+        "retrieval_version": "faceted-hybrid-rrf-v15",
+        "query": {"sha256": runner.hashlib.sha256(question.encode("utf-8")).hexdigest()},
+        "plan": {
+            "planner_used": False,
+            "policy_version": runner.RAG_POLICY_VERSION,
+            "planner_call": {"status": "not_called"},
+        },
+        "evidence": {
+            "decision": {
+                "value": "clean_abstention",
+                "skip_answer_generation": True,
+                "allowed_source_numbers": [],
+                "rules_fired": ["certified_direct_absence", "no_safe_related_material"],
+            },
+            "targets": [
+                {
+                    "target_character_count": len(target),
+                    "target_sha256": runner.hashlib.sha256(
+                        " ".join(runner.tokenize_anchor(target)).encode("utf-8")
+                    ).hexdigest(),
+                }
+            ],
+        },
+        "generation_contract": {
+            "status": "clean_abstention",
+            "structured_generation_called": False,
+        },
+    }
+
+
+def test_trace_proven_local_release_accepts_embedding_only_and_rejects_unproven_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    question = "Discuss Thomas Jefferson's role as president."
+    item_root = Path("private-run/items/H003")
+    reference = runner.PrivateTraceReference(
+        sequence=1,
+        schema_id="archivist.retrieval_trace/13",
+        trace_id="1" * 32,
+        path="retrieval-traces/2026-08-09/trace.json",
+        sha256="a" * 64,
+        query_sha256=runner.hashlib.sha256(question.encode()).hexdigest(),
+        retrieval_version="faceted-hybrid-rrf-v15",
+    )
+    row = _early_release_row()
+    monkeypatch.setattr(runner, "_usage_rows", lambda *_a, **_k: [row])
+    monkeypatch.setattr(runner, "sha256_file", lambda _path: "a" * 64)
+    monkeypatch.setattr(
+        runner,
+        "_load_json_object",
+        lambda _path, **_kwargs: _clean_abstention_trace(question),
+    )
+
+    proof = runner._prove_local_early_release(
+        item_root=item_root,
+        question=question,
+        trace_reference=reference,
+        usage_db=Path("usage.sqlite3"),
+    )
+    assert proof.status == "clean_abstention"
+    assert proof.answer == runner._clean_abstention("Discuss Thomas Jefferson's")
+    events = runner._private_usage_events(
+        Path("usage.sqlite3"),
+        turn_id="H003",
+        phase="generation",
+        local_release_proven=True,
+        audited_ledger_recovery=True,
+    )
+    assert [event.operation for event in events] == ["query_embedding"]
+    with pytest.raises(runner.AnswerEvaluationError, match="exactly one"):
+        runner._private_usage_events(
+            Path("usage.sqlite3"),
+            turn_id="H003",
+            phase="generation",
+            audited_ledger_recovery=True,
+        )
+
+
+def test_orphaned_local_release_is_recovered_without_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gold = next(item for item in _gold_items() if item["id"] == "H003")
+    run_root = Path("private-run")
+    item_root = run_root / "items" / "H003"
+    row = _early_release_row()
+    monkeypatch.setattr(runner, "_usage_rows_if_any", lambda *_a, **_k: [row])
+    monkeypatch.setattr(runner, "_usage_rows", lambda *_a, **_k: [row])
+    monkeypatch.setattr(Path, "is_file", lambda _path: False)
+    monkeypatch.setattr(
+        Path,
+        "glob",
+        lambda _path, _pattern: iter([item_root / "retrieval-traces/2026-08-09/trace.json"]),
+    )
+    reference = runner.PrivateTraceReference(
+        sequence=1,
+        schema_id="archivist.retrieval_trace/13",
+        trace_id="1" * 32,
+        path="retrieval-traces/2026-08-09/trace.json",
+        sha256="a" * 64,
+        query_sha256=runner.hashlib.sha256(str(gold["question"]).encode()).hexdigest(),
+        retrieval_version="faceted-hybrid-rrf-v15",
+    )
+    monkeypatch.setattr(runner, "_trace_reference_from_path", lambda *_a, **_k: reference)
+    proof = runner._LocalReleaseProof(
+        answer=runner._clean_abstention("Discuss Thomas Jefferson's"),
+        status="clean_abstention",
+        evidence_decision="clean_abstention",
+        diagnostics={"offline_recovery": {"full_turn_latency_recovered": False}},
+        trace_reference=reference,
+        elapsed_seconds=0.0,
+    )
+    monkeypatch.setattr(runner, "_prove_local_early_release", lambda **_k: proof)
+    monkeypatch.setattr(
+        runner,
+        "_private_usage_events",
+        lambda *_a, **_k: (
+            build_private_usage_event(
+                sequence=1,
+                response_id="req_embedding_H003",
+                recorded_at="2026-08-09T13:09:36+00:00",
+                operation="query_embedding",
+                requested_model=runner.EMBEDDING_MODEL,
+                actual_model=runner.EMBEDDING_MODEL,
+                input_tokens=45,
+                cached_tokens=0,
+                cache_write_tokens=0,
+                output_tokens=0,
+                reasoning_tokens=0,
+                total_tokens=45,
+                estimated_cost_nano_usd=160,
+                pricing_version="test-v1",
+                unpriced=False,
+            ),
+        ),
+    )
+    writes: list[Path] = []
+    monkeypatch.setattr(
+        runner,
+        "write_json_atomic_no_overwrite",
+        lambda path, _value: writes.append(path),
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_evidence_planned_answer",
+        lambda **_k: pytest.fail("recovery repeated the V26/provider path"),
+    )
+    args = argparse.Namespace(run_root=run_root, manifest=Path("unused"), chunks=Path("unused"))
+    cohort_item = SimpleNamespace(
+        item_id="H003",
+        question_sha256=runner.hashlib.sha256(str(gold["question"]).encode()).hexdigest(),
+    )
+    generated = runner._run_one_generated_item(
+        args=args,
+        context=SimpleNamespace(),
+        item=gold,
+        client=None,
+        usage_db=run_root / "usage.sqlite3",
+        runner_sha256="a" * 64,
+        cohort_manifest_sha256="b" * 64,
+        cohort_item=cohort_item,
+    )
+    assert generated.item_id == "H003"
+    assert generated.sources == ()
+    assert item_root / "generated.json" in writes
+    assert item_root / "local-release-recovery-audit.json" in writes
+
+
 def test_existing_calibration_semantic_aggregate_requires_all_call_checkpoints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -663,9 +882,7 @@ def test_existing_baseline_semantic_aggregate_requires_active_lane_checkpoints(
     context = _context()
     calibration = _generated_item(context.calibration_items[0], 1)
     remaining_item = next(
-        item
-        for item in context.gold_items
-        if item["id"] not in context.calibration_ids
+        item for item in context.gold_items if item["id"] not in context.calibration_ids
     )
     remaining = _generated_item(remaining_item, 2)
     decompositions = tuple(
@@ -759,9 +976,7 @@ def test_provider_capture_preserves_with_raw_response_path() -> None:
     raw = client.responses.with_raw_response.parse(model=runner.JUDGE_MODEL)
     assert raw.http_response.json() == payload
     assert raw.parse() is parsed
-    assert client.observations == [
-        runner._ProviderObservation("resp_raw", runner.JUDGE_MODEL)
-    ]
+    assert client.observations == [runner._ProviderObservation("resp_raw", runner.JUDGE_MODEL)]
 
 
 def _semantic_usage_row(response_id: str, operation: str) -> dict[str, object]:
@@ -841,9 +1056,7 @@ def test_calibration_judge_fails_before_client_on_auth_or_label_error(
     monkeypatch.setattr(
         runner,
         "_load_validated_calibration_inputs",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            ValueError("owner label is incomplete")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("owner label is incomplete")),
     )
     invalid_labels = argparse.Namespace(
         authorize_openai_calibration_judge=True,
@@ -866,18 +1079,14 @@ def test_semantic_calls_keep_evidence_and_rubric_lanes_separate(
     def fake_evidence(client: object, *, claim: object, source_texts: object):
         response_id = f"resp_evidence_{len(response_ids) + 1}"
         response_ids.append(response_id)
-        client.observations.append(
-            runner._ProviderObservation(response_id, runner.JUDGE_MODEL)
-        )
+        client.observations.append(runner._ProviderObservation(response_id, runner.JUDGE_MODEL))
         evidence_inputs.append((claim, dict(source_texts)))
         return SimpleNamespace(
             parsed=runner.ClaimEvidenceVerdict.model_validate(
                 {
                     "claim_id": claim.claim_id,
                     "faithfulness": "supported",
-                    "source_verdicts": [
-                        {"source_number": 1, "label": "supported"}
-                    ],
+                    "source_verdicts": [{"source_number": 1, "label": "supported"}],
                     "rationale": "Supported by the supplied evidence.",
                 }
             ),
@@ -892,16 +1101,13 @@ def test_semantic_calls_keep_evidence_and_rubric_lanes_separate(
     def fake_rubric(client: object, *, answer: str, answer_claims: object, rubric: object):
         response_id = "resp_rubric_1"
         response_ids.append(response_id)
-        client.observations.append(
-            runner._ProviderObservation(response_id, runner.JUDGE_MODEL)
-        )
+        client.observations.append(runner._ProviderObservation(response_id, runner.JUDGE_MODEL))
         rubric_inputs.append(rubric)
         return SimpleNamespace(
             parsed=runner.ItemRubricVerdict.model_validate(
                 {
                     "gold_claims": [
-                        {"claim_id": item.claim_id, "status": "absent"}
-                        for item in rubric.claims
+                        {"claim_id": item.claim_id, "status": "absent"} for item in rubric.claims
                     ],
                     "answer_claim_matches": [
                         {"answer_claim_id": item.claim_id, "gold_claim_ids": []}
@@ -1095,14 +1301,14 @@ def test_lock_instrument_is_offline_and_preserves_mixed_fallback(
     assert len(written) == 1
     lock = written[0]
     assert lock.scoring_mode.value == "mixed"
-    assert next(
-        item for item in lock.dimensions if item.dimension.value == "claim_mapping"
-    ).scoring_mode.value == "manual"
-    assert lock.baseline_next_action == runner.NEXT_ACTION_BASELINE
     assert (
-        f"OPTIONAL SCORING ACTION: {runner.NEXT_ACTION_BASELINE}"
-        in capsys.readouterr().out
+        next(
+            item for item in lock.dimensions if item.dimension.value == "claim_mapping"
+        ).scoring_mode.value
+        == "manual"
     )
+    assert lock.baseline_next_action == runner.NEXT_ACTION_BASELINE
+    assert f"OPTIONAL SCORING ACTION: {runner.NEXT_ACTION_BASELINE}" in capsys.readouterr().out
 
 
 def _all_manual_instrument() -> SimpleNamespace:
@@ -1120,8 +1326,7 @@ def test_semantic_baseline_reuses_all_37_generation_and_decomposition_artifacts(
 ) -> None:
     context = _context()
     generated = tuple(
-        _generated_item(item, sequence)
-        for sequence, item in enumerate(context.gold_items, start=1)
+        _generated_item(item, sequence) for sequence, item in enumerate(context.gold_items, start=1)
     )
     generated_by_id = {item.item_id: item for item in generated}
     decomposed = tuple(
@@ -1144,12 +1349,8 @@ def test_semantic_baseline_reuses_all_37_generation_and_decomposition_artifacts(
             for item_id in context.calibration_ids
         )
     )
-    calibration_generated = tuple(
-        generated_by_id[item_id] for item_id in context.calibration_ids
-    )
-    calibration_decomposed = tuple(
-        decomposed_by_id[item_id] for item_id in context.calibration_ids
-    )
+    calibration_generated = tuple(generated_by_id[item_id] for item_id in context.calibration_ids)
+    calibration_decomposed = tuple(decomposed_by_id[item_id] for item_id in context.calibration_ids)
     cohort = SimpleNamespace(
         items=tuple(SimpleNamespace(item_id=item.item_id) for item in generated)
     )
@@ -1215,8 +1416,7 @@ def test_semantic_baseline_reuses_all_37_generation_and_decomposition_artifacts(
         lambda *_args, **_kwargs: (
             decomposed,
             tuple(
-                SimpleNamespace(response_id=f"decomposition-{item.item_id}")
-                for item in generated
+                SimpleNamespace(response_id=f"decomposition-{item.item_id}") for item in generated
             ),
             "6" * 64,
         ),
@@ -1283,9 +1483,7 @@ def test_semantic_baseline_reuses_all_37_generation_and_decomposition_artifacts(
     monkeypatch.setattr(
         runner,
         "build_baseline_semantic_item",
-        lambda *, decomposition, **_kwargs: SimpleNamespace(
-            item_id=decomposition.item_id
-        ),
+        lambda *, decomposition, **_kwargs: SimpleNamespace(item_id=decomposition.item_id),
     )
     semantic = SimpleNamespace(items=(), aggregate_sha256="6" * 64)
     monkeypatch.setattr(
@@ -1349,8 +1547,7 @@ def test_completed_baseline_resume_makes_no_calls_and_overwrites_nothing(
 ) -> None:
     context = _context()
     generated = tuple(
-        _generated_item(item, sequence)
-        for sequence, item in enumerate(context.gold_items, start=1)
+        _generated_item(item, sequence) for sequence, item in enumerate(context.gold_items, start=1)
     )
     decompositions = tuple(
         SimpleNamespace(
@@ -1398,14 +1595,8 @@ def test_completed_baseline_resume_makes_no_calls_and_overwrites_nothing(
         runner,
         "_load_calibration_artifacts",
         lambda *_a, **_k: (
-            tuple(
-                item for item in generated if item.item_id in context.calibration_ids
-            ),
-            tuple(
-                item
-                for item in decompositions
-                if item.item_id in context.calibration_ids
-            ),
+            tuple(item for item in generated if item.item_id in context.calibration_ids),
+            tuple(item for item in decompositions if item.item_id in context.calibration_ids),
             "2" * 64,
             "3" * 64,
         ),

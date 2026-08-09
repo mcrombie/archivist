@@ -239,8 +239,8 @@ The answer-evaluation preflight is offline and makes no provider call:
 uv run python scripts/run_answer_evaluation.py preflight
 ```
 
-After separate owner authorization for the disclosed data and cost scope, the complete resumable
-cohort uses this single paid entry point:
+The owner authorized the complete frozen cohort up to a cumulative `$20.00`. A fresh run uses this
+single paid entry point:
 
 ```powershell
 uv run python scripts/run_answer_evaluation.py run-37 `
@@ -253,14 +253,48 @@ The command-line acknowledgement is a safety interlock, not authorization by its
 writes the sealed private binding plus the closed, text-free mechanical JSON and Markdown reports.
 It performs no calibration repeats or semantic-judge calls.
 
+The first authorized execution stopped fail-closed at H003. H001 and H002 are sealed. H003 made
+exactly one embedding call and reached a trace-backed deterministic `clean_abstention` before
+answer generation, but the original harness rejected that valid early-release checkpoint shape.
+No retry and no H003 answer-generation call occurred. Cumulative recorded spend is approximately
+**`$0.2957022`**. The abstention remains evaluation behavior—likely a false abstention—not an item
+to repair or rerun.
+
+Recovery is deliberately offline and non-destructive. After committing and verifying the harness
+correction, leave the original partial root
+`runtime/evaluations/v26-held-out-answer-quality-2026-08-07` untouched and create its audited
+sibling:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py recover-interrupted
+```
+
+That command makes no provider call. It preserves the H001/H002 inner generated-item payloads
+unchanged, explicitly reconstructs H003 from its exact sealed trace and existing usage ledger, and
+binds the source and sibling roots in `migration-audit.json`. Resume only the missing operations:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py run-37 `
+  --run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-01 `
+  --authorize-openai-full-evaluation `
+  --max-cost-usd 20
+```
+
+The cumulative cap includes the already recorded calls. The final private/public artifacts bind
+the migration hash and identify H003 as trace-recovered. Because its full-turn duration cannot be
+reconstructed, generation latency is reported over **36 of 37** items rather than imputed; the
+public report carries that limitation. “Uninterrupted” forbids calibration or changes to V26,
+prompts, models, retrieval, corpus, gold, or UI—not exact provider-free recovery after a harness
+stop.
+
 Faithfulness and abstention calibration is later, lower-priority scoring-instrument work. Only
 after all 37 answers and canonical decompositions are preserved may the predeclared ten-item subset
 receive human labels, repeated decompositions, and semantic judge checks. That work may add a
 hash-bound scoring supplement; it cannot delay, overwrite, or suppress the baseline. Five-repeat
 generator noise measurement is likewise required before a later comparative or significance
-claim, not before this first descriptive result. No paid answer-quality call has occurred while
-implementing this protocol. V26 remains frozen, and the interactive application and earlier
-practical evaluations remain development evidence only.
+claim, not before this first descriptive result. The partial answer-quality run has recorded about
+`$0.2957022`; completion remains pending. V26 remains frozen, and the interactive application and
+earlier practical evaluations remain development evidence only.
 
 ## Documentation map
 

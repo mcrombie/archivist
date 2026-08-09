@@ -63,7 +63,7 @@ from answer_evaluation import (  # noqa: E402
     write_json_atomic_no_overwrite,
 )
 from answer_coverage import EvidenceCoverageAnswer  # noqa: E402
-from archivist_modes import ArchivistMode  # noqa: E402
+from archivist_modes import ArchivistMode, archivist_mode_metadata  # noqa: E402
 from corpus import load_chunks  # noqa: E402
 from costs import UsageLedger, usage_scope  # noqa: E402
 from evaluation_artifacts import (  # noqa: E402
@@ -128,11 +128,12 @@ from evaluation_reporting import (  # noqa: E402
     render_public_evaluation_markdown,
 )
 from evaluation_scoring import select_calibration_item_ids  # noqa: E402
+from evidence_policy import tokenize_anchor  # noqa: E402
 from gold_provenance import validate_gold_provenance_file  # noqa: E402
 from gold_set import validate_gold_set_file  # noqa: E402
 from model_config import GENERATOR_SETTINGS, QUERY_PLANNER_SETTINGS  # noqa: E402
 from perspectives import AnswerVoice, HistoriographicalLens, Worldview  # noqa: E402
-from query_planning import ResolvedTurn  # noqa: E402
+from query_planning import ResolvedTurn, build_question_plan  # noqa: E402
 from query_planning import PlannerQuestionPlan, QUERY_PLANNER_INSTRUCTIONS  # noqa: E402
 from rag_pipeline import (  # noqa: E402
     EVIDENCE_PLANNED_POLICY,
@@ -141,6 +142,8 @@ from rag_pipeline import (  # noqa: E402
     QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS,
     QUERY_PLANNER_PROMPT_VERSION,
     RAG_POLICY_VERSION,
+    STRUCTURAL_STAGE_SHORTFALL_MESSAGE,
+    _clean_abstention,
     preflight_answer_corpus,
     run_evidence_planned_answer,
 )
@@ -180,6 +183,13 @@ CLAIM_EVIDENCE_CALL_COST_RESERVE_USD = 0.15
 ITEM_RUBRIC_CALL_COST_RESERVE_USD = 0.20
 EMBEDDING_MODEL = "text-embedding-3-small"
 INSTRUMENT_ID = "v26-held-out-answer-quality-scoring-lock"
+INTERRUPTED_RUNNER_SHA256 = "c79edf5287f9c7fa3e1c9a54a287c555a4c0d25917187422d7d5b38ef7806f84"
+INTERRUPTED_COHORT_FILE_SHA256 = "4828f20d20a9d2de35e04f81265da45259139e96b4a0c28397933d0c71aca56e"
+INTERRUPTED_GENERATED_CHECKPOINT_SHA256S = {
+    "H001": "8899e3756b2405ca1e92cc6eb6a058679e08efaf1b5c5282537ad0021280368c",
+    "H002": "cd57cf9a2caf4e23f7b561443ba9b90a1996f565709659c6d1d4decdcf865618",
+}
+INTERRUPTED_H003_TRACE_SHA256 = "ad968ef4d972bd738a387149bf578ccc9a1b9fe0b8de8e0f4387225c73f19e20"
 
 DEFAULT_GOLD = BASE_DIR / "fixtures" / "gold_set.json"
 DEFAULT_PROVENANCE = BASE_DIR / "fixtures" / "gold_set.provenance.json"
@@ -189,6 +199,7 @@ DEFAULT_COMMITMENT = BASE_DIR / "fixtures" / "gold_questions.commitment.json"
 DEFAULT_CATALOG = BASE_DIR / "fixtures" / "evaluation_model_catalog.json"
 DEFAULT_CHUNKS = BASE_DIR / "output" / "chunks.json"
 DEFAULT_RUN_ROOT = BASE_DIR / "runtime" / "evaluations" / EVALUATION_ID
+DEFAULT_RECOVERY_ROOT = DEFAULT_RUN_ROOT.with_name(EVALUATION_ID + "-harness-recovery-01")
 DEFAULT_LABELS = DEFAULT_RUN_ROOT / "calibration-labels.json"
 PRIVATE_EVALUATION_ROOT = (BASE_DIR / "runtime" / "evaluations").resolve()
 
@@ -246,6 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "preflight",
+            "recover-interrupted",
             "run-37",
             "calibration-generate",
             "validate-labels",
@@ -263,6 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-catalog", type=Path, default=DEFAULT_CATALOG)
     parser.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
     parser.add_argument("--run-root", type=Path, default=DEFAULT_RUN_ROOT)
+    parser.add_argument("--source-run-root", type=Path, default=DEFAULT_RUN_ROOT)
     parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS)
     parser.add_argument(
         "--authorize-openai-full-evaluation",
@@ -276,9 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--authorize-openai-calibration-generation",
         action="store_true",
-        help=(
-            "Retired: use run-37 and --authorize-openai-full-evaluation."
-        ),
+        help=("Retired: use run-37 and --authorize-openai-full-evaluation."),
     )
     parser.add_argument(
         "--authorize-openai-calibration-judge",
@@ -473,9 +484,7 @@ def _expected_cohort_manifest(
     *,
     runner_sha256: str,
 ) -> AnswerEvaluationCohortManifest:
-    query_planner_prompt = (
-        QUERY_PLANNER_INSTRUCTIONS + "\n" + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS
-    )
+    query_planner_prompt = QUERY_PLANNER_INSTRUCTIONS + "\n" + QUERY_PLANNER_ADDITIONAL_INSTRUCTIONS
     return build_cohort_manifest(
         evaluation_id=EVALUATION_ID,
         candidate_commit=context.gold.candidate_commit,
@@ -550,33 +559,23 @@ def _expected_cohort_manifest(
         structured_outputs=(
             {
                 "output_id": "planner_question_plan",
-                "schema_sha256": canonical_json_sha256(
-                    PlannerQuestionPlan.model_json_schema()
-                ),
+                "schema_sha256": canonical_json_sha256(PlannerQuestionPlan.model_json_schema()),
             },
             {
                 "output_id": "evidence_coverage_answer",
-                "schema_sha256": canonical_json_sha256(
-                    EvidenceCoverageAnswer.model_json_schema()
-                ),
+                "schema_sha256": canonical_json_sha256(EvidenceCoverageAnswer.model_json_schema()),
             },
             {
                 "output_id": "claim_decomposition",
-                "schema_sha256": canonical_json_sha256(
-                    ClaimDecomposition.model_json_schema()
-                ),
+                "schema_sha256": canonical_json_sha256(ClaimDecomposition.model_json_schema()),
             },
             {
                 "output_id": "claim_evidence_verdict",
-                "schema_sha256": canonical_json_sha256(
-                    ClaimEvidenceVerdict.model_json_schema()
-                ),
+                "schema_sha256": canonical_json_sha256(ClaimEvidenceVerdict.model_json_schema()),
             },
             {
                 "output_id": "item_rubric_verdict",
-                "schema_sha256": canonical_json_sha256(
-                    ItemRubricVerdict.model_json_schema()
-                ),
+                "schema_sha256": canonical_json_sha256(ItemRubricVerdict.model_json_schema()),
             },
         ),
     )
@@ -600,14 +599,71 @@ def _load_or_write_cohort_manifest(
     return actual, sha256_file(path)
 
 
+def _archive_bytes_no_overwrite(*, source: Path, destination: Path) -> None:
+    payload = source.read_bytes()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with destination.open("xb") as handle:
+            handle.write(payload)
+    except FileExistsError:
+        if destination.read_bytes() != payload:
+            raise AnswerEvaluationError(f"immutable migration archive changed: {destination}")
+
+
+def _usage_turn_ids(path: Path) -> tuple[str, ...]:
+    connection = sqlite3.connect(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT turn_id FROM usage_events
+            WHERE project_id = ? AND conversation_id = ?
+            ORDER BY turn_id
+            """,
+            (EVALUATION_ID, "held-out-37"),
+        ).fetchall()
+    finally:
+        connection.close()
+    return tuple(str(row[0]) for row in rows)
+
+
+def _logical_usage_bindings(path: Path) -> tuple[dict[str, object], ...]:
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute(
+            """
+            SELECT id, turn_id, response_id, operation, requested_model, actual_model,
+                   input_tokens, cached_tokens, cache_write_tokens, output_tokens,
+                   reasoning_tokens, total_tokens, estimated_cost_nano_usd,
+                   pricing_version, unpriced
+            FROM usage_events
+            WHERE project_id = ? AND conversation_id = ? ORDER BY id
+            """,
+            (EVALUATION_ID, "held-out-37"),
+        ).fetchall()
+    finally:
+        connection.close()
+    bindings = []
+    for ordinal, row in enumerate(rows, start=1):
+        fields = {key: row[key] for key in row.keys() if key != "id"}
+        bindings.append(
+            {
+                "ordinal": ordinal,
+                "turn_id": str(row["turn_id"]),
+                "response_id": str(row["response_id"]),
+                "event_sha256": canonical_json_sha256(fields),
+            }
+        )
+    return tuple(bindings)
+
+
 def _print_preflight(context: EvaluationContext) -> None:
     print("VALID V26 ANSWER-EVALUATION PREFLIGHT")
     print(f"Candidate: {context.gold.candidate_commit} / {context.gold.candidate_rag_policy}")
     print(f"Gold set: {len(context.gold_items)} items / {context.gold.gold_set_sha256}")
     print(f"Question-set SHA-256: {context.gold.question_set_sha256}")
     print(
-        "Later calibration subset (never a generation gate): "
-        f"{', '.join(context.calibration_ids)}"
+        f"Later calibration subset (never a generation gate): {', '.join(context.calibration_ids)}"
     )
     print(f"Full uninterrupted generation cohort: {len(context.gold_items)} questions")
     print(
@@ -721,6 +777,8 @@ def _private_usage_events(
     turn_id: str,
     phase: str,
     provider_observations: Sequence[_ProviderObservation] = (),
+    local_release_proven: bool = False,
+    audited_ledger_recovery: bool = False,
 ):
     rows = _usage_rows(path, turn_id=turn_id)
     if not rows:
@@ -731,7 +789,13 @@ def _private_usage_events(
             ["query_embedding", "answer_generation"],
             ["query_planning", "query_embedding", "answer_generation"],
         )
-        if operations not in allowed_sequences:
+        local_release_sequences = (
+            ["query_embedding"],
+            ["query_planning", "query_embedding"],
+        )
+        if operations not in allowed_sequences and not (
+            local_release_proven and operations in local_release_sequences
+        ):
             raise AnswerEvaluationError(
                 f"{turn_id}: expected exactly one optional planner, one batched "
                 "query embedding, and one answer generation in order"
@@ -781,7 +845,9 @@ def _private_usage_events(
                 f"({row['requested_model']!r} / {row['actual_model']!r})"
             )
         response_id = str(row["response_id"])
-        if observed.get(response_id) != row["actual_model"]:
+        if observed.get(response_id) != row["actual_model"] and not (
+            audited_ledger_recovery and local_release_proven and not provider_observations
+        ):
             raise AnswerEvaluationError(
                 f"{turn_id}: {operation} ledger identity does not match the raw response"
             )
@@ -808,11 +874,159 @@ def _private_usage_events(
                 unpriced=bool(row["unpriced"]),
             )
         )
-    if set(observed) != {event.response_id for event in events}:
+    if not (audited_ledger_recovery and local_release_proven and not provider_observations) and (
+        set(observed) != {event.response_id for event in events}
+    ):
         raise AnswerEvaluationError(
             f"{turn_id}: raw provider response cardinality differs from tracked usage"
         )
     return tuple(events)
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalReleaseProof:
+    answer: str
+    status: str
+    evidence_decision: str
+    diagnostics: Mapping[str, object]
+    trace_reference: PrivateTraceReference
+    elapsed_seconds: float
+
+
+def _trace_reference_from_path(item_root: Path, trace_path: Path) -> PrivateTraceReference:
+    payload = _load_json_object(trace_path, label="retrieval trace")
+    query = payload.get("query")
+    if not isinstance(query, Mapping):
+        raise AnswerEvaluationError("retrieval trace has no query binding")
+    return PrivateTraceReference(
+        sequence=1,
+        schema_id=_required_string(payload, "schema", label="retrieval trace"),
+        trace_id=_required_string(payload, "trace_id", label="retrieval trace"),
+        path=trace_path.relative_to(item_root).as_posix(),
+        sha256=sha256_file(trace_path),
+        query_sha256=_required_string(query, "sha256", label="retrieval trace query"),
+        retrieval_version=_required_string(payload, "retrieval_version", label="retrieval trace"),
+    )
+
+
+def _prove_local_early_release(
+    *,
+    item_root: Path,
+    question: str,
+    trace_reference: PrivateTraceReference,
+    usage_db: Path,
+    expected_answer: str | None = None,
+    expected_status: str | None = None,
+    expected_evidence_decision: str | None = None,
+    final_source_count: int = 0,
+) -> _LocalReleaseProof:
+    trace_path = (item_root / trace_reference.path).resolve()
+    try:
+        trace_path.relative_to(item_root.resolve())
+    except ValueError as exc:
+        raise AnswerEvaluationError("retrieval trace path escapes its item directory") from exc
+    if sha256_file(trace_path) != trace_reference.sha256:
+        raise AnswerEvaluationError("retrieval trace hash changed")
+    trace = _load_json_object(trace_path, label="retrieval trace")
+    if trace_reference.query_sha256 != hashlib.sha256(question.encode("utf-8")).hexdigest():
+        raise AnswerEvaluationError("retrieval trace belongs to another question")
+    evidence = trace.get("evidence")
+    generation = trace.get("generation_contract")
+    plan_trace = trace.get("plan")
+    if not all(isinstance(value, Mapping) for value in (evidence, generation, plan_trace)):
+        raise AnswerEvaluationError("local-release trace is incomplete")
+    decision = evidence.get("decision")
+    if not isinstance(decision, Mapping):
+        raise AnswerEvaluationError("local-release evidence decision is missing")
+    if (
+        decision.get("skip_answer_generation") is not True
+        or generation.get("structured_generation_called") is not False
+        or decision.get("allowed_source_numbers") != []
+        or final_source_count != 0
+    ):
+        raise AnswerEvaluationError("trace does not prove an empty-source local release")
+    operations = [str(row["operation"]) for row in _usage_rows(usage_db, turn_id=item_root.name)]
+    planner_used = plan_trace.get("planner_used") is True
+    expected_operations = (
+        ["query_planning", "query_embedding"] if planner_used else ["query_embedding"]
+    )
+    if operations != expected_operations:
+        raise AnswerEvaluationError("local-release provider-call shape disagrees with its trace")
+
+    status = str(generation.get("status"))
+    evidence_decision = str(decision.get("value"))
+    rules = decision.get("rules_fired")
+    if status == "clean_abstention" and evidence_decision == "clean_abstention":
+        target_label: str | None = None
+        if not planner_used:
+            fallback = build_question_plan(
+                ResolvedTurn(standalone_question=question, trusted_user_texts=(question,))
+            )
+            targets = evidence.get("targets")
+            if (
+                not isinstance(targets, list)
+                or len(targets) != 1
+                or not isinstance(targets[0], Mapping)
+            ):
+                raise AnswerEvaluationError("clean-abstention trace has no unique target proof")
+            target_record = targets[0]
+            matching = [
+                target.query_surface_span
+                for target in fallback.targets
+                if (
+                    len(target.query_surface_span) == target_record.get("target_character_count")
+                    and hashlib.sha256(
+                        " ".join(tokenize_anchor(target.query_surface_span)).encode("utf-8")
+                    ).hexdigest()
+                    == target_record.get("target_sha256")
+                )
+            ]
+            if len(matching) != 1:
+                raise AnswerEvaluationError("clean-abstention target cannot be reconstructed")
+            target_label = matching[0]
+        elif expected_answer is None:
+            raise AnswerEvaluationError(
+                "planner-derived clean abstention cannot be reconstructed offline"
+            )
+        answer = expected_answer or _clean_abstention(target_label)
+    elif (
+        "structural_stage_shortfall" in (rules if isinstance(rules, list) else [])
+        and evidence_decision == "indeterminate"
+    ):
+        answer = STRUCTURAL_STAGE_SHORTFALL_MESSAGE
+    else:
+        raise AnswerEvaluationError("trace status is not a supported deterministic local release")
+    if expected_answer is not None and answer != expected_answer:
+        raise AnswerEvaluationError("local-release answer disagrees with deterministic trace proof")
+    if expected_status is not None and status != expected_status:
+        raise AnswerEvaluationError("local-release status disagrees with runtime result")
+    if expected_evidence_decision is not None and evidence_decision != expected_evidence_decision:
+        raise AnswerEvaluationError("local-release decision disagrees with runtime result")
+
+    _required_string(trace, "created_at", label="trace")
+    planner = plan_trace.get("planner_call")
+    diagnostics = {
+        "rag_policy_version": str(plan_trace.get("policy_version")),
+        "archivist_mode": archivist_mode_metadata(ArchivistMode.ESSENTIAL),
+        "evidence": dict(evidence),
+        "generation": dict(generation),
+        "planner": dict(planner) if isinstance(planner, Mapping) else {},
+        "stage_timings_ms": {},
+        "offline_recovery": {
+            "schema": "archivist.answer_evaluation.local_release_recovery/1",
+            "trace_sha256": trace_reference.sha256,
+            "full_turn_latency_recovered": False,
+            "latency_limitation": "full_turn_elapsed_seconds_was_not_checkpointed",
+        },
+    }
+    return _LocalReleaseProof(
+        answer=answer,
+        status=status,
+        evidence_decision=evidence_decision,
+        diagnostics=diagnostics,
+        trace_reference=trace_reference,
+        elapsed_seconds=0.0,
+    )
 
 
 def _trace_references(summary: Mapping[str, object]) -> tuple[PrivateTraceReference, ...]:
@@ -918,7 +1132,70 @@ def _run_one_generated_item(
             cohort_manifest_sha256=cohort_manifest_sha256,
             cohort_item=cohort_item,
         )
-    _require_no_orphan_usage(usage_db, turn_id=item_id)
+    orphan_rows = _usage_rows_if_any(usage_db, turn_id=item_id)
+    if orphan_rows:
+        trace_paths = sorted((item_root / "retrieval-traces").glob("*/*.json"))
+        if len(trace_paths) != 1:
+            raise AnswerEvaluationError(
+                f"usage exists for {item_id} without one recoverable retrieval trace; "
+                "refusing a repeat call"
+            )
+        trace_reference = _trace_reference_from_path(item_root, trace_paths[0])
+        proof = _prove_local_early_release(
+            item_root=item_root,
+            question=question,
+            trace_reference=trace_reference,
+            usage_db=usage_db,
+        )
+        generated = build_private_generated_item(
+            item_id=item_id,
+            question=question,
+            stratum=_required_string(item, "stratum", label=f"gold item {item_id}"),
+            expected_behavior=_required_string(
+                item, "expected_behavior", label=f"gold item {item_id}"
+            ),
+            answer=proof.answer,
+            status=proof.status,
+            evidence_decision=proof.evidence_decision,
+            diagnostics=_json_value(proof.diagnostics),
+            sources=(),
+            elapsed_seconds=proof.elapsed_seconds,
+            usage_events=_private_usage_events(
+                usage_db,
+                turn_id=item_id,
+                phase="generation",
+                local_release_proven=True,
+                audited_ledger_recovery=True,
+            ),
+            trace_references=(proof.trace_reference,),
+        )
+        strict_checkpoint = build_private_generation_checkpoint(
+            cohort_manifest_sha256=cohort_manifest_sha256,
+            item=generated,
+        )
+        audit = _sealed_artifact(
+            {
+                "schema": "archivist.answer_evaluation.local_release_recovery_audit/1",
+                "item_id": item_id,
+                "runner_sha256": runner_sha256,
+                "cohort_manifest_sha256": cohort_manifest_sha256,
+                "trace_sha256": proof.trace_reference.sha256,
+                "usage_event_sha256s": [
+                    canonical_json_sha256(event.model_dump(mode="json"))
+                    for event in generated.usage_events
+                ],
+                "generated_item_sha256": generated.item_sha256,
+                "provider_calls_repeated": False,
+            }
+        )
+        audit_path = item_root / "local-release-recovery-audit.json"
+        if audit_path.is_file():
+            if _load_json_object(audit_path, label="local release recovery audit") != audit:
+                raise AnswerEvaluationError("local release recovery audit changed")
+        else:
+            write_json_atomic_no_overwrite(audit_path, audit)
+        write_json_atomic_no_overwrite(checkpoint, strict_checkpoint)
+        return generated
 
     recorder = SmokeArtifactRecorder(
         run_root=item_root,
@@ -928,11 +1205,14 @@ def _run_one_generated_item(
     )
     started = perf_counter()
     capturing_client = _ProviderCapturingClient(client)
-    with recorder.capture_turn(1), usage_scope(
-        project_id=EVALUATION_ID,
-        conversation_id="held-out-37",
-        turn_id=item_id,
-        enforce_budget=True,
+    with (
+        recorder.capture_turn(1),
+        usage_scope(
+            project_id=EVALUATION_ID,
+            conversation_id="held-out-37",
+            turn_id=item_id,
+            enforce_budget=True,
+        ),
     ):
         result = run_evidence_planned_answer(
             resolved_turn=ResolvedTurn(
@@ -958,6 +1238,20 @@ def _run_one_generated_item(
         {"runner_sha256": runner_sha256},
         expected_turn_numbers=(1,),
     )
+    trace_references = _trace_references(trace_summary)
+    operations = [str(row["operation"]) for row in _usage_rows(usage_db, turn_id=item_id)]
+    local_release = "answer_generation" not in operations
+    if local_release:
+        _prove_local_early_release(
+            item_root=item_root,
+            question=question,
+            trace_reference=trace_references[0],
+            usage_db=usage_db,
+            expected_answer=result.answer,
+            expected_status=result.status,
+            expected_evidence_decision=result.evidence_decision,
+            final_source_count=len(result.final_chunks),
+        )
     generated = build_private_generated_item(
         item_id=item_id,
         question=question,
@@ -978,8 +1272,9 @@ def _run_one_generated_item(
             turn_id=item_id,
             phase="generation",
             provider_observations=capturing_client.observations,
+            local_release_proven=local_release,
         ),
-        trace_references=_trace_references(trace_summary),
+        trace_references=trace_references,
     )
     strict_checkpoint = build_private_generation_checkpoint(
         cohort_manifest_sha256=cohort_manifest_sha256,
@@ -1309,9 +1604,7 @@ def _validate_generation_artifact(
         if generated_item.item_id != expected_id or generated_item.question != expected_question:
             raise AnswerEvaluationError("calibration generation differs from locked gold")
         checkpoint = args.run_root / "items" / expected_id / "generated.json"
-        cohort_item = next(
-            value for value in cohort_manifest.items if value.item_id == expected_id
-        )
+        cohort_item = next(value for value in cohort_manifest.items if value.item_id == expected_id)
         checkpoint_item = _load_generated_checkpoint(
             checkpoint,
             item=gold_item,
@@ -1376,10 +1669,7 @@ def _validate_decomposition_artifact(
                 cohort_manifest_sha256=cohort_manifest_sha256,
             )
             checkpoint_path = (
-                path.parent
-                / "items"
-                / generated.item_id
-                / f"decomposition-{repetition}.json"
+                path.parent / "items" / generated.item_id / f"decomposition-{repetition}.json"
             )
             checkpoint_on_disk = _load_json_object(
                 checkpoint_path,
@@ -1606,14 +1896,12 @@ def _calibration_generate(args: argparse.Namespace, context: EvaluationContext) 
             )
 
         if decomposition_path.is_file():
-            canonical_decompositions, decomposition_sha256 = (
-                _validate_decomposition_artifact(
-                    decomposition_path,
-                    generated_items=generated_items,
-                    generation_sha256=generation_sha256,
-                    context=context,
-                    cohort_manifest_sha256=cohort_manifest_sha256,
-                )
+            canonical_decompositions, decomposition_sha256 = _validate_decomposition_artifact(
+                decomposition_path,
+                generated_items=generated_items,
+                generation_sha256=generation_sha256,
+                context=context,
+                cohort_manifest_sha256=cohort_manifest_sha256,
             )
         else:
             ensure_ledger()
@@ -1646,9 +1934,7 @@ def _calibration_generate(args: argparse.Namespace, context: EvaluationContext) 
                         )
                     )
                 _require_cost_within_cap(ensure_ledger(), maximum)
-                canonical = DecomposedPilotItem.model_validate(
-                    repetitions[0]["decomposition"]
-                )
+                canonical = DecomposedPilotItem.model_validate(repetitions[0]["decomposition"])
                 _validate_decomposition_against_generated(canonical, generated)
                 canonical_list.append(canonical)
                 decomposition_records.append(
@@ -1799,6 +2085,8 @@ def _load_or_write_precalibration_private_artifact(
     decompositions: Sequence[DecomposedPilotItem],
     gold_items: Sequence[Mapping[str, object]],
     decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+    migration_artifact_sha256: str | None = None,
+    recovered_item_ids: Sequence[str] = (),
 ) -> PrecalibrationPrivateArtifact:
     if path.is_file():
         actual = validate_precalibration_private_artifact(
@@ -1811,6 +2099,8 @@ def _load_or_write_precalibration_private_artifact(
             decompositions=decompositions,
             gold_items=gold_items,
             decomposition_checkpoints=decomposition_checkpoints,
+            migration_artifact_sha256=migration_artifact_sha256,
+            recovered_item_ids=recovered_item_ids,
         )
         if actual != expected:
             raise AnswerEvaluationError(
@@ -1849,6 +2139,8 @@ def _emit_precalibration_results(
     generation_artifact_sha256: str,
     decompositions: Sequence[DecomposedPilotItem],
     decomposition_artifact_sha256: str,
+    migration_artifact_sha256: str | None = None,
+    recovered_item_ids: Sequence[str] = (),
 ) -> tuple[Path, Path, Path]:
     checkpoints = _load_canonical_decomposition_checkpoints(
         run_root=args.run_root,
@@ -1864,6 +2156,8 @@ def _emit_precalibration_results(
         decompositions=decompositions,
         gold_items=context.gold_items,
         decomposition_checkpoints=checkpoints,
+        migration_artifact_sha256=migration_artifact_sha256,
+        recovered_item_ids=recovered_item_ids,
     )
     private_path = args.run_root / "precalibration-private.json"
     private_artifact = _load_or_write_precalibration_private_artifact(
@@ -1877,6 +2171,8 @@ def _emit_precalibration_results(
         decompositions=decompositions,
         gold_items=context.gold_items,
         decomposition_checkpoints=checkpoints,
+        migration_artifact_sha256=migration_artifact_sha256,
+        recovered_item_ids=recovered_item_ids,
     )
     expected_public = build_public_precalibration_summary(
         candidate_id=context.gold.candidate_rag_policy,
@@ -1886,6 +2182,8 @@ def _emit_precalibration_results(
         gold_items=context.gold_items,
         decomposition_checkpoints=checkpoints,
         private_artifact=private_artifact,
+        migration_artifact_sha256=migration_artifact_sha256,
+        recovered_item_ids=recovered_item_ids,
     )
     summary_path = args.run_root / "precalibration-public-summary.json"
     summary_sha256 = _load_or_write_precalibration_public_summary(
@@ -1899,6 +2197,302 @@ def _emit_precalibration_results(
     )
     _load_or_write_public_report(report_path, expected=markdown)
     return private_path, summary_path, report_path
+
+
+def _validated_recovery_reporting_binding(
+    *,
+    run_root: Path,
+    context: EvaluationContext,
+    runner_sha256: str,
+    cohort_manifest: AnswerEvaluationCohortManifest,
+    cohort_manifest_sha256: str,
+    usage_db: Path,
+) -> tuple[str | None, tuple[str, ...]]:
+    audit_path = run_root / "migration-audit.json"
+    if not audit_path.is_file():
+        return None, ()
+    audit = _load_json_object(audit_path, label="interrupted-run migration audit")
+    if audit.get("schema") != "archivist.answer_evaluation.interrupted_run_migration/1":
+        raise AnswerEvaluationError("interrupted-run migration audit schema changed")
+    artifact_hash = audit.get("artifact_sha256")
+    if (
+        not isinstance(artifact_hash, str)
+        or canonical_json_sha256(
+            {key: value for key, value in audit.items() if key != "artifact_sha256"}
+        )
+        != artifact_hash
+    ):
+        raise AnswerEvaluationError("interrupted-run migration audit seal changed")
+    expected_destination = run_root.relative_to(PRIVATE_EVALUATION_ROOT).as_posix()
+    if (
+        audit.get("source_runner_sha256") != INTERRUPTED_RUNNER_SHA256
+        or audit.get("source_cohort_manifest_file_sha256") != INTERRUPTED_COHORT_FILE_SHA256
+        or audit.get("destination_runner_sha256") != runner_sha256
+        or audit.get("destination_run_root") != expected_destination
+        or audit.get("destination_cohort_manifest_file_sha256") != cohort_manifest_sha256
+        or audit.get("provider_calls_repeated") is not False
+        or audit.get("recovered_item_id") != "H003"
+        or audit.get("full_turn_latency_recovered") is not False
+    ):
+        raise AnswerEvaluationError("interrupted-run migration identity changed")
+
+    preserved = audit.get("logical_usage_events")
+    if not isinstance(preserved, list) or audit.get("logical_usage_event_count") != len(preserved):
+        raise AnswerEvaluationError("migration audit has no exact logical usage prefix")
+    current = list(_logical_usage_bindings(usage_db))
+    if current[: len(preserved)] != preserved:
+        raise AnswerEvaluationError("preserved logical usage prefix changed")
+    response_ids = [str(event.get("response_id")) for event in current]
+    if len(response_ids) != len(set(response_ids)):
+        raise AnswerEvaluationError("evaluation usage contains duplicate provider response IDs")
+
+    cohort_by_id = {item.item_id: item for item in cohort_manifest.items}
+    gold_by_id = {
+        _required_string(item, "id", label="gold item"): item for item in context.gold_items
+    }
+    generated = {
+        item_id: _load_generated_checkpoint(
+            run_root / "items" / item_id / "generated.json",
+            item=gold_by_id[item_id],
+            cohort_manifest_sha256=cohort_manifest_sha256,
+            cohort_item=cohort_by_id[item_id],
+        )
+        for item_id in ("H001", "H002", "H003")
+    }
+    raw_bindings = audit.get("generated_item_bindings")
+    if not isinstance(raw_bindings, list):
+        raise AnswerEvaluationError("migration audit has no preserved checkpoint bindings")
+    by_id = {
+        str(binding.get("item_id")): binding
+        for binding in raw_bindings
+        if isinstance(binding, Mapping)
+    }
+    for item_id in ("H001", "H002"):
+        binding = by_id.get(item_id)
+        if (
+            not isinstance(binding, Mapping)
+            or binding.get("unchanged_generated_item_sha256") != generated[item_id].item_sha256
+            or binding.get("source_checkpoint_file_sha256")
+            != INTERRUPTED_GENERATED_CHECKPOINT_SHA256S[item_id]
+            or binding.get("destination_checkpoint_file_sha256")
+            != sha256_file(run_root / "items" / item_id / "generated.json")
+        ):
+            raise AnswerEvaluationError(f"{item_id} recovered checkpoint binding changed")
+    h003 = generated["H003"]
+    h003_trace = h003.trace_references[0] if len(h003.trace_references) == 1 else None
+    if (
+        h003.item_sha256 != audit.get("recovered_generated_item_sha256")
+        or audit.get("recovered_checkpoint_file_sha256")
+        != sha256_file(run_root / "items" / "H003" / "generated.json")
+        or h003.status != "clean_abstention"
+        or h003.evidence_decision != "clean_abstention"
+        or h003.sources
+        or h003_trace is None
+        or h003_trace.sha256 != INTERRUPTED_H003_TRACE_SHA256
+        or sha256_file(run_root / "items" / "H003" / h003_trace.path)
+        != INTERRUPTED_H003_TRACE_SHA256
+        or audit.get("recovery_trace_sha256") != INTERRUPTED_H003_TRACE_SHA256
+        or [event.operation for event in h003.usage_events] != ["query_embedding"]
+    ):
+        raise AnswerEvaluationError("H003 trace-recovered binding changed")
+    recovery_audit_path = run_root / "items" / "H003" / "local-release-recovery-audit.json"
+    recovery_audit = _load_json_object(
+        recovery_audit_path, label="H003 local release recovery audit"
+    )
+    recovery_seal = recovery_audit.get("artifact_sha256")
+    if (
+        not isinstance(recovery_seal, str)
+        or canonical_json_sha256(
+            {key: value for key, value in recovery_audit.items() if key != "artifact_sha256"}
+        )
+        != recovery_seal
+        or recovery_audit.get("generated_item_sha256") != h003.item_sha256
+        or recovery_audit.get("trace_sha256") != INTERRUPTED_H003_TRACE_SHA256
+        or recovery_audit.get("provider_calls_repeated") is not False
+    ):
+        raise AnswerEvaluationError("H003 local recovery audit changed")
+    return sha256_file(audit_path), ("H003",)
+
+
+def _recover_interrupted_run(args: argparse.Namespace, context: EvaluationContext) -> None:
+    source_root = _require_private_run_root(args.source_run_root)
+    destination_root = (
+        DEFAULT_RECOVERY_ROOT
+        if args.run_root.resolve() == DEFAULT_RUN_ROOT.resolve()
+        else _require_private_run_root(args.run_root)
+    )
+    destination_root = _require_private_run_root(destination_root)
+    if destination_root == source_root:
+        raise AnswerEvaluationError("offline recovery requires a distinct destination run root")
+    runner_sha256 = sha256_file(Path(__file__))
+    expected = _expected_cohort_manifest(context, runner_sha256=runner_sha256)
+    audit_path = destination_root / "migration-audit.json"
+    if audit_path.is_file():
+        audit = _load_json_object(audit_path, label="interrupted-run migration audit")
+        if (
+            audit.get("source_run_root")
+            != source_root.relative_to(PRIVATE_EVALUATION_ROOT).as_posix()
+        ):
+            raise AnswerEvaluationError("interrupted-run migration audit source changed")
+        manifest, manifest_sha = _load_or_write_cohort_manifest(
+            destination_root / "cohort-manifest.json",
+            context=context,
+            runner_sha256=runner_sha256,
+        )
+        usage_path = destination_root / "full-evaluation-usage.sqlite3"
+        _validated_recovery_reporting_binding(
+            run_root=destination_root,
+            context=context,
+            runner_sha256=runner_sha256,
+            cohort_manifest=manifest,
+            cohort_manifest_sha256=manifest_sha,
+            usage_db=usage_path,
+        )
+        print(f"VALIDATED EXISTING OFFLINE RECOVERY: {destination_root}")
+        print(
+            "Resume with: python scripts/run_answer_evaluation.py run-37 "
+            f"--run-root {destination_root} --authorize-openai-full-evaluation "
+            "--max-cost-usd 20"
+        )
+        return
+    if destination_root.exists():
+        raise AnswerEvaluationError(
+            "recovery destination exists without a complete immutable migration audit"
+        )
+
+    source_manifest_path = source_root / "cohort-manifest.json"
+    if sha256_file(source_manifest_path) != INTERRUPTED_COHORT_FILE_SHA256:
+        raise AnswerEvaluationError("source cohort is not the exact known interrupted run")
+    source_manifest = AnswerEvaluationCohortManifest.model_validate(
+        _load_json_object(source_manifest_path, label="source cohort manifest")
+    )
+    if source_manifest.runner_sha256 != INTERRUPTED_RUNNER_SHA256:
+        raise AnswerEvaluationError("source cohort runner is not the known interrupted runner")
+    old_fields = source_manifest.model_dump(mode="json")
+    new_fields = expected.model_dump(mode="json")
+    old_fields.pop("runner_sha256")
+    new_fields.pop("runner_sha256")
+    old_fields.pop("manifest_sha256")
+    new_fields.pop("manifest_sha256")
+    if old_fields != new_fields:
+        raise AnswerEvaluationError("source cohort differs beyond the harness runner binding")
+
+    usage_source = source_root / "full-evaluation-usage.sqlite3"
+    if _usage_turn_ids(usage_source) != ("H001", "H002", "H003"):
+        raise AnswerEvaluationError("source usage contains an unknown or missing interrupted turn")
+    staging_root = destination_root.with_name(f".{destination_root.name}.staging-{uuid4().hex}")
+    staging_root.mkdir(parents=True, exist_ok=False)
+    usage_destination = staging_root / "full-evaluation-usage.sqlite3"
+    _archive_bytes_no_overwrite(source=usage_source, destination=usage_destination)
+    if sha256_file(usage_source) != sha256_file(usage_destination):
+        raise AnswerEvaluationError("usage ledger copy changed bytes")
+    write_json_atomic_no_overwrite(staging_root / "cohort-manifest.json", expected)
+    new_manifest_sha256 = sha256_file(staging_root / "cohort-manifest.json")
+    old_manifest_sha256 = sha256_file(source_manifest_path)
+    old_by_id = {item.item_id: item for item in source_manifest.items}
+    new_by_id = {item.item_id: item for item in expected.items}
+    bindings = []
+    for item_id, expected_checkpoint_sha in INTERRUPTED_GENERATED_CHECKPOINT_SHA256S.items():
+        source_checkpoint_path = source_root / "items" / item_id / "generated.json"
+        if sha256_file(source_checkpoint_path) != expected_checkpoint_sha:
+            raise AnswerEvaluationError(f"{item_id} source checkpoint changed")
+        source_checkpoint = validate_private_generation_checkpoint(
+            PrivateGenerationCheckpoint.model_validate(
+                _load_json_object(source_checkpoint_path, label=f"{item_id} source checkpoint")
+            ),
+            cohort_manifest_sha256=old_manifest_sha256,
+            expected_item=old_by_id[item_id],
+        )
+        destination_item_root = staging_root / "items" / item_id
+        for trace in source_checkpoint.item.trace_references:
+            _archive_bytes_no_overwrite(
+                source=source_root / "items" / item_id / trace.path,
+                destination=destination_item_root / trace.path,
+            )
+        rebound = build_private_generation_checkpoint(
+            cohort_manifest_sha256=new_manifest_sha256,
+            item=source_checkpoint.item,
+        )
+        destination_checkpoint = destination_item_root / "generated.json"
+        write_json_atomic_no_overwrite(destination_checkpoint, rebound)
+        validate_private_generation_checkpoint(
+            rebound,
+            cohort_manifest_sha256=new_manifest_sha256,
+            expected_item=new_by_id[item_id],
+        )
+        bindings.append(
+            {
+                "item_id": item_id,
+                "unchanged_generated_item_sha256": source_checkpoint.item.item_sha256,
+                "source_checkpoint_file_sha256": expected_checkpoint_sha,
+                "destination_checkpoint_file_sha256": sha256_file(destination_checkpoint),
+            }
+        )
+
+    h003_source_traces = sorted(
+        (source_root / "items" / "H003" / "retrieval-traces").glob("*/*.json")
+    )
+    if (
+        len(h003_source_traces) != 1
+        or sha256_file(h003_source_traces[0]) != INTERRUPTED_H003_TRACE_SHA256
+    ):
+        raise AnswerEvaluationError("H003 source trace is not the exact known interrupted trace")
+    h003_destination_trace = (
+        staging_root
+        / "items"
+        / "H003"
+        / h003_source_traces[0].relative_to(source_root / "items" / "H003")
+    )
+    _archive_bytes_no_overwrite(source=h003_source_traces[0], destination=h003_destination_trace)
+    h003_gold = next(item for item in context.gold_items if item.get("id") == "H003")
+    h003 = _run_one_generated_item(
+        args=argparse.Namespace(
+            run_root=staging_root,
+            manifest=args.manifest,
+            chunks=args.chunks,
+        ),
+        context=context,
+        item=h003_gold,
+        client=None,
+        usage_db=usage_destination,
+        runner_sha256=runner_sha256,
+        cohort_manifest_sha256=new_manifest_sha256,
+        cohort_item=new_by_id["H003"],
+    )
+    audit = _sealed_artifact(
+        {
+            "schema": "archivist.answer_evaluation.interrupted_run_migration/1",
+            "source_run_root": source_root.relative_to(PRIVATE_EVALUATION_ROOT).as_posix(),
+            "destination_run_root": destination_root.relative_to(
+                PRIVATE_EVALUATION_ROOT
+            ).as_posix(),
+            "source_runner_sha256": INTERRUPTED_RUNNER_SHA256,
+            "destination_runner_sha256": runner_sha256,
+            "source_cohort_manifest_file_sha256": old_manifest_sha256,
+            "destination_cohort_manifest_file_sha256": new_manifest_sha256,
+            "usage_ledger_initial_file_sha256": sha256_file(usage_destination),
+            "preserved_usage_turn_ids": ["H001", "H002", "H003"],
+            "logical_usage_event_count": len(_logical_usage_bindings(usage_destination)),
+            "logical_usage_events": list(_logical_usage_bindings(usage_destination)),
+            "generated_item_bindings": bindings,
+            "recovered_item_id": h003.item_id,
+            "recovered_generated_item_sha256": h003.item_sha256,
+            "recovered_checkpoint_file_sha256": sha256_file(
+                staging_root / "items" / "H003" / "generated.json"
+            ),
+            "recovery_trace_sha256": INTERRUPTED_H003_TRACE_SHA256,
+            "full_turn_latency_recovered": False,
+            "provider_calls_repeated": False,
+        }
+    )
+    write_json_atomic_no_overwrite(staging_root / "migration-audit.json", audit)
+    os.replace(staging_root, destination_root)
+    print(f"OFFLINE INTERRUPTED RUN RECOVERED WITHOUT PROVIDER CALLS: {destination_root}")
+    print(
+        "Resume with: python scripts/run_answer_evaluation.py run-37 "
+        f"--run-root {destination_root} --authorize-openai-full-evaluation "
+        "--max-cost-usd 20"
+    )
 
 
 def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
@@ -1928,6 +2522,14 @@ def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
         runner_sha256=runner_sha256,
     )
     cohort_by_id = {item.item_id: item for item in cohort_manifest.items}
+    migration_artifact_sha256, recovered_item_ids = _validated_recovery_reporting_binding(
+        run_root=args.run_root,
+        context=context,
+        runner_sha256=runner_sha256,
+        cohort_manifest=cohort_manifest,
+        cohort_manifest_sha256=cohort_manifest_sha256,
+        usage_db=usage_db,
+    )
     ledger: UsageLedger | None = None
     client: object | None = None
 
@@ -2056,10 +2658,7 @@ def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
             canonical_decompositions: list[DecomposedPilotItem] = []
             for generated in generated_items:
                 checkpoint_path = (
-                    args.run_root
-                    / "items"
-                    / generated.item_id
-                    / "decomposition-1.json"
+                    args.run_root / "items" / generated.item_id / "decomposition-1.json"
                 )
                 if not checkpoint_path.is_file():
                     _require_cost_reserve(
@@ -2110,6 +2709,8 @@ def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
             generation_artifact_sha256=generation_sha,
             decompositions=decompositions,
             decomposition_artifact_sha256=decomposition_sha,
+            migration_artifact_sha256=migration_artifact_sha256,
+            recovered_item_ids=recovered_item_ids,
         )
 
     spent = _ledger_total_cost(ensure_ledger())
@@ -2208,8 +2809,8 @@ def _load_validated_calibration_inputs(
     str,
     CalibrationLabelFile,
 ]:
-    generated, decomposed, generation_sha, decomposition_sha = (
-        _load_calibration_artifacts(args, context)
+    generated, decomposed, generation_sha, decomposition_sha = _load_calibration_artifacts(
+        args, context
     )
     cohort_manifest_sha = sha256_file(args.run_root / "cohort-manifest.json")
     labels = CalibrationLabelFile.model_validate(
@@ -2279,10 +2880,7 @@ def _claim_evidence_checkpoint(
     )
     if client is None:  # pragma: no cover - internal call-order guard
         raise AnswerEvaluationError("missing provider client for claim-evidence call")
-    source_texts = {
-        source.source_number: source.text
-        for source in generated.sources
-    }
+    source_texts = {source.source_number: source.text for source in generated.sources}
     capturing_client = _ProviderCapturingClient(client)
     with usage_scope(
         project_id=EVALUATION_ID,
@@ -2456,9 +3054,7 @@ def _require_baseline_semantic_checkpoints(
                 for claim in decomposition.claims
             )
         if rubric_active:
-            required.append(
-                run_root / "items" / generated_item.item_id / "item-rubric.json"
-            )
+            required.append(run_root / "items" / generated_item.item_id / "item-rubric.json")
         missing = [path for path in required if not path.is_file()]
         if missing:
             raise AnswerEvaluationError(
@@ -2595,9 +3191,7 @@ def _calibration_judge(args: argparse.Namespace, context: EvaluationContext) -> 
     semantic_path = args.run_root / "calibration-semantic-results.json"
     agreement_path = args.run_root / "calibration-agreement-projection.json"
     if agreement_path.is_file() and not semantic_path.is_file():
-        raise AnswerEvaluationError(
-            "agreement projection exists without its semantic aggregate"
-        )
+        raise AnswerEvaluationError("agreement projection exists without its semantic aggregate")
     if semantic_path.is_file():
         _require_calibration_semantic_checkpoints(
             args.run_root,
@@ -2971,9 +3565,7 @@ def _load_locked_instrument(
     path = args.run_root / "instrument-lock.json"
     if not path.is_file():
         raise AnswerEvaluationError("scoring instrument lock is missing")
-    locked = InstrumentLock.model_validate(
-        _load_json_object(path, label="scoring instrument lock")
-    )
+    locked = InstrumentLock.model_validate(_load_json_object(path, label="scoring instrument lock"))
     if locked != expected:
         raise AnswerEvaluationError(
             "existing scoring instrument lock differs from its exact inputs"
@@ -3188,9 +3780,7 @@ def _validate_baseline_decomposition_artifact(
     payload = _load_json_object(path, label="baseline decomposition artifact")
     raw_records = payload.get("items")
     if not isinstance(raw_records, list) or len(raw_records) != 37:
-        raise AnswerEvaluationError(
-            "baseline decomposition must contain exactly 37 records"
-        )
+        raise AnswerEvaluationError("baseline decomposition must contain exactly 37 records")
     records: list[dict[str, object]] = []
     decompositions: list[DecomposedPilotItem] = []
     usage_events: list[PrivateUsageEvent] = []
@@ -3215,9 +3805,7 @@ def _validate_baseline_decomposition_artifact(
             repetition=1,
             cohort_manifest_sha256=cohort_manifest_sha256,
         )
-        checkpoint_path = (
-            path.parent / "items" / generated.item_id / "decomposition-1.json"
-        )
+        checkpoint_path = path.parent / "items" / generated.item_id / "decomposition-1.json"
         if _load_json_object(
             checkpoint_path,
             label="baseline decomposition checkpoint",
@@ -3293,9 +3881,7 @@ def _calibration_decomposition_usage_events(
                 repetition=repetition,
                 cohort_manifest_sha256=cohort_manifest_sha256,
             )
-            events.append(
-                PrivateDecompositionCheckpoint.model_validate(raw_checkpoint).usage_event
-            )
+            events.append(PrivateDecompositionCheckpoint.model_validate(raw_checkpoint).usage_event)
     return tuple(events)
 
 
@@ -3362,9 +3948,7 @@ def _load_or_write_manual_template(
         decomposition_artifact_sha256=decomposition_artifact_sha256,
     )
     calibration_by_id = {item.item_id: item for item in calibration_labels.items}
-    labels = tuple(
-        calibration_by_id.get(item.item_id, item) for item in label_template.items
-    )
+    labels = tuple(calibration_by_id.get(item.item_id, item) for item in label_template.items)
     rubrics = tuple(
         build_item_rubric_input(question=generated.question, gold_item=gold_item)
         for generated, gold_item in zip(generated_items, context.gold_items, strict=True)
@@ -3514,9 +4098,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
     decomposition_path = args.run_root / "baseline-decompositions.json"
     semantic_path = args.run_root / "baseline-semantic.json"
     if decomposition_path.is_file() and not generation_path.is_file():
-        raise AnswerEvaluationError(
-            "baseline decomposition exists without its generation artifact"
-        )
+        raise AnswerEvaluationError("baseline decomposition exists without its generation artifact")
     if semantic_path.is_file() and not decomposition_path.is_file():
         raise AnswerEvaluationError(
             "baseline semantic aggregate exists without its decomposition artifact"
@@ -3568,8 +4150,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
         else:
             by_id = {item.item_id: item for item in calibration_generated}
             gold_by_id = {
-                _required_string(item, "id", label="gold item"): item
-                for item in context.gold_items
+                _required_string(item, "id", label="gold item"): item for item in context.gold_items
             }
             for item_id in context.remaining_ids:
                 item = gold_by_id[item_id]
@@ -3621,18 +4202,13 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                 )
             )
         else:
-            calibration_by_id = {
-                item.item_id: item for item in calibration_decomposed
-            }
+            calibration_by_id = {item.item_id: item for item in calibration_decomposed}
             records: list[dict[str, object]] = []
             decomposition_list: list[DecomposedPilotItem] = []
             decomposition_event_list: list[PrivateUsageEvent] = []
             for generated in generated_items:
                 checkpoint_path = (
-                    args.run_root
-                    / "items"
-                    / generated.item_id
-                    / "decomposition-1.json"
+                    args.run_root / "items" / generated.item_id / "decomposition-1.json"
                 )
                 if generated.item_id in calibration_by_id:
                     checkpoint_payload = _load_json_object(
@@ -3651,9 +4227,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                         args=args,
                         generated=generated,
                         repetition=1,
-                        client=(
-                            object() if checkpoint_path.is_file() else ensure_client()
-                        ),
+                        client=(object() if checkpoint_path.is_file() else ensure_client()),
                         usage_db=usage_db,
                         cohort_manifest_sha256=cohort_manifest_sha,
                     )
@@ -3663,9 +4237,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                     repetition=1,
                     cohort_manifest_sha256=cohort_manifest_sha,
                 )
-                checkpoint = PrivateDecompositionCheckpoint.model_validate(
-                    checkpoint_payload
-                )
+                checkpoint = PrivateDecompositionCheckpoint.model_validate(checkpoint_payload)
                 decomposition_list.append(decomposition)
                 decomposition_event_list.append(checkpoint.usage_event)
                 records.append(
@@ -3701,9 +4273,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                 evidence_active=evidence_active,
                 rubric_active=rubric_active,
             )
-        calibration_semantic_by_id = {
-            item.item_id: item for item in calibration_semantic.items
-        }
+        calibration_semantic_by_id = {item.item_id: item for item in calibration_semantic.items}
         semantic_items: list[BaselineSemanticItem] = []
         for generated, decomposition, gold_item in zip(
             generated_items,
@@ -3738,11 +4308,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                             decomposition=decomposition,
                             claim=claim,
                             call_ordinal=1,
-                            client=(
-                                None
-                                if checkpoint_path.is_file()
-                                else ensure_client()
-                            ),
+                            client=(None if checkpoint_path.is_file() else ensure_client()),
                             ledger=(
                                 ensure_ledger()
                                 if not checkpoint_path.is_file()
@@ -3756,9 +4322,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                 evidence_results = tuple(values)
             rubric_result: ItemRubricResult | None = None
             if rubric_active:
-                rubric_checkpoint = (
-                    args.run_root / "items" / generated.item_id / "item-rubric.json"
-                )
+                rubric_checkpoint = args.run_root / "items" / generated.item_id / "item-rubric.json"
                 rubric_result = _item_rubric_checkpoint(
                     args=args,
                     generated=generated,
@@ -3766,9 +4330,7 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
                     gold_item=gold_item,
                     client=(None if rubric_checkpoint.is_file() else ensure_client()),
                     ledger=(
-                        ensure_ledger()
-                        if not rubric_checkpoint.is_file()
-                        else ledger or object()  # type: ignore[arg-type]
+                        ensure_ledger() if not rubric_checkpoint.is_file() else ledger or object()  # type: ignore[arg-type]
                     ),
                     maximum=maximum,
                     usage_db=usage_db,
@@ -3986,9 +4548,7 @@ def _load_completed_baseline(
         )
     )
     evidence_active, rubric_active = _instrument_lane_activity(instrument)
-    calibration_semantic_by_id = {
-        item.item_id: item for item in calibration_semantic.items
-    }
+    calibration_semantic_by_id = {item.item_id: item for item in calibration_semantic.items}
     semantic_items: list[BaselineSemanticItem] = []
     for generated, decomposition, gold_item in zip(
         generated_items,
@@ -4178,9 +4738,7 @@ def _load_completed_baseline(
             manual_scoring_aggregate=manual,
         )
     elif (args.run_root / "private-full-run.manual.json").is_file():
-        raise AnswerEvaluationError(
-            "manual full-run artifact exists without manual-scoring.json"
-        )
+        raise AnswerEvaluationError("manual full-run artifact exists without manual-scoring.json")
     return _CompletedBaseline(
         cohort_manifest=cohort_manifest,
         instrument=instrument,
@@ -4201,9 +4759,7 @@ def _load_or_write_public_summary(
     expected: PublicEvaluationSummary,
 ) -> str:
     if path.is_file():
-        actual = validate_public_summary(
-            _load_json_object(path, label="public evaluation summary")
-        )
+        actual = validate_public_summary(_load_json_object(path, label="public evaluation summary"))
         if actual != expected:
             raise AnswerEvaluationError(
                 "public summary differs from the exact private full-run inputs"
@@ -4312,9 +4868,7 @@ def _report(args: argparse.Namespace, context: EvaluationContext) -> None:
 
 def _not_yet_available(command: str) -> None:
     prerequisite = {
-        "baseline": (
-            "Complete run-37 first; optional semantic scoring cannot generate answers."
-        ),
+        "baseline": ("Complete run-37 first; optional semantic scoring cannot generate answers."),
         "report": "Complete and preserve all 37 answers before emitting the text-free report.",
     }[command]
     raise AnswerEvaluationError(prerequisite)
@@ -4326,6 +4880,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         context = _build_context(args, require_clean=args.command != "preflight")
         if args.command == "preflight":
             _print_preflight(context)
+        elif args.command == "recover-interrupted":
+            _recover_interrupted_run(args, context)
         elif args.command == "run-37":
             _run_37(args, context)
         elif args.command == "calibration-generate":

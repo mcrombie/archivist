@@ -17,7 +17,9 @@ anything that still requires measurement.
 - **Measurement:** the unchanged ten-question cohort is development evidence. The 37-item
   owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
   held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
-  (+1.26 points). This is a retrieval-only diagnostic, not an answer-quality score.
+  (+1.26 points). This is a retrieval-only diagnostic, not an answer-quality score. The authorized
+  answer-quality run has now begun: H001/H002 are sealed, H003 ended in a trace-backed deterministic
+  `clean_abstention`, and the harness stopped fail-closed after about `$0.2957022` recorded spend.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
@@ -25,13 +27,13 @@ anything that still requires measurement.
   question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
   annotations began as historical Claude drafts, but the owner later source-verified and
   adjudicated them. This is disclosed without a prospective-blinding claim.
-- **Restart point:** run all 37 frozen V26 questions in one uninterrupted answer-generation and
-  canonical-decomposition operation, preserving every answer, source set, trace, and usage record.
-  Publish the mechanically available baseline results immediately, with semantic fields pending
-  where necessary. Calibration is later, lower-priority scoring work and may not delay the cohort;
-  no RAG, prompt, retrieval, model, UI, gold, or corpus change may intervene. The completed 37 is a
-  descriptive baseline, followed later by semantic calibration, noise-floor repetition, and
-  production measurement.
+- **Restart point:** commit and verify the narrow harness correction, leave the original H001–H003
+  partial root immutable, and run the exact provider-free migration into its sibling recovery root.
+  Preserve H001/H002 inner payloads unchanged, mark H003 trace-recovered, and resume only missing
+  operations under the existing `$20.00` cumulative cap. No retry, calibration, RAG, prompt,
+  retrieval, model, UI, gold, or corpus change may intervene. Publish the mechanically available
+  37-item baseline with H003's likely false abstention intact and generation latency explicitly
+  measured over 36/37 items. Calibration remains later and lower priority.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
@@ -3731,6 +3733,37 @@ measurement apparatus to suppress an inconvenient or incomplete result.
 Useful blog lesson: evaluation generation and evaluation scoring are different jobs. A careful
 scorer can improve how a result is interpreted, but it should not stand in the doorway and prevent
 the underlying evidence from being created.
+
+### 2026-08-09 - A fail-closed stop that should not erase valid evidence
+
+- The first paid held-out answer run finally began. H001 and H002 sealed successfully. On H003,
+  Archivist made one embedding call, found insufficient evidence through its deterministic local
+  release path, and returned `clean_abstention` without calling the answer model.
+- The evaluation harness did exactly half of the right thing: it rejected an artifact shape it did
+  not understand and stopped fail-closed. It made no retry, preserving both the budget and the
+  experiment. The mistake was narrower—the production path's valid early abstention had never been
+  represented in the harness's checkpoint assumptions.
+- The stop left useful evidence, not a disposable failed run. H001/H002 are sealed; H003 has an
+  exact retrieval trace and ledger entry proving its one embedding call and local release. Recorded
+  spend at the stop is about `$0.2957022`. H003 is probably a false abstention, but that is precisely
+  the kind of behavior a held-out evaluation is supposed to preserve rather than repair away.
+- Designed recovery as an audited migration, not a do-over. The original partial root remains
+  immutable. A provider-free command creates a sibling root, rebinds only the outer checkpoint
+  envelopes required by the corrected runner, keeps H001/H002 inner payloads unchanged, and
+  reconstructs H003 explicitly from its sealed trace. A migration artifact binds both roots,
+  manifests, runner hashes, usage events, and recovered item.
+- The resumed run starts at the first genuinely missing provider operation under the same
+  cumulative `$20.00` ceiling. There is no calibration detour and no change to V26, prompts,
+  retrieval, models, corpus, gold, or UI. “Uninterrupted cohort” now means uninterrupted behavioral
+  conditions, while permitting exact provider-free continuation after a harness fault.
+- Recovery has one irreducible measurement cost: H003's complete turn latency was not sealed. The
+  final report therefore measures generation latency from 36 of 37 turns, identifies H003 as
+  trace-recovered, binds the migration hash, and discloses the limitation publicly instead of
+  inventing a duration.
+
+Useful blog lesson: fail-closed does not have to mean throw everything away. If completed work is
+cryptographically and operationally provable, the honest recovery is to preserve it, disclose the
+migration, and continue without giving an unfavorable result a second chance.
 
 ## Update convention
 

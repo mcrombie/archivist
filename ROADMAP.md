@@ -13,8 +13,8 @@ is a roadmap, not the detailed experimental contract or the historical developme
 
 Archivist remains a retrieval-augmented question-answering system over one long-form historical
 manuscript. Its public reader experience is already live; its retrieval-only held-out diagnostic
-is complete, while its formal held-out answer-quality baseline has not yet run. Those are different
-accomplishments and must not be conflated.
+is complete, while its formal held-out answer-quality baseline has begun but is not complete. Those
+are different accomplishments and must not be conflated.
 
 ## Current checkpoint — 2026-08-09
 
@@ -57,7 +57,8 @@ is not a gate that may suppress the full development cohort.
 
 V25 subsequently added source-bounded completeness and explicit complete/partial/insufficient
 outcomes. V26 added corpus-agnostic comparison grammar before premise adjudication. Neither has
-received the formal held-out evaluation described below.
+completed the formal held-out evaluation described below; frozen V26 is now the candidate under
+measurement.
 
 ### Formal held-out gold lock
 
@@ -71,13 +72,30 @@ leaving 37 questions across the contracted six strata: 8 focused biographical, 8
 analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus, and 2 adversarial-premise. H020 and
 H040 also remain intentionally absent. The final DOCX and canonical private JSON are separate from
 the source workbook. Run-of-record schema, composition, manifest-location, and development-overlap
-checks pass, and no held-out item has been run through Archivist.
+checks passed before candidate exposure. The answer-quality run later began on August 9.
 
 The ordered owner fields and final annotations are bound to candidate
 `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e` under
-`evidence-planned-v26`. No external annotation request has been made and no H-item has reached the
-answer generator. The later retrieval-only diagnostic sent the 37 locked question strings to the
-declared embedding endpoint, but no gold annotation or manuscript passage accompanied them.
+`evidence-planned-v26`. No external annotation request was made before lock and no H-item had then
+reached the answer generator. The later retrieval-only diagnostic sent the 37 locked question
+strings to the declared embedding endpoint, but no gold annotation or manuscript passage
+accompanied them.
+
+### Answer-quality run incident and recovery
+
+**Interrupted fail-closed — 2026-08-09.** The owner-authorized `$20.00` run sealed H001 and H002.
+H003 then made one embedding call and reached a trace-backed deterministic `clean_abstention`
+before answer generation. The harness did not recognize that valid early-release shape and stopped
+fail-closed. It made no retry and no H003 answer-generation call. Cumulative recorded spend is
+approximately `$0.2957022`. H003 is likely a false abstention and remains part of the result.
+
+Recovery is exact and provider-free. Preserve the original partial run root unchanged; migrate its
+audited contents into the dedicated sibling root; retain the H001/H002 inner generated-item
+payloads unchanged; construct H003 only from its sealed retrieval trace and existing ledger; then
+resume at the first missing provider operation under the same cumulative cap. The final report
+binds the migration artifact, identifies H003 as trace-recovered, observes generation latency for
+36 of 37 items, and discloses that limitation publicly. This is continuation of the unchanged
+cohort, not a retry or a repair of H003.
 
 Parts of the completed annotations began as historical Claude drafts, then were directly checked,
 adopted, or revised by the manuscript owner. The owner has elected to retain that adjudicated work
@@ -105,9 +123,9 @@ After formal lock:
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. Because OpenAI currently exposes canonical `gpt-5.6-sol` and `gpt-5.6-terra` IDs but no immutable dated snapshots, the first answer cohort must bind the committed catalog observation plus requested/returned IDs and disclose the limitation. |
 | **3. Held-out gold question set** | **Complete and formally locked** | Preserve the synchronized private source, committed private-safe gold, provenance sidecar, and frozen-candidate boundary unchanged. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Complete** | The frozen run found 24.71% dense versus 25.97% hybrid macro Recall@5 (+1.26 points), with a mixed per-stratum effect. Preserve the private text-free result and do not tune V26 from it before the answer-quality baseline. |
-| **5. Citation-accuracy harness** | **Prepared; paid run not started** | Generate and canonically decompose all 37 locked answers in one uninterrupted pass, establish the mechanical citation measures, and preserve complete run identity. |
+| **5. Citation-accuracy harness** | **Run started; recovery prepared** | Preserve the immutable H001–H003 partial root, perform the exact provider-free sibling migration, resume the missing frozen operations with no retry, and establish mechanical citation measures over all 37 items. |
 | **6. Faithfulness and abstention calibration** | **Deferred, lower priority** | After the full baseline is preserved, label the fixed ten-item subset, measure judge agreement, and settle §§6–7. This work may fill semantic fields in a separate supplement; it may not delay or overwrite the baseline. |
-| **7. Formal baseline and evaluation report** | **Next; not run** | Run the complete held-out set once under the locked contract and immediately publish text-free reproducible artifacts, limitations, exact denominators, and all mechanically available results. Semantic metrics may remain explicitly pending. |
+| **7. Formal baseline and evaluation report** | **In progress; stopped fail-closed at H003** | Complete the unchanged held-out set through the audited recovery path and publish text-free reproducible artifacts, the recovery limitation, exact denominators, and all mechanically available results. Semantic metrics may remain explicitly pending. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
 | **8A. Production observability and latency evidence** | **Partial and unmeasured** | Stage timing and token/cost records exist. Add/confirm privacy-safe request correlation and run the declared warm production cohort before publishing latency statistics. |
 
@@ -137,16 +155,21 @@ top of the list.
    predeclared +1.26-point delta. Hit@5 was 90.91% versus 93.94%. The five fixed-subset repetitions
    had zero spread, while the per-stratum result remained mixed. No generator or judge ran, and V26
    was not changed.
-7. **Next — run the complete 37-item answer-quality cohort without a calibration stop.** In one
-   authorized, uninterrupted pass, generate and preserve every frozen V26 answer and source/trace/
-   usage record, then create one canonical claim decomposition for every answer. No owner labeling,
-   semantic verdict, agreement threshold, RAG repair, prompt change, retrieval change, model change,
-   or UI work may intervene. The planned authorization ceiling for this operation is `$20.00`; the
-   actual authorization remains an explicit owner action at run time.
+7. **In progress — recover and resume the complete 37-item answer-quality cohort.** The authorized
+   run sealed H001/H002 and a trace-backed local `clean_abstention` for H003 before the harness
+   rejected that early-release shape. No retry occurred; recorded spend is about `$0.2957022`.
+   First run the exact offline migration into the sibling recovery root, leaving the source root
+   immutable, H001/H002 inner payloads unchanged, and H003 explicitly trace-recovered. Then resume
+   the first missing provider operation under the already authorized `$20.00` cumulative cap. No
+   owner labeling, semantic verdict, agreement threshold, RAG repair, prompt change, retrieval
+   change, model change, gold change, corpus change, or UI work may intervene. H003's likely false
+   abstention remains measured behavior.
 8. **Immediately publish the descriptive baseline artifacts.** Produce the private machine-readable
    result and text-free readable/public report with exact cohort identity, costs, latency, response
-   status, mechanical citation measures, limitations, and per-stratum denominators. Semantic fields
-   that require calibration are `pending`, not blockers. The first complete 37 may state that
+   status, mechanical citation measures, limitations, and per-stratum denominators. Bind and
+   disclose the migration artifact and H003 recovery; report generation latency over the 36
+   observed full turns rather than imputing H003. Semantic fields that require calibration are
+   `pending`, not blockers. The first complete 37 may state that
    generator spread is not yet measured; the five-repeat noise floor is required before a later
    comparative or significance claim, not before this descriptive baseline.
 9. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item

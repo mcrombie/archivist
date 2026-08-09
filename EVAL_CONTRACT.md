@@ -64,6 +64,24 @@ other immediately computable results are reported without waiting. No RAG, promp
 model, UI, gold-set, or corpus change may intervene within the 37-item pass. Because no held-out
 answer existed when this amendment was authorized, it invalidates no answer-quality result.
 
+**Technical incident clarification, 2026-08-09 (fail-closed harness recovery):** “one uninterrupted
+pass” means one unchanged behavioral cohort without a calibration, system, prompt, model, corpus,
+or gold-set intervention; it does not require discarding already sealed evidence after the harness
+itself stops fail-closed. The authorized run sealed H001 and H002, then H003 made exactly one
+embedding call and reached a trace-backed deterministic `clean_abstention` before answer
+generation. The original harness rejected that valid early-release shape and stopped without a
+retry or answer-generation call for H003. Recovery may proceed only through an exact provider-free
+migration into a distinct sibling run root: the partial source root remains immutable; the H001 and
+H002 inner generated-item payloads remain byte-for-byte/hash-for-hash unchanged while only their
+checkpoint envelopes are rebound to the new runner manifest; H003 is reconstructed explicitly from
+the exact sealed trace and existing usage ledger; and a migration audit binds both roots, runner
+hashes, manifests, usage events, and recovered item. H003 remains evaluation behavior—likely a
+false abstention—not a defect to retry or repair. Because its full-turn latency was not sealed, the
+baseline reports generation latency from 36 of 37 items and publicly discloses the trace-recovered
+item and migration artifact. Resume then continues at the first genuinely missing provider
+operation under the original cumulative spending ceiling. This narrow recovery changes no V26
+behavior and repeats no provider call.
+
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. The complete
 37-question generation/decomposition baseline runs before either section is calibrated. Sections 6
 and 7 lock later after the calibration work answers what only runs can answer; until then, affected
@@ -148,6 +166,24 @@ Runs of record require a **clean working tree**. `commit` is meaningless if unco
 A dirty run is permitted — exploration is the normal case — and records `"working_tree": "dirty"` with **`dirty_fingerprint`**: SHA-256 over `git diff HEAD` concatenated with the contents of every untracked non-ignored file, in `git status --porcelain` order. Untracked content must be in the fingerprint, or a newly added source file changes behaviour while leaving the fingerprint identical.
 
 **A dirty run may never be cited as a run of record**, may never appear in `docs/evaluation.md`, and may never be used as a before-or-after in a comparison.
+
+#### 1.2.1 Exact recovery from a fail-closed harness stop
+
+A harness stop does not authorize a paid retry. An interrupted run of record may resume only when
+all completed provider operations and locally released outcomes can be proven from immutable
+checkpoints, trace hashes, and the usage ledger. Ordinary resume under the same runner reuses those
+artifacts directly. If the harness must change solely to accept an already-valid artifact shape,
+the original root is archived unchanged and an offline migration creates a sibling root with a
+sealed source-to-destination audit. The migration may rebind outer checkpoint/manifest envelopes,
+but it may not alter an answer, source set, trace, usage event, locally determined response status,
+or any inner generated-item payload; it may not call a provider.
+
+The resumed report must bind the migration artifact, enumerate trace-recovered item IDs, exclude
+unrecoverable timing observations from their denominators, and carry a public limitation. A
+recovered abstention, error, or partial answer remains the candidate's measured behavior. Recovery
+does not permit calibration, gold revision, model/prompt/retrieval/corpus changes, selective retry,
+or repair of an unfavorable answer. If these exact conditions cannot be proven, preserve the
+partial run as an incomplete artifact rather than manufacturing continuity.
 
 ### 1.3 Cohorts
 

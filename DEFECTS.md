@@ -59,6 +59,26 @@ before calibration.
 
 ---
 
+## [2026-08-09] Harness rejected H003's valid deterministic early release
+Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
+Symptom: the authorized run sealed H001 and H002. H003 then made one embedding call, produced a
+trace-backed deterministic `clean_abstention`, and correctly skipped answer generation. The harness
+rejected that valid early-release artifact shape and stopped fail-closed. It made no retry and no
+H003 answer-generation call. Cumulative recorded spend at the stop is approximately `$0.2957022`.
+Cause: implementation defect in the run-of-record harness. Its resume/checkpoint assumptions
+covered provider-generated answers but did not admit the production RAG's valid locally released
+clean-abstention path, even though the trace and usage ledger were sufficient to prove the outcome.
+Resolution and verification: preserve the original partial root byte-for-byte and migrate only
+through the exact provider-free recovery command into a distinct sibling root. The migration audit
+binds source/destination runners, manifests, ledger events, and artifact hashes; H001/H002 retain
+unchanged inner generated-item payloads; H003 is explicitly reconstructed from the exact sealed
+trace, with no provider replay. Resume begins at the first missing operation under the same
+cumulative `$20.00` cap. H003's likely false abstention remains evaluation behavior, not a repair
+target. Its unavailable full-turn latency is not imputed: the final latency denominator is 36/37,
+and the public summary/report bind the migration artifact and disclose the trace-recovered item.
+This exact fail-closed recovery is compatible with the uninterrupted-cohort rule because it changes
+no V26 behavior, prompt, model, retrieval, corpus, gold, calibration state, or prior provider output.
+
 ## [2026-08-09] Contract event: scorer calibration still interrupted the held-out baseline
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
 Symptom: although the August 7 amendment removed calibration as a quality veto, the declared run

@@ -174,9 +174,7 @@ def _parse_gold_item(value: Mapping[str, object]) -> _GoldItem:
         value.get("relevant_chunk_ids"),
         label=f"{item_id} relevant_chunk_ids",
     )
-    if any(
-        not isinstance(chunk_id, str) or not chunk_id for chunk_id in relevant_raw
-    ):
+    if any(not isinstance(chunk_id, str) or not chunk_id for chunk_id in relevant_raw):
         raise ValueError(f"{item_id}: relevant_chunk_ids must contain nonempty strings")
     relevant = tuple(relevant_raw)
     if len(relevant) != len(set(relevant)):
@@ -252,9 +250,7 @@ def _validate_decomposition(
 def _rubric_sha256(gold: _GoldItem) -> str:
     raw = {
         "item_id": gold.item_id,
-        "gold_claims": [
-            {"claim_id": claim.claim_id, "text": claim.text} for claim in gold.claims
-        ],
+        "gold_claims": [{"claim_id": claim.claim_id, "text": claim.text} for claim in gold.claims],
         "must_not_claims": list(gold.must_not_claim),
     }
     raw["rubric_sha256"] = canonical_json_sha256(raw)
@@ -352,7 +348,10 @@ def _validate_rubric_result(bundle: _ItemBundle) -> None:
     ]:
         raise ValueError(f"{generated.item_id}: item-rubric gold order changed")
     for binding, claim in zip(result.rubric.gold_claims, gold.claims, strict=True):
-        if binding.claim_text_sha256 != sha256_text(claim.text) or binding.essential != claim.essential:
+        if (
+            binding.claim_text_sha256 != sha256_text(claim.text)
+            or binding.essential != claim.essential
+        ):
             raise ValueError(f"{generated.item_id}/{claim.claim_id}: rubric claim changed")
     if result.rubric.must_not_claim_sha256s != tuple(
         sha256_text(text) for text in gold.must_not_claim
@@ -412,17 +411,11 @@ _BASE_LIMITATIONS = (
 )
 _PENDING_LIMITATION_BY_DIMENSION = {
     ScoringDimension.FAITHFULNESS: PublicLimitationId.MANUAL_FAITHFULNESS_PENDING,
-    ScoringDimension.CITED_SOURCE_SUPPORT: (
-        PublicLimitationId.MANUAL_CITED_SOURCE_SUPPORT_PENDING
-    ),
+    ScoringDimension.CITED_SOURCE_SUPPORT: (PublicLimitationId.MANUAL_CITED_SOURCE_SUPPORT_PENDING),
     ScoringDimension.CLAIM_MAPPING: PublicLimitationId.MANUAL_CLAIM_MAPPING_PENDING,
     ScoringDimension.GOLD_STATUS: PublicLimitationId.MANUAL_GOLD_STATUS_PENDING,
-    ScoringDimension.MUST_NOT_TRIPWIRES: (
-        PublicLimitationId.MANUAL_MUST_NOT_TRIPWIRES_PENDING
-    ),
-    ScoringDimension.RESPONSE_BEHAVIOR: (
-        PublicLimitationId.MANUAL_RESPONSE_BEHAVIOR_PENDING
-    ),
+    ScoringDimension.MUST_NOT_TRIPWIRES: (PublicLimitationId.MANUAL_MUST_NOT_TRIPWIRES_PENDING),
+    ScoringDimension.RESPONSE_BEHAVIOR: (PublicLimitationId.MANUAL_RESPONSE_BEHAVIOR_PENDING),
 }
 _METRICS_BY_DIMENSION = {
     ScoringDimension.FAITHFULNESS: frozenset(
@@ -448,9 +441,7 @@ _METRICS_BY_DIMENSION = {
             PublicMetricId.ESSENTIAL_GOLD_CLAIM_RECALL,
         }
     ),
-    ScoringDimension.MUST_NOT_TRIPWIRES: frozenset(
-        {PublicMetricId.MUST_NOT_CLAIM_VIOLATION}
-    ),
+    ScoringDimension.MUST_NOT_TRIPWIRES: frozenset({PublicMetricId.MUST_NOT_CLAIM_VIOLATION}),
     ScoringDimension.RESPONSE_BEHAVIOR: frozenset(
         {
             PublicMetricId.OUT_OF_CORPUS_ABSTENTION,
@@ -466,9 +457,7 @@ def _limitation_ids(
     metrics: Sequence[PublicMetric],
 ) -> tuple[PublicLimitationId, ...]:
     pending_metric_ids = {
-        metric.metric_id
-        for metric in metrics
-        if metric.availability is MetricAvailability.PENDING
+        metric.metric_id for metric in metrics if metric.availability is MetricAvailability.PENDING
     }
     pending = tuple(
         _PENDING_LIMITATION_BY_DIMENSION[dimension]
@@ -633,11 +622,7 @@ def _score_metrics(
     malformed = sum(audit.malformed_bracket_token_count for audit in audits)
     bracket_tokens = malformed + sum(audit.well_formed_group_count for audit in audits)
 
-    claims = [
-        (bundle, claim)
-        for bundle in bundles
-        for claim in bundle.decomposition.claims
-    ]
+    claims = [(bundle, claim) for bundle in bundles for claim in bundle.decomposition.claims]
     cited_claims = sum(bool(claim.cited_source_numbers) for _, claim in claims)
 
     mappings: dict[tuple[str, str], tuple[str, ...] | None] = {
@@ -676,9 +661,7 @@ def _score_metrics(
                     else:
                         judge_grounded += int(label is CitedSourceLabel.SUPPORTED)
 
-    faithfulness_values = [
-        _faithfulness(bundle, claim, modes) for bundle, claim in claims
-    ]
+    faithfulness_values = [_faithfulness(bundle, claim, modes) for bundle, claim in claims]
     faithfulness_available = all(value is not None for value in faithfulness_values)
 
     gold_records: list[tuple[_GoldClaim, GoldClaimStatus | None]] = []
@@ -840,7 +823,10 @@ def _score_metrics(
             _metric(
                 PublicMetricId.FALSE_ABSTENTION,
                 numerator=(
-                    sum(behavior_values[index] is ResponseBehavior.DECLINE for index in answerable_indices)
+                    sum(
+                        behavior_values[index] is ResponseBehavior.DECLINE
+                        for index in answerable_indices
+                    )
                     if answerable_behavior_available
                     else None
                 ),
@@ -949,9 +935,7 @@ def _precalibration_metric(
 def _gold_location_ids(gold: _GoldItem) -> frozenset[str]:
     return frozenset(
         set(gold.relevant_chunk_ids).union(
-            chunk_id
-            for claim in gold.claims
-            for chunk_id in claim.supporting_chunk_ids
+            chunk_id for claim in gold.claims for chunk_id in claim.supporting_chunk_ids
         )
     )
 
@@ -967,11 +951,7 @@ def _precalibration_metrics(
     resolved_references = sum(audit.resolvable_reference_count for audit in audits)
     malformed = sum(audit.malformed_bracket_token_count for audit in audits)
     bracket_tokens = malformed + sum(audit.well_formed_group_count for audit in audits)
-    claims = [
-        (bundle, claim)
-        for bundle in bundles
-        for claim in bundle.decomposition.claims
-    ]
+    claims = [(bundle, claim) for bundle in bundles for claim in bundle.decomposition.claims]
     cited_claims = sum(bool(claim.cited_source_numbers) for _, claim in claims)
     cited_pairs = [
         (bundle, source_number)
@@ -979,14 +959,11 @@ def _precalibration_metrics(
         for source_number in claim.cited_source_numbers
     ]
     cited_gold_location_matches = sum(
-        bundle.generated.sources[source_number - 1].chunk_id
-        in _gold_location_ids(bundle.gold)
+        bundle.generated.sources[source_number - 1].chunk_id in _gold_location_ids(bundle.gold)
         for bundle, source_number in cited_pairs
     )
     gold_location_pairs = [
-        (bundle, chunk_id)
-        for bundle in bundles
-        for chunk_id in _gold_location_ids(bundle.gold)
+        (bundle, chunk_id) for bundle in bundles for chunk_id in _gold_location_ids(bundle.gold)
     ]
     retrieved_gold_locations = sum(
         chunk_id in {source.chunk_id for source in bundle.generated.sources}
@@ -1001,8 +978,7 @@ def _precalibration_metrics(
         bundle.gold.stratum is EvaluationStratum.OUT_OF_CORPUS for bundle in bundles
     )
     adversarial_count = sum(
-        bundle.gold.stratum is EvaluationStratum.ADVERSARIAL_PREMISE
-        for bundle in bundles
+        bundle.gold.stratum is EvaluationStratum.ADVERSARIAL_PREMISE for bundle in bundles
     )
     answerable_count = sum(
         bundle.gold.expected_behavior is ExpectedBehavior.ANSWER
@@ -1130,10 +1106,10 @@ def build_public_precalibration_summary(
     generated_items: Sequence[PrivateGeneratedItem | Mapping[str, object]],
     decompositions: Sequence[DecomposedPilotItem | Mapping[str, object]],
     gold_items: Sequence[Mapping[str, object]],
-    decomposition_checkpoints: Sequence[
-        PrivateDecompositionCheckpoint | Mapping[str, object]
-    ],
+    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint | Mapping[str, object]],
     private_artifact: PrecalibrationPrivateArtifact | Mapping[str, object],
+    migration_artifact_sha256: str | None = None,
+    recovered_item_ids: Sequence[str] = (),
 ) -> PublicPrecalibrationSummary:
     """Emit the exact mechanical result before semantic calibration or judging."""
 
@@ -1154,8 +1130,7 @@ def build_public_precalibration_summary(
     )
     if not (len(generated) == len(decomposed) == len(gold) == 37):
         raise ValueError(
-            "public precalibration result requires exactly 37 generated, "
-            "decomposed, and gold items"
+            "public precalibration result requires exactly 37 generated, decomposed, and gold items"
         )
     ids = [item.item_id for item in generated]
     if len(ids) != len(set(ids)):
@@ -1211,6 +1186,8 @@ def build_public_precalibration_summary(
         decompositions=decomposed,
         gold_items=gold_raw,
         decomposition_checkpoints=checkpoints,
+        migration_artifact_sha256=migration_artifact_sha256,
+        recovered_item_ids=recovered_item_ids,
     )
     bundles = tuple(
         _ItemBundle(
@@ -1229,8 +1206,21 @@ def build_public_precalibration_summary(
         )
     )
     metrics = _precalibration_metrics(bundles)
-    checkpoint_usage = tuple(
-        checkpoint.usage_events[0] for checkpoint in checkpoints
+    checkpoint_usage = tuple(checkpoint.usage_events[0] for checkpoint in checkpoints)
+    recovered_ids = frozenset(artifact.recovered_item_ids)
+    exact_latency_bundles = tuple(
+        bundle for bundle in bundles if bundle.generated.item_id not in recovered_ids
+    )
+    limitations = (
+        PublicLimitationId.CANONICAL_MODEL_ID_MUTABILITY,
+        PublicLimitationId.GENERATOR_SPREAD_UNMEASURED,
+        PublicLimitationId.DESCRIPTIVE_NOT_GATE,
+        PublicLimitationId.SEMANTIC_SCORING_PENDING,
+        *(
+            (PublicLimitationId.TRACE_RECOVERED_ITEM_PRESENT,)
+            if artifact.recovered_item_count
+            else ()
+        ),
     )
     return PublicPrecalibrationSummary(
         evaluation_id=manifest.evaluation_id,
@@ -1251,13 +1241,12 @@ def build_public_precalibration_summary(
         generation_artifact_sha256=artifact.generation_artifact_sha256,
         decomposition_artifact_sha256=artifact.decomposition_artifact_sha256,
         gold_set_sha256=manifest.gold_set_sha256,
-        limitation_ids=(
-            PublicLimitationId.CANONICAL_MODEL_ID_MUTABILITY,
-            PublicLimitationId.GENERATOR_SPREAD_UNMEASURED,
-            PublicLimitationId.DESCRIPTIVE_NOT_GATE,
-            PublicLimitationId.SEMANTIC_SCORING_PENDING,
-        ),
+        migration_artifact_sha256=artifact.migration_artifact_sha256,
+        recovered_item_count=artifact.recovered_item_count,
+        limitation_ids=limitations,
         run_status=BaselineRunStatus.COMPLETE,
+        generation_latency_denominator=artifact.generation_latency_denominator,
+        generation_latency_observed_count=(artifact.generation_latency_observed_count),
         item_count=37,
         source_count=sum(len(bundle.generated.sources) for bundle in bundles),
         claim_count=sum(len(bundle.decomposition.claims) for bundle in bundles),
@@ -1286,7 +1275,7 @@ def build_public_precalibration_summary(
             for stratum in EvaluationStratum
         ),
         cost=_cost(bundles, (), (), checkpoint_usage),
-        latency=_latency(bundles),
+        latency=_latency(exact_latency_bundles),
     )
 
 
@@ -1335,9 +1324,7 @@ def build_public_evaluation_summary(
         else CalibrationSemanticAggregate.model_validate(calibration_semantic_aggregate)
     )
     additional_usage = tuple(
-        event
-        if isinstance(event, PrivateUsageEvent)
-        else PrivateUsageEvent.model_validate(event)
+        event if isinstance(event, PrivateUsageEvent) else PrivateUsageEvent.model_validate(event)
         for event in additional_usage_events
     )
     manual_aggregate = (
@@ -1353,16 +1340,16 @@ def build_public_evaluation_summary(
         else PrivateFullRunArtifact.model_validate(private_full_run_artifact)
     )
     evidence_results = tuple(
-        result
-        for item in semantic.items
-        for result in item.first_call_claim_evidence
+        result for item in semantic.items for result in item.first_call_claim_evidence
     )
     rubric_results = tuple(
         item.item_rubric for item in semantic.items if item.item_rubric is not None
     )
     manual = () if manual_aggregate is None else manual_aggregate.items
     if not (len(generated) == len(decomposed) == len(gold) == 37):
-        raise ValueError("public baseline requires exactly 37 generated, decomposed, and gold items")
+        raise ValueError(
+            "public baseline requires exactly 37 generated, decomposed, and gold items"
+        )
     ids = [item.item_id for item in generated]
     if len(ids) != len(set(ids)):
         raise ValueError("generated baseline item IDs must be unique")
@@ -1382,9 +1369,7 @@ def build_public_evaluation_summary(
             or manifest_item.stratum is not gold_item.stratum
             or manifest_item.expected_behavior is not gold_item.expected_behavior
         ):
-            raise ValueError(
-                f"{generated_item.item_id}: cohort manifest differs from frozen gold"
-            )
+            raise ValueError(f"{generated_item.item_id}: cohort manifest differs from frozen gold")
     if list(semantic.item_ids) != ids:
         raise ValueError("baseline semantic item order differs from the frozen cohort")
     cohort_manifest_file_sha256 = hashlib.sha256(
@@ -1521,9 +1506,7 @@ def build_public_evaluation_summary(
     modes = _dimension_modes(instrument)
     if modes[ScoringDimension.FAITHFULNESS] is ScoringMode.JUDGE:
         for bundle in bundles:
-            if set(bundle.evidence) != {
-                claim.claim_id for claim in bundle.decomposition.claims
-            }:
+            if set(bundle.evidence) != {claim.claim_id for claim in bundle.decomposition.claims}:
                 raise ValueError(
                     f"{bundle.generated.item_id}: judge faithfulness requires every claim result"
                 )
@@ -1611,8 +1594,7 @@ def render_public_evaluation_markdown(
 
     public = validate_public_summary(summary)
     if len(public_summary_json_sha256) != 64 or any(
-        character not in "0123456789abcdef"
-        for character in public_summary_json_sha256
+        character not in "0123456789abcdef" for character in public_summary_json_sha256
     ):
         raise ValueError("public summary JSON SHA-256 must be 64 lowercase hex characters")
     lines = [
@@ -1658,8 +1640,7 @@ def render_public_evaluation_markdown(
         "|---|---:|",
     ]
     lines.extend(
-        f"| `{metric.metric_id.value}` | {_markdown_ratio(metric)} |"
-        for metric in public.metrics
+        f"| `{metric.metric_id.value}` | {_markdown_ratio(metric)} |" for metric in public.metrics
     )
     lines.extend(["", "## Strata", ""])
     for stratum in public.strata:
@@ -1714,8 +1695,7 @@ def render_public_precalibration_markdown(
 
     public = validate_public_precalibration_summary(summary)
     if len(public_summary_json_sha256) != 64 or any(
-        character not in "0123456789abcdef"
-        for character in public_summary_json_sha256
+        character not in "0123456789abcdef" for character in public_summary_json_sha256
     ):
         raise ValueError("public summary JSON SHA-256 must be 64 lowercase hex characters")
     lines = [
@@ -1732,6 +1712,11 @@ def render_public_precalibration_markdown(
         f"- Private artifact SHA-256: `{public.private_artifact_sha256}`",
         f"- Generation artifact SHA-256: `{public.generation_artifact_sha256}`",
         f"- Decomposition artifact SHA-256: `{public.decomposition_artifact_sha256}`",
+        *(
+            [f"- Migration artifact SHA-256: `{public.migration_artifact_sha256}`"]
+            if public.migration_artifact_sha256 is not None
+            else []
+        ),
         f"- Gold set SHA-256: `{public.gold_set_sha256}`",
         f"- Corpus manifest SHA-256: `{public.corpus_manifest_sha256}`",
         f"- Chunks SHA-256: `{public.chunks_sha256}`",
@@ -1752,6 +1737,7 @@ def render_public_precalibration_markdown(
         f"- Items: {public.item_count}",
         f"- Completed answers: {public.completed_answer_count}",
         f"- Technical errors: {public.technical_error_count}",
+        f"- Trace-recovered items: {public.recovered_item_count}",
         f"- Sources: {public.source_count}",
         f"- Claims: {public.claim_count}",
         f"- Citation references: {public.citation_count}",
@@ -1776,8 +1762,7 @@ def render_public_precalibration_markdown(
             ]
         )
         lines.extend(
-            f"| `{metric.metric_id.value}` | "
-            f"{_precalibration_markdown_ratio(metric)} |"
+            f"| `{metric.metric_id.value}` | {_precalibration_markdown_ratio(metric)} |"
             for metric in stratum.metrics
         )
         lines.append("")
@@ -1789,6 +1774,8 @@ def render_public_precalibration_markdown(
             f"- Priced events: {public.cost.priced_event_count}",
             f"- Unpriced events: {public.cost.unpriced_event_count}",
             f"- Latency scope: `{public.latency_scope}`",
+            f"- Latency denominator: {public.generation_latency_denominator}",
+            f"- Exact latency observations: {public.generation_latency_observed_count}",
             f"- Total seconds: {public.latency.total_seconds:.3f}",
             f"- Mean seconds: {public.latency.mean_seconds:.3f}",
             f"- P50 seconds: {public.latency.p50_seconds:.3f}",
