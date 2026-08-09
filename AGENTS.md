@@ -12,45 +12,46 @@ The corpus is also the moat. Rigorous evaluation depends on knowing the source m
 
 ## Current priorities and answer surfaces
 
-The highest-leverage unfinished work remains the formal held-out evaluation described in
-`EVAL_CONTRACT.md` and `ROADMAP.md`. The objective is not "the answers look good." Retrieval,
-faithfulness, citation, and abstention behavior must be measured, bounded, reproducible, and have
-their failures written down. A system with mediocre but characterized numbers is better evidence
-than a system with excellent-looking answers and no defensible measurement.
+The highest-leverage unfinished measurement work is diagnosing the decomposition instrument and,
+in a separately declared cohort, rebuilding the claim-derived scoring path described in
+`EVAL_CONTRACT.md` and `ROADMAP.md`. The completed first baseline must stay unchanged. The objective
+is not "the answers look good." Retrieval, faithfulness, citation, and abstention behavior must be
+measured, bounded, reproducible, and have their failures written down. A system with mediocre but
+characterized numbers is better evidence than a system with excellent-looking answers and no
+defensible measurement.
 
 As of 2026-08-09, the 37 retained owner-controlled held-out questions and their owner-adjudicated
 annotations are formally locked against frozen V26 candidate
 `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`. H020, H039, and H040 are intentionally absent.
 Historical Claude drafting is disclosed retrospectively under provenance v4; the repository must
 not claim that it was prospectively blinded or fully hash-captured. The predeclared retrieval-only
-benchmark is complete. The authorized answer-quality run has now sealed all 37 V26 answers. The
-earlier H003 local-release incident remains preserved through its audited sibling migration, with
-no provider replay and a 36/37 generation-latency denominator. Canonical claim decomposition then
-began. H001 and H002 each received exactly one Terra call; both completed with parseable output
-whose claim text did not exactly match its declared character spans in the corresponding frozen
-answer. Recovery-03 preserved them as no-retry technical failures and advanced through 27 sealed
-outcomes. H029 then received one Terra call that ended with provider status `incomplete`, no output
-text, and all 8,000 output tokens reported as reasoning. It is priced but cannot be parsed as a
-canonical decomposition. No item has been retried or repaired. Recovery-03 now contains 116
-provider events and cumulative recorded spend of `$6.80227647`.
+benchmark and the first descriptive answer-quality baseline are complete. Recovery-04 preserves
+all 37 V26 answer artifacts: 35 completed/released answers and two generation-side technical-error
+artifacts. The earlier H003 local-release incident remains preserved through its audited sibling
+migration, with no provider replay and 36 exact observations in the 37-item generation-latency
+scope. Canonical measurement made exactly one `gpt-5.6-terra` attempt for every answer and no item
+was retried or repaired. Ten attempts produced usable decompositions; 27 are disclosed technical
+measurement failures—26 `exact_span_mismatch` and H029's one `incomplete_response`. Those 27 are
+failures of the Terra decomposition instrument, not findings that V26 failed 27 answers.
 
-The next sequence is fixed: leave recovery-03 immutable, create an audited provider-free
-recovery-04 sibling that preserves all 27 prior outcomes and records H029 as the technical outcome
-`incomplete_response`, then call Terra exactly once for H030–H038—the nine untouched answers—under
-the same cumulative `$20.00` cap. A completed, parseable Terra result that fails one of the four
-closed local invariants—sequential claim IDs, in-bounds spans, ordered non-overlapping spans, or
-exact answer substrings—is sealed as a technical measurement failure and the run continues without
-correction or retry. A terminal `incomplete` response is likewise sealed, without parsing or
-fabricating claims. Provider/network errors, model-identity mismatch, missing parsed output from a
-nominally completed response, unavailable citation numbers, or unknown statuses still stop
-fail-closed. Final closure is 37 sealed answers and exactly 37 Terra attempts, partitioned into `N`
-usable decompositions and `37 - N` disclosed technical failures. Decomposition-dependent
-denominators use only `N`; failures are never imputed as zero claims or scored as answer-quality
-defects. Do not insert a calibration stop, owner-labeling step, semantic-judge gate, RAG, prompt,
-retrieval, model, UI, gold, or corpus repair inside that pass. This is recovery of a measurement-
-instrument failure, not repair of the candidate answers. Once an H-item is run, never change the
-gold set or V26 in response to its result; any later system change opens a new cohort rather than
-repairing this baseline in place.
+The completed baseline contains 198 sources, 251 citation references, and 41 claims from the ten
+usable decompositions. Its immediately available mechanical results are citation resolvability
+251/251 (1.000), malformed citations 0/250, citation completeness 34/41 (0.829), cited-source to
+gold-location match 23/34 (0.676), and gold-location retrieval coverage 75/428 (0.175). Answer-level
+citation syntax measures retain their full applicable denominators; claim- and decomposition-
+dependent measures use only the ten usable decompositions. Semantic answer-quality measures remain
+pending by design, so this is a complete descriptive baseline rather than a complete semantic
+scorecard. The closed ledger has 125 priced events, zero unpriced events, and `$7.02298147` in
+recorded spend, safely below the authorized `$20.00` cap.
+
+The next measurement priority is to diagnose and redesign the decomposition instrument on a new,
+explicitly separate measurement cohort. Its 27/37 technical-failure rate sharply limits how far
+the current claim-derived metrics can be interpreted. Never change, repair, or rerun this completed
+baseline to improve those denominators, and never treat the 27 instrument failures as empty claim
+sets or candidate-answer failures. A later low-priority calibration or semantic supplement may add
+faithfulness and abstention results without overwriting the baseline. Once an H-item is run, never
+change the gold set or V26 in response to its result; any later system or instrument change opens a
+new cohort rather than repairing this one in place.
 
 The product has nevertheless moved beyond the original two-phase description. Reader-facing
 appearance and interpretive modes are implemented and public; they are no longer forbidden work.
@@ -383,7 +384,9 @@ These are decided. A brief may note a consequence, but may not reopen the questi
 
 - **Do not rebuild the code.** It is modular and reasonably clean. The remaining measurement gap is
   not evidence that a rewrite would help; a rebuild produces equally unmeasured code.
-- **The evaluation is the highest-leverage next action**, ahead of any retrieval improvement.
+- **The completed first baseline is immutable.** The highest-leverage next measurement action is a
+  new-cohort decomposition-instrument repair; do not rerun the baseline or tune retrieval against
+  its held-out questions.
 - **The gold set is the first artifact** and the input to all three measurements.
 - **Optimize for this manuscript; keep the plumbing corpus-agnostic.**
 - **Answer Mode reaches done without Index Mode.**

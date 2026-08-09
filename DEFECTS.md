@@ -59,6 +59,27 @@ before calibration.
 
 ---
 
+## [2026-08-09] Canonical decomposition instrument yielded only 10 usable readings from 37 attempts
+Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
+Symptom: the frozen V26 baseline completed with exactly 37 answer-only `gpt-5.6-terra`
+decomposition attempts, but only ten produced usable canonical decompositions. Twenty-six completed
+outputs failed the exact answer-substring/character-span invariant and H029 produced one terminal
+`incomplete_response`. The claim-derived portion of the report therefore contains 41 claims from
+only ten usable outcomes. These 27 technical outcomes are measurement-instrument failures; they do
+not establish that V26 failed 27 answers.
+Cause: the pinned Terra decomposition instrument did not reliably satisfy its exact-span output
+contract. The harness correctly refused to realign spans, parse nonexistent output, fabricate empty
+claim sets, or retry after seeing held-out results. Consequently, mechanically valid claim-derived
+metrics have a much narrower evidence base than the 37-item answer cohort.
+Resolution and verification: preserve recovery-04 and its result as the complete descriptive
+baseline. It closes with all 37 answer artifacts, 37 unique Terra attempts, ten usable
+decompositions, 26 `exact_span_mismatch` outcomes, one `incomplete_response`, 125 priced events,
+zero unpriced events, and `$7.02298147` cumulative cost. Answer-level citation syntax measures keep
+their full applicable denominators; decomposition-dependent measures explicitly use only ten.
+Diagnose and prospectively redesign the decomposition instrument in a new measurement cohort rather
+than changing or rerunning this baseline. Semantic calibration remains optional, lower-priority
+supplemental work and cannot erase this limitation.
+
 ## [2026-08-09] Terra returned H029 incomplete without output
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
 Symptom: recovery-03 preserved all 37 frozen V26 answers and reached 28 of the 37 contracted
@@ -73,16 +94,16 @@ one-attempt contract, while treating its empty output as a claim set would fabri
 existing response `resp_04c5799aa1b46c76006a78a779f5e8819f84b2edbf39a416c5` was retrieved by
 exact ID without another model call and preserved privately with SHA-256
 `84503bc1cd861bafc09cb33bbe32f581ee56a63ed15c66e8d5ccb7562d1d8617`.
-Resolution and verification: preserve recovery-03 unchanged and use one provider-free recovery-04
-migration to seal H029 as technical `incomplete_response`, alongside the 27 earlier decomposition
-outcomes. Resume only H030–H038's nine untouched Terra calls under the same cumulative `$20.00`
-cap. A future exact `incomplete` status may be sealed and followed by the next untouched item;
-unknown statuses, provider or network failures, model-identity mismatch, missing parse, and an
-unavailable citation number still stop fail-closed. Final answer-level metrics retain all 37 items;
-decomposition-dependent metrics use only `N` usable decompositions and disclose `37 - N` technical
-failures. This prospectively narrows the earlier H002 rule that treated every incomplete status as
-an unrecoverable stop. It authorizes no retry, parsing fabrication, calibration, semantic judgment,
-gold change, or candidate repair.
+Resolution and verification: recovery-03 remains unchanged. One provider-free recovery-04 migration
+sealed H029 as technical `incomplete_response` alongside the 27 earlier outcomes, after which the
+resume made exactly the nine previously untouched calls H030–H038. H029 was not retried, parsed from
+empty output, or attributed to the candidate answer. Recovery-04 closes with all 37 answer
+artifacts and exactly 37 Terra attempts; the ledger contains 125 priced events, `$7.02298147`
+cumulative spend, and zero unpriced events. A future exact `incomplete` status may be sealed and
+followed by the next untouched item; unknown statuses, provider or network failures, model-identity
+mismatch, missing parse, and an unavailable citation number still stop fail-closed. This narrowed
+the earlier H002 rule without authorizing a retry, fabricated parse, semantic judgment, gold change,
+or candidate repair.
 
 ## [2026-08-09] Terra repeated the exact-span instrument failure for H002
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation

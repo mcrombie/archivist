@@ -13,9 +13,9 @@ is a roadmap, not the detailed experimental contract or the historical developme
 
 Archivist remains a retrieval-augmented question-answering system over one long-form historical
 manuscript. Its public reader experience is already live; its retrieval-only held-out diagnostic
-is complete, while its formal held-out answer-quality baseline has sealed all 37 answers and is
-finishing canonical decomposition after one disclosed instrument failure. Those are different
-accomplishments and must not be conflated.
+and its first formal held-out answer-quality baseline are complete. The latter is a descriptive
+mechanical baseline, not yet a complete semantic answer-quality scorecard, and those accomplishments
+must not be conflated.
 
 ## Current checkpoint — 2026-08-09
 
@@ -122,12 +122,22 @@ ended with provider status `incomplete`: 8,000 output tokens, all reported as re
 output text. No retry occurred. The existing response was retrieved by ID without a model call and
 privately snapshotted. Recovery-03 has 116 provider events and cumulative spend of `$6.80227647`.
 
-Preserve recovery-03 unchanged. Recovery-04 must bind all 27 prior outcomes and seal H029 as
-`incomplete_response`, then resume only H030–H038's nine untouched calls. Future terminal-
-incomplete responses may be sealed and skipped without retry; unknown status, provider/network,
-model-identity, nominally-completed missing-parse, and unavailable-citation failures still stop.
-Final closure remains exactly 37 attempts partitioned into `N` usable decompositions and `37 - N`
-technical outcomes.
+**Recovery-04 closed the complete descriptive baseline — 2026-08-09.** The provider-free migration
+preserved recovery-03, sealed H029 as `incomplete_response`, and the resume made exactly the nine
+untouched H030–H038 calls. No answer or decomposition attempt was retried. All 37 answer artifacts
+are preserved: 35 completed/released answers and two generation-side technical-error artifacts.
+The decomposition ledger closes at exactly 37 Terra attempts, of which ten are usable and 27 are
+technical measurement failures—26 `exact_span_mismatch` and one `incomplete_response`. The latter
+are failures of the measurement instrument, not 27 failed V26 answers.
+
+The report covers 198 sources and 251 citation references. Available mechanical results are
+citation resolvability 251/251 (1.000), malformed citations 0/250, citation completeness 34/41
+(0.829), cited-source to gold-location match 23/34 (0.676), and gold-location retrieval coverage
+75/428 (0.175). The 41-claim denominator comes only from the ten usable decompositions; answer-level
+citation syntax measures retain all applicable answers. Semantic measures remain pending by design.
+The exact ledger records 125 priced events, zero unpriced events, and `$7.02298147` total spend.
+This is a complete descriptive baseline, but the 27/37 instrument-failure rate sharply limits
+claim-derived interpretation.
 
 Parts of the completed annotations began as historical Claude drafts, then were directly checked,
 adopted, or revised by the manuscript owner. The owner has elected to retain that adjudicated work
@@ -155,9 +165,9 @@ After formal lock:
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. Because OpenAI currently exposes canonical `gpt-5.6-sol` and `gpt-5.6-terra` IDs but no immutable dated snapshots, the first answer cohort must bind the committed catalog observation plus requested/returned IDs and disclose the limitation. |
 | **3. Held-out gold question set** | **Complete and formally locked** | Preserve the synchronized private source, committed private-safe gold, provenance sidecar, and frozen-candidate boundary unchanged. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Complete** | The frozen run found 24.71% dense versus 25.97% hybrid macro Recall@5 (+1.26 points), with a mixed per-stratum effect. Preserve the private text-free result and do not tune V26 from it before the answer-quality baseline. |
-| **5. Citation-accuracy harness** | **All answers sealed; decomposition recovery required** | Preserve recovery-03, migrate provider-free with H029 recorded as `incomplete_response`, run exactly H030–H038's nine untouched Terra calls, and report `N/37` usable decompositions without retry or repair. |
+| **5. Citation-accuracy harness** | **Complete for the first descriptive baseline** | Preserve recovery-04 and its exact 37-attempt closure. Mechanical citation results are emitted with exact denominators; decomposition-dependent results use ten usable outcomes and disclose 27 technical instrument failures. |
 | **6. Faithfulness and abstention calibration** | **Deferred, lower priority** | After the full baseline is preserved, label the fixed ten-item subset, measure judge agreement, and settle §§6–7. This work may fill semantic fields in a separate supplement; it may not delay or overwrite the baseline. |
-| **7. Formal baseline and evaluation report** | **In progress; 37 answers sealed, 28/37 decompositions attempted** | Finish H030–H038 through the audited no-retry recovery path, then publish text-free reproducible artifacts with all technical failures, exact denominators, and all mechanically available results. Semantic metrics may remain explicitly pending. |
+| **7. Formal baseline and evaluation report** | **Complete descriptive baseline; semantic scoring pending** | Preserve the public/private hash-bound reports. Diagnose the decomposition instrument in a separate new measurement cohort before relying heavily on claim-derived results; any later semantic calibration is a separate supplement. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
 | **8A. Production observability and latency evidence** | **Partial and unmeasured** | Stage timing and token/cost records exist. Add/confirm privacy-safe request correlation and run the declared warm production cohort before publishing latency statistics. |
 
@@ -187,36 +197,32 @@ top of the list.
    predeclared +1.26-point delta. Hit@5 was 90.91% versus 93.94%. The five fixed-subset repetitions
    had zero spread, while the per-stratum result remained mixed. No generator or judge ran, and V26
    was not changed.
-7. **In progress — finish canonical decomposition without retrying failed instrument calls.**
-   All 37 V26 answers are sealed, including H003's trace-recovered local `clean_abstention`.
-   Recovery-03 advanced to 27 sealed decomposition outcomes before H029's one call ended terminal-
-   incomplete with no output text. Its existing response was retrieved by ID without a model call,
-   privately snapshotted, and hash-bound; no retry occurred. Create the exact provider-free
-   recovery-04 sibling, preserve recovery-03, record H029 as `incomplete_response`, and make exactly
-   one Terra call for H030–H038 under the already authorized `$20.00` cumulative cap. Seal later
-   predeclared local ID/span or terminal-incomplete failures and continue without retry; other
-   unexpected failures stop fail-closed. No owner labeling, semantic verdict, agreement threshold,
-   RAG repair, prompt change, retrieval change, model change, gold change, corpus change, or UI work
-   may intervene.
-8. **Immediately publish the descriptive baseline artifacts.** Produce the private machine-readable
-   result and text-free readable/public report with exact cohort identity, costs, latency, response
-   status, mechanical citation measures, limitations, and per-stratum denominators. Bind and
-   disclose every migration, H003 recovery, and all decomposition-instrument failures; report
-   generation latency over the 36 observed full turns rather than imputing H003, and report
-   decomposition as `N` usable outputs from 37 attempts. Failed decompositions are excluded only
-   from decomposition-dependent denominators, never treated as empty answers or candidate failures. Semantic fields that
-   require calibration are `pending`, not blockers. The first complete 37 may state that
-   generator spread is not yet measured; the five-repeat noise floor is required before a later
-   comparative or significance claim, not before this descriptive baseline.
-9. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+7. **Completed — finish canonical decomposition without retrying failed instrument calls.**
+   Recovery-04 preserved every earlier result, recorded H029 as `incomplete_response`, and made
+   exactly the nine untouched H030–H038 calls. The cohort closes with all 37 answer artifacts and
+   exactly 37 Terra attempts: ten usable decompositions, 26 `exact_span_mismatch` failures, and one
+   `incomplete_response`. No answer or attempted decomposition was retried, corrected, or replaced.
+8. **Completed — emit the descriptive baseline artifacts.** The private machine-readable result
+   and text-free public-safe summary/report bind cohort identity, cost, latency, response status,
+   mechanical citation measures, limitations, every migration, H003 recovery, and all measurement-
+   instrument failures. Generation latency reports the 36 observed full turns: 1,817.196 seconds
+   total, 50.478-second mean, 47.928-second p50, 91.695-second p95, and 108.685-second maximum.
+   Semantic fields remain explicitly pending rather than blocking publication.
+9. **Next — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26 of
+   37 outputs violated exact-span validation, then prospectively declare and test a revised
+   instrument without changing or rerunning this baseline. The current ten usable decompositions
+   are enough to preserve limited mechanical measurements, not enough to support strong
+   claim-derived conclusions.
+10. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
    subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
-   technical failure are preserved, measure judge and
-   decomposition agreement, and publish a hash-bound scoring supplement. Judge failure selects
-   manual/pending dimensions and never changes the original baseline.
-10. **Measure production behavior.** Deploy the exact evaluated candidate, verify the production
+   technical failures are preserved, measure judge and decomposition agreement, and publish a
+   hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
+   the original baseline. This is optional, lower-priority work and must not be represented as part
+   of the completed descriptive baseline.
+11. **Measure production behavior.** Deploy the exact evaluated candidate, verify the production
    commit, and collect the predeclared 30–50 successful warm first-turn cohort while reporting
    failures, cold starts, follow-ups, p50, p95, and cost.
-11. **Fill resume and blog claims only from those artifacts.** If hybrid retrieval does not improve
+12. **Fill resume and blog claims only from those artifacts.** If hybrid retrieval does not improve
     the predeclared metric, report that result rather than tuning against the used holdout. A later
     system change requires a new holdout for a new improvement claim.
 
@@ -268,11 +274,11 @@ Deferred means valuable but not on the critical path to the first defensible mea
 
 | Deferred item | Why revisit it | Entry condition |
 |---|---|---|
-| **Index Assistant Mode** | The original back-of-book indexing idea remains useful, but its exact-match ranking defect needs a separate gold set and metric. | Complete the Answer Mode baseline, then write an Index-specific contract. |
+| **Index Assistant Mode** | The original back-of-book indexing idea remains useful, but its exact-match ranking defect needs a separate gold set and metric. | The Answer Mode descriptive baseline is complete; write an Index-specific contract before resuming this work. |
 | **Multi-corpus Archivist** | A second public-domain Virginia history could test corpus identity, isolation, and transferability without exposing *Cradle*. | Preserve byte-identical *Cradle* chunk IDs and retrieval behavior first; require fail-closed exposure policy and corpus-local absence messages. |
 | **Additional edition locator profiles** | Paperback, hardcover, and ebook locators would let readers use the edition they own. | The owner supplies edition-specific pagination; each profile binds to its own source hash. |
 | **Precision@k as a public metric** | It is useful only when non-relevant labels are genuinely exhaustive. | Amend the contract before results and complete owner-verified exhaustive relevance judgments; otherwise report Recall@k and context recall. |
-| **Learned reranking or new retrieval tuning** | It may improve ordering, but the current project has no held-out baseline proving what needs improvement. | A completed baseline identifies a retrieval-specific defect and a fresh development set supports iteration. |
+| **Learned reranking or new retrieval tuning** | It may improve ordering, and the first baseline now documents low gold-location retrieval coverage, but its held-out questions cannot become tuning data. | Diagnose the retrieval-specific defect and build a fresh development set before opening a new comparison cohort. |
 | **Durable saved conversations** | It would improve return visits but adds storage and privacy obligations. | Define retention, deletion, consent, and public abuse boundaries first. |
 
 ## Resume-claim release criteria

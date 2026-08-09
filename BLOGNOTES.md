@@ -18,10 +18,11 @@ anything that still requires measurement.
   owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
   held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
   (+1.26 points). This is a retrieval-only diagnostic, not an answer-quality score. The authorized
-  answer-quality run has now sealed all 37 V26 answers. Its first two Terra decomposition calls,
-  for H001 and H002, each completed once but failed strict claim-text/character-span validation.
-  Neither was retried or repaired; recovery-02 contains 90 provider events and cumulative recorded
-  spend of `$5.46195397`.
+  answer-quality baseline is now complete. Recovery-04 preserves all 37 answer artifacts: 35
+  completed/released answers and two generation-side technical-error artifacts. Exactly 37 Terra
+  decomposition attempts produced ten usable decompositions and 27 technical measurement failures
+  (26 `exact_span_mismatch`, one `incomplete_response`). No answer or attempted decomposition was
+  retried or repaired. The 27 failures belong to the ruler, not to 27 candidate answers.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
@@ -29,17 +30,58 @@ anything that still requires measurement.
   question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
   annotations began as historical Claude drafts, but the owner later source-verified and
   adjudicated them. This is disclosed without a prospective-blinding claim.
-- **Restart point:** leave recovery-02 immutable. H001 and H002 already have provider-retrieved,
-  private hash-bound response snapshots and must remain technical decomposition failures. Create
-  the provider-free recovery-03 sibling before making exactly 35 missing Terra calls under the same
-  `$20.00` cumulative cap. Do not correct or retry either failed result. During the remaining pass,
-  seal and continue only for the four predeclared reproducible local ID/span failures; stop on any
-  other unexpected condition. Publish 37 sealed answers, exactly 37 canonical attempts, `N` usable
-  decompositions, `37 - N` technical failures, and exact affected denominators. This is instrument
-  recovery, not candidate repair; calibration remains later and lower priority.
+- **Baseline result:** the report covers 198 sources, 251 citation references, and 41 claims from
+  the ten usable decompositions. Citation resolvability is 251/251 (1.000); malformed citations are
+  0/250; citation completeness is 34/41 (0.829); cited-source to gold-location match is 23/34
+  (0.676); and gold-location retrieval coverage is 75/428 (0.175). Claim-derived measures use only
+  the ten usable decompositions, while answer-level citation syntax measures retain all applicable
+  observations. Semantic answer-quality fields remain pending by design.
+- **Cost and latency:** the closed ledger records 125 priced events, zero unpriced events, and
+  `$7.02298147` total estimated API cost under the `$20.00` cap. H003's audited recovery leaves 36
+  exact generation-latency observations in the 37-item scope: 1,817.196 seconds total, 50.478-second
+  mean, 47.928-second p50, 91.695-second p95, and 108.685-second maximum.
+- **Next evidence step:** preserve this complete descriptive baseline unchanged. The 27/37
+  decomposition-instrument failure rate sharply limits the claim-derived interpretation, so the
+  next recommended work is to diagnose and redesign that instrument in a separately declared
+  measurement cohort. Do not change or rerun V26 or this held-out baseline to improve the result.
+  Semantic calibration remains optional, lower-priority supplemental work.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-09 — The 37-question baseline is complete, and the ruler is part of the result
+
+- The evaluation finally closed exactly as authorized: all 37 frozen V26 answer artifacts are
+  preserved, followed by exactly one Terra decomposition attempt per answer. Recovery-04 first
+  converted H029's already-spent, empty `incomplete` response into an auditable technical outcome,
+  then called only the nine untouched items H030–H038. There were no retries.
+- The answer side and the measurement side tell different stories. Archivist produced 35
+  completed/released answers plus two generation-side technical-error artifacts. Terra supplied ten
+  usable decompositions, while 26 outputs failed exact text/span validation and one exhausted its
+  reasoning allowance without producing output. Calling these 27 failed *answers* would blame the
+  candidate for the ruler's malformed readings.
+- The mechanically available citation evidence is still useful. All 251 citation references
+  resolved; none of 250 syntax-eligible citations was malformed; 34 of 41 decomposed claims carried
+  a citation; 23 of those 34 citations matched an owner-recorded gold location; and retrieval found
+  75 of 428 gold locations. The last two figures show how much evidence coverage remains to improve,
+  but the 41-claim universe represents only the ten usable decomposition outcomes.
+- The run cost `$7.02298147` across 125 priced and zero unpriced events. Its 36 exact generation
+  timings totaled 1,817.196 seconds, with a 47.928-second median and 91.695-second p95; H003's
+  trace-backed recovery is disclosed rather than assigned an invented duration.
+- This is the project's first complete descriptive answer-quality baseline. It is not yet the full
+  semantic scorecard: faithfulness, abstention, gold-claim recall, and related judgments remain
+  pending. More importantly, a 27/37 failure rate means the next instrument should be rebuilt and
+  validated in a new cohort. The completed baseline stays frozen as evidence of what both the
+  candidate and its first ruler actually did.
+- The public-safe, text-free local report is
+  `runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04/precalibration-public-report.md`;
+  its summary SHA-256 is
+  `eaa6d33460c0c616467e9cd9cb043c762e16c5e6a6654cfe2eebd3360655dc7a`.
+
+Useful blog lesson: evaluation infrastructure is not an invisible neutral observer. When a strict
+ruler fails mechanically, preserving that failure can be more credible than forcing a tidy score.
+The useful claim is not that every answer was good; it is that every answer and every attempted
+measurement survived intact, with the limits of each denominator made visible.
 
 ## 2026-08-09 — Turning a repeated malformed measurement into an honest cohort outcome
 

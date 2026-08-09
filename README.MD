@@ -226,13 +226,14 @@ uv run python scripts/run_retrieval_benchmark.py run `
 
 The private, gitignored embedding cache is reused by both arms, every value of `k`, and the five
 retrieval repetitions; later offline reproductions do not make another API call. The complete
-answer-quality cohort has now sealed all 37 frozen V26 answers. Canonical decomposition has made
-28 of its 37 one-attempt-only calls: 27 have sealed outcomes, while H029 returned the provider status
-`incomplete` with no output and awaits provider-free recovery as a technical outcome. There is no
-ten-item calibration stop and no semantic quality gate before completion. The initial baseline
-report includes every immediately computable result—cohort identity, costs, latency, response status,
-mechanical citation measures, and technical decomposition failures—with semantic fields explicitly
-pending where a calibrated judgment is required.
+answer-quality cohort is also complete. Recovery-04 preserves all 37 frozen V26 answer artifacts:
+35 completed/released answers and two generation-side technical-error artifacts. Canonical
+decomposition made exactly 37 one-attempt-only Terra calls, with ten usable decompositions and 27
+technical measurement failures—26 `exact_span_mismatch` and H029's one `incomplete_response`. No
+answer or decomposition attempt was retried or repaired. The 27 failures belong to the Terra
+measurement instrument; they do **not** mean V26 failed 27 answers. The baseline reports every
+immediately computable result and leaves semantic fields explicitly pending where calibrated
+judgment is still required.
 
 The answer-evaluation preflight is offline and makes no provider call:
 
@@ -297,8 +298,8 @@ call, and preserved in private snapshots with SHA-256
 correct either result, retry either item, or promote an invalid canonical decomposition.
 Recovery-02 contains 90 provider events and cumulative recorded spend of **`$5.46195397`**.
 
-Recovery-02 now remains immutable. Create recovery-03 with the provider-free command below after
-the generalized no-retry harness is committed:
+Recovery-02 remains immutable. The completed provider-free migration created recovery-03 with the
+historical command below after the generalized no-retry harness was committed:
 
 ```powershell
 uv run python scripts/run_answer_evaluation.py recover-decomposition-failure `
@@ -306,9 +307,9 @@ uv run python scripts/run_answer_evaluation.py recover-decomposition-failure `
 ```
 
 That migration binds all 37 answer checkpoints, the complete existing ledger, both response
-snapshots and validation failures, and the source and destination runner identities. It makes no
-provider call. Resume against the printed recovery-03 path; H001 and H002 are skipped and exactly
-one Terra call is made for each of the remaining 35 cohort items under the same cumulative cap:
+snapshots and validation failures, and the source and destination runner identities. It made no
+provider call. The resumed run skipped H001 and H002 and made exactly one Terra call for each
+previously untouched item until H029 returned terminal status `incomplete`:
 
 ```powershell
 uv run python scripts/run_answer_evaluation.py run-37 `
@@ -321,13 +322,12 @@ A completed parseable result that fails one of the four predeclared local claim-
 is sealed immediately as a technical measurement failure and is never corrected or retried; the
 run continues to the next untouched item. An exact provider status of `incomplete` is likewise
 sealed as a technical measurement failure and may continue after its one attempt is durably bound.
-An unknown status, provider or network failure, returned-model mismatch, missing parse, or unavailable
-citation number still stops fail-closed. The
-completed baseline reports **37 answers and exactly 37 canonical decomposition attempts,
-partitioned into `N` usable decompositions and `37 - N` technical failures**. Failures are excluded
-only from decomposition-dependent denominators and are never imputed as empty claim sets or scored
-as candidate answer failures. This recovery repairs the measurement harness, not the frozen
-answers.
+An unknown status, provider or network failure, returned-model mismatch, missing parse, or
+unavailable citation number still stops fail-closed. The completed baseline reports **all 37 answer
+artifacts and exactly 37 canonical decomposition attempts: ten usable decompositions and 27
+technical failures**. Failures are excluded only from decomposition-dependent denominators and are
+never imputed as empty claim sets or scored as candidate answer failures. This recovery repaired
+the measurement harness's representation, not the frozen answers.
 
 Recovery-03 made exactly one `gpt-5.6-terra` call for H029 before stopping on provider status
 `incomplete`. Response `resp_04c5799aa1b46c76006a78a779f5e8819f84b2edbf39a416c5` contained no
@@ -339,9 +339,9 @@ SHA-256 `84503bc1cd861bafc09cb33bbe32f581ee56a63ed15c66e8d5ccb7562d1d8617`. It w
 parsed from nonexistent output, or attributed to the candidate answer. Recovery-03 is now immutable
 at 116 priced provider events, `$6.80227647` cumulative recorded spend, and zero unpriced events.
 
-Create recovery-04 from recovery-03 with the exact provider-free command below. The migration seals
-H029 as technical `incomplete_response`, preserves all 37 answers and the 27 earlier decomposition
-outcomes, and changes no candidate, prompt, gold, or provider evidence:
+Recovery-04 was created from recovery-03 with the exact provider-free command below. The migration
+sealed H029 as technical `incomplete_response`, preserved all 37 answers and the 27 earlier
+decomposition outcomes, and changed no candidate, prompt, gold, or provider evidence:
 
 ```powershell
 uv run python scripts/run_answer_evaluation.py recover-decomposition-failure `
@@ -349,8 +349,8 @@ uv run python scripts/run_answer_evaluation.py recover-decomposition-failure `
   --run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04
 ```
 
-Resume only the nine untouched items, H030–H038, against recovery-04 under the original cumulative
-cap:
+The final resume called only the nine untouched items, H030–H038, against recovery-04 under the
+original cumulative cap:
 
 ```powershell
 uv run python scripts/run_answer_evaluation.py run-37 `
@@ -359,15 +359,40 @@ uv run python scripts/run_answer_evaluation.py run-37 `
   --max-cost-usd 20
 ```
 
-Faithfulness and abstention calibration is later, lower-priority scoring-instrument work. Only
-after all 37 answers, all 37 canonical attempts, every usable decomposition, and all technical
-failures are preserved may the predeclared subset receive human labels, repeated decompositions,
-and semantic judge checks. That work may add a hash-bound scoring supplement; it cannot delay,
-overwrite, or suppress the baseline. Five-repeat generator noise measurement is likewise required
-before a later comparative or significance claim, not before this first descriptive result. The
-answer-quality run has recorded `$6.80227647`; completion of the remaining nine decomposition calls
-is pending. Answer-level metrics retain `n = 37`; only decomposition-dependent metrics use the
-eventual `N` usable outcomes. V26 remains frozen, and the interactive application and earlier
+The resulting report covers 198 sources, 251 citation references, and 41 claims from the ten usable
+decompositions:
+
+| Mechanical metric | Result |
+|---|---:|
+| Citation resolvability | 251/251 (1.000) |
+| Malformed citation rate | 0/250 (0.000) |
+| Citation completeness | 34/41 (0.829) |
+| Cited-source gold-location match | 23/34 (0.676) |
+| Gold-location retrieval coverage | 75/428 (0.175) |
+
+Answer-level citation syntax metrics retain all applicable answer/citation observations;
+claim- and decomposition-dependent metrics use only the ten usable outcomes. The high 27/37
+decomposition-instrument failure rate therefore sharply limits interpretation of the latter. The
+generation pipeline has 36 exact latency observations in its 37-item scope because of the disclosed
+H003 recovery: 1,817.196 seconds total, 50.478-second mean, 47.928-second p50, 91.695-second p95,
+and 108.685-second maximum. The closed ledger contains 125 priced events, zero unpriced events, and
+**`$7.02298147`** total estimated API cost, safely below the authorized `$20.00` cap.
+
+The text-free public report and summary are
+`runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04/precalibration-public-report.md`
+and `precalibration-public-summary.json`. Their summary SHA-256 is
+`eaa6d33460c0c616467e9cd9cb043c762e16c5e6a6654cfe2eebd3360655dc7a`; the bound private,
+generation, decomposition, and migration artifact hashes are respectively
+`6d3fe51abcc3167e69b8e58fa46bceefeb29cf5c8ae9666c575f12757fe1312a`,
+`61a58409b18025487d04f68ef2057005e757a91eb32223e71455e97cd4f13083`,
+`1d7c759821e8a71fad70886878be06cb81b731f320a9cc30bf5d6f51b3d77d7b`, and
+`41b5f8f5ca98753ee3297a4dc9a9285d51ddcaf9cec4adc1f8067245c444f8a8`.
+
+This is a complete **descriptive baseline**, not yet a full semantic answer-quality scorecard.
+Faithfulness, abstention, gold-claim recall, and related semantic measures remain pending by design.
+The next recommended measurement work is to diagnose and redesign the decomposition instrument in
+a new cohort, without changing or rerunning this baseline; an optional calibration/semantic
+supplement remains lower priority. V26 stays frozen, and the interactive application and earlier
 practical evaluations remain development evidence only.
 
 ## Documentation map

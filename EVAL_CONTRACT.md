@@ -142,10 +142,43 @@ provider/network errors, model mismatches, and unbound results remain fail-close
 honest representation for a paid attempt with no usable measurement; it does not change
 V26, the answer, the prompt, the model, the 37-attempt cardinality, or any quality threshold.
 
+**Completion record, 2026-08-09 (first descriptive answer-quality baseline):** the audited
+provider-free migration sealed H029 as `incomplete_response`; the resumed pass then made exactly
+the nine previously untouched calls H030–H038. It made no retry, answer regeneration, calibration
+call, semantic-judge call, gold change, or V26 change. The resulting recovery-04 cohort is complete
+with all 37 answer artifacts preserved: 35 completed/released answers and two generation-side
+technical-error artifacts. It also closes at exactly 37 canonical Terra attempts: ten usable
+decompositions and 27 technical measurement failures, comprising 26 `exact_span_mismatch` outcomes
+and one `incomplete_response`. The latter 27 describe the decomposition instrument, not 27 failed
+candidate answers.
+
+The initial descriptive report contains 198 sources, 251 citation references, and 41 claims from
+the ten usable decompositions. Citation resolvability is 251/251 (1.000), malformed citations are
+0/250, citation completeness is 34/41 (0.829), cited-source to gold-location match is 23/34
+(0.676), and gold-location retrieval coverage is 75/428 (0.175). Answer-level citation syntax
+measures retain every applicable answer/citation denominator; claim- and decomposition-dependent
+measures use only the ten usable outcomes. The high 27/37 instrument-failure rate materially limits
+interpretation of those claim-derived results. Semantic fields remain pending by design and may be
+added only as a separate supplement. Completion cost is `$7.02298147` across 125 priced events and
+zero unpriced events, below the authorized `$20.00` cap. Generation latency has 36 exact
+observations in the 37-item scope: 1,817.196 seconds total, 50.478-second mean, 47.928-second p50,
+91.695-second p95, and 108.685-second maximum.
+
+The public summary, private result, generation result, decomposition result, and recovery-04
+migration are bound respectively by SHA-256
+`eaa6d33460c0c616467e9cd9cb043c762e16c5e6a6654cfe2eebd3360655dc7a`,
+`6d3fe51abcc3167e69b8e58fa46bceefeb29cf5c8ae9666c575f12757fe1312a`,
+`61a58409b18025487d04f68ef2057005e757a91eb32223e71455e97cd4f13083`,
+`1d7c759821e8a71fad70886878be06cb81b731f320a9cc30bf5d6f51b3d77d7b`, and
+`41b5f8f5ca98753ee3297a4dc9a9285d51ddcaf9cec4adc1f8067245c444f8a8`.
+This completes the pre-calibration baseline; it does not settle or retroactively calibrate the
+semantic scoring sections.
+
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. The complete
-37-question generation/decomposition baseline runs before either section is calibrated. Sections 6
-and 7 lock later after the calibration work answers what only runs can answer; until then, affected
-semantic metrics are reported as pending rather than delaying the baseline.
+37-question generation/decomposition baseline is complete before either section is calibrated.
+Sections 6 and 7 lock later after the calibration work answers what only runs can answer; until
+then, affected semantic metrics remain pending in a separate supplement rather than delaying or
+overwriting the baseline.
 
 ---
 
