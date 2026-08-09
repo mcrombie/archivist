@@ -33,6 +33,9 @@ DECOMPOSED_PILOT_ITEM_SCHEMA = "archivist.answer_evaluation.decomposition/1"
 CALIBRATION_LABEL_SCHEMA = "archivist.answer_evaluation.calibration_labels/1"
 INSTRUMENT_LOCK_SCHEMA = "archivist.answer_evaluation.instrument_lock/1"
 PUBLIC_SUMMARY_SCHEMA = "archivist.answer_evaluation.public_summary/2"
+PRECALIBRATION_PUBLIC_SUMMARY_SCHEMA = (
+    "archivist.answer_evaluation.precalibration_public_summary/1"
+)
 COHORT_MANIFEST_SCHEMA = "archivist.answer_evaluation.cohort_manifest/1"
 PRIVATE_GENERATION_CHECKPOINT_SCHEMA = (
     "archivist.answer_evaluation.private_generation_checkpoint/1"
@@ -169,6 +172,27 @@ class PublicMetricId(StrEnum):
     ANSWER_SUCCESS = "answer_success"
 
 
+class PrecalibrationMetricId(StrEnum):
+    """Closed metrics available before any semantic-scoring calls."""
+
+    CITATION_RESOLVABILITY = "citation_resolvability"
+    CITATION_COMPLETENESS = "citation_completeness"
+    MALFORMED_CITATION_RATE = "malformed_citation_rate"
+    CITED_SOURCE_GOLD_LOCATION_MATCH = "cited_source_gold_location_match"
+    GOLD_LOCATION_RETRIEVAL_COVERAGE = "gold_location_retrieval_coverage"
+    CITATION_GROUNDEDNESS = "citation_groundedness"
+    FAITHFULNESS_SUPPORTED = "faithfulness_supported"
+    FAITHFULNESS_PARTIALLY_SUPPORTED = "faithfulness_partially_supported"
+    FAITHFULNESS_UNSUPPORTED = "faithfulness_unsupported"
+    FAITHFULNESS_CONTRADICTED = "faithfulness_contradicted"
+    GOLD_CLAIM_RECALL = "gold_claim_recall"
+    ESSENTIAL_GOLD_CLAIM_RECALL = "essential_gold_claim_recall"
+    MUST_NOT_CLAIM_VIOLATION = "must_not_claim_violation"
+    OUT_OF_CORPUS_ABSTENTION = "out_of_corpus_abstention"
+    ADVERSARIAL_PREMISE_CORRECTION = "adversarial_premise_correction"
+    FALSE_ABSTENTION = "false_abstention"
+
+
 class PublicLimitationId(StrEnum):
     """Closed, prose-free limitations that qualify the public baseline."""
 
@@ -183,6 +207,7 @@ class PublicLimitationId(StrEnum):
     MANUAL_GOLD_STATUS_PENDING = "manual_gold_status_pending"
     MANUAL_MUST_NOT_TRIPWIRES_PENDING = "manual_must_not_tripwires_pending"
     MANUAL_RESPONSE_BEHAVIOR_PENDING = "manual_response_behavior_pending"
+    SEMANTIC_SCORING_PENDING = "semantic_scoring_pending_calibration"
 
 
 class _ClosedModel(BaseModel):
@@ -1729,6 +1754,37 @@ class PublicMetric(_ClosedModel):
         return self
 
 
+class PrecalibrationPublicMetric(_ClosedModel):
+    """One closed result whose unavailable semantic value remains explicit."""
+
+    metric_id: PrecalibrationMetricId
+    availability: MetricAvailability
+    numerator: NonnegativeInt | None
+    denominator: NonnegativeInt
+    value: UnitInterval | None
+
+    @model_validator(mode="after")
+    def ratio_or_pending_state_is_exact(self) -> "PrecalibrationPublicMetric":
+        if self.availability is MetricAvailability.PENDING:
+            if self.denominator < 1:
+                raise ValueError("pending metric must retain its real positive denominator")
+            if self.numerator is not None or self.value is not None:
+                raise ValueError("pending metric must have null numerator and value")
+            return self
+        if self.numerator is None:
+            raise ValueError("available metric must have a numerator")
+        if self.numerator > self.denominator:
+            raise ValueError("metric numerator cannot exceed denominator")
+        if self.denominator == 0:
+            if self.numerator != 0 or self.value is not None:
+                raise ValueError("zero-denominator metric must be 0/0 with null value")
+            return self
+        expected = self.numerator / self.denominator
+        if self.value is None or not math.isclose(self.value, expected, abs_tol=1e-12):
+            raise ValueError("metric value must equal numerator divided by denominator")
+        return self
+
+
 class PublicCost(_ClosedModel):
     estimated_cost_usd: NonnegativeFloat | None
     priced_event_count: NonnegativeInt
@@ -1843,6 +1899,134 @@ class PublicEvaluationSummary(_ClosedModel):
         return self
 
 
+class PrecalibrationPublicStratumSummary(_ClosedModel):
+    stratum: EvaluationStratum
+    item_count: NonnegativeInt
+    metrics: tuple[PrecalibrationPublicMetric, ...]
+
+    @model_validator(mode="after")
+    def metric_ids_are_unique(self) -> "PrecalibrationPublicStratumSummary":
+        _require_unique(
+            [metric.metric_id for metric in self.metrics],
+            label="precalibration stratum metric IDs",
+        )
+        return self
+
+
+class PublicPrecalibrationSummary(_ClosedModel):
+    """Text-free first result emitted before semantic calibration or judging."""
+
+    schema_version: Literal[PRECALIBRATION_PUBLIC_SUMMARY_SCHEMA] = Field(
+        PRECALIBRATION_PUBLIC_SUMMARY_SCHEMA,
+        alias="schema",
+    )
+    evaluation_id: Identifier
+    candidate_id: Identifier
+    candidate_commit: GitCommit
+    rag_policy: Identifier
+    cohort_manifest_sha256: Sha256
+    corpus_manifest_sha256: Sha256
+    chunks_sha256: Sha256
+    question_set_sha256: Sha256
+    model_catalog_sha256: Sha256
+    runner_sha256: Sha256
+    planner_model_id: NonemptyString
+    generator_model_id: NonemptyString
+    decomposer_model_id: NonemptyString
+    embedding_model_id: NonemptyString
+    private_artifact_sha256: Sha256
+    generation_artifact_sha256: Sha256
+    decomposition_artifact_sha256: Sha256
+    gold_set_sha256: Sha256
+    limitation_ids: tuple[PublicLimitationId, ...]
+    run_status: BaselineRunStatus
+    latency_scope: Literal["generation_pipeline"] = "generation_pipeline"
+    item_count: NonnegativeInt
+    source_count: NonnegativeInt
+    claim_count: NonnegativeInt
+    citation_count: NonnegativeInt
+    completed_answer_count: NonnegativeInt
+    technical_error_count: NonnegativeInt
+    metrics: tuple[PrecalibrationPublicMetric, ...]
+    strata: tuple[PrecalibrationPublicStratumSummary, ...]
+    cost: PublicCost
+    latency: PublicLatency
+
+    @property
+    def schema(self) -> str:
+        return self.schema_version
+
+    @model_validator(mode="after")
+    def aggregate_ids_and_counts_are_coherent(self) -> "PublicPrecalibrationSummary":
+        metric_ids = [metric.metric_id for metric in self.metrics]
+        _require_unique(metric_ids, label="precalibration summary metric IDs")
+        _require_unique(
+            [entry.stratum for entry in self.strata],
+            label="precalibration summary strata",
+        )
+        _require_unique(self.limitation_ids, label="precalibration limitation IDs")
+        required_limitations = {
+            PublicLimitationId.CANONICAL_MODEL_ID_MUTABILITY,
+            PublicLimitationId.GENERATOR_SPREAD_UNMEASURED,
+            PublicLimitationId.DESCRIPTIVE_NOT_GATE,
+            PublicLimitationId.SEMANTIC_SCORING_PENDING,
+        }
+        if not required_limitations <= set(self.limitation_ids):
+            raise ValueError("precalibration summary is missing a fixed limitation")
+        if sum(entry.item_count for entry in self.strata) != self.item_count:
+            raise ValueError("precalibration stratum counts must sum to item_count")
+        if self.completed_answer_count + self.technical_error_count != self.item_count:
+            raise ValueError("completion and technical-error counts must cover every item")
+        mechanical_ids = {
+            PrecalibrationMetricId.CITATION_RESOLVABILITY,
+            PrecalibrationMetricId.CITATION_COMPLETENESS,
+            PrecalibrationMetricId.MALFORMED_CITATION_RATE,
+            PrecalibrationMetricId.CITED_SOURCE_GOLD_LOCATION_MATCH,
+            PrecalibrationMetricId.GOLD_LOCATION_RETRIEVAL_COVERAGE,
+        }
+        for metric in (
+            *self.metrics,
+            *(metric for stratum in self.strata for metric in stratum.metrics),
+        ):
+            if metric.metric_id in mechanical_ids:
+                if metric.availability is not MetricAvailability.AVAILABLE:
+                    raise ValueError("mechanical precalibration metrics must be available")
+            elif (
+                metric.denominator > 0
+                and metric.availability is not MetricAvailability.PENDING
+            ):
+                raise ValueError("semantic precalibration metrics must remain pending")
+        if self.run_status is BaselineRunStatus.COMPLETE:
+            if self.item_count != 37:
+                raise ValueError("complete precalibration result must contain exactly 37 items")
+            expected_strata = {
+                EvaluationStratum.FOCUSED_BIOGRAPHICAL: 8,
+                EvaluationStratum.FOCUSED_ANALYTICAL: 8,
+                EvaluationStratum.CONCEPTUAL: 5,
+                EvaluationStratum.BROAD_THEMATIC: 10,
+                EvaluationStratum.OUT_OF_CORPUS: 4,
+                EvaluationStratum.ADVERSARIAL_PREMISE: 2,
+            }
+            actual_strata = {entry.stratum: entry.item_count for entry in self.strata}
+            if actual_strata != expected_strata:
+                raise ValueError(
+                    "complete precalibration strata must be exactly 8/8/5/10/4/2"
+                )
+            if set(metric_ids) != set(PrecalibrationMetricId):
+                raise ValueError(
+                    "complete precalibration result must include every metric exactly once"
+                )
+            if any(
+                set(metric.metric_id for metric in stratum.metrics)
+                != set(PrecalibrationMetricId)
+                for stratum in self.strata
+            ):
+                raise ValueError(
+                    "complete precalibration strata must include every metric exactly once"
+                )
+        return self
+
+
 def validate_public_summary(
     payload: PublicEvaluationSummary | Mapping[str, object],
 ) -> PublicEvaluationSummary:
@@ -1856,6 +2040,16 @@ def validate_public_summary(
     if isinstance(payload, PublicEvaluationSummary):
         return payload
     return PublicEvaluationSummary.model_validate(payload)
+
+
+def validate_public_precalibration_summary(
+    payload: PublicPrecalibrationSummary | Mapping[str, object],
+) -> PublicPrecalibrationSummary:
+    """Validate the closed public boundary available before semantic scoring."""
+
+    if isinstance(payload, PublicPrecalibrationSummary):
+        return payload
+    return PublicPrecalibrationSummary.model_validate(payload)
 
 
 def _calibration_rubrics(

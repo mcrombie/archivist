@@ -4,7 +4,7 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-07
+## Current checkpoint — 2026-08-09
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
   local code reports `evidence-planned-v26`, `query-planner-v11`, and
@@ -25,11 +25,13 @@ anything that still requires measurement.
   question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
   annotations began as historical Claude drafts, but the owner later source-verified and
   adjudicated them. This is disclosed without a prospective-blinding claim.
-- **Restart point:** begin the single 37-item answer-quality cohort with the fixed ten calibration
-  answers, lock the scorer, and then run the remaining 27 immediately. Judge failure selects
-  manual/pending scoring instead of blocking the cohort; no RAG, prompt, retrieval, model, or UI
-  repair may intervene. The completed 37 is a descriptive baseline, followed later by noise-floor
-  repetition and production measurement.
+- **Restart point:** run all 37 frozen V26 questions in one uninterrupted answer-generation and
+  canonical-decomposition operation, preserving every answer, source set, trace, and usage record.
+  Publish the mechanically available baseline results immediately, with semantic fields pending
+  where necessary. Calibration is later, lower-priority scoring work and may not delay the cohort;
+  no RAG, prompt, retrieval, model, UI, gold, or corpus change may intervene. The completed 37 is a
+  descriptive baseline, followed later by semantic calibration, noise-floor repetition, and
+  production measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
@@ -3692,6 +3694,43 @@ surprise its author.
 Useful blog lesson: calibration should make the ruler legible, not keep the object being measured
 off the scale. A fallback from automatic to manual scoring preserves rigor without allowing the
 measurement apparatus to suppress an inconvenient or incomplete result.
+
+### 2026-08-09 - Taking the ruler out of the doorway
+
+- The owner caught that the supposedly nonblocking calibration still divided the evaluation into a
+  ten-question opening and a 27-question remainder. It no longer had a quality veto, but it still
+  imposed an operational stop for labels and judge qualification before most answers could exist.
+- Amended the contract prospectively because no held-out answer had yet been generated. The next
+  substantive paid operation now generates and preserves all 37 frozen V26 answers and one
+  canonical decomposition for each, without a calibration stop or intervening system change.
+- Separated **producing the evidence** from **qualifying an automated scorer**. The initial baseline
+  can report identity, answer status, citations, costs, latency, and other mechanical measurements
+  immediately. Faithfulness, semantic coverage, abstention, and premise-correction metrics remain
+  explicitly pending wherever they need the later calibrated judgment.
+- Demoted the fixed ten-item exercise to what it actually is: later, lower-priority validation of
+  the scoring instrument. Human labels, decomposition repeats, and judge-agreement checks may add a
+  hash-bound supplement to the preserved baseline, but they cannot overwrite it, delay it, or
+  decide whether the 37-question result is allowed to exist.
+- Preserved the frozen V26 candidate, gold set, corpus, prompts, models, and earlier retrieval-only
+  diagnostic. This was a sequencing correction before answer exposure, not a system repair or a
+  retroactive response to a score.
+- Implemented one resumable `run-37` entry point. It completes the 37 frozen V26 answer turns and
+  then exactly one canonical answer-only decomposition for each result. Calibration repeats and
+  semantic judge verdicts are absent from this operation; interrupted, already-bound checkpoints
+  are verified and reused instead of silently purchased again.
+- Made the first report part of that same command. Once the canonical decompositions exist, the
+  harness writes a sealed private binding and closed, text-free JSON and Markdown summaries of
+  completion, technical errors, cost, latency, citation syntax/resolvability/completeness, and
+  source-to-gold-location diagnostics. Semantic measures are visibly pending rather than invented.
+- Verified the evaluation subsystem with 129 focused tests plus Ruff and whitespace checks. A
+  repository-wide run reached 827 passing and one skipped test before 81 tests encountered the
+  repository's existing Windows temporary-directory access failure; no evaluation assertion
+  failed. The offline preflight confirmed the exact 37-answer/37-decomposition scope and made no
+  provider call.
+
+Useful blog lesson: evaluation generation and evaluation scoring are different jobs. A careful
+scorer can improve how a result is interpreted, but it should not stand in the doorway and prevent
+the underlying evidence from being created.
 
 ## Update convention
 

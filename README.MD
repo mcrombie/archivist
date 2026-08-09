@@ -226,17 +226,41 @@ uv run python scripts/run_retrieval_benchmark.py run `
 
 The private, gitignored embedding cache is reused by both arms, every value of `k`, and the five
 retrieval repetitions; later offline reproductions do not make another API call. The next formal
-stage is one continuous answer-quality cohort: generate and decompose the fixed ten-item
-calibration subset, bind human labels before revealing semantic judge verdicts, and lock the
-scoring instrument. This calibration determines scoring mode; it is not a candidate-quality gate.
-Those ten answers are the first ten of the same 37-item V26 run. The remaining
-27 run immediately after that lock, with no intervening RAG, prompt, retrieval, model, or UI repair.
-If the judge misses its agreement checks, affected dimensions use manual scoring or remain
-explicitly pending; the cohort still completes. The first complete 37-item result is a descriptive
-baseline with exact denominators. Five-repeat generator noise measurement is required before a
-later comparative or significance claim, not before this first baseline. No paid call has occurred
-while implementing this answer-evaluation protocol. V26 remains frozen, and the interactive
-application and earlier practical evaluations remain development evidence only.
+stage is the complete answer-quality cohort: generate and preserve all 37 frozen V26 answers, then
+create one canonical claim decomposition for every answer, in one uninterrupted paid operation.
+There is no ten-item calibration stop and no semantic quality gate before completion. The initial
+baseline report includes every immediately computable result—cohort identity, costs, latency,
+response status, and mechanical citation measures—with semantic fields explicitly pending where a
+calibrated judgment is required.
+
+The answer-evaluation preflight is offline and makes no provider call:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py preflight
+```
+
+After separate owner authorization for the disclosed data and cost scope, the complete resumable
+cohort uses this single paid entry point:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py run-37 `
+  --authorize-openai-full-evaluation `
+  --max-cost-usd 20
+```
+
+The command-line acknowledgement is a safety interlock, not authorization by itself. It runs all
+37 answers first, creates exactly one canonical answer-only decomposition per answer, and then
+writes the sealed private binding plus the closed, text-free mechanical JSON and Markdown reports.
+It performs no calibration repeats or semantic-judge calls.
+
+Faithfulness and abstention calibration is later, lower-priority scoring-instrument work. Only
+after all 37 answers and canonical decompositions are preserved may the predeclared ten-item subset
+receive human labels, repeated decompositions, and semantic judge checks. That work may add a
+hash-bound scoring supplement; it cannot delay, overwrite, or suppress the baseline. Five-repeat
+generator noise measurement is likewise required before a later comparative or significance
+claim, not before this first descriptive result. No paid answer-quality call has occurred while
+implementing this protocol. V26 remains frozen, and the interactive application and earlier
+practical evaluations remain development evidence only.
 
 ## Documentation map
 

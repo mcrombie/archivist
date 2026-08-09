@@ -28,6 +28,7 @@ from answer_evaluation import (
     DecomposedClaim,
     DecomposedPilotItem,
     InstrumentLock,
+    PrivateDecompositionCheckpoint,
     PrivateGeneratedItem,
     PrivateOrderedSource,
     PrivateProviderMetadata,
@@ -53,6 +54,9 @@ BASELINE_SEMANTIC_AGGREGATE_SCHEMA = (
     "archivist.answer_evaluation.baseline_semantic_aggregate/1"
 )
 PRIVATE_FULL_RUN_ARTIFACT_SCHEMA = "archivist.answer_evaluation.private_full_run/1"
+PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA = (
+    "archivist.answer_evaluation.precalibration_private_artifact/1"
+)
 DECOMPOSITION_STABILITY_SCHEMA = (
     "archivist.answer_evaluation.decomposition_stability/1"
 )
@@ -1241,6 +1245,217 @@ def validate_baseline_semantic_aggregate(
     return aggregate
 
 
+class PrecalibrationItemBinding(_ClosedModel):
+    """Prose-free exact join for generation, decomposition, and owner gold."""
+
+    item_id: Identifier
+    generated_item_sha256: Sha256
+    answer_sha256: Sha256
+    decomposition_sha256: Sha256
+    gold_item_sha256: Sha256
+    binding_sha256: Sha256
+
+    @model_validator(mode="after")
+    def hash_is_exact(self) -> "PrecalibrationItemBinding":
+        payload = self.model_dump(mode="json", exclude={"binding_sha256"})
+        if self.binding_sha256 != canonical_json_sha256(payload):
+            raise ValueError("binding_sha256 does not bind the precalibration item")
+        return self
+
+
+class PrecalibrationPrivateArtifact(_ClosedModel):
+    """Hash-only join emitted before any semantic-scoring calls."""
+
+    schema_version: Literal[PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA] = Field(
+        PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA,
+        alias="schema",
+    )
+    cohort_manifest_sha256: Sha256
+    generation_artifact_sha256: Sha256
+    decomposition_artifact_sha256: Sha256
+    gold_set_sha256: Sha256
+    gold_items_sha256: Sha256
+    decomposition_checkpoint_count: Literal[37]
+    decomposition_checkpoints_sha256: Sha256
+    decomposition_usage_events_sha256: Sha256
+    item_ids: tuple[Identifier, ...] = Field(min_length=37, max_length=37)
+    items: tuple[PrecalibrationItemBinding, ...] = Field(min_length=37, max_length=37)
+    artifact_sha256: Sha256
+
+    @property
+    def schema(self) -> str:
+        return self.schema_version
+
+    @model_validator(mode="after")
+    def joins_and_hash_are_exact(self) -> "PrecalibrationPrivateArtifact":
+        _require_unique(self.item_ids, label="precalibration item IDs")
+        if [item.item_id for item in self.items] != list(self.item_ids):
+            raise ValueError("precalibration artifact must bind all 37 items in exact order")
+        payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != canonical_json_sha256(payload):
+            raise ValueError("artifact_sha256 does not bind the precalibration artifact")
+        return self
+
+
+def _precalibration_item_binding(
+    generated: PrivateGeneratedItem,
+    decomposition: DecomposedPilotItem,
+    gold_item: Mapping[str, object],
+) -> PrecalibrationItemBinding:
+    _validate_decomposition(generated, decomposition)
+    if gold_item.get("id") != generated.item_id:
+        raise ValueError("precalibration gold item order or identity changed")
+    raw: dict[str, object] = {
+        "item_id": generated.item_id,
+        "generated_item_sha256": generated.item_sha256,
+        "answer_sha256": generated.answer_sha256,
+        "decomposition_sha256": decomposition.decomposition_sha256,
+        "gold_item_sha256": canonical_json_sha256(dict(gold_item)),
+    }
+    raw["binding_sha256"] = canonical_json_sha256(raw)
+    return PrecalibrationItemBinding.model_validate(raw)
+
+
+def _validate_precalibration_checkpoints(
+    *,
+    cohort_manifest_sha256: str,
+    generated_items: Sequence[PrivateGeneratedItem],
+    decompositions: Sequence[DecomposedPilotItem],
+    checkpoints: Sequence[PrivateDecompositionCheckpoint],
+) -> tuple[PrivateDecompositionCheckpoint, ...]:
+    normalized = tuple(
+        PrivateDecompositionCheckpoint.model_validate(
+            checkpoint.model_dump(mode="json")
+        )
+        for checkpoint in checkpoints
+    )
+    if len(normalized) != 37:
+        raise ValueError("precalibration cost closure requires exactly 37 decomposition calls")
+    item_ids = tuple(item.item_id for item in generated_items)
+    expected_layout = tuple((item_id, 1) for item_id in item_ids)
+    actual_layout = tuple(
+        (checkpoint.item_id, checkpoint.repetition) for checkpoint in normalized
+    )
+    if actual_layout != expected_layout:
+        raise ValueError(
+            "decomposition checkpoints must be the 37 canonical repetition-1 "
+            "calls in cohort order"
+        )
+    generated_by_id = {item.item_id: item for item in generated_items}
+    decomposition_by_id = {item.item_id: item for item in decompositions}
+    response_ids: list[str] = []
+    for checkpoint in normalized:
+        generated = generated_by_id[checkpoint.item_id]
+        if checkpoint.cohort_manifest_sha256 != cohort_manifest_sha256:
+            raise ValueError("decomposition checkpoint belongs to another cohort")
+        if checkpoint.answer_sha256 != generated.answer_sha256:
+            raise ValueError("decomposition checkpoint belongs to another answer")
+        if checkpoint.decomposition != decomposition_by_id[checkpoint.item_id]:
+            raise ValueError("canonical decomposition checkpoint changed")
+        response_ids.append(checkpoint.usage_events[0].response_id)
+    _require_unique(response_ids, label="precalibration decomposition response IDs")
+    generated_response_ids = [
+        event.response_id
+        for generated in generated_items
+        for event in generated.usage_events
+    ]
+    _require_unique(
+        generated_response_ids,
+        label="precalibration generation response IDs",
+    )
+    if set(generated_response_ids) & set(response_ids):
+        raise ValueError("generation and decomposition response IDs overlap")
+    return normalized
+
+
+def build_precalibration_private_artifact(
+    *,
+    cohort_manifest_sha256: str,
+    generation_artifact_sha256: str,
+    decomposition_artifact_sha256: str,
+    gold_set_sha256: str,
+    generated_items: Sequence[PrivateGeneratedItem],
+    decompositions: Sequence[DecomposedPilotItem],
+    gold_items: Sequence[Mapping[str, object]],
+    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+) -> PrecalibrationPrivateArtifact:
+    if {len(generated_items), len(decompositions), len(gold_items)} != {37}:
+        raise ValueError("precalibration artifact requires exactly 37 paired items")
+    item_ids = tuple(item.item_id for item in generated_items)
+    _require_unique(item_ids, label="precalibration generated item IDs")
+    if [item.item_id for item in decompositions] != list(item_ids):
+        raise ValueError("precalibration decomposition item order changed")
+    normalized_checkpoints = _validate_precalibration_checkpoints(
+        cohort_manifest_sha256=cohort_manifest_sha256,
+        generated_items=generated_items,
+        decompositions=decompositions,
+        checkpoints=decomposition_checkpoints,
+    )
+    bindings = tuple(
+        _precalibration_item_binding(generated, decomposition, gold_item)
+        for generated, decomposition, gold_item in zip(
+            generated_items,
+            decompositions,
+            gold_items,
+            strict=True,
+        )
+    )
+    usage_events = tuple(
+        checkpoint.usage_events[0] for checkpoint in normalized_checkpoints
+    )
+    raw: dict[str, object] = {
+        "schema": PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA,
+        "cohort_manifest_sha256": cohort_manifest_sha256,
+        "generation_artifact_sha256": generation_artifact_sha256,
+        "decomposition_artifact_sha256": decomposition_artifact_sha256,
+        "gold_set_sha256": gold_set_sha256,
+        "gold_items_sha256": canonical_json_sha256([dict(item) for item in gold_items]),
+        "decomposition_checkpoint_count": len(normalized_checkpoints),
+        "decomposition_checkpoints_sha256": canonical_json_sha256(
+            [checkpoint.model_dump(mode="json") for checkpoint in normalized_checkpoints]
+        ),
+        "decomposition_usage_events_sha256": canonical_json_sha256(
+            [event.model_dump(mode="json") for event in usage_events]
+        ),
+        "item_ids": list(item_ids),
+        "items": [binding.model_dump(mode="json") for binding in bindings],
+    }
+    raw["artifact_sha256"] = canonical_json_sha256(raw)
+    return PrecalibrationPrivateArtifact.model_validate(raw)
+
+
+def validate_precalibration_private_artifact(
+    value: PrecalibrationPrivateArtifact | Mapping[str, object],
+    *,
+    cohort_manifest_sha256: str,
+    generation_artifact_sha256: str,
+    decomposition_artifact_sha256: str,
+    gold_set_sha256: str,
+    generated_items: Sequence[PrivateGeneratedItem],
+    decompositions: Sequence[DecomposedPilotItem],
+    gold_items: Sequence[Mapping[str, object]],
+    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+) -> PrecalibrationPrivateArtifact:
+    artifact = (
+        value
+        if isinstance(value, PrecalibrationPrivateArtifact)
+        else PrecalibrationPrivateArtifact.model_validate(value)
+    )
+    expected = build_precalibration_private_artifact(
+        cohort_manifest_sha256=cohort_manifest_sha256,
+        generation_artifact_sha256=generation_artifact_sha256,
+        decomposition_artifact_sha256=decomposition_artifact_sha256,
+        gold_set_sha256=gold_set_sha256,
+        generated_items=generated_items,
+        decompositions=decompositions,
+        gold_items=gold_items,
+        decomposition_checkpoints=decomposition_checkpoints,
+    )
+    if artifact != expected:
+        raise ValueError("precalibration artifact changed from its exact inputs")
+    return artifact
+
+
 class FullRunItemBinding(_ClosedModel):
     """Prose-free exact join for one generated/decomposed/semantic item."""
 
@@ -2082,6 +2297,7 @@ __all__ = [
     "DECOMPOSITION_STABILITY_SCHEMA",
     "ITEM_RUBRIC_RESULT_SCHEMA",
     "MANUAL_SCORING_AGGREGATE_SCHEMA",
+    "PRECALIBRATION_PRIVATE_ARTIFACT_SCHEMA",
     "PRIVATE_FULL_RUN_ARTIFACT_SCHEMA",
     "AgreementCount",
     "BaselineSemanticAggregate",
@@ -2098,6 +2314,8 @@ __all__ = [
     "ItemRubricResult",
     "LockedClaimBinding",
     "ManualScoringAggregate",
+    "PrecalibrationItemBinding",
+    "PrecalibrationPrivateArtifact",
     "PrivateFullRunArtifact",
     "SanitizedGoldClaimBinding",
     "SanitizedRubricBinding",
@@ -2110,6 +2328,7 @@ __all__ = [
     "build_decomposition_stability",
     "build_item_rubric_result",
     "build_manual_scoring_aggregate",
+    "build_precalibration_private_artifact",
     "build_private_full_run_artifact",
     "build_sanitized_rubric_binding",
     "project_calibration_agreement",
@@ -2120,5 +2339,6 @@ __all__ = [
     "validate_decomposition_stability",
     "validate_item_rubric_result",
     "validate_manual_scoring_aggregate",
+    "validate_precalibration_private_artifact",
     "validate_private_full_run_artifact",
 ]

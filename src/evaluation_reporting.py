@@ -31,6 +31,10 @@ from answer_evaluation import (
     InstrumentLock,
     MetricAvailability,
     MustNotClaimStatus,
+    PrecalibrationMetricId,
+    PrecalibrationPublicMetric,
+    PrecalibrationPublicStratumSummary,
+    PrivateDecompositionCheckpoint,
     PrivateGeneratedItem,
     PrivateUsageEvent,
     PublicCost,
@@ -39,6 +43,7 @@ from answer_evaluation import (
     PublicLatency,
     PublicMetric,
     PublicMetricId,
+    PublicPrecalibrationSummary,
     PublicStratumSummary,
     ResponseBehavior,
     ScoringDimension,
@@ -47,6 +52,7 @@ from answer_evaluation import (
     canonical_json_sha256,
     sha256_text,
     validate_public_summary,
+    validate_public_precalibration_summary,
 )
 from evaluation_judge import ItemRubricInput
 from evaluation_results import (
@@ -55,10 +61,12 @@ from evaluation_results import (
     ClaimEvidenceResult,
     ItemRubricResult,
     ManualScoringAggregate,
+    PrecalibrationPrivateArtifact,
     PrivateFullRunArtifact,
     validate_baseline_semantic_aggregate,
     validate_calibration_semantic_aggregate,
     validate_manual_scoring_aggregate,
+    validate_precalibration_private_artifact,
     validate_private_full_run_artifact,
 )
 from evaluation_scoring import audit_citations
@@ -94,6 +102,7 @@ class _GoldItem:
     stratum: EvaluationStratum
     expected_behavior: ExpectedBehavior
     claims: tuple[_GoldClaim, ...]
+    relevant_chunk_ids: frozenset[str]
     must_not_claim: tuple[str, ...]
 
 
@@ -161,6 +170,18 @@ def _parse_gold_item(value: Mapping[str, object]) -> _GoldItem:
     if len({claim.claim_id for claim in claims}) != len(claims):
         raise ValueError(f"{item_id}: gold claim IDs must be unique")
 
+    relevant_raw = _require_sequence(
+        value.get("relevant_chunk_ids"),
+        label=f"{item_id} relevant_chunk_ids",
+    )
+    if any(
+        not isinstance(chunk_id, str) or not chunk_id for chunk_id in relevant_raw
+    ):
+        raise ValueError(f"{item_id}: relevant_chunk_ids must contain nonempty strings")
+    relevant = tuple(relevant_raw)
+    if len(relevant) != len(set(relevant)):
+        raise ValueError(f"{item_id}: relevant_chunk_ids contain duplicates")
+
     must_raw = _require_sequence(
         value.get("must_not_claim"),
         label=f"{item_id} must_not_claim",
@@ -176,6 +197,7 @@ def _parse_gold_item(value: Mapping[str, object]) -> _GoldItem:
         stratum=stratum,
         expected_behavior=expected,
         claims=tuple(claims),
+        relevant_chunk_ids=frozenset(relevant),
         must_not_claim=must_not,
     )
 
@@ -890,6 +912,384 @@ def _latency(bundles: Sequence[_ItemBundle]) -> PublicLatency:
     )
 
 
+def _precalibration_metric(
+    metric_id: PrecalibrationMetricId,
+    *,
+    numerator: int | None,
+    denominator: int,
+    available: bool,
+) -> PrecalibrationPublicMetric:
+    if denominator == 0:
+        return PrecalibrationPublicMetric(
+            metric_id=metric_id,
+            availability=MetricAvailability.AVAILABLE,
+            numerator=0,
+            denominator=0,
+            value=None,
+        )
+    if not available:
+        return PrecalibrationPublicMetric(
+            metric_id=metric_id,
+            availability=MetricAvailability.PENDING,
+            numerator=None,
+            denominator=denominator,
+            value=None,
+        )
+    if numerator is None:
+        raise ValueError(f"available metric {metric_id.value} requires a numerator")
+    return PrecalibrationPublicMetric(
+        metric_id=metric_id,
+        availability=MetricAvailability.AVAILABLE,
+        numerator=numerator,
+        denominator=denominator,
+        value=numerator / denominator,
+    )
+
+
+def _gold_location_ids(gold: _GoldItem) -> frozenset[str]:
+    return frozenset(
+        set(gold.relevant_chunk_ids).union(
+            chunk_id
+            for claim in gold.claims
+            for chunk_id in claim.supporting_chunk_ids
+        )
+    )
+
+
+def _precalibration_metrics(
+    bundles: Sequence[_ItemBundle],
+) -> tuple[PrecalibrationPublicMetric, ...]:
+    audits = [
+        audit_citations(bundle.generated.answer, source_count=len(bundle.generated.sources))
+        for bundle in bundles
+    ]
+    citation_references = sum(audit.source_reference_count for audit in audits)
+    resolved_references = sum(audit.resolvable_reference_count for audit in audits)
+    malformed = sum(audit.malformed_bracket_token_count for audit in audits)
+    bracket_tokens = malformed + sum(audit.well_formed_group_count for audit in audits)
+    claims = [
+        (bundle, claim)
+        for bundle in bundles
+        for claim in bundle.decomposition.claims
+    ]
+    cited_claims = sum(bool(claim.cited_source_numbers) for _, claim in claims)
+    cited_pairs = [
+        (bundle, source_number)
+        for bundle, claim in claims
+        for source_number in claim.cited_source_numbers
+    ]
+    cited_gold_location_matches = sum(
+        bundle.generated.sources[source_number - 1].chunk_id
+        in _gold_location_ids(bundle.gold)
+        for bundle, source_number in cited_pairs
+    )
+    gold_location_pairs = [
+        (bundle, chunk_id)
+        for bundle in bundles
+        for chunk_id in _gold_location_ids(bundle.gold)
+    ]
+    retrieved_gold_locations = sum(
+        chunk_id in {source.chunk_id for source in bundle.generated.sources}
+        for bundle, chunk_id in gold_location_pairs
+    )
+    gold_claim_count = sum(len(bundle.gold.claims) for bundle in bundles)
+    essential_gold_claim_count = sum(
+        claim.essential for bundle in bundles for claim in bundle.gold.claims
+    )
+    tripwire_count = sum(len(bundle.gold.must_not_claim) for bundle in bundles)
+    out_of_corpus_count = sum(
+        bundle.gold.stratum is EvaluationStratum.OUT_OF_CORPUS for bundle in bundles
+    )
+    adversarial_count = sum(
+        bundle.gold.stratum is EvaluationStratum.ADVERSARIAL_PREMISE
+        for bundle in bundles
+    )
+    answerable_count = sum(
+        bundle.gold.expected_behavior is ExpectedBehavior.ANSWER
+        and bundle.gold.stratum is not EvaluationStratum.OUT_OF_CORPUS
+        for bundle in bundles
+    )
+    metrics = (
+        _precalibration_metric(
+            PrecalibrationMetricId.CITATION_RESOLVABILITY,
+            numerator=resolved_references,
+            denominator=citation_references,
+            available=True,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.CITATION_COMPLETENESS,
+            numerator=cited_claims,
+            denominator=len(claims),
+            available=True,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.MALFORMED_CITATION_RATE,
+            numerator=malformed,
+            denominator=bracket_tokens,
+            available=True,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.CITED_SOURCE_GOLD_LOCATION_MATCH,
+            numerator=cited_gold_location_matches,
+            denominator=len(cited_pairs),
+            available=True,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.GOLD_LOCATION_RETRIEVAL_COVERAGE,
+            numerator=retrieved_gold_locations,
+            denominator=len(gold_location_pairs),
+            available=True,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.CITATION_GROUNDEDNESS,
+            numerator=None,
+            denominator=len(cited_pairs),
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.FAITHFULNESS_SUPPORTED,
+            numerator=None,
+            denominator=len(claims),
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.FAITHFULNESS_PARTIALLY_SUPPORTED,
+            numerator=None,
+            denominator=len(claims),
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.FAITHFULNESS_UNSUPPORTED,
+            numerator=None,
+            denominator=len(claims),
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.FAITHFULNESS_CONTRADICTED,
+            numerator=None,
+            denominator=len(claims),
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.GOLD_CLAIM_RECALL,
+            numerator=None,
+            denominator=gold_claim_count,
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.ESSENTIAL_GOLD_CLAIM_RECALL,
+            numerator=None,
+            denominator=essential_gold_claim_count,
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.MUST_NOT_CLAIM_VIOLATION,
+            numerator=None,
+            denominator=tripwire_count,
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.OUT_OF_CORPUS_ABSTENTION,
+            numerator=None,
+            denominator=out_of_corpus_count,
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.ADVERSARIAL_PREMISE_CORRECTION,
+            numerator=None,
+            denominator=adversarial_count,
+            available=False,
+        ),
+        _precalibration_metric(
+            PrecalibrationMetricId.FALSE_ABSTENTION,
+            numerator=None,
+            denominator=answerable_count,
+            available=False,
+        ),
+    )
+    if [metric.metric_id for metric in metrics] != list(PrecalibrationMetricId):
+        raise AssertionError("precalibration metric order diverged from its closed enum")
+    return metrics
+
+
+def _normalize_decomposition_checkpoints(
+    values: Sequence[PrivateDecompositionCheckpoint | Mapping[str, object]],
+) -> tuple[PrivateDecompositionCheckpoint, ...]:
+    return tuple(
+        value
+        if isinstance(value, PrivateDecompositionCheckpoint)
+        else PrivateDecompositionCheckpoint.model_validate(value)
+        for value in values
+    )
+
+
+def build_public_precalibration_summary(
+    *,
+    candidate_id: str,
+    cohort_manifest: AnswerEvaluationCohortManifest | Mapping[str, object],
+    generated_items: Sequence[PrivateGeneratedItem | Mapping[str, object]],
+    decompositions: Sequence[DecomposedPilotItem | Mapping[str, object]],
+    gold_items: Sequence[Mapping[str, object]],
+    decomposition_checkpoints: Sequence[
+        PrivateDecompositionCheckpoint | Mapping[str, object]
+    ],
+    private_artifact: PrecalibrationPrivateArtifact | Mapping[str, object],
+) -> PublicPrecalibrationSummary:
+    """Emit the exact mechanical result before semantic calibration or judging."""
+
+    generated = _normalize_generated(generated_items)
+    decomposed = _normalize_decompositions(decompositions)
+    gold_raw = tuple(dict(item) for item in gold_items)
+    gold = tuple(_parse_gold_item(item) for item in gold_raw)
+    checkpoints = _normalize_decomposition_checkpoints(decomposition_checkpoints)
+    manifest = (
+        cohort_manifest
+        if isinstance(cohort_manifest, AnswerEvaluationCohortManifest)
+        else AnswerEvaluationCohortManifest.model_validate(cohort_manifest)
+    )
+    artifact = (
+        private_artifact
+        if isinstance(private_artifact, PrecalibrationPrivateArtifact)
+        else PrecalibrationPrivateArtifact.model_validate(private_artifact)
+    )
+    if not (len(generated) == len(decomposed) == len(gold) == 37):
+        raise ValueError(
+            "public precalibration result requires exactly 37 generated, "
+            "decomposed, and gold items"
+        )
+    ids = [item.item_id for item in generated]
+    if len(ids) != len(set(ids)):
+        raise ValueError("generated precalibration item IDs must be unique")
+    if [item.item_id for item in decomposed] != ids or [item.item_id for item in gold] != ids:
+        raise ValueError("generated, decomposition, and gold order must match exactly")
+    if [item.item_id for item in manifest.items] != ids:
+        raise ValueError("cohort manifest item order differs from the frozen cohort")
+    cohort_manifest_file_sha256 = hashlib.sha256(
+        canonical_json_bytes(manifest, pretty=True)
+    ).hexdigest()
+    for manifest_item, generated_item, decomposition, gold_item in zip(
+        manifest.items,
+        generated,
+        decomposed,
+        gold,
+        strict=True,
+    ):
+        if (
+            generated_item.question != gold_item.question
+            or manifest_item.question_sha256 != sha256_text(gold_item.question)
+            or manifest_item.question_sha256 != generated_item.question_sha256
+            or manifest_item.stratum is not gold_item.stratum
+            or manifest_item.stratum is not generated_item.stratum
+            or manifest_item.expected_behavior is not gold_item.expected_behavior
+            or manifest_item.expected_behavior is not generated_item.expected_behavior
+        ):
+            raise ValueError(
+                f"{generated_item.item_id}: cohort, generation, or gold binding changed"
+            )
+        _validate_decomposition(generated_item, decomposition)
+    if artifact.cohort_manifest_sha256 != cohort_manifest_file_sha256:
+        raise ValueError("precalibration artifact belongs to another cohort manifest")
+    if artifact.gold_set_sha256 != manifest.gold_set_sha256:
+        raise ValueError("precalibration artifact belongs to another gold set")
+    decomposition_prompt = _manifest_prompt(manifest, "claim_decomposition")
+    for checkpoint in checkpoints:
+        if (
+            checkpoint.cohort_manifest_sha256 != cohort_manifest_file_sha256
+            or checkpoint.prompt_version != decomposition_prompt.version
+            or checkpoint.prompt_sha256 != decomposition_prompt.prompt_sha256
+            or checkpoint.judge_model != manifest.judge.model_id
+            or checkpoint.judge_settings != manifest.judge.settings
+        ):
+            raise ValueError("decomposition checkpoint differs from the cohort contract")
+    validate_precalibration_private_artifact(
+        artifact,
+        cohort_manifest_sha256=cohort_manifest_file_sha256,
+        generation_artifact_sha256=artifact.generation_artifact_sha256,
+        decomposition_artifact_sha256=artifact.decomposition_artifact_sha256,
+        gold_set_sha256=manifest.gold_set_sha256,
+        generated_items=generated,
+        decompositions=decomposed,
+        gold_items=gold_raw,
+        decomposition_checkpoints=checkpoints,
+    )
+    bundles = tuple(
+        _ItemBundle(
+            generated=generated_item,
+            decomposition=decomposition,
+            gold=gold_item,
+            evidence={},
+            rubric=None,
+            manual=None,
+        )
+        for generated_item, decomposition, gold_item in zip(
+            generated,
+            decomposed,
+            gold,
+            strict=True,
+        )
+    )
+    metrics = _precalibration_metrics(bundles)
+    checkpoint_usage = tuple(
+        checkpoint.usage_events[0] for checkpoint in checkpoints
+    )
+    return PublicPrecalibrationSummary(
+        evaluation_id=manifest.evaluation_id,
+        candidate_id=candidate_id,
+        candidate_commit=manifest.candidate_commit,
+        rag_policy=manifest.rag_policy,
+        cohort_manifest_sha256=cohort_manifest_file_sha256,
+        corpus_manifest_sha256=manifest.corpus_manifest_sha256,
+        chunks_sha256=manifest.chunks_sha256,
+        question_set_sha256=manifest.question_set_sha256,
+        model_catalog_sha256=manifest.model_catalog_sha256,
+        runner_sha256=manifest.runner_sha256,
+        planner_model_id=manifest.planner.model_id,
+        generator_model_id=manifest.generator.model_id,
+        decomposer_model_id=manifest.judge.model_id,
+        embedding_model_id=manifest.embedding_model,
+        private_artifact_sha256=artifact.artifact_sha256,
+        generation_artifact_sha256=artifact.generation_artifact_sha256,
+        decomposition_artifact_sha256=artifact.decomposition_artifact_sha256,
+        gold_set_sha256=manifest.gold_set_sha256,
+        limitation_ids=(
+            PublicLimitationId.CANONICAL_MODEL_ID_MUTABILITY,
+            PublicLimitationId.GENERATOR_SPREAD_UNMEASURED,
+            PublicLimitationId.DESCRIPTIVE_NOT_GATE,
+            PublicLimitationId.SEMANTIC_SCORING_PENDING,
+        ),
+        run_status=BaselineRunStatus.COMPLETE,
+        item_count=37,
+        source_count=sum(len(bundle.generated.sources) for bundle in bundles),
+        claim_count=sum(len(bundle.decomposition.claims) for bundle in bundles),
+        citation_count=sum(
+            audit_citations(
+                bundle.generated.answer,
+                source_count=len(bundle.generated.sources),
+            ).source_reference_count
+            for bundle in bundles
+        ),
+        completed_answer_count=sum(
+            bundle.generated.status in _SUCCESSFUL_RELEASES for bundle in bundles
+        ),
+        technical_error_count=sum(
+            bundle.generated.status in _TECHNICAL_FAILURES for bundle in bundles
+        ),
+        metrics=metrics,
+        strata=tuple(
+            PrecalibrationPublicStratumSummary(
+                stratum=stratum,
+                item_count=sum(bundle.gold.stratum is stratum for bundle in bundles),
+                metrics=_precalibration_metrics(
+                    [bundle for bundle in bundles if bundle.gold.stratum is stratum]
+                ),
+            )
+            for stratum in EvaluationStratum
+        ),
+        cost=_cost(bundles, (), (), checkpoint_usage),
+        latency=_latency(bundles),
+    )
+
+
 def build_public_evaluation_summary(
     *,
     candidate_id: str,
@@ -1297,7 +1697,115 @@ def render_public_evaluation_markdown(
     return "\n".join(lines) + "\n"
 
 
+def _precalibration_markdown_ratio(metric: PrecalibrationPublicMetric) -> str:
+    if metric.availability is MetricAvailability.PENDING:
+        return f"pending (denominator {metric.denominator})"
+    if metric.denominator == 0:
+        return "0/0 (not applicable)"
+    return f"{metric.numerator}/{metric.denominator} ({metric.value:.3f})"
+
+
+def render_public_precalibration_markdown(
+    summary: PublicPrecalibrationSummary | Mapping[str, object],
+    *,
+    public_summary_json_sha256: str,
+) -> str:
+    """Render the deterministic, text-free result available before calibration."""
+
+    public = validate_public_precalibration_summary(summary)
+    if len(public_summary_json_sha256) != 64 or any(
+        character not in "0123456789abcdef"
+        for character in public_summary_json_sha256
+    ):
+        raise ValueError("public summary JSON SHA-256 must be 64 lowercase hex characters")
+    lines = [
+        "# Archivist pre-calibration evaluation result",
+        "",
+        "## Identity",
+        "",
+        f"- Evaluation: `{public.evaluation_id}`",
+        f"- Candidate: `{public.candidate_id}`",
+        f"- Candidate commit: `{public.candidate_commit}`",
+        f"- RAG policy: `{public.rag_policy}`",
+        f"- Cohort manifest SHA-256: `{public.cohort_manifest_sha256}`",
+        f"- Public summary JSON SHA-256: `{public_summary_json_sha256}`",
+        f"- Private artifact SHA-256: `{public.private_artifact_sha256}`",
+        f"- Generation artifact SHA-256: `{public.generation_artifact_sha256}`",
+        f"- Decomposition artifact SHA-256: `{public.decomposition_artifact_sha256}`",
+        f"- Gold set SHA-256: `{public.gold_set_sha256}`",
+        f"- Corpus manifest SHA-256: `{public.corpus_manifest_sha256}`",
+        f"- Chunks SHA-256: `{public.chunks_sha256}`",
+        f"- Question set SHA-256: `{public.question_set_sha256}`",
+        f"- Model catalog SHA-256: `{public.model_catalog_sha256}`",
+        f"- Runner SHA-256: `{public.runner_sha256}`",
+        "",
+        "## Models",
+        "",
+        f"- Planner: `{public.planner_model_id}`",
+        f"- Generator: `{public.generator_model_id}`",
+        f"- Decomposer: `{public.decomposer_model_id}`",
+        f"- Embedding: `{public.embedding_model_id}`",
+        "",
+        "## Cohort totals",
+        "",
+        f"- Run status: `{public.run_status.value}`",
+        f"- Items: {public.item_count}",
+        f"- Completed answers: {public.completed_answer_count}",
+        f"- Technical errors: {public.technical_error_count}",
+        f"- Sources: {public.source_count}",
+        f"- Claims: {public.claim_count}",
+        f"- Citation references: {public.citation_count}",
+        "",
+        "## Aggregate metrics",
+        "",
+        "| Metric ID | Result |",
+        "|---|---:|",
+    ]
+    lines.extend(
+        f"| `{metric.metric_id.value}` | {_precalibration_markdown_ratio(metric)} |"
+        for metric in public.metrics
+    )
+    lines.extend(["", "## Strata", ""])
+    for stratum in public.strata:
+        lines.extend(
+            [
+                f"### `{stratum.stratum.value}` ({stratum.item_count})",
+                "",
+                "| Metric ID | Result |",
+                "|---|---:|",
+            ]
+        )
+        lines.extend(
+            f"| `{metric.metric_id.value}` | "
+            f"{_precalibration_markdown_ratio(metric)} |"
+            for metric in stratum.metrics
+        )
+        lines.append("")
+    lines.extend(
+        [
+            "## Cost and latency",
+            "",
+            f"- Estimated API cost (USD): {public.cost.estimated_cost_usd}",
+            f"- Priced events: {public.cost.priced_event_count}",
+            f"- Unpriced events: {public.cost.unpriced_event_count}",
+            f"- Latency scope: `{public.latency_scope}`",
+            f"- Total seconds: {public.latency.total_seconds:.3f}",
+            f"- Mean seconds: {public.latency.mean_seconds:.3f}",
+            f"- P50 seconds: {public.latency.p50_seconds:.3f}",
+            f"- P95 seconds: {public.latency.p95_seconds:.3f}",
+            f"- Maximum seconds: {public.latency.maximum_seconds:.3f}",
+            "",
+            "## Limitations",
+            "",
+        ]
+    )
+    lines.extend(f"- `{limitation.value}`" for limitation in public.limitation_ids)
+    return "\n".join(lines) + "\n"
+
+
 __all__ = [
+    "build_public_precalibration_summary",
     "build_public_evaluation_summary",
+    "render_public_precalibration_markdown",
     "render_public_evaluation_markdown",
 ]

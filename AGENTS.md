@@ -18,15 +18,18 @@ faithfulness, citation, and abstention behavior must be measured, bounded, repro
 their failures written down. A system with mediocre but characterized numbers is better evidence
 than a system with excellent-looking answers and no defensible measurement.
 
-As of 2026-08-07, the 37 retained owner-controlled held-out questions and their owner-adjudicated
+As of 2026-08-09, the 37 retained owner-controlled held-out questions and their owner-adjudicated
 annotations are formally locked against frozen V26 candidate
 `8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e`. H020, H039, and H040 are intentionally absent.
 Historical Claude drafting is disclosed retrospectively under provenance v4; the repository must
 not claim that it was prospectively blinded or fully hash-captured. The predeclared retrieval-only
 benchmark is complete; no held-out answer has yet been generated. The next sequence is fixed: the
-prospectively selected ten-item scoring calibration produces the first ten answers of the same
-37-item V26 cohort, then the remaining 27 run immediately after the scoring lock. Do not insert a
-RAG, prompt, retrieval, model, or UI repair between those operations. Once an H-item is run, never
+next substantive paid operation generates and canonically decomposes all 37 frozen V26 answers in
+one uninterrupted pass, preserving every output before later calibration work. Do not insert a
+calibration stop, owner-labeling step, semantic-judge gate, RAG, prompt, retrieval, model, or UI
+repair inside that pass. Publish immediately computable baseline results with semantic fields
+explicitly pending; calibration is later, lower-priority scoring-instrument work and may only add a
+hash-bound supplement. Once an H-item is run, never
 change the gold set or V26 in response to its result; any later system change opens a new cohort
 rather than repairing this baseline in place.
 
@@ -58,7 +61,7 @@ In decreasing order of fixedness. Changes to a lower number are more expensive a
 
    This is the experimental control, and it plays the role invariants play in a simulation project. **Implement the definitions exactly as written; never adjust one to make a number come out better.** Only the project owner may change them, and any change must be logged in `DEFECTS.md` as a contract change and treated as invalidating every earlier run for comparison. If a result only holds because a metric definition moved, the result is worthless.
 
-   Sections settle on their own clocks. §§1–5 — run identity, the corpus contract, the gold-set schema, retrieval recall, citation accuracy — are settleable at the desk and are locked. §6 faithfulness and §7 abstention are drafted but **not yet settled**, because judge agreement and threshold placement can only be answered by a pilot run. They lock once the pilot has answered what only runs can answer. There is no category of formal metric that stays permanently adjustable.
+   Sections settle on their own clocks. §§1–5 — run identity, the corpus contract, the gold-set schema, retrieval recall, citation accuracy — are settleable at the desk and are locked. §6 faithfulness and §7 abstention are drafted but **not yet settled**, because judge agreement and threshold placement can only be answered by a later calibration exercise. That work begins only after all 37 baseline answers and canonical decompositions are preserved, and its pending state cannot delay the baseline. The sections lock once calibration has answered what only runs can answer. There is no category of formal metric that stays permanently adjustable.
 
 2. **The system under test.** The Essential retrieval path, its prompt and model configuration, and
    any separately declared experimental arm. Freely changeable — that is the point — but every
@@ -187,11 +190,12 @@ The success criterion is a before-and-after comparison across code versions, so 
   not a result.
 - **Judge calls carry no conversation state.** One question per call, no shared history, no batching several gold items into one prompt — batching lets one item's judgement contaminate the next.
 
-The fixed ten-item calibration is not a preliminary quality gate or a disposable pilot. Those ten
-answers are the first ten members of the same frozen 37-item cohort. Calibration locks how answers
-are scored, not whether the candidate deserves to finish the cohort. If the automatic judge misses
-its predeclared agreement thresholds, use manual scoring for the affected dimensions or report
-them pending; judge failure must not block generation and preservation of the remaining 27 answers.
+The fixed ten-item calibration subset is not a preliminary quality gate or a disposable pilot. It
+is drawn from the already preserved 37-item cohort only after every answer and canonical
+decomposition exists. Calibration locks how semantic dimensions are scored, not whether the
+candidate deserves to run or whether results may be reported. If the automatic judge misses its
+predeclared agreement thresholds, use manual scoring for the affected dimensions or report them
+pending; judge failure must not alter, delay, rerun, or suppress any of the 37 preserved answers.
 
 ## Define what you test
 

@@ -37,6 +37,7 @@ from answer_evaluation import (  # noqa: E402
     PrivateGenerationCheckpoint,
     PrivateTraceReference,
     PrivateUsageEvent,
+    PublicPrecalibrationSummary,
     PublicEvaluationSummary,
     ScoringDimension,
     ScoringMode,
@@ -57,6 +58,7 @@ from answer_evaluation import (  # noqa: E402
     validate_cohort_manifest,
     validate_private_decomposition_checkpoint,
     validate_private_generation_checkpoint,
+    validate_public_precalibration_summary,
     validate_public_summary,
     write_json_atomic_no_overwrite,
 )
@@ -96,6 +98,7 @@ from evaluation_results import (  # noqa: E402
     DecompositionStability,
     ItemRubricResult,
     ManualScoringAggregate,
+    PrecalibrationPrivateArtifact,
     PrivateFullRunArtifact,
     build_baseline_semantic_aggregate,
     build_baseline_semantic_item,
@@ -107,6 +110,7 @@ from evaluation_results import (  # noqa: E402
     build_item_rubric_result,
     build_manual_scoring_aggregate,
     build_private_full_run_artifact,
+    build_precalibration_private_artifact,
     project_calibration_agreement,
     validate_calibration_semantic_aggregate,
     validate_claim_evidence_result,
@@ -115,9 +119,12 @@ from evaluation_results import (  # noqa: E402
     validate_baseline_semantic_aggregate,
     validate_manual_scoring_aggregate,
     validate_private_full_run_artifact,
+    validate_precalibration_private_artifact,
 )
 from evaluation_reporting import (  # noqa: E402
+    build_public_precalibration_summary,
     build_public_evaluation_summary,
+    render_public_precalibration_markdown,
     render_public_evaluation_markdown,
 )
 from evaluation_scoring import select_calibration_item_ids  # noqa: E402
@@ -164,6 +171,9 @@ FIXED_CALIBRATION_IDS = (
 CALIBRATION_COST_ESTIMATE_LOW_USD = 1.75
 CALIBRATION_COST_ESTIMATE_HIGH_USD = 3.50
 CALIBRATION_RECOMMENDED_CAP_USD = 4.00
+FULL_EVALUATION_COST_ESTIMATE_LOW_USD = 6.00
+FULL_EVALUATION_COST_ESTIMATE_HIGH_USD = 12.00
+FULL_EVALUATION_RECOMMENDED_CAP_USD = 20.00
 GENERATION_ITEM_COST_RESERVE_USD = 0.80
 DECOMPOSITION_CALL_COST_RESERVE_USD = 0.15
 CLAIM_EVIDENCE_CALL_COST_RESERVE_USD = 0.15
@@ -236,6 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "preflight",
+            "run-37",
             "calibration-generate",
             "validate-labels",
             "calibration-judge",
@@ -254,11 +265,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-root", type=Path, default=DEFAULT_RUN_ROOT)
     parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS)
     parser.add_argument(
+        "--authorize-openai-full-evaluation",
+        action="store_true",
+        help=(
+            "Authorize all 37 frozen V26 RAG turns and one canonical answer-only Terra "
+            "decomposition per answer. No calibration repeats or semantic judge verdicts "
+            "are included."
+        ),
+    )
+    parser.add_argument(
         "--authorize-openai-calibration-generation",
         action="store_true",
         help=(
-            "Authorize the fixed ten V26 answer runs and three answer-only Terra "
-            "decompositions per answer. No semantic judge verdict is included."
+            "Retired: use run-37 and --authorize-openai-full-evaluation."
         ),
     )
     parser.add_argument(
@@ -269,7 +288,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--authorize-openai-remaining-baseline",
         action="store_true",
-        help="Authorize the remaining 27 items only after the scoring instrument locks.",
+        help=(
+            "Authorize later semantic-scoring calls after the optional instrument lock. "
+            "This phase cannot generate or decompose missing answers."
+        ),
     )
     parser.add_argument("--max-cost-usd", type=float)
     parser.add_argument(
@@ -583,8 +605,11 @@ def _print_preflight(context: EvaluationContext) -> None:
     print(f"Candidate: {context.gold.candidate_commit} / {context.gold.candidate_rag_policy}")
     print(f"Gold set: {len(context.gold_items)} items / {context.gold.gold_set_sha256}")
     print(f"Question-set SHA-256: {context.gold.question_set_sha256}")
-    print(f"Calibration IDs (first 10 of this same cohort): {', '.join(context.calibration_ids)}")
-    print(f"Remaining IDs after scoring lock: {len(context.remaining_ids)}")
+    print(
+        "Later calibration subset (never a generation gate): "
+        f"{', '.join(context.calibration_ids)}"
+    )
+    print(f"Full uninterrupted generation cohort: {len(context.gold_items)} questions")
     print(
         "Corpus/index: "
         f"{context.corpus_identity['embedded_chunk_count']} eligible chunks, "
@@ -597,21 +622,27 @@ def _print_preflight(context: EvaluationContext) -> None:
     )
     print("Working tree: " + str(context.run_identity["working_tree"]))
     print(
-        "If separately authorized, calibration sends exactly 10 locked questions to OpenAI "
-        "gpt-5.6-sol planning, text-embedding-3-small retrieval, and gpt-5.6-sol generation; "
-        "retrieved manuscript passages are included only in the generation prompts. Each of the "
-        "10 resulting answers is then sent alone to gpt-5.6-terra three times for claim "
-        "decomposition. No gold annotations, semantic verdicts, history, or automatic retries."
+        "If separately authorized, run-37 executes 37 frozen V26 RAG turns. Each turn "
+        "uses one batched text-embedding-3-small request and one gpt-5.6-sol generation; "
+        "the existing pipeline may also use up to one gpt-5.6-sol planning call. Retrieved "
+        "private manuscript passages are included only in generation prompts. Each answer is "
+        "then sent alone to gpt-5.6-terra once for canonical claim decomposition, for 37 "
+        "decomposition calls total. No calibration repeats, gold annotations, semantic "
+        "verdicts, history, or automatic retries."
     )
     print(
-        "Reasonable calibration estimate: "
-        f"${CALIBRATION_COST_ESTIMATE_LOW_USD:.2f}–"
-        f"${CALIBRATION_COST_ESTIMATE_HIGH_USD:.2f}; "
-        f"recommended authorization ceiling ${CALIBRATION_RECOMMENDED_CAP_USD:.2f}."
+        "Reasonable full-cohort estimate: "
+        f"${FULL_EVALUATION_COST_ESTIMATE_LOW_USD:.2f}-"
+        f"${FULL_EVALUATION_COST_ESTIMATE_HIGH_USD:.2f}; "
+        f"recommended authorization ceiling ${FULL_EVALUATION_RECOMMENDED_CAP_USD:.2f}."
     )
     print(
-        "After owner labels and scorer lock, the next substantive phase is the remaining 27 "
-        "questions with no V26 repair or UI detour."
+        "Exact paid command after authorization: python scripts/run_answer_evaluation.py "
+        "run-37 --authorize-openai-full-evaluation --max-cost-usd 20"
+    )
+    print(
+        "Calibration and semantic scoring are later optional measurement work. They cannot "
+        "block generation or preservation of any of the 37 evaluation answers."
     )
 
 
@@ -1448,6 +1479,14 @@ def _require_cost_reserve(
 
 
 def _calibration_generate(args: argparse.Namespace, context: EvaluationContext) -> None:
+    if not (
+        (args.run_root / "baseline-generated.json").is_file()
+        and (args.run_root / "baseline-decompositions.json").is_file()
+    ):
+        raise AnswerEvaluationError(
+            "calibration work requires the completed 37-item generation and canonical "
+            "decomposition artifacts; it cannot create a ten-item paid cohort first"
+        )
     maximum = _require_paid_authorization(
         args,
         flag_name="authorize_openai_calibration_generation",
@@ -1665,6 +1704,424 @@ def _calibration_generate(args: argparse.Namespace, context: EvaluationContext) 
     print(
         "No semantic judge verdict has been requested. Complete the owner labels before the "
         "separately authorized calibration-judge phase."
+    )
+
+
+def _write_or_validate_calibration_generation_subset(
+    *,
+    args: argparse.Namespace,
+    context: EvaluationContext,
+    runner_sha256: str,
+    cohort_manifest: AnswerEvaluationCohortManifest,
+    cohort_manifest_sha256: str,
+    generated_items: Sequence[PrivateGeneratedItem],
+) -> tuple[tuple[PrivateGeneratedItem, ...], str]:
+    by_id = {item.item_id: item for item in generated_items}
+    calibration_generated = tuple(by_id[item_id] for item_id in context.calibration_ids)
+    path = args.run_root / "calibration-generated.json"
+    if not path.is_file():
+        payload: dict[str, object] = {
+            "schema": CALIBRATION_GENERATION_SCHEMA,
+            "evaluation_id": EVALUATION_ID,
+            "created_at": datetime.now(UTC).isoformat(),
+            "candidate_commit": context.gold.candidate_commit,
+            "rag_policy": context.gold.candidate_rag_policy,
+            "gold_set_sha256": context.gold.gold_set_sha256,
+            "question_set_sha256": context.gold.question_set_sha256,
+            "corpus_manifest_sha256": context.gold.corpus_manifest_sha256,
+            "model_catalog_sha256": context.model_catalog_sha256,
+            "runner_sha256": runner_sha256,
+            "cohort_manifest_sha256": cohort_manifest_sha256,
+            "run_identity": dict(context.run_identity),
+            "calibration_item_ids": list(context.calibration_ids),
+            "remaining_item_count": len(context.remaining_ids),
+            "items": [item.model_dump(mode="json") for item in calibration_generated],
+        }
+        write_json_atomic_no_overwrite(path, payload)
+    validated, artifact_sha256 = _validate_generation_artifact(
+        path,
+        args=args,
+        context=context,
+        runner_sha256=runner_sha256,
+        cohort_manifest=cohort_manifest,
+        cohort_manifest_sha256=cohort_manifest_sha256,
+    )
+    if validated != calibration_generated:
+        raise AnswerEvaluationError(
+            "calibration generation subset differs from the preserved 37-item cohort"
+        )
+    return validated, artifact_sha256
+
+
+def _retired_calibration_generate() -> None:
+    raise AnswerEvaluationError(
+        "calibration-generate is retired: it cannot run a ten-item paid cohort. "
+        "Use run-37 --authorize-openai-full-evaluation so all 37 frozen answers are "
+        "generated before any optional calibration work."
+    )
+
+
+def _load_canonical_decomposition_checkpoints(
+    *,
+    run_root: Path,
+    generated_items: Sequence[PrivateGeneratedItem],
+    cohort_manifest_sha256: str,
+) -> tuple[PrivateDecompositionCheckpoint, ...]:
+    checkpoints: list[PrivateDecompositionCheckpoint] = []
+    for generated in generated_items:
+        payload = _load_json_object(
+            run_root / "items" / generated.item_id / "decomposition-1.json",
+            label=f"canonical decomposition checkpoint {generated.item_id}/1",
+        )
+        _validate_decomposition_checkpoint_payload(
+            payload,
+            generated=generated,
+            repetition=1,
+            cohort_manifest_sha256=cohort_manifest_sha256,
+        )
+        checkpoints.append(PrivateDecompositionCheckpoint.model_validate(payload))
+    if len(checkpoints) != 37:
+        raise AnswerEvaluationError(
+            "immediate evaluation result requires exactly 37 canonical decompositions"
+        )
+    return tuple(checkpoints)
+
+
+def _load_or_write_precalibration_private_artifact(
+    path: Path,
+    *,
+    expected: PrecalibrationPrivateArtifact,
+    cohort_manifest_sha256: str,
+    generation_artifact_sha256: str,
+    decomposition_artifact_sha256: str,
+    gold_set_sha256: str,
+    generated_items: Sequence[PrivateGeneratedItem],
+    decompositions: Sequence[DecomposedPilotItem],
+    gold_items: Sequence[Mapping[str, object]],
+    decomposition_checkpoints: Sequence[PrivateDecompositionCheckpoint],
+) -> PrecalibrationPrivateArtifact:
+    if path.is_file():
+        actual = validate_precalibration_private_artifact(
+            _load_json_object(path, label="private pre-calibration result"),
+            cohort_manifest_sha256=cohort_manifest_sha256,
+            generation_artifact_sha256=generation_artifact_sha256,
+            decomposition_artifact_sha256=decomposition_artifact_sha256,
+            gold_set_sha256=gold_set_sha256,
+            generated_items=generated_items,
+            decompositions=decompositions,
+            gold_items=gold_items,
+            decomposition_checkpoints=decomposition_checkpoints,
+        )
+        if actual != expected:
+            raise AnswerEvaluationError(
+                "private pre-calibration result differs from the exact 37-item inputs"
+            )
+        return actual
+    write_json_atomic_no_overwrite(path, expected)
+    return expected
+
+
+def _load_or_write_precalibration_public_summary(
+    path: Path,
+    *,
+    expected: PublicPrecalibrationSummary,
+) -> str:
+    if path.is_file():
+        actual = validate_public_precalibration_summary(
+            _load_json_object(path, label="public pre-calibration summary")
+        )
+        if actual != expected:
+            raise AnswerEvaluationError(
+                "public pre-calibration summary differs from the exact private result"
+            )
+        return sha256_file(path)
+    write_json_atomic_no_overwrite(path, expected)
+    return sha256_file(path)
+
+
+def _emit_precalibration_results(
+    *,
+    args: argparse.Namespace,
+    context: EvaluationContext,
+    cohort_manifest: AnswerEvaluationCohortManifest,
+    cohort_manifest_sha256: str,
+    generated_items: Sequence[PrivateGeneratedItem],
+    generation_artifact_sha256: str,
+    decompositions: Sequence[DecomposedPilotItem],
+    decomposition_artifact_sha256: str,
+) -> tuple[Path, Path, Path]:
+    checkpoints = _load_canonical_decomposition_checkpoints(
+        run_root=args.run_root,
+        generated_items=generated_items,
+        cohort_manifest_sha256=cohort_manifest_sha256,
+    )
+    expected_private = build_precalibration_private_artifact(
+        cohort_manifest_sha256=cohort_manifest_sha256,
+        generation_artifact_sha256=generation_artifact_sha256,
+        decomposition_artifact_sha256=decomposition_artifact_sha256,
+        gold_set_sha256=context.gold.gold_set_sha256,
+        generated_items=generated_items,
+        decompositions=decompositions,
+        gold_items=context.gold_items,
+        decomposition_checkpoints=checkpoints,
+    )
+    private_path = args.run_root / "precalibration-private.json"
+    private_artifact = _load_or_write_precalibration_private_artifact(
+        private_path,
+        expected=expected_private,
+        cohort_manifest_sha256=cohort_manifest_sha256,
+        generation_artifact_sha256=generation_artifact_sha256,
+        decomposition_artifact_sha256=decomposition_artifact_sha256,
+        gold_set_sha256=context.gold.gold_set_sha256,
+        generated_items=generated_items,
+        decompositions=decompositions,
+        gold_items=context.gold_items,
+        decomposition_checkpoints=checkpoints,
+    )
+    expected_public = build_public_precalibration_summary(
+        candidate_id=context.gold.candidate_rag_policy,
+        cohort_manifest=cohort_manifest,
+        generated_items=generated_items,
+        decompositions=decompositions,
+        gold_items=context.gold_items,
+        decomposition_checkpoints=checkpoints,
+        private_artifact=private_artifact,
+    )
+    summary_path = args.run_root / "precalibration-public-summary.json"
+    summary_sha256 = _load_or_write_precalibration_public_summary(
+        summary_path,
+        expected=expected_public,
+    )
+    report_path = args.run_root / "precalibration-public-report.md"
+    markdown = render_public_precalibration_markdown(
+        expected_public,
+        public_summary_json_sha256=summary_sha256,
+    )
+    _load_or_write_public_report(report_path, expected=markdown)
+    return private_path, summary_path, report_path
+
+
+def _run_37(args: argparse.Namespace, context: EvaluationContext) -> None:
+    maximum = _require_paid_authorization(
+        args,
+        flag_name="authorize_openai_full_evaluation",
+    )
+    args.run_root = _require_private_run_root(args.run_root)
+    args.run_root.mkdir(parents=True, exist_ok=True)
+    calibration_generation_path = args.run_root / "calibration-generated.json"
+    generation_path = args.run_root / "baseline-generated.json"
+    decomposition_path = args.run_root / "baseline-decompositions.json"
+
+    if generation_path.is_file() and not calibration_generation_path.is_file():
+        raise AnswerEvaluationError(
+            "37-item generation artifact exists without its bound calibration subset"
+        )
+    if decomposition_path.is_file() and not generation_path.is_file():
+        raise AnswerEvaluationError(
+            "37-item decomposition artifact exists without its bound generation artifact"
+        )
+    usage_db = args.run_root / "full-evaluation-usage.sqlite3"
+    runner_sha256 = sha256_file(Path(__file__))
+    cohort_manifest, cohort_manifest_sha256 = _load_or_write_cohort_manifest(
+        args.run_root / "cohort-manifest.json",
+        context=context,
+        runner_sha256=runner_sha256,
+    )
+    cohort_by_id = {item.item_id: item for item in cohort_manifest.items}
+    ledger: UsageLedger | None = None
+    client: object | None = None
+
+    def ensure_ledger() -> UsageLedger:
+        nonlocal ledger
+        if ledger is None:
+            ledger = UsageLedger(usage_db)
+            ledger.update_settings(
+                monthly_budget_usd=maximum,
+                warning_threshold_percent=100,
+                hard_limit_enabled=True,
+            )
+            _require_cost_within_cap(ledger, maximum)
+        return ledger
+
+    def ensure_client() -> object:
+        nonlocal client
+        if client is None:
+            api_key = os.getenv("OPENAI_API_KEY", "").strip()
+            if not api_key:
+                raise AnswerEvaluationError("OPENAI_API_KEY is unavailable")
+            ensure_ledger()
+            client = _create_openai_client(api_key)
+        return client
+
+    print(
+        "AUTHORIZED RESUMABLE 37-QUESTION EVALUATION: all frozen questions run before "
+        "optional calibration. Completed bound checkpoints are verified and reused; only "
+        "missing checkpoints may call the V26 RAG path or answer-only Terra decomposition. "
+        "No gold annotations, semantic verdicts, history, retries, or answer regeneration."
+    )
+
+    with _isolated_usage_db(usage_db):
+        ensure_ledger()
+        if generation_path.is_file():
+            calibration_generated, calibration_generation_sha = (
+                _write_or_validate_calibration_generation_subset(
+                    args=args,
+                    context=context,
+                    runner_sha256=runner_sha256,
+                    cohort_manifest=cohort_manifest,
+                    cohort_manifest_sha256=cohort_manifest_sha256,
+                    generated_items=tuple(
+                        _load_generated_checkpoint(
+                            args.run_root
+                            / "items"
+                            / _required_string(item, "id", label="gold item")
+                            / "generated.json",
+                            item=item,
+                            cohort_manifest_sha256=cohort_manifest_sha256,
+                            cohort_item=cohort_by_id[
+                                _required_string(item, "id", label="gold item")
+                            ],
+                        )
+                        for item in context.calibration_items
+                    ),
+                )
+            )
+            generated_items, generation_sha = _validate_baseline_generation_artifact(
+                generation_path,
+                args=args,
+                context=context,
+                runner_sha256=runner_sha256,
+                cohort_manifest=cohort_manifest,
+                cohort_manifest_sha256=cohort_manifest_sha256,
+                calibration_generation_sha256=calibration_generation_sha,
+            )
+        else:
+            generated_list: list[PrivateGeneratedItem] = []
+            for item in context.gold_items:
+                item_id = _required_string(item, "id", label="gold item")
+                checkpoint_path = args.run_root / "items" / item_id / "generated.json"
+                if not checkpoint_path.is_file():
+                    _require_cost_reserve(
+                        ensure_ledger(),
+                        maximum,
+                        reserve_usd=GENERATION_ITEM_COST_RESERVE_USD,
+                        label=f"generation item {item_id}",
+                    )
+                generated_list.append(
+                    _run_one_generated_item(
+                        args=args,
+                        context=context,
+                        item=item,
+                        client=None if checkpoint_path.is_file() else ensure_client(),
+                        usage_db=usage_db,
+                        runner_sha256=runner_sha256,
+                        cohort_manifest_sha256=cohort_manifest_sha256,
+                        cohort_item=cohort_by_id[item_id],
+                    )
+                )
+                _require_cost_within_cap(ensure_ledger(), maximum)
+            generated_items = tuple(generated_list)
+            calibration_generated, calibration_generation_sha = (
+                _write_or_validate_calibration_generation_subset(
+                    args=args,
+                    context=context,
+                    runner_sha256=runner_sha256,
+                    cohort_manifest=cohort_manifest,
+                    cohort_manifest_sha256=cohort_manifest_sha256,
+                    generated_items=generated_items,
+                )
+            )
+            fields = _baseline_generation_fields(
+                context=context,
+                runner_sha256=runner_sha256,
+                cohort_manifest_sha256=cohort_manifest_sha256,
+                calibration_generation_sha256=calibration_generation_sha,
+                generated_items=generated_items,
+            )
+            write_json_atomic_no_overwrite(generation_path, _sealed_artifact(fields))
+            generation_sha = sha256_file(generation_path)
+
+        if decomposition_path.is_file():
+            decompositions, _decomposition_events, decomposition_sha = (
+                _validate_baseline_decomposition_artifact(
+                    decomposition_path,
+                    context=context,
+                    generated_items=generated_items,
+                    generation_artifact_sha256=generation_sha,
+                    cohort_manifest_sha256=cohort_manifest_sha256,
+                )
+            )
+        else:
+            canonical_records: list[dict[str, object]] = []
+            canonical_decompositions: list[DecomposedPilotItem] = []
+            for generated in generated_items:
+                checkpoint_path = (
+                    args.run_root
+                    / "items"
+                    / generated.item_id
+                    / "decomposition-1.json"
+                )
+                if not checkpoint_path.is_file():
+                    _require_cost_reserve(
+                        ensure_ledger(),
+                        maximum,
+                        reserve_usd=DECOMPOSITION_CALL_COST_RESERVE_USD,
+                        label=f"decomposition {generated.item_id}/1",
+                    )
+                checkpoint_payload = _decomposition_checkpoint(
+                    args=args,
+                    generated=generated,
+                    repetition=1,
+                    client=None if checkpoint_path.is_file() else ensure_client(),
+                    usage_db=usage_db,
+                    cohort_manifest_sha256=cohort_manifest_sha256,
+                )
+                _require_cost_within_cap(ensure_ledger(), maximum)
+                canonical = _validate_decomposition_checkpoint_payload(
+                    checkpoint_payload,
+                    generated=generated,
+                    repetition=1,
+                    cohort_manifest_sha256=cohort_manifest_sha256,
+                )
+                canonical_decompositions.append(canonical)
+                canonical_records.append(
+                    {
+                        "item_id": generated.item_id,
+                        "answer_sha256": generated.answer_sha256,
+                        "checkpoint": dict(checkpoint_payload),
+                    }
+                )
+            decompositions = tuple(canonical_decompositions)
+            fields = _baseline_decomposition_fields(
+                context=context,
+                generation_artifact_sha256=generation_sha,
+                cohort_manifest_sha256=cohort_manifest_sha256,
+                records=canonical_records,
+            )
+            write_json_atomic_no_overwrite(decomposition_path, _sealed_artifact(fields))
+            decomposition_sha = sha256_file(decomposition_path)
+
+        private_result, public_summary, public_report = _emit_precalibration_results(
+            args=args,
+            context=context,
+            cohort_manifest=cohort_manifest,
+            cohort_manifest_sha256=cohort_manifest_sha256,
+            generated_items=generated_items,
+            generation_artifact_sha256=generation_sha,
+            decompositions=decompositions,
+            decomposition_artifact_sha256=decomposition_sha,
+        )
+
+    spent = _ledger_total_cost(ensure_ledger())
+    print(f"Preserved all 37 generated answers: {generation_path}")
+    print(f"Preserved all 37 canonical decompositions: {decomposition_path}")
+    print(f"Preserved immediate private result binding: {private_result}")
+    print(f"Preserved immediate public mechanical summary: {public_summary}")
+    print(f"Preserved immediate public mechanical report: {public_report}")
+    print(f"Recorded estimated full-cohort cost: ${spent:.6f}")
+    print(
+        "Immediate mechanical results are ready. Optional owner calibration and semantic "
+        "scoring may follow, but cannot delay or replace those results."
     )
 
 
@@ -2591,9 +3048,9 @@ def _lock_instrument(args: argparse.Namespace, context: EvaluationContext) -> No
         )
     print(
         "Low agreement selects manual fallback only for affected dimensions; it does not "
-        "block the remaining 27 questions."
+        "change, delay, or suppress the already preserved 37-question results."
     )
-    print(f"NEXT ACTION: {locked.baseline_next_action}")
+    print(f"OPTIONAL SCORING ACTION: {locked.baseline_next_action}")
 
 
 def _sealed_artifact(fields: Mapping[str, object]) -> dict[str, object]:
@@ -3013,6 +3470,12 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
     )
     args.run_root = _require_private_run_root(args.run_root)
     args.run_root.mkdir(parents=True, exist_ok=True)
+    for name in ("baseline-generated.json", "baseline-decompositions.json"):
+        if not (args.run_root / name).is_file():
+            raise AnswerEvaluationError(
+                "semantic baseline scoring cannot generate missing answers; "
+                f"run-37 must first preserve {name}"
+            )
     required_calibration = (
         "cohort-manifest.json",
         "calibration-generated.json",
@@ -3086,10 +3549,10 @@ def _baseline(args: argparse.Namespace, context: EvaluationContext) -> None:
         return client
 
     print(
-        "AUTHORIZED RESUMABLE 37-ITEM BASELINE: the ten calibration answers and their "
-        "first decompositions/semantic calls are reused exactly. Only missing checkpoints "
-        "among the remaining 27 may call frozen V26 generation, one Terra decomposition, "
-        "and the scoring lanes marked JUDGE by the locked instrument."
+        "AUTHORIZED OPTIONAL SEMANTIC SCORING: all 37 generated answers and canonical "
+        "decompositions are reused exactly. Only missing semantic checkpoints may call the "
+        "scoring lanes marked JUDGE by the locked instrument; generation and decomposition "
+        "are unavailable in this phase."
     )
     with _isolated_usage_db(usage_db):
         if generation_path.is_file():
@@ -3850,8 +4313,7 @@ def _report(args: argparse.Namespace, context: EvaluationContext) -> None:
 def _not_yet_available(command: str) -> None:
     prerequisite = {
         "baseline": (
-            "Lock the scoring instrument first. The next substantive phase will then be the "
-            "remaining 27 items without changing V26."
+            "Complete run-37 first; optional semantic scoring cannot generate answers."
         ),
         "report": "Complete and preserve all 37 answers before emitting the text-free report.",
     }[command]
@@ -3864,8 +4326,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         context = _build_context(args, require_clean=args.command != "preflight")
         if args.command == "preflight":
             _print_preflight(context)
+        elif args.command == "run-37":
+            _run_37(args, context)
         elif args.command == "calibration-generate":
-            _calibration_generate(args, context)
+            _retired_calibration_generate()
         elif args.command == "validate-labels":
             _validate_labels(args, context)
         elif args.command == "calibration-judge":

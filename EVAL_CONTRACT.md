@@ -49,7 +49,25 @@ The first cohort therefore binds a committed catalog observation, exact requeste
 exact provider-returned identifiers, role-specific settings, prompt hashes, and usage response IDs,
 and states the resulting reproducibility limitation. A future dated snapshot opens a new cohort.
 
-**Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. Both lock after the calibration pilot (Brief 6) answers what only runs can answer; the open questions are enumerated at the end of each section, split by whether they are desk questions or run questions.
+**Owner-authorized amendment, 2026-08-09 (run the complete cohort before calibration):** the
+sequencing portion of the August 7 amendment is superseded before any held-out answer has been
+generated. The next substantive paid operation is one uninterrupted generation and canonical
+claim-decomposition pass over all 37 frozen V26 questions. The harness must preserve every answer,
+source set, trace, usage record, canonical decomposition, and mechanically computable result before
+any human-label or semantic-judge calibration work begins. No calibration result, owner-labeling
+step, judge-agreement threshold, manual-scoring availability, or semantic metric may delay or stop
+that complete pass. Calibration is later, lower-priority scoring-instrument work: it may add a
+hash-bound supplemental scoring artifact, but it may not overwrite the preserved baseline or
+condition whether the 37-item result exists. Metrics that require a calibrated semantic judgment
+remain explicitly `pending` in the initial report; mechanical citation, status, cost, latency, and
+other immediately computable results are reported without waiting. No RAG, prompt, retrieval,
+model, UI, gold-set, or corpus change may intervene within the 37-item pass. Because no held-out
+answer existed when this amendment was authorized, it invalidates no answer-quality result.
+
+**Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. The complete
+37-question generation/decomposition baseline runs before either section is calibrated. Sections 6
+and 7 lock later after the calibration work answers what only runs can answer; until then, affected
+semantic metrics are reported as pending rather than delaying the baseline.
 
 ---
 
@@ -537,12 +555,19 @@ An answer is decomposed by a pinned decomposition prompt against the pinned **ju
 - `cited_sources` — the `[Source N]` indices attached to the sentence or clause asserting it
 - `char_span` — offsets into the answer, so decomposition is auditable
 
-**Decomposition stability is itself measured.** Repeat decomposition **three times** on a fixed 10-answer subset and report the variance in claim count per answer. If decomposition is unstable, every number built on it is unstable, and that must be visible rather than assumed away. This check runs in the pilot and is repeated whenever the judge snapshot or decomposition prompt changes.
+**Decomposition stability is itself measured.** Every one of the 37 preserved answers first receives
+one canonical decomposition in the uninterrupted baseline pass. Later, repeat decomposition
+**three times total** on a fixed 10-answer subset and report the variance in claim count per answer.
+If decomposition is unstable, every number built on it is unstable, and that must be visible rather
+than assumed away. The repeated calibration decompositions may not delay or replace preservation
+of the 37 canonical decompositions, and the check is repeated whenever the judge snapshot or
+decomposition prompt changes.
 
-The fixed calibration subset is selected before generation: every `out_of_corpus` and
+The fixed later-calibration subset is selected before generation: every `out_of_corpus` and
 `adversarial_premise` item, plus the lexicographically first item from each of the other four
-strata. This produces exactly ten items spanning all six strata. Decomposition may run before the
-human calibration labels exist because it defines the units to label; **human labels must be
+strata. This produces exactly ten items spanning all six strata. All 37 canonical decompositions
+run before human calibration labels exist because they define the units to preserve and later
+score; **human labels must be
 hash-bound and complete before any faithfulness, source-support, rubric-match, or response-behavior
 verdict from the judge is revealed.**
 
@@ -584,7 +609,7 @@ groundedness = (# supported (claim, cited source) pairs) / (# pairs)
 **Ground truth is available without the judge for any claim that matches a gold claim**: the gold `supporting_chunk_ids` set is authoritative, and any member counts as correct (§2.3). The judge is required only for claims the answer makes that the gold set does not enumerate. **Report gold-matched and judge-only groundedness separately** — the first is ground truth, the second is an estimate, and presenting them as one number would launder an estimate into a fact.
 
 Semantic mapping from an answer claim to zero or more gold claim IDs is produced by the item-rubric
-judge and calibrated against the human pilot labels. The mapping decision is an estimate; once a
+judge and calibrated against the later human labels. The mapping decision is an estimate; once a
 mapping is accepted, membership of a cited chunk ID in the mapped gold claim's
 `supporting_chunk_ids` is mechanical ground truth. Unmatched answer claims use the separately
 calibrated source-support judgement and remain reported as judge-only groundedness.
@@ -603,9 +628,13 @@ Whether the answer is *complete* with respect to the gold claims — that is cov
 
 ---
 
-## 6. Faithfulness — PREDECLARED; LOCKS AFTER CALIBRATION
+## 6. Faithfulness — PREDECLARED; CALIBRATION FOLLOWS THE BASELINE
 
-**This section is not locked.** It may not be used for a run of record until the calibration pilot (Brief 6) has answered the open questions below and the owner has ratified the result. Implement the draft, run the pilot, then settle.
+**This section is not locked for automatic semantic scoring.** That does not block a run of record:
+generate and canonically decompose all 37 answers first, preserve and report every immediately
+computable result, and mark the semantic fields defined here `pending`. Calibration and owner
+ratification may later qualify an automatic judge or select manual scoring, producing a separate
+hash-bound supplement to the preserved baseline.
 
 ### 6.1 Draft definition
 
@@ -628,7 +657,8 @@ faithfulness = # fully supported / # claims
 
 Also reported are the complete four-label distribution, essential and all-gold-claim recall, and
 **`must_not_claim` violations**. Gold-claim presence, semantic answer-to-gold mapping, and bounded
-tripwire detection are produced by one item-rubric judge call and calibrated against the pilot's
+tripwire detection are produced by one item-rubric judge call and calibrated against the later
+calibration subset's
 human labels. The tripwire list is not exhaustive, so its denominator and item count are always
 reported and it is never described as a general hallucination rate.
 
@@ -644,11 +674,13 @@ reported and it is never described as a general hallucination rate.
   exact question, and a sanitized gold projection containing only claim ID/text/importance and
   bounded `must_not_claim` strings.** It never sees source passages, notes, relevant or supporting
   chunk IDs, provenance metadata, or the expected behavior label.
-- **The calibration subset is hand-labelled after decomposition but before any semantic judge verdict is seen.** Labelling after seeing the judge's verdicts measures the labeller's agreeableness.
+- **The calibration subset is hand-labelled after the full 37-answer/decomposition baseline is
+  preserved but before any semantic judge verdict is seen.** Labelling after seeing the judge's
+  verdicts measures the labeller's agreeableness.
 
 ### 6.3 Open questions
 
-**Desk decisions settled before the pilot:**
+**Desk decisions settled before later calibration:**
 
 - `partially_supported` is a fourth level and does not count as fully supported.
 - Every claim, including one without a citation, is judged against the full context supplied to the
@@ -657,22 +689,24 @@ reported and it is never described as a general hallucination rate.
   labels remain separate metrics.
 - A zero applicable denominator produces `null` plus denominator `0`, never a manufactured zero.
 
-**Run questions** — only a pilot can answer:
+**Run questions** — only the later calibration exercise can answer:
 
 - Judge–human agreement on the hand-labelled calibration subset, and the agreement level below
   which the judge is unfit for automatic scoring of the affected dimension
 - Judge run-to-run variance on identical inputs with the same explicit supported settings
 - Whether the four-level rubric is used in practice or collapses to fewer categories
 - Whether answer-to-gold mapping, source-support labels, and response-behavior classification are
-  eligible for automatic scoring of the remaining 27 items; an ineligible dimension is scored
-  manually or reported pending and does not stop the cohort
+  eligible for automatic scoring of the complete preserved 37-item cohort; an ineligible
+  dimension is scored manually or reported pending and does not alter the baseline
 
-**Settling procedure:** generate and decompose the predeclared ten items; hash-lock the answers and
-decomposition; hand-label every decomposed claim and item behavior; then run the semantic judge.
+**Settling procedure:** after all 37 answers and canonical decompositions are generated and
+hash-locked, hand-label every decomposed claim and item behavior in the predeclared ten-item subset;
+then run the semantic judge and the repeated decomposition check.
 The automatic judge is eligible only when exact human agreement is at least `0.80` and repeat
 agreement on the fixed repeat sample is at least `0.90`. The owner then ratifies the scoring lock.
-Failure selects `manual` scoring for the affected dimensions; it does not block completion of the
-37-question cohort. Record the lock in `DEFECTS.md` as a contract event.
+Failure selects `manual` scoring for the affected dimensions or leaves them `pending`; it cannot
+alter, suppress, or delay the already preserved 37-question cohort. Record the lock in
+`DEFECTS.md` as a contract event.
 
 For this first cohort, **exact human agreement** pools only predeclared atomic decisions: each
 claim's four-level faithfulness label, each cited-source support label, the exact set of gold claim
@@ -686,7 +720,7 @@ verdict is requested and cannot be changed after results are visible.
 
 ---
 
-## 7. Abstention and premise correction — PREDECLARED; LOCKS AFTER CALIBRATION
+## 7. Abstention and premise correction — PREDECLARED; CALIBRATION FOLLOWS THE BASELINE
 
 ### 7.1 Predeclared definition
 
@@ -706,12 +740,13 @@ ordinary abstention. A response that first declines and then asserts a substanti
 
 ### 7.2 Open questions
 
-**Desk decision:** rendered behavior is classified by the calibrated item-rubric judge (or the
-manual fallback), not inferred from internal status codes or a phrase regex. Internal status and
-evidence-decision fields remain diagnostics.
+**Desk decision:** rendered behavior is ultimately classified by the calibrated item-rubric judge
+(or the manual fallback), not inferred from internal status codes or a phrase regex. Until that
+classification is available, the initial baseline reports the semantic rate as `pending` while
+preserving internal status and evidence-decision fields as diagnostics.
 
 **Run question:** the base rate of abstention on answerable items remains unknown until the complete
-cohort. The pilot calibrates classification; it does not estimate final performance.
+cohort. Later calibration qualifies classification; it does not condition whether the cohort runs.
 
 ---
 
@@ -742,8 +777,9 @@ snapshot, 481 of 910 chunks are retrieval-eligible and seven documents are skipp
 
 The first 37-item answer-quality run is a descriptive baseline, not a pass/fail release exam. No
 numeric envelope will be reverse-engineered from its result, and the absence of an envelope cannot
-delay it. The calibration locks **how** the answers are scored; it does not establish a quality
-threshold the candidate must clear before the rest of the cohort is allowed to run.
+delay it. All 37 answers and canonical decompositions are generated and preserved before
+calibration. Calibration later locks **how** semantic dimensions are scored; it does not establish
+a quality threshold the candidate must clear and is not a prerequisite for the initial result.
 
 Any later before/after improvement experiment must declare its comparison statistic, minimum
 meaningful effect, and required noise-floor evidence before the later candidate is evaluated.
@@ -755,10 +791,10 @@ meaningful effect, and required noise-floor evidence before the later candidate 
 | `resolvability` | descriptive with exact denominator | no |
 | `groundedness` (gold-matched and judge-only separated) | descriptive | no |
 | `completeness` | descriptive with exact denominator | no |
-| `faithfulness` | descriptive after scorer calibration | no |
-| `out_of_corpus_decline_rate` | descriptive after scorer calibration | no |
-| `false_abstention_rate` | descriptive after scorer calibration | no |
-| `premise_correction_rate` | descriptive after scorer calibration | no |
+| `faithfulness` | pending initially; descriptive in later calibrated/manual supplement | no |
+| `out_of_corpus_decline_rate` | pending initially; descriptive in later calibrated/manual supplement | no |
+| `false_abstention_rate` | pending initially; descriptive in later calibrated/manual supplement | no |
+| `premise_correction_rate` | pending initially; descriptive in later calibrated/manual supplement | no |
 
 All first-baseline values are reported with exact denominators, unavailable values as `null`, and
 the model-identity and generator-variance limitations from §1. They may locate the next defect; they

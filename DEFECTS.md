@@ -53,8 +53,29 @@ cohort was superseded by the 2026-07-30 contract event below. Any older statemen
 strictly required a date-suffixed model ID was superseded by the 2026-08-07 catalog-bound exception:
 dated immutable snapshots remain preferred, but the exact canonical IDs are permitted when the
 catalog observation, requested/returned IDs, settings, response IDs, and limitation are bound.
+The 2026-08-07 requirement to stop after ten answers for scorer calibration was superseded
+prospectively by the 2026-08-09 event below: the full 37-answer/decomposition baseline now completes
+before calibration.
 
 ---
+
+## [2026-08-09] Contract event: scorer calibration still interrupted the held-out baseline
+Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
+Symptom: although the August 7 amendment removed calibration as a quality veto, the declared run
+still generated ten answers, stopped for owner labeling and scorer qualification, and only then
+allowed the remaining 27. In practice, a lower-priority scoring-instrument task still stood between
+the owner and the complete evaluation result.
+Cause: owner-authorized contract correction before any held-out answer-quality generation. The
+previous repair changed the consequence of failed calibration but retained calibration as an
+operational prerequisite for most of the cohort.
+Resolution and verification: the next substantive paid operation is now one uninterrupted pass
+that generates and canonically decomposes all 37 frozen V26 answers and preserves their sources,
+traces, usage, and immediately computable metrics. Calibration occurs only afterward and may add a
+hash-bound semantic-scoring supplement; its absence or failure leaves affected metrics pending and
+cannot delay, overwrite, rerun, or suppress the baseline. No RAG, prompt, retrieval, model, UI,
+gold, or corpus change may intervene within the pass. This amendment was made before any held-out
+answer had been generated, so it invalidates no answer-quality result; the completed retrieval-only
+diagnostic remains valid.
 
 ## [2026-08-07] Contract event: scoring calibration could have become a second gate
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation

@@ -10,6 +10,7 @@ import pytest
 from answer_evaluation import (
     CalibrationItemLabel,
     EvaluationStratum,
+    PrecalibrationMetricId,
     PublicLimitationId,
     PublicMetricId,
     ScoringDimension,
@@ -17,6 +18,7 @@ from answer_evaluation import (
     build_decomposed_claim,
     build_decomposed_pilot_item,
     build_instrument_lock,
+    build_private_decomposition_checkpoint,
     build_private_generated_item,
     build_private_source,
     build_private_usage_event,
@@ -27,7 +29,9 @@ from answer_evaluation import (
 from evaluation_judge import ItemRubricInput
 from evaluation_reporting import (
     build_public_evaluation_summary,
+    build_public_precalibration_summary,
     render_public_evaluation_markdown,
+    render_public_precalibration_markdown,
 )
 from evaluation_results import (
     build_baseline_semantic_aggregate,
@@ -37,6 +41,7 @@ from evaluation_results import (
     build_claim_evidence_result,
     build_item_rubric_result,
     build_manual_scoring_aggregate,
+    build_precalibration_private_artifact,
     build_private_full_run_artifact,
 )
 
@@ -199,7 +204,11 @@ def _provider(response_id: str) -> dict[str, object]:
     }
 
 
-def _make_fixture(*, insufficient_evidence_item: int | None = None) -> _Fixture:
+def _make_fixture(
+    *,
+    insufficient_evidence_item: int | None = None,
+    technical_error_item: int | None = None,
+) -> _Fixture:
     generated_items = []
     decompositions = []
     gold_items: list[dict[str, object]] = []
@@ -268,7 +277,9 @@ def _make_fixture(*, insufficient_evidence_item: int | None = None) -> _Fixture:
                     )
                 )
             status = (
-                "insufficient_evidence"
+                "generation_contract_failed"
+                if index == technical_error_item
+                else "insufficient_evidence"
                 if index == insufficient_evidence_item
                 else "answered"
             )
@@ -535,6 +546,60 @@ def _additional_usage_events(calibration_semantic) -> tuple[Any, ...]:
     return decompositions + repeats
 
 
+def _canonical_decomposition_checkpoints(fixture: _Fixture) -> tuple[Any, ...]:
+    checkpoints = []
+    for generated, decomposition in zip(
+        fixture.generated,
+        fixture.decompositions,
+        strict=True,
+    ):
+        response_id = f"resp_precal_decomposition_{generated.item_id}"
+        checkpoints.append(
+            build_private_decomposition_checkpoint(
+                cohort_manifest_sha256=COHORT_SHA,
+                item_id=generated.item_id,
+                answer_sha256=generated.answer_sha256,
+                repetition=1,
+                prompt_version="evaluation-claim-decomposition-v2",
+                prompt_sha256=DECOMPOSITION_PROMPT_SHA,
+                judge_model=JUDGE_MODEL,
+                judge_settings=JUDGE_SETTINGS,
+                provider=_provider(response_id),
+                usage_event=_usage(
+                    response_id=response_id,
+                    operation="eval_claim_decomposition",
+                    model=JUDGE_MODEL,
+                ),
+                decomposition=decomposition,
+            )
+        )
+    return tuple(checkpoints)
+
+
+def _precalibration_summary(fixture: _Fixture):
+    checkpoints = _canonical_decomposition_checkpoints(fixture)
+    artifact = build_precalibration_private_artifact(
+        cohort_manifest_sha256=COHORT_SHA,
+        generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+        decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+        gold_set_sha256=GOLD_SHA,
+        generated_items=fixture.generated,
+        decompositions=fixture.decompositions,
+        gold_items=fixture.gold,
+        decomposition_checkpoints=checkpoints,
+    )
+    summary = build_public_precalibration_summary(
+        candidate_id="evidence-planned-v26",
+        cohort_manifest=COHORT_MANIFEST,
+        generated_items=fixture.generated,
+        decompositions=fixture.decompositions,
+        gold_items=fixture.gold,
+        decomposition_checkpoints=checkpoints,
+        private_artifact=artifact,
+    )
+    return summary, artifact, checkpoints
+
+
 def _summary(
     fixture: _Fixture,
     *,
@@ -721,6 +786,7 @@ def test_markdown_report_is_deterministic_and_uses_only_the_public_boundary() ->
     assert PRIVATE_SENTINEL not in markdown
     assert "Private evaluation question" not in markdown
     assert "Private owner note" not in markdown
+
     assert "rationale" not in markdown
 
     with pytest.raises(ValueError, match="64 lowercase hex"):
@@ -885,3 +951,189 @@ def test_structurally_released_insufficient_evidence_counts_as_answer_success() 
     success = _metric(summary, PublicMetricId.ANSWER_SUCCESS)
     assert (success.numerator, success.denominator) == (37, 37)
     assert summary.error_count == 0
+
+
+def _precal_metric(summary, metric_id: PrecalibrationMetricId):
+    return next(metric for metric in summary.metrics if metric.metric_id is metric_id)
+
+
+def test_precalibration_result_is_complete_mechanical_text_free_and_semantic_pending() -> None:
+    fixture = _make_fixture()
+    summary, artifact, checkpoints = _precalibration_summary(fixture)
+
+    assert summary.item_count == 37
+    assert summary.completed_answer_count == 37
+    assert summary.technical_error_count == 0
+    assert summary.source_count == 37
+    assert summary.claim_count == 34
+    assert summary.citation_count == 33
+    assert summary.private_artifact_sha256 == artifact.artifact_sha256
+    assert artifact.decomposition_checkpoint_count == 37
+    assert summary.cost.priced_event_count == 74
+    assert summary.cost.unpriced_event_count == 0
+    assert summary.cost.estimated_cost_usd == pytest.approx(0.074)
+    assert summary.latency_scope == "generation_pipeline"
+    assert _precal_metric(
+        summary,
+        PrecalibrationMetricId.CITATION_RESOLVABILITY,
+    ).numerator == 33
+    completeness = _precal_metric(
+        summary,
+        PrecalibrationMetricId.CITATION_COMPLETENESS,
+    )
+    assert (completeness.numerator, completeness.denominator) == (33, 34)
+    malformed = _precal_metric(
+        summary,
+        PrecalibrationMetricId.MALFORMED_CITATION_RATE,
+    )
+    assert (malformed.numerator, malformed.denominator) == (1, 34)
+    cited_location = _precal_metric(
+        summary,
+        PrecalibrationMetricId.CITED_SOURCE_GOLD_LOCATION_MATCH,
+    )
+    assert (cited_location.numerator, cited_location.denominator) == (33, 33)
+    retrieved_location = _precal_metric(
+        summary,
+        PrecalibrationMetricId.GOLD_LOCATION_RETRIEVAL_COVERAGE,
+    )
+    assert (retrieved_location.numerator, retrieved_location.denominator) == (33, 33)
+    pending_denominators = {
+        PrecalibrationMetricId.CITATION_GROUNDEDNESS: 33,
+        PrecalibrationMetricId.FAITHFULNESS_SUPPORTED: 34,
+        PrecalibrationMetricId.FAITHFULNESS_PARTIALLY_SUPPORTED: 34,
+        PrecalibrationMetricId.FAITHFULNESS_UNSUPPORTED: 34,
+        PrecalibrationMetricId.FAITHFULNESS_CONTRADICTED: 34,
+        PrecalibrationMetricId.GOLD_CLAIM_RECALL: 33,
+        PrecalibrationMetricId.ESSENTIAL_GOLD_CLAIM_RECALL: 33,
+        PrecalibrationMetricId.MUST_NOT_CLAIM_VIOLATION: 37,
+        PrecalibrationMetricId.OUT_OF_CORPUS_ABSTENTION: 4,
+        PrecalibrationMetricId.ADVERSARIAL_PREMISE_CORRECTION: 2,
+        PrecalibrationMetricId.FALSE_ABSTENTION: 33,
+    }
+    for metric_id, denominator in pending_denominators.items():
+        metric = _precal_metric(summary, metric_id)
+        assert metric.availability.value == "pending"
+        assert metric.numerator is None
+        assert metric.value is None
+        assert metric.denominator == denominator
+    assert PublicLimitationId.SEMANTIC_SCORING_PENDING in summary.limitation_ids
+
+    serialized = json.dumps(summary.model_dump(mode="json"), sort_keys=True)
+    assert PRIVATE_SENTINEL not in serialized
+    assert "Private evaluation question" not in serialized
+    assert "Private owner note" not in serialized
+    assert "rationale" not in serialized
+    assert all(checkpoint.repetition == 1 for checkpoint in checkpoints)
+
+
+def test_precalibration_markdown_is_deterministic_and_text_free() -> None:
+    fixture = _make_fixture()
+    summary, _, _ = _precalibration_summary(fixture)
+    public_json_sha256 = canonical_json_sha256(summary.model_dump(mode="json"))
+
+    markdown = render_public_precalibration_markdown(
+        summary,
+        public_summary_json_sha256=public_json_sha256,
+    )
+
+    assert markdown == render_public_precalibration_markdown(
+        summary.model_dump(mode="json"),
+        public_summary_json_sha256=public_json_sha256,
+    )
+    assert "# Archivist pre-calibration evaluation result" in markdown
+    assert "`semantic_scoring_pending_calibration`" in markdown
+    assert "pending (denominator 34)" in markdown
+    assert PRIVATE_SENTINEL not in markdown
+    assert "Private evaluation question" not in markdown
+    assert "Private owner note" not in markdown
+
+    injected = summary.model_dump(mode="json")
+    injected["question"] = "Private evaluation question H001?"
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        render_public_precalibration_markdown(
+            injected,
+            public_summary_json_sha256=public_json_sha256,
+        )
+
+    invented = summary.model_dump(mode="json")
+    semantic_metric = next(
+        metric
+        for metric in invented["metrics"]
+        if metric["metric_id"] == "faithfulness_supported"
+    )
+    semantic_metric.update(availability="available", numerator=0, value=0.0)
+    with pytest.raises(ValueError, match="must remain pending"):
+        render_public_precalibration_markdown(
+            invented,
+            public_summary_json_sha256=public_json_sha256,
+        )
+
+
+def test_precalibration_artifact_rejects_noncanonical_or_incomplete_calls() -> None:
+    fixture = _make_fixture()
+    checkpoints = _canonical_decomposition_checkpoints(fixture)
+
+    with pytest.raises(ValueError, match="exactly 37 decomposition calls"):
+        build_precalibration_private_artifact(
+            cohort_manifest_sha256=COHORT_SHA,
+            generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+            decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+            gold_set_sha256=GOLD_SHA,
+            generated_items=fixture.generated,
+            decompositions=fixture.decompositions,
+            gold_items=fixture.gold,
+            decomposition_checkpoints=checkpoints[:-1],
+        )
+
+    reordered = (checkpoints[1], checkpoints[0], *checkpoints[2:])
+    with pytest.raises(ValueError, match="37 canonical repetition-1"):
+        build_precalibration_private_artifact(
+            cohort_manifest_sha256=COHORT_SHA,
+            generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+            decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+            gold_set_sha256=GOLD_SHA,
+            generated_items=fixture.generated,
+            decompositions=fixture.decompositions,
+            gold_items=fixture.gold,
+            decomposition_checkpoints=reordered,
+        )
+
+    second = fixture.generated[1]
+    duplicate_response_item = build_private_generated_item(
+        item_id=second.item_id,
+        question=second.question,
+        stratum=second.stratum,
+        expected_behavior=second.expected_behavior,
+        answer=second.answer,
+        status=second.status,
+        evidence_decision=second.evidence_decision,
+        diagnostics=second.diagnostics,
+        sources=second.sources,
+        elapsed_seconds=second.elapsed_seconds,
+        usage_events=(fixture.generated[0].usage_events[0],),
+        trace_references=second.trace_references,
+    )
+    duplicate_generation_ids = (
+        fixture.generated[0],
+        duplicate_response_item,
+        *fixture.generated[2:],
+    )
+    with pytest.raises(ValueError, match="generation response IDs"):
+        build_precalibration_private_artifact(
+            cohort_manifest_sha256=COHORT_SHA,
+            generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+            decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+            gold_set_sha256=GOLD_SHA,
+            generated_items=duplicate_generation_ids,
+            decompositions=fixture.decompositions,
+            gold_items=fixture.gold,
+            decomposition_checkpoints=checkpoints,
+        )
+
+
+def test_precalibration_completion_and_error_counts_cover_every_item() -> None:
+    fixture = _make_fixture(technical_error_item=1)
+    summary, _, _ = _precalibration_summary(fixture)
+
+    assert summary.completed_answer_count == 36
+    assert summary.technical_error_count == 1

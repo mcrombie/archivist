@@ -16,7 +16,7 @@ manuscript. Its public reader experience is already live; its retrieval-only hel
 is complete, while its formal held-out answer-quality baseline has not yet run. Those are different
 accomplishments and must not be conflated.
 
-## Current checkpoint — 2026-08-07
+## Current checkpoint — 2026-08-09
 
 The repository's current Answer Mode is `evidence-planned-v26`, with
 `query-planner-v11` and `evidence-coverage-v11`. It searches 481 retrieval-eligible chunks from the
@@ -105,9 +105,9 @@ After formal lock:
 | **2. Frozen corpus and reproducible run identity** | **Mostly complete** | The corpus manifest, stable chunk IDs, hashes, eligible boundary, and explicit `l2` distance space exist. Because OpenAI currently exposes canonical `gpt-5.6-sol` and `gpt-5.6-terra` IDs but no immutable dated snapshots, the first answer cohort must bind the committed catalog observation plus requested/returned IDs and disclose the limitation. |
 | **3. Held-out gold question set** | **Complete and formally locked** | Preserve the synchronized private source, committed private-safe gold, provenance sidecar, and frozen-candidate boundary unchanged. |
 | **4. Retrieval recall and dense-vs-hybrid benchmark** | **Complete** | The frozen run found 24.71% dense versus 25.97% hybrid macro Recall@5 (+1.26 points), with a mixed per-stratum effect. Preserve the private text-free result and do not tune V26 from it before the answer-quality baseline. |
-| **5. Citation-accuracy harness** | **Not run** | Run the locked answer-generation and claim-decomposition workflow, establish mechanical citation measures, and preserve complete run identity. |
-| **6. Faithfulness and abstention calibration** | **Not run** | Generate/decompose the fixed ten answers, bind human labels before semantic judge output, measure judge agreement, and settle §§6–7. These are the first ten answers of the same 37-item cohort, not a quality gate in front of it. Judge failure selects manual/pending scoring rather than blocking completion. |
-| **7. Formal baseline and evaluation report** | **Not run** | Run the complete held-out set once under the locked contract and publish text-free reproducible artifacts, limitations, and exact denominators. |
+| **5. Citation-accuracy harness** | **Prepared; paid run not started** | Generate and canonically decompose all 37 locked answers in one uninterrupted pass, establish the mechanical citation measures, and preserve complete run identity. |
+| **6. Faithfulness and abstention calibration** | **Deferred, lower priority** | After the full baseline is preserved, label the fixed ten-item subset, measure judge agreement, and settle §§6–7. This work may fill semantic fields in a separate supplement; it may not delay or overwrite the baseline. |
+| **7. Formal baseline and evaluation report** | **Next; not run** | Run the complete held-out set once under the locked contract and immediately publish text-free reproducible artifacts, limitations, exact denominators, and all mechanically available results. Semantic metrics may remain explicitly pending. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
 | **8A. Production observability and latency evidence** | **Partial and unmeasured** | Stage timing and token/cost records exist. Add/confirm privacy-safe request correlation and run the declared warm production cohort before publishing latency statistics. |
 
@@ -137,22 +137,26 @@ top of the list.
    predeclared +1.26-point delta. Hit@5 was 90.91% versus 93.94%. The five fixed-subset repetitions
    had zero spread, while the per-stratum result remained mixed. No generator or judge ran, and V26
    was not changed.
-7. **Next — begin the 37-item answer-quality cohort with its fixed ten-item calibration.** Generate
-   and preserve those ten V26 answers, establish mechanical citation metrics, decompose each answer,
-   bind the human labels before semantic judge output, measure judge agreement, and lock the scorer.
-   These ten answers remain the first ten of the final cohort. If automatic judging fails its
-   agreement checks, select manual scoring for the affected dimensions or report them pending; do
-   not stop the cohort.
-8. **Immediately complete the descriptive baseline.** Run the remaining 27 untouched held-out
-   items with no intervening RAG, prompt, retrieval, model, or UI repair, then publish a text-free
-   machine-readable result, readable report, exact rerun command, cohort identity, limitations,
-   and per-stratum denominators. The first complete 37 may state that generator spread is not yet
-   measured; the five-repeat noise floor is required before a later comparative or significance
-   claim, not before this descriptive baseline.
-9. **Measure production behavior.** Deploy the exact evaluated candidate, verify the production
+7. **Next — run the complete 37-item answer-quality cohort without a calibration stop.** In one
+   authorized, uninterrupted pass, generate and preserve every frozen V26 answer and source/trace/
+   usage record, then create one canonical claim decomposition for every answer. No owner labeling,
+   semantic verdict, agreement threshold, RAG repair, prompt change, retrieval change, model change,
+   or UI work may intervene. The planned authorization ceiling for this operation is `$20.00`; the
+   actual authorization remains an explicit owner action at run time.
+8. **Immediately publish the descriptive baseline artifacts.** Produce the private machine-readable
+   result and text-free readable/public report with exact cohort identity, costs, latency, response
+   status, mechanical citation measures, limitations, and per-stratum denominators. Semantic fields
+   that require calibration are `pending`, not blockers. The first complete 37 may state that
+   generator spread is not yet measured; the five-repeat noise floor is required before a later
+   comparative or significance claim, not before this descriptive baseline.
+9. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+   subset only after all 37 answers and canonical decompositions are preserved, measure judge and
+   decomposition agreement, and publish a hash-bound scoring supplement. Judge failure selects
+   manual/pending dimensions and never changes the original baseline.
+10. **Measure production behavior.** Deploy the exact evaluated candidate, verify the production
    commit, and collect the predeclared 30–50 successful warm first-turn cohort while reporting
    failures, cold starts, follow-ups, p50, p95, and cost.
-10. **Fill resume and blog claims only from those artifacts.** If hybrid retrieval does not improve
+11. **Fill resume and blog claims only from those artifacts.** If hybrid retrieval does not improve
     the predeclared metric, report that result rather than tuning against the used holdout. A later
     system change requires a new holdout for a new improvement claim.
 

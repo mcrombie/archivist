@@ -61,6 +61,7 @@ def _context() -> SimpleNamespace:
         calibration_items=calibration_items,
         remaining_ids=remaining_ids,
         model_catalog_sha256="d" * 64,
+        corpus_identity={"embedded_chunk_count": 481, "hnsw_space": "l2"},
         run_identity={
             "git_commit": "8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e",
             "working_tree": "clean",
@@ -134,6 +135,21 @@ def test_preflight_constructs_no_openai_client(monkeypatch: pytest.MonkeyPatch) 
     assert runner.main(["preflight"]) == 0
 
 
+def test_preflight_names_full_37_scope_and_exact_authorized_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner._print_preflight(_context())
+    output = capsys.readouterr().out
+    assert "37 frozen V26 RAG turns" in output
+    assert "37 decomposition calls total" in output
+    assert "semantic verdicts" in output
+    assert (
+        "python scripts/run_answer_evaluation.py run-37 "
+        "--authorize-openai-full-evaluation --max-cost-usd 20"
+    ) in output
+    assert "cannot block generation" in output
+
+
 def test_frozen_gold_partition_is_exact_and_rejects_duplicate_ids() -> None:
     items = _gold_items()
     calibration_ids, _, remaining_ids = runner._partition_gold_items(items)
@@ -155,14 +171,251 @@ def test_paid_authorization_and_cost_ceiling_fail_closed(
     maximum: float | None,
 ) -> None:
     args = argparse.Namespace(
-        authorize_openai_calibration_generation=authorized,
+        authorize_openai_full_evaluation=authorized,
         max_cost_usd=maximum,
     )
     with pytest.raises(runner.AnswerEvaluationError):
         runner._require_paid_authorization(
             args,
-            flag_name="authorize_openai_calibration_generation",
+            flag_name="authorize_openai_full_evaluation",
         )
+
+
+class _ZeroCostLedger:
+    def __init__(self, _path: Path) -> None:
+        pass
+
+    def update_settings(self, **_kwargs: object) -> None:
+        pass
+
+    def summary(self) -> dict[str, float]:
+        return {"all_time_usd": 0.0}
+
+
+def _decomposition_for(generated):
+    return build_decomposed_pilot_item(
+        item_id=generated.item_id,
+        answer_sha256=generated.answer_sha256,
+        claims=(
+            build_decomposed_claim(
+                claim_id="C001",
+                text=generated.answer,
+                char_start=0,
+                char_end=len(generated.answer),
+                cited_source_numbers=(1,),
+            ),
+        ),
+    )
+
+
+def test_run_37_makes_37_generation_and_37_decomposition_calls_without_semantic_judging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _context()
+    generated_by_id = {
+        str(item["id"]): _generated_item(item, sequence)
+        for sequence, item in enumerate(context.gold_items, start=1)
+    }
+    generation_calls: list[str] = []
+    decomposition_calls: list[tuple[str, int]] = []
+    calibration_subsets: list[tuple[str, ...]] = []
+    emitted: list[tuple[int, int]] = []
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(runner, "UsageLedger", _ZeroCostLedger)
+    monkeypatch.setattr(runner, "_require_private_run_root", lambda path: path)
+    monkeypatch.setattr(Path, "mkdir", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(Path, "is_file", lambda _path: False)
+    monkeypatch.setattr(runner, "sha256_file", lambda _path: "f" * 64)
+    monkeypatch.setattr(runner, "_create_openai_client", lambda _key: object())
+    cohort = SimpleNamespace(
+        items=tuple(SimpleNamespace(item_id=str(item["id"])) for item in context.gold_items)
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_or_write_cohort_manifest",
+        lambda *_args, **_kwargs: (cohort, "c" * 64),
+    )
+
+    def generate(*, item, **_kwargs):
+        item_id = str(item["id"])
+        generation_calls.append(item_id)
+        return generated_by_id[item_id]
+
+    def decompose(*, generated, repetition, **_kwargs):
+        decomposition_calls.append((generated.item_id, repetition))
+        return {
+            "item_id": generated.item_id,
+            "repetition": repetition,
+            "decomposition": _decomposition_for(generated).model_dump(mode="json"),
+        }
+
+    monkeypatch.setattr(runner, "_run_one_generated_item", generate)
+    monkeypatch.setattr(runner, "_decomposition_checkpoint", decompose)
+    monkeypatch.setattr(
+        runner,
+        "_validate_decomposition_checkpoint_payload",
+        lambda payload, *, generated, **_kwargs: _decomposition_for(generated),
+    )
+
+    def calibration_generation_subset(*, generated_items, **_kwargs):
+        assert len(generated_items) == 37
+        by_id = {item.item_id: item for item in generated_items}
+        subset = tuple(by_id[item_id] for item_id in context.calibration_ids)
+        calibration_subsets.append(tuple(item.item_id for item in subset))
+        return subset, "a" * 64
+
+    monkeypatch.setattr(
+        runner,
+        "_write_or_validate_calibration_generation_subset",
+        calibration_generation_subset,
+    )
+    monkeypatch.setattr(
+        runner,
+        "PrivateDecompositionCheckpoint",
+        SimpleNamespace(
+            model_validate=lambda _payload: SimpleNamespace(usage_event=object())
+        ),
+    )
+    monkeypatch.setattr(runner, "_baseline_generation_fields", lambda **_kwargs: {})
+    monkeypatch.setattr(runner, "_baseline_decomposition_fields", lambda **_kwargs: {})
+    monkeypatch.setattr(runner, "_sealed_artifact", lambda fields: fields)
+    monkeypatch.setattr(runner, "write_json_atomic_no_overwrite", lambda *_a, **_k: "e" * 64)
+    monkeypatch.setattr(
+        runner,
+        "_emit_precalibration_results",
+        lambda *, generated_items, decompositions, **_kwargs: (
+            emitted.append((len(generated_items), len(decompositions)))
+            or (Path("private.json"), Path("public.json"), Path("public.md"))
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "judge_claim_evidence",
+        lambda *_a, **_k: pytest.fail("run-37 requested a semantic evidence verdict"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "judge_item_rubric",
+        lambda *_a, **_k: pytest.fail("run-37 requested a semantic rubric verdict"),
+    )
+
+    runner._run_37(
+        argparse.Namespace(
+            authorize_openai_full_evaluation=True,
+            max_cost_usd=20.0,
+            run_root=runner.DEFAULT_RUN_ROOT / "exact-37-call-count",
+            labels=runner.DEFAULT_LABELS,
+        ),
+        context,
+    )
+
+    expected_ids = [str(item["id"]) for item in context.gold_items]
+    assert generation_calls == expected_ids
+    assert decomposition_calls == [(item_id, 1) for item_id in expected_ids]
+    assert calibration_subsets == [context.calibration_ids]
+    assert emitted == [(37, 37)]
+
+
+def test_completed_run_37_resumes_without_provider_calls_or_overwrite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _context()
+    generated = tuple(
+        _generated_item(item, sequence)
+        for sequence, item in enumerate(context.gold_items, start=1)
+    )
+    by_id = {item.item_id: item for item in generated}
+    calibration_generated = tuple(by_id[item_id] for item_id in context.calibration_ids)
+    decompositions = tuple(_decomposition_for(item) for item in generated)
+
+    monkeypatch.setattr(runner, "UsageLedger", _ZeroCostLedger)
+    monkeypatch.setattr(runner, "_require_private_run_root", lambda path: path)
+    monkeypatch.setattr(Path, "mkdir", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(Path, "is_file", lambda _path: True)
+    monkeypatch.setattr(runner, "sha256_file", lambda _path: "f" * 64)
+    cohort = SimpleNamespace(
+        items=tuple(SimpleNamespace(item_id=item.item_id) for item in generated)
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_or_write_cohort_manifest",
+        lambda *_args, **_kwargs: (cohort, "c" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_generated_checkpoint",
+        lambda _path, *, item, **_kwargs: by_id[str(item["id"])],
+    )
+    monkeypatch.setattr(
+        runner,
+        "_write_or_validate_calibration_generation_subset",
+        lambda **_kwargs: (calibration_generated, "a" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validate_baseline_generation_artifact",
+        lambda *_args, **_kwargs: (generated, "d" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validate_baseline_decomposition_artifact",
+        lambda *_args, **_kwargs: (decompositions, tuple(), "e" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_emit_precalibration_results",
+        lambda **_kwargs: (Path("private.json"), Path("public.json"), Path("public.md")),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_create_openai_client",
+        lambda _key: pytest.fail("completed run constructed a provider client"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_run_one_generated_item",
+        lambda **_kwargs: pytest.fail("completed answer was regenerated"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_decomposition_checkpoint",
+        lambda **_kwargs: pytest.fail("completed decomposition was repeated"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "write_json_atomic_no_overwrite",
+        lambda *_args, **_kwargs: pytest.fail("completed artifact was overwritten"),
+    )
+
+    runner._run_37(
+        argparse.Namespace(
+            authorize_openai_full_evaluation=True,
+            max_cost_usd=20.0,
+            run_root=runner.DEFAULT_RUN_ROOT / "resume-37",
+            labels=runner.DEFAULT_LABELS,
+        ),
+        context,
+    )
+
+
+def test_retired_calibration_generate_cannot_make_paid_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "_build_context", lambda *_a, **_k: object())
+    monkeypatch.setattr(
+        runner,
+        "_create_openai_client",
+        lambda _key: pytest.fail("retired command constructed a provider client"),
+    )
+    assert runner.main(
+        [
+            "calibration-generate",
+            "--authorize-openai-calibration-generation",
+            "--max-cost-usd",
+            "4",
+        ]
+    ) == 1
 
 
 def test_openai_client_disables_sdk_retries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,6 +461,8 @@ def test_completed_calibration_is_validated_and_reused_without_calls_or_overwrit
 
     def completed_artifact_is_file(path: Path) -> bool:
         if path.name in {
+            "baseline-generated.json",
+            "baseline-decompositions.json",
             "calibration-generated.json",
             "calibration-decompositions.json",
             "calibration-labels.template.json",
@@ -844,7 +1099,10 @@ def test_lock_instrument_is_offline_and_preserves_mixed_fallback(
         item for item in lock.dimensions if item.dimension.value == "claim_mapping"
     ).scoring_mode.value == "manual"
     assert lock.baseline_next_action == runner.NEXT_ACTION_BASELINE
-    assert f"NEXT ACTION: {runner.NEXT_ACTION_BASELINE}" in capsys.readouterr().out
+    assert (
+        f"OPTIONAL SCORING ACTION: {runner.NEXT_ACTION_BASELINE}"
+        in capsys.readouterr().out
+    )
 
 
 def _all_manual_instrument() -> SimpleNamespace:
@@ -857,7 +1115,7 @@ def _all_manual_instrument() -> SimpleNamespace:
     )
 
 
-def test_remaining_baseline_calls_exactly_27_generation_and_decomposition_only(
+def test_semantic_baseline_reuses_all_37_generation_and_decomposition_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = _context()
@@ -903,6 +1161,8 @@ def test_remaining_baseline_calls_exactly_27_generation_and_decomposition_only(
         "calibration-semantic-results.json",
         "calibration-agreement-projection.json",
         "instrument-lock.json",
+        "baseline-generated.json",
+        "baseline-decompositions.json",
     }
 
     def is_file(path: Path) -> bool:
@@ -943,6 +1203,23 @@ def test_remaining_baseline_calls_exactly_27_generation_and_decomposition_only(
         runner,
         "_load_or_write_cohort_manifest",
         lambda *_args, **_kwargs: (cohort, "4" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validate_baseline_generation_artifact",
+        lambda *_args, **_kwargs: (generated, "5" * 64),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validate_baseline_decomposition_artifact",
+        lambda *_args, **_kwargs: (
+            decomposed,
+            tuple(
+                SimpleNamespace(response_id=f"decomposition-{item.item_id}")
+                for item in generated
+            ),
+            "6" * 64,
+        ),
     )
     monkeypatch.setattr(runner, "sha256_file", lambda _path: "5" * 64)
     calls = {"client": 0, "generation": [], "decomposition": []}
@@ -1062,9 +1339,9 @@ def test_remaining_baseline_calls_exactly_27_generation_and_decomposition_only(
 
     runner._baseline(args, context)
 
-    assert calls["client"] == 1
-    assert calls["generation"] == list(context.remaining_ids)
-    assert calls["decomposition"] == list(context.remaining_ids)
+    assert calls["client"] == 0
+    assert calls["generation"] == []
+    assert calls["decomposition"] == []
 
 
 def test_completed_baseline_resume_makes_no_calls_and_overwrites_nothing(
