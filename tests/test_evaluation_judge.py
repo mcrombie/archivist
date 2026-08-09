@@ -14,6 +14,8 @@ from evaluation_judge import (
     ITEM_RUBRIC_PROMPT,
     AtomicClaim,
     ClaimDecomposition,
+    ClaimDecompositionValidationCode,
+    ClaimDecompositionValidationError,
     ClaimEvidenceVerdict,
     EvaluationJudgeModelMismatchError,
     EvaluationJudgeParseError,
@@ -28,10 +30,11 @@ from evaluation_judge import (
 )
 
 
-def provider_response(parsed, *, model: str = JUDGE_MODEL):
+def provider_response(parsed, *, model: str = JUDGE_MODEL, status: str = "completed"):
     return SimpleNamespace(
         id="resp_eval_001",
         model=model,
+        status=status,
         created_at=1_786_000_000,
         system_fingerprint="fp_eval",
         output_parsed=parsed,
@@ -78,9 +81,10 @@ def test_decomposition_call_is_single_answer_only_and_returns_provider_metadata(
         key: call[key] for key in ("model", "reasoning", "text")
     } == JUDGE_SETTINGS.responses_create_kwargs()
     assert not ({"conversation", "history", "previous_response_id"} & call.keys())
-    assert CLAIM_DECOMPOSITION_PROMPT_SHA256 == hashlib.sha256(
-        CLAIM_DECOMPOSITION_PROMPT.encode("utf-8")
-    ).hexdigest()
+    assert (
+        CLAIM_DECOMPOSITION_PROMPT_SHA256
+        == hashlib.sha256(CLAIM_DECOMPOSITION_PROMPT.encode("utf-8")).hexdigest()
+    )
 
 
 def test_claim_evidence_call_contains_one_claim_and_sources_but_no_gold(monkeypatch):
@@ -149,18 +153,16 @@ def test_item_rubric_call_contains_answer_and_gold_but_no_source_text(monkeypatc
             cited_sources=[],
         )
     ]
-    rubric = ItemRubricInput.model_validate({
-        "question": "What happened?",
-        "claims": [
-            {"claim_id": "H001-C1", "text": "A rubric claim.", "essential": True}
-        ],
-        "must_not_claim": ["A bounded tripwire."],
-    })
+    rubric = ItemRubricInput.model_validate(
+        {
+            "question": "What happened?",
+            "claims": [{"claim_id": "H001-C1", "text": "A rubric claim.", "essential": True}],
+            "must_not_claim": ["A bounded tripwire."],
+        }
+    )
     parsed = ItemRubricVerdict(
         gold_claims=[{"claim_id": "H001-C1", "status": "present"}],
-        answer_claim_matches=[
-            {"answer_claim_id": "C001", "gold_claim_ids": ["H001-C1"]}
-        ],
+        answer_claim_matches=[{"answer_claim_id": "C001", "gold_claim_ids": ["H001-C1"]}],
         must_not_claim=[{"index": 0, "status": "not_asserted"}],
         response_behavior="substantive_answer",
         rationale="The answer contains the rubric claim.",
@@ -230,9 +232,7 @@ def test_item_rubric_rejects_changed_locked_join_keys(
     )
     payload = {
         "gold_claims": [{"claim_id": "H001-C1", "status": "present"}],
-        "answer_claim_matches": [
-            {"answer_claim_id": "C001", "gold_claim_ids": ["H001-C1"]}
-        ],
+        "answer_claim_matches": [{"answer_claim_id": "C001", "gold_claim_ids": ["H001-C1"]}],
         "must_not_claim": [{"index": 0, "status": "not_asserted"}],
         "response_behavior": "substantive_answer",
         "rationale": "A bounded rationale.",
@@ -250,13 +250,13 @@ def test_item_rubric_rejects_changed_locked_join_keys(
             object(),
             answer=answer,
             answer_claims=[claim],
-            rubric=ItemRubricInput.model_validate({
-                "question": "What happened?",
-                "claims": [
-                    {"claim_id": "H001-C1", "text": "Gold.", "essential": True}
-                ],
-                "must_not_claim": ["Tripwire."],
-            }),
+            rubric=ItemRubricInput.model_validate(
+                {
+                    "question": "What happened?",
+                    "claims": [{"claim_id": "H001-C1", "text": "Gold.", "essential": True}],
+                    "must_not_claim": ["Tripwire."],
+                }
+            ),
         )
 
 
@@ -320,7 +320,25 @@ def test_missing_parsed_output_raises_after_exactly_one_call(monkeypatch):
     assert len(calls) == 1
 
 
-def test_decomposition_rejects_paraphrased_claim_text(monkeypatch):
+def test_incomplete_response_with_parsed_payload_stops_before_local_validation(monkeypatch):
+    calls: list[dict] = []
+    parsed = ClaimDecomposition(claims=[])
+
+    def fake_parse(client, *, operation, **request):
+        calls.append({"client": client, "operation": operation, **request})
+        return provider_response(parsed, status="in_progress")
+
+    monkeypatch.setattr(evaluation_judge, "tracked_responses_parse", fake_parse)
+
+    with pytest.raises(EvaluationJudgeParseError, match="not 'completed'") as exc_info:
+        decompose_answer_claims(object(), answer="A factual answer.")
+
+    assert len(calls) == 1
+    assert not isinstance(exc_info.value, ClaimDecompositionValidationError)
+
+
+def test_decomposition_preserves_completed_response_when_exact_span_fails(monkeypatch):
+    calls: list[dict] = []
     answer = "Project Lumen began in Port Delta [Source 2]."
     parsed = ClaimDecomposition(
         claims=[
@@ -334,14 +352,28 @@ def test_decomposition_rejects_paraphrased_claim_text(monkeypatch):
         ]
     )
 
-    monkeypatch.setattr(
-        evaluation_judge,
-        "tracked_responses_parse",
-        lambda *_args, **_kwargs: provider_response(parsed),
-    )
+    response = provider_response(parsed)
 
-    with pytest.raises(EvaluationJudgeParseError, match="exact supplied-answer substring"):
+    def fake_parse(*_args, **kwargs):
+        calls.append(kwargs)
+        return response
+
+    monkeypatch.setattr(evaluation_judge, "tracked_responses_parse", fake_parse)
+
+    with pytest.raises(
+        ClaimDecompositionValidationError,
+        match="exact supplied-answer substring",
+    ) as exc_info:
         decompose_answer_claims(object(), answer=answer)
+
+    assert len(calls) == 1
+    assert exc_info.value.failure_code is ClaimDecompositionValidationCode.EXACT_SPAN_MISMATCH
+    assert exc_info.value.failure_message == str(exc_info.value)
+    assert exc_info.value.parsed is parsed
+    assert exc_info.value.provider.id == response.id
+    assert exc_info.value.provider.model == response.model
+    assert exc_info.value.provider.created_at == response.created_at
+    assert exc_info.value.provider.system_fingerprint == response.system_fingerprint
 
 
 def test_decomposition_rejects_noncanonical_claim_ids(monkeypatch):
@@ -363,8 +395,76 @@ def test_decomposition_rejects_noncanonical_claim_ids(monkeypatch):
         lambda *_args, **_kwargs: provider_response(parsed),
     )
 
-    with pytest.raises(EvaluationJudgeParseError, match="sequential claim IDs"):
+    with pytest.raises(
+        ClaimDecompositionValidationError,
+        match="sequential claim IDs",
+    ) as exc_info:
         decompose_answer_claims(object(), answer=answer)
+
+    assert exc_info.value.failure_code is ClaimDecompositionValidationCode.SEQUENTIAL_CLAIM_IDS
+    assert exc_info.value.parsed is parsed
+
+
+def test_decomposition_exposes_span_out_of_bounds_as_closed_failure(monkeypatch):
+    answer = "One claim."
+    parsed = ClaimDecomposition(
+        claims=[
+            AtomicClaim(
+                claim_id="C001",
+                text=answer,
+                char_start=0,
+                char_end=len(answer) + 1,
+                cited_sources=[],
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        evaluation_judge,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: provider_response(parsed),
+    )
+
+    with pytest.raises(ClaimDecompositionValidationError, match="outside") as exc_info:
+        decompose_answer_claims(object(), answer=answer)
+
+    assert exc_info.value.failure_code is ClaimDecompositionValidationCode.SPAN_OUT_OF_BOUNDS
+    assert exc_info.value.parsed is parsed
+
+
+def test_decomposition_exposes_overlapping_spans_as_closed_failure(monkeypatch):
+    answer = "First. Second."
+    parsed = ClaimDecomposition(
+        claims=[
+            AtomicClaim(
+                claim_id="C001",
+                text="First.",
+                char_start=0,
+                char_end=6,
+                cited_sources=[],
+            ),
+            AtomicClaim(
+                claim_id="C002",
+                text=". Second.",
+                char_start=5,
+                char_end=14,
+                cited_sources=[],
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        evaluation_judge,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: provider_response(parsed),
+    )
+
+    with pytest.raises(ClaimDecompositionValidationError, match="overlap") as exc_info:
+        decompose_answer_claims(object(), answer=answer)
+
+    assert (
+        exc_info.value.failure_code
+        is ClaimDecompositionValidationCode.OVERLAPPING_OR_OUT_OF_ORDER_SPANS
+    )
+    assert exc_info.value.parsed is parsed
 
 
 def test_claim_evidence_rejects_changed_source_join_keys(monkeypatch):

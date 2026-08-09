@@ -13,6 +13,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -243,6 +244,53 @@ class EvaluationJudgeParseError(EvaluationJudgeError):
     """The provider call completed without the requested structured payload."""
 
 
+class ClaimDecompositionValidationCode(StrEnum):
+    """Closed post-parse invariant failures for one claim-decomposition call."""
+
+    SEQUENTIAL_CLAIM_IDS = "sequential_claim_ids"
+    SPAN_OUT_OF_BOUNDS = "span_out_of_bounds"
+    OVERLAPPING_OR_OUT_OF_ORDER_SPANS = "overlapping_or_out_of_order_spans"
+    EXACT_SPAN_MISMATCH = "exact_span_mismatch"
+
+
+_CLAIM_DECOMPOSITION_VALIDATION_MESSAGES: Mapping[ClaimDecompositionValidationCode, str] = {
+    ClaimDecompositionValidationCode.SEQUENTIAL_CLAIM_IDS: (
+        "claim decomposition changed the required sequential claim IDs"
+    ),
+    ClaimDecompositionValidationCode.SPAN_OUT_OF_BOUNDS: (
+        "claim span falls outside the supplied answer"
+    ),
+    ClaimDecompositionValidationCode.OVERLAPPING_OR_OUT_OF_ORDER_SPANS: (
+        "claim spans overlap or are out of order"
+    ),
+    ClaimDecompositionValidationCode.EXACT_SPAN_MISMATCH: (
+        "claim text must equal the exact supplied-answer substring"
+    ),
+}
+
+
+class ClaimDecompositionValidationError(EvaluationJudgeParseError):
+    """A completed, parsed decomposition failed a closed local invariant.
+
+    The attached result is the exact parsed provider result that failed.  A
+    caller can therefore preserve the already-paid attempt without replaying
+    the request or manufacturing a canonical decomposition.
+    """
+
+    def __init__(
+        self,
+        *,
+        failure_code: ClaimDecompositionValidationCode,
+        provider: ProviderResponseMetadata,
+        parsed: ClaimDecomposition,
+    ) -> None:
+        self.failure_code = failure_code
+        self.failure_message = _CLAIM_DECOMPOSITION_VALIDATION_MESSAGES[failure_code]
+        self.provider = provider
+        self.parsed = parsed
+        super().__init__(self.failure_message)
+
+
 class EvaluationJudgeModelMismatchError(EvaluationJudgeError):
     """The provider did not report the exact model that was requested."""
 
@@ -269,9 +317,7 @@ def _metadata(response: object) -> ProviderResponseMetadata:
         id=None if response_id is None else str(response_id),
         model=None if response_model is None else str(response_model),
         created_at=created_at if isinstance(created_at, (int, float, str)) else None,
-        system_fingerprint=(
-            None if system_fingerprint is None else str(system_fingerprint)
-        ),
+        system_fingerprint=(None if system_fingerprint is None else str(system_fingerprint)),
     )
 
 
@@ -309,6 +355,11 @@ def _call_judge(
         max_output_tokens=max_output_tokens,
         **JUDGE_SETTINGS.responses_create_kwargs(),
     )
+    response_status = _response_value(response, "status")
+    if response_status != "completed":
+        raise EvaluationJudgeParseError(
+            f"{operation} returned provider status {response_status!r}, not 'completed'"
+        )
     provider = _metadata(response)
     if provider.model != JUDGE_MODEL:
         # The tracked call has already retained provider usage before this
@@ -356,16 +407,28 @@ def decompose_answer_claims(
     for ordinal, claim in enumerate(result.parsed.claims, start=1):
         expected_claim_id = f"C{ordinal:03d}"
         if claim.claim_id != expected_claim_id:
-            raise EvaluationJudgeParseError(
-                "claim decomposition changed the required sequential claim IDs"
+            raise ClaimDecompositionValidationError(
+                failure_code=ClaimDecompositionValidationCode.SEQUENTIAL_CLAIM_IDS,
+                provider=result.provider,
+                parsed=result.parsed,
             )
         if claim.char_end > len(answer):
-            raise EvaluationJudgeParseError("claim span falls outside the supplied answer")
+            raise ClaimDecompositionValidationError(
+                failure_code=ClaimDecompositionValidationCode.SPAN_OUT_OF_BOUNDS,
+                provider=result.provider,
+                parsed=result.parsed,
+            )
         if claim.char_start < previous_end:
-            raise EvaluationJudgeParseError("claim spans overlap or are out of order")
+            raise ClaimDecompositionValidationError(
+                failure_code=(ClaimDecompositionValidationCode.OVERLAPPING_OR_OUT_OF_ORDER_SPANS),
+                provider=result.provider,
+                parsed=result.parsed,
+            )
         if answer[claim.char_start : claim.char_end] != claim.text:
-            raise EvaluationJudgeParseError(
-                "claim text must equal the exact supplied-answer substring"
+            raise ClaimDecompositionValidationError(
+                failure_code=ClaimDecompositionValidationCode.EXACT_SPAN_MISMATCH,
+                provider=result.provider,
+                parsed=result.parsed,
             )
         previous_end = claim.char_end
     return result
@@ -407,9 +470,7 @@ def judge_claim_evidence(
     if result.parsed.claim_id != claim.claim_id:
         raise EvaluationJudgeParseError("claim evidence verdict changed claim_id")
     expected_source_numbers = sorted(claim.cited_sources)
-    actual_source_numbers = [
-        verdict.source_number for verdict in result.parsed.source_verdicts
-    ]
+    actual_source_numbers = [verdict.source_number for verdict in result.parsed.source_verdicts]
     if actual_source_numbers != expected_source_numbers:
         raise EvaluationJudgeParseError(
             "claim evidence verdict changed source numbers, order, or cardinality"
@@ -453,9 +514,7 @@ def judge_item_rubric(
         instructions=ITEM_RUBRIC_PROMPT,
         payload={
             "answer": answer,
-            "answer_claims": [
-                {"claim_id": claim.claim_id, "text": claim.text} for claim in claims
-            ],
+            "answer_claims": [{"claim_id": claim.claim_id, "text": claim.text} for claim in claims],
             "rubric": rubric.model_dump(mode="json"),
         },
         text_format=ItemRubricVerdict,
@@ -499,9 +558,7 @@ def build_item_rubric_input(
     raw_must_not_claim = gold_item.get("must_not_claim")
     if not isinstance(raw_claims, Sequence) or isinstance(raw_claims, (str, bytes)):
         raise ValueError("gold item claims must be an ordered array")
-    if not isinstance(raw_must_not_claim, Sequence) or isinstance(
-        raw_must_not_claim, (str, bytes)
-    ):
+    if not isinstance(raw_must_not_claim, Sequence) or isinstance(raw_must_not_claim, (str, bytes)):
         raise ValueError("gold item must_not_claim must be an ordered array")
     claims: list[ItemRubricGoldClaim] = []
     for raw_claim in raw_claims:

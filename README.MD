@@ -227,7 +227,7 @@ uv run python scripts/run_retrieval_benchmark.py run `
 The private, gitignored embedding cache is reused by both arms, every value of `k`, and the five
 retrieval repetitions; later offline reproductions do not make another API call. The complete
 answer-quality cohort has now sealed all 37 frozen V26 answers. Canonical decomposition is still in
-progress after its first call exposed a strict span/text validation failure. There is no ten-item
+progress after its first two calls exposed strict span/text validation failures. There is no ten-item
 calibration stop and no semantic quality gate before completion. The initial baseline report
 includes every immediately computable result—cohort identity, costs, latency, response status,
 mechanical citation measures, and technical decomposition failures—with semantic fields explicitly
@@ -286,32 +286,52 @@ public report carries that limitation. “Uninterrupted” forbids calibration o
 prompts, models, retrieval, corpus, gold, or UI—not exact provider-free recovery after a harness
 stop.
 
-Canonical decomposition then stopped fail-closed on its first item. The one H001 Terra response
-completed and was charged, but several returned claim strings did not exactly equal the answer
-substrings declared by their character spans. The existing response was retrieved afterward by
-provider response ID through `responses.retrieve`, which made no model call, and preserved in a
-private snapshot with SHA-256
-`dd6ca585e3d1f8fac6af4070187b0230115ded0482837c23b4f12beda82c1f1e`. The harness did not correct
-the text or spans, retry H001, or promote an invalid canonical decomposition. Cumulative recorded
-spend at this stop is **`$5.42436647`**.
+Canonical decomposition then stopped fail-closed on each of its first two items. The H001 and H002
+Terra responses each completed and were charged exactly once, but returned claim strings that did
+not exactly equal the answer substrings declared by their character spans. The existing responses
+were retrieved afterward by provider response ID through `responses.retrieve`, which made no model
+call, and preserved in private snapshots with SHA-256
+`dd6ca585e3d1f8fac6af4070187b0230115ded0482837c23b4f12beda82c1f1e` (H001) and
+`5dc006d3de7f2ae64f4aea1db76907c0cbda2f9b60ee060ffb3edac1eff42c0d` (H002). The harness did not
+correct either result, retry either item, or promote an invalid canonical decomposition.
+Recovery-02 contains 90 provider events and cumulative recorded spend of **`$5.46195397`**.
 
-The answer-complete recovery root now remains immutable. A second provider-free sibling migration
-must bind all 37 answer checkpoints, the ledger, the H001 response snapshot and validation failure,
-and the source and destination runner identities. H001 is recorded as one technical decomposition
-failure; resume skips it and makes exactly one Terra call for each of the remaining 36 cohort
-items under the same cumulative `$20.00` cap. The completed baseline reports **37 answers, 37
-canonical decomposition attempts, 36 usable decompositions, and one technical failure**. H001 is
-excluded only from decomposition-dependent denominators and is never imputed as an empty claim set
-or scored as a candidate answer failure. This recovery repairs the measurement harness, not the
-frozen answer.
+Recovery-02 now remains immutable. Create recovery-03 with the provider-free command below after
+the generalized no-retry harness is committed:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py recover-decomposition-failure `
+  --source-run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-02
+```
+
+That migration binds all 37 answer checkpoints, the complete existing ledger, both response
+snapshots and validation failures, and the source and destination runner identities. It makes no
+provider call. Resume against the printed recovery-03 path; H001 and H002 are skipped and exactly
+one Terra call is made for each of the remaining 35 cohort items under the same cumulative cap:
+
+```powershell
+uv run python scripts/run_answer_evaluation.py run-37 `
+  --run-root runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-03 `
+  --authorize-openai-full-evaluation `
+  --max-cost-usd 20
+```
+
+A completed parseable result that fails one of the four predeclared local claim-ID/span invariants
+is sealed immediately as a technical measurement failure and is never corrected or retried; the
+run continues to the next untouched item. Every other unexpected condition stops fail-closed. The
+completed baseline reports **37 answers and exactly 37 canonical decomposition attempts,
+partitioned into `N` usable decompositions and `37 - N` technical failures**. Failures are excluded
+only from decomposition-dependent denominators and are never imputed as empty claim sets or scored
+as candidate answer failures. This recovery repairs the measurement harness, not the frozen
+answers.
 
 Faithfulness and abstention calibration is later, lower-priority scoring-instrument work. Only
-after all 37 answers, all 37 canonical attempts, every usable decomposition, and the technical
-failure are preserved may the predeclared subset receive human labels, repeated decompositions,
+after all 37 answers, all 37 canonical attempts, every usable decomposition, and all technical
+failures are preserved may the predeclared subset receive human labels, repeated decompositions,
 and semantic judge checks. That work may add a hash-bound scoring supplement; it cannot delay,
 overwrite, or suppress the baseline. Five-repeat generator noise measurement is likewise required
 before a later comparative or significance claim, not before this first descriptive result. The
-answer-quality run has recorded `$5.42436647`; completion of the remaining 36 decomposition calls
+answer-quality run has recorded `$5.46195397`; completion of the remaining 35 decomposition calls
 is pending. V26 remains frozen, and the interactive application and earlier practical evaluations
 remain development evidence only.
 

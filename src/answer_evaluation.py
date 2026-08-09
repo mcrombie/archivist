@@ -155,6 +155,9 @@ class MetricAvailability(StrEnum):
 class DecompositionFailureCode(StrEnum):
     """Closed technical failures from one canonical decomposition attempt."""
 
+    SEQUENTIAL_CLAIM_IDS = "sequential_claim_ids"
+    SPAN_OUT_OF_BOUNDS = "span_out_of_bounds"
+    OVERLAPPING_OR_OUT_OF_ORDER_SPANS = "overlapping_or_out_of_order_spans"
     EXACT_SPAN_MISMATCH = "exact_span_mismatch"
 
 

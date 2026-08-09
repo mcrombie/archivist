@@ -992,15 +992,15 @@ def _precalibration_metrics(
     )
     tripwire_count = sum(len(bundle.gold.must_not_claim) for bundle in bundles)
     out_of_corpus_count = sum(
-        gold.stratum is EvaluationStratum.OUT_OF_CORPUS for gold in gold_items
+        bundle.gold.stratum is EvaluationStratum.OUT_OF_CORPUS for bundle in bundles
     )
     adversarial_count = sum(
-        gold.stratum is EvaluationStratum.ADVERSARIAL_PREMISE for gold in gold_items
+        bundle.gold.stratum is EvaluationStratum.ADVERSARIAL_PREMISE for bundle in bundles
     )
     answerable_count = sum(
-        gold.expected_behavior is ExpectedBehavior.ANSWER
-        and gold.stratum is not EvaluationStratum.OUT_OF_CORPUS
-        for gold in gold_items
+        bundle.gold.expected_behavior is ExpectedBehavior.ANSWER
+        and bundle.gold.stratum is not EvaluationStratum.OUT_OF_CORPUS
+        for bundle in bundles
     )
     metrics = (
         _precalibration_metric(

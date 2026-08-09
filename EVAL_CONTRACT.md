@@ -82,31 +82,44 @@ item and migration artifact. Resume then continues at the first genuinely missin
 operation under the original cumulative spending ceiling. This narrow recovery changes no V26
 behavior and repeats no provider call.
 
-**Technical incident clarification, 2026-08-09 (canonical-decomposition validation failure):**
+**Technical incident clarification, 2026-08-09 (canonical-decomposition validation failures):**
 the recovered cohort subsequently sealed all 37 frozen V26 answers before canonical
-decomposition began. Terra's first canonical call, for H001, completed and was charged exactly
-once, but multiple returned `text` values did not equal the frozen answer substrings named by their
-`char_span` offsets. Strict §5.1 validation therefore rejected the output and stopped the harness.
-This is a measurement-instrument failure: it does not change, repair, or invalidate the sealed H001
-candidate answer. The failed output may not be span-corrected, text-corrected, parsed leniently,
-retried, or promoted as H001's canonical decomposition.
+decomposition began. Terra's first two canonical calls, for H001 and H002, each completed and were
+charged exactly once, but returned `text` values that did not equal the frozen answer substrings
+named by their `char_span` offsets. Strict §5.1 validation rejected both outputs and stopped the
+harness after each call. These are measurement-instrument failures: they do not change, repair, or
+invalidate either sealed candidate answer. The failed outputs may not be span-corrected,
+text-corrected, parsed leniently, retried, or promoted as canonical decompositions.
 
-The provider response was retrieved afterward by exact response ID through `responses.retrieve`,
-which made no model call, and was preserved as a private hash-bound snapshot. Honest continuation
-requires a second provider-free sibling migration that leaves the answer-complete source root
-immutable and binds the 37 answer checkpoints, cohort manifest, usage ledger, H001 response ID and
-usage, retrieved-response snapshot, answer hash, prompt hash, validation failure, source and
-destination runner hashes, and migration audit. H001 is represented by one explicit technical
-decomposition failure. Resume skips H001 and makes exactly one canonical Terra call for each of the
-remaining 36 cohort items under the original cumulative `$20.00` ceiling. The resulting baseline
-must close at exactly 37 sealed answers, 37 attempted canonical decomposition calls, 36 valid
-canonical decomposition checkpoints, one technical decomposition failure, and unique response
-IDs. Decomposition-dependent measures use the 36 valid decompositions and disclose that exact
-denominator; they may not impute zero H001 claims or treat the instrument failure as a candidate
-answer failure. Mechanical answer-level measures that do not require decomposition remain defined
-over their original eligible denominators. No calibration, semantic verdict, owner-labeling step,
-V26 change, prompt change, model change, retrieval change, corpus change, gold change, or answer
-regeneration is permitted during this continuation.
+Both provider responses were retrieved afterward by exact response ID through
+`responses.retrieve`, which made no model call, and preserved as private hash-bound snapshots.
+Honest continuation requires a provider-free recovery-02-to-recovery-03 sibling migration that
+leaves recovery-02 immutable and binds the 37 answer checkpoints, cohort manifest, all 90 existing
+usage events, both response IDs and usage records, both snapshots, answer and prompt hashes,
+validation failures, source and destination runner hashes, and migration audit. H001 and H002 are
+represented by two explicit technical decomposition failures. Resume skips both and makes exactly
+one canonical Terra call for each of the remaining 35 cohort items under the original cumulative
+`$20.00` ceiling.
+
+For this unchanged cohort, a completed and parseable Terra result may continue past a local
+post-parse failure only when its first failure is one of four closed §5.1 invariants: nonsequential
+claim IDs, an out-of-bounds span, overlapping or out-of-order spans, or claim text unequal to the
+exact answer substring. The exact response, parsed payload, provider identity, usage, answer hash,
+and reproduced failure are sealed as a technical outcome, and the item is never corrected or
+retried. A provider, network, model-identity, missing-parse, unavailable-source-number, incomplete-
+status, or unknown failure still stops fail-closed. Before each new call, a durable item-bound
+attempt-intent record is written; an unresolved intent blocks automatic resume rather than risking
+a duplicate call.
+
+The resulting baseline must close at exactly 37 sealed answers and exactly 37 attempted canonical
+decomposition calls, partitioned into `N` valid canonical decomposition checkpoints and `37 - N`
+technical failures, with unique response IDs and exact ledger-to-outcome closure. Decomposition-
+dependent measures use `N` and disclose that exact denominator; they may not impute zero claims or
+treat an instrument failure as a candidate answer failure. Mechanical answer-level measures that
+do not require decomposition remain defined over their original eligible denominators. No
+calibration, semantic verdict, owner-labeling step, V26 change, prompt change, model change,
+retrieval change, corpus change, gold change, or answer regeneration is permitted during this
+continuation.
 
 **Settled:** §§1–5. **Drafted, not settled:** §6 faithfulness, §7 abstention. The complete
 37-question generation/decomposition baseline runs before either section is calibrated. Sections 6

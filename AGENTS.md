@@ -26,24 +26,28 @@ not claim that it was prospectively blinded or fully hash-captured. The predecla
 benchmark is complete. The authorized answer-quality run has now sealed all 37 V26 answers. The
 earlier H003 local-release incident remains preserved through its audited sibling migration, with
 no provider replay and a 36/37 generation-latency denominator. Canonical claim decomposition then
-began. The first and only Terra call for H001 completed, but its returned claim text did not exactly
-match its declared character spans in the frozen answer. Strict validation stopped fail-closed.
-The response was retrieved by provider response ID without another model call and preserved in a
-private hash-bound snapshot; its spans were not corrected, the response was not retried, and no
-canonical H001 decomposition was manufactured. Cumulative recorded spend at this second stop is
-`$5.42436647`.
+began. H001 and H002 each received exactly one Terra call; both completed with parseable output
+whose claim text did not exactly match its declared character spans in the corresponding frozen
+answer. Strict validation stopped fail-closed after each call. Both responses were retrieved by
+provider response ID without another model call and preserved in private hash-bound snapshots;
+their spans were not corrected, neither response was retried, and no canonical decomposition was
+manufactured. Recovery-02 now contains 90 provider events and cumulative recorded spend of
+`$5.46195397`.
 
-The next sequence is fixed: leave the answer-complete recovery root immutable, create an audited
-provider-free sibling migration that records H001 as one technical decomposition failure, and call
-Terra exactly once for each of the remaining 36 answers under the same cumulative `$20.00` cap.
-The baseline must report 37 sealed answers, 37 attempted canonical decomposition calls, 36 usable
-decompositions, and one technical decomposition failure. Decomposition-dependent denominators
-exclude H001 with the exclusion disclosed; they must not impute zero claims or score the failure as
-an answer-quality defect. Do not insert a calibration stop, owner-labeling step, semantic-judge
-gate, RAG, prompt, retrieval, model, UI, gold, or corpus repair inside that pass. This is recovery
-of a measurement-instrument failure, not repair of the candidate answer. Once an H-item is run,
-never change the gold set or V26 in response to its result; any later system change opens a new
-cohort rather than repairing this baseline in place.
+The next sequence is fixed: leave recovery-02 immutable, create an audited provider-free
+recovery-03 sibling that records H001 and H002 as technical decomposition failures, and call Terra
+exactly once for each of the remaining 35 answers under the same cumulative `$20.00` cap. A
+completed, parseable Terra result that fails one of the four closed local invariants—sequential
+claim IDs, in-bounds spans, ordered non-overlapping spans, or exact answer substrings—is sealed as
+a technical measurement failure and the run continues without correction or retry. Provider,
+network, model-identity, missing-parse, or unknown failures still stop fail-closed. Final closure is
+37 sealed answers and exactly 37 Terra attempts, partitioned into `N` usable decompositions and
+`37 - N` disclosed technical failures. Decomposition-dependent denominators use only `N`; failures
+are never imputed as zero claims or scored as answer-quality defects. Do not insert a calibration
+stop, owner-labeling step, semantic-judge gate, RAG, prompt, retrieval, model, UI, gold, or corpus
+repair inside that pass. This is recovery of a measurement-instrument failure, not repair of the
+candidate answers. Once an H-item is run, never change the gold set or V26 in response to its
+result; any later system change opens a new cohort rather than repairing this baseline in place.
 
 The product has nevertheless moved beyond the original two-phase description. Reader-facing
 appearance and interpretive modes are implemented and public; they are no longer forbidden work.

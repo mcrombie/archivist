@@ -576,37 +576,41 @@ def _canonical_decomposition_checkpoints(fixture: _Fixture) -> tuple[Any, ...]:
 def _decomposition_failure_inputs(
     fixture: _Fixture,
     *,
-    item_id: str,
+    item_ids: tuple[str, ...],
 ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    failed_ids = frozenset(item_ids)
     decompositions = tuple(
         decomposition
         for decomposition in fixture.decompositions
-        if decomposition.item_id != item_id
+        if decomposition.item_id not in failed_ids
     )
     outcomes = list(_canonical_decomposition_checkpoints(fixture))
-    index = next(
-        index for index, generated in enumerate(fixture.generated) if generated.item_id == item_id
-    )
-    generated = fixture.generated[index]
-    response_id = f"resp_precal_decomposition_{item_id}"
-    outcomes[index] = build_private_decomposition_failure_checkpoint(
-        cohort_manifest_sha256=COHORT_SHA,
-        item_id=item_id,
-        answer_sha256=generated.answer_sha256,
-        repetition=1,
-        prompt_version="evaluation-claim-decomposition-v2",
-        prompt_sha256=DECOMPOSITION_PROMPT_SHA,
-        judge_model=JUDGE_MODEL,
-        judge_settings=JUDGE_SETTINGS,
-        provider=_provider(response_id),
-        usage_event=_usage(
-            response_id=response_id,
-            operation="eval_claim_decomposition",
-            model=JUDGE_MODEL,
-        ),
-        failure_code="exact_span_mismatch",
-        provider_response_snapshot_sha256="a" * 64,
-    )
+    for item_id in item_ids:
+        index = next(
+            index
+            for index, generated in enumerate(fixture.generated)
+            if generated.item_id == item_id
+        )
+        generated = fixture.generated[index]
+        response_id = f"resp_precal_decomposition_{item_id}"
+        outcomes[index] = build_private_decomposition_failure_checkpoint(
+            cohort_manifest_sha256=COHORT_SHA,
+            item_id=item_id,
+            answer_sha256=generated.answer_sha256,
+            repetition=1,
+            prompt_version="evaluation-claim-decomposition-v2",
+            prompt_sha256=DECOMPOSITION_PROMPT_SHA,
+            judge_model=JUDGE_MODEL,
+            judge_settings=JUDGE_SETTINGS,
+            provider=_provider(response_id),
+            usage_event=_usage(
+                response_id=response_id,
+                operation="eval_claim_decomposition",
+                model=JUDGE_MODEL,
+            ),
+            failure_code="exact_span_mismatch",
+            provider_response_snapshot_sha256="a" * 64,
+        )
     return decompositions, tuple(outcomes)
 
 
@@ -1121,7 +1125,7 @@ def test_precalibration_markdown_is_deterministic_and_text_free() -> None:
 
 def test_precalibration_seals_one_decomposition_failure_without_losing_answer() -> None:
     fixture = _make_fixture()
-    decompositions, outcomes = _decomposition_failure_inputs(fixture, item_id="H001")
+    decompositions, outcomes = _decomposition_failure_inputs(fixture, item_ids=("H001",))
     failure = validate_private_decomposition_failure_checkpoint(
         outcomes[0],
         cohort_manifest_sha256=COHORT_SHA,
@@ -1205,7 +1209,7 @@ def test_precalibration_seals_one_decomposition_failure_without_losing_answer() 
     assert (
         _precal_metric(summary, PrecalibrationMetricId.MUST_NOT_CLAIM_VIOLATION).denominator == 36
     )
-    assert _precal_metric(summary, PrecalibrationMetricId.FALSE_ABSTENTION).denominator == 33
+    assert _precal_metric(summary, PrecalibrationMetricId.FALSE_ABSTENTION).denominator == 32
 
     public_json = json.dumps(summary.model_dump(mode="json"), sort_keys=True)
     assert "H001" not in public_json
@@ -1228,6 +1232,65 @@ def test_precalibration_seals_one_decomposition_failure_without_losing_answer() 
     assert "`canonical_decomposition_technical_failure_present`" in markdown
     assert "Exact latency observations: 36" in markdown
     assert PRIVATE_SENTINEL not in markdown
+
+
+def test_precalibration_behavior_denominators_exclude_two_decomposition_failures() -> None:
+    fixture = _make_fixture()
+    decompositions, outcomes = _decomposition_failure_inputs(
+        fixture,
+        item_ids=("H001", "H002"),
+    )
+    artifact = build_precalibration_private_artifact(
+        cohort_manifest_sha256=COHORT_SHA,
+        generation_artifact_sha256=GENERATION_ARTIFACT_SHA,
+        decomposition_artifact_sha256=DECOMPOSITION_ARTIFACT_SHA,
+        gold_set_sha256=GOLD_SHA,
+        generated_items=fixture.generated,
+        decompositions=decompositions,
+        gold_items=fixture.gold,
+        decomposition_checkpoints=outcomes,
+        migration_artifact_sha256="4" * 64,
+        recovered_item_ids=("H003",),
+    )
+    summary = build_public_precalibration_summary(
+        candidate_id="evidence-planned-v26",
+        cohort_manifest=COHORT_MANIFEST,
+        generated_items=fixture.generated,
+        decompositions=decompositions,
+        gold_items=fixture.gold,
+        decomposition_checkpoints=outcomes,
+        private_artifact=artifact,
+        migration_artifact_sha256="4" * 64,
+        recovered_item_ids=("H003",),
+    )
+
+    assert summary.item_count == 37
+    assert summary.completed_answer_count == 37
+    assert summary.citation_count == 33
+    assert summary.decomposition_attempt_count == 37
+    assert summary.usable_decomposition_count == 35
+    assert summary.decomposition_technical_failure_count == 2
+    assert (
+        _precal_metric(
+            summary,
+            PrecalibrationMetricId.FALSE_ABSTENTION,
+        ).denominator
+        == 31
+    )
+    assert (
+        _precal_metric(
+            summary,
+            PrecalibrationMetricId.OUT_OF_CORPUS_ABSTENTION,
+        ).denominator
+        == 4
+    )
+    assert (
+        _precal_metric(
+            summary,
+            PrecalibrationMetricId.ADVERSARIAL_PREMISE_CORRECTION,
+        ).denominator
+        == 2
+    )
 
 
 def test_precalibration_trace_recovery_is_bound_and_excluded_from_latency() -> None:

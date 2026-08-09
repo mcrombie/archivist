@@ -18,9 +18,10 @@ anything that still requires measurement.
   owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
   held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
   (+1.26 points). This is a retrieval-only diagnostic, not an answer-quality score. The authorized
-  answer-quality run has now sealed all 37 V26 answers. Its first Terra decomposition call, for
-  H001, completed once but failed strict claim-text/character-span validation. No retry or repair
-  occurred; cumulative recorded spend is `$5.42436647`.
+  answer-quality run has now sealed all 37 V26 answers. Its first two Terra decomposition calls,
+  for H001 and H002, each completed once but failed strict claim-text/character-span validation.
+  Neither was retried or repaired; recovery-02 contains 90 provider events and cumulative recorded
+  spend of `$5.46195397`.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
@@ -28,16 +29,36 @@ anything that still requires measurement.
   question-commitment, overlap, privacy, provenance, and frozen-candidate checks pass. Parts of the
   annotations began as historical Claude drafts, but the owner later source-verified and
   adjudicated them. This is disclosed without a prospective-blinding claim.
-- **Restart point:** leave the answer-complete recovery root immutable. Preserve the provider-
-  retrieved H001 response as a private hash-bound snapshot, record it as one technical
-  decomposition failure, and create a provider-free sibling migration before making the 36 missing
-  Terra calls under the same `$20.00` cumulative cap. Do not correct H001's text or spans and do not
-  retry it. Publish 37 sealed answers, 37 canonical attempts, 36 usable decompositions, one
-  technical failure, and exact affected denominators. This is instrument recovery, not candidate
-  repair; calibration remains later and lower priority.
+- **Restart point:** leave recovery-02 immutable. H001 and H002 already have provider-retrieved,
+  private hash-bound response snapshots and must remain technical decomposition failures. Create
+  the provider-free recovery-03 sibling before making exactly 35 missing Terra calls under the same
+  `$20.00` cumulative cap. Do not correct or retry either failed result. During the remaining pass,
+  seal and continue only for the four predeclared reproducible local ID/span failures; stop on any
+  other unexpected condition. Publish 37 sealed answers, exactly 37 canonical attempts, `N` usable
+  decompositions, `37 - N` technical failures, and exact affected denominators. This is instrument
+  recovery, not candidate repair; calibration remains later and lower priority.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-09 — Turning a repeated malformed measurement into an honest cohort outcome
+
+- H002 showed that H001 was not a one-off interruption worth handling with another bespoke retry
+  decision. Terra produced a second parseable decomposition whose offsets did not reproduce its
+  own claim text. The strict validator rejected it, and the run correctly spent nothing on a retry.
+- The existing response was retrieved by ID rather than regenerated, then preserved as a private
+  snapshot. This made the distinction visible: the model call happened and belongs in cost and
+  attempt counts, but its output cannot be used as canonical claim measurement.
+- The harness now needs to represent that distinction directly. Each of the 37 answers still gets
+  exactly one Terra attempt. A successful decomposition contributes to claim-dependent metrics; a
+  mechanically proven local ID/span failure contributes a disclosed technical outcome instead.
+  Neither is silently discarded, repaired, converted to zero claims, or counted as an answer miss.
+- A durable pre-call intent and exact final ledger closure turn “no automatic retries” from a client
+  setting into a recoverable audit rule. If an interruption leaves the call's status ambiguous, the
+  next run stops rather than guessing and risking a duplicate charge.
+- This repair is deliberately narrower than making the judge more forgiving. It preserves the
+  frozen V26 answers and the failed measurement outputs as evidence, while allowing the remaining
+  untouched items to finish under the original authorization.
 
 ## 2026-08-07 — The first held-out retrieval diagnostic
 

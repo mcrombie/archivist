@@ -59,6 +59,31 @@ before calibration.
 
 ---
 
+## [2026-08-09] Terra repeated the exact-span instrument failure for H002
+Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
+Symptom: after provider-free recovery-02 sealed H001 as a technical decomposition failure, the
+authorized resume skipped H001 and made exactly one Terra call for H002. That call completed and
+was charged `$0.0375875`, but four of six returned claim strings did not exactly equal the frozen
+answer substrings at their declared spans. The harness stopped before H003. Recovery-02 now holds
+90 provider events and cumulative recorded spend of `$5.46195397`.
+Cause: the same class of measurement-instrument/model-output contract failure seen on H001, now
+demonstrating that a harness which stops for bespoke recovery after every known local span failure
+cannot complete the authorized no-retry cohort. This is not evidence that either candidate answer
+is defective. The response was retrieved by exact response ID without another model call and
+preserved privately with SHA-256
+`5dc006d3de7f2ae64f4aea1db76907c0cbda2f9b60ee060ffb3edac1eff42c0d`.
+Resolution and verification: do not repair or retry H002. Preserve recovery-02 unchanged and make
+one provider-free recovery-03 migration that binds both prior technical failures and every existing
+usage event. For the remaining 35 items, seal and continue past only four predeclared, mechanically
+reproducible post-parse failures: nonsequential claim IDs, out-of-bounds spans, overlapping or
+out-of-order spans, and exact-substring mismatch. Any provider, network, incomplete-status,
+model-identity, missing-parse, unavailable-source-number, or unknown failure still stops
+fail-closed. A durable pre-call intent prevents an ambiguous interruption from becoming a duplicate
+call. Final closure requires exactly 37 Terra attempts, unique response IDs, exact ledger-to-outcome
+agreement, and `N` valid decompositions plus `37 - N` disclosed technical failures. Failures are
+excluded only from decomposition-dependent denominators and never count as candidate-answer
+failures.
+
 ## [2026-08-09] Terra returned an invalid canonical claim-to-span mapping for H001
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
 Symptom: after the audited H003 recovery, the unchanged run sealed all 37 frozen V26 answers and

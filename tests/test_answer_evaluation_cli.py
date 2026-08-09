@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +32,13 @@ from answer_evaluation import (
     build_private_source,
     build_private_usage_event,
     canonical_json_sha256,
+)
+from evaluation_judge import (
+    AtomicClaim,
+    ClaimDecomposition,
+    ClaimDecompositionValidationCode,
+    ClaimDecompositionValidationError,
+    ProviderResponseMetadata,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -191,7 +199,7 @@ class _ZeroCostLedger:
         pass
 
     def summary(self) -> dict[str, float]:
-        return {"all_time_usd": 0.0}
+        return {"all_time_usd": 0.0, "unpriced_events": 0}
 
 
 def _decomposition_for(generated):
@@ -211,9 +219,20 @@ def _decomposition_for(generated):
 
 
 def _decomposition_failure_for(generated, *, cohort_manifest_sha256: str):
+    is_h002 = generated.item_id == "H002"
+    response_id = (
+        runner.SECOND_DECOMPOSITION_FAILURE_RESPONSE_ID
+        if is_h002
+        else runner.DECOMPOSITION_FAILURE_RESPONSE_ID
+    )
+    snapshot_sha = (
+        runner.SECOND_DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256
+        if is_h002
+        else runner.DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256
+    )
     usage = build_private_usage_event(
         sequence=1,
-        response_id=runner.DECOMPOSITION_FAILURE_RESPONSE_ID,
+        response_id=response_id,
         recorded_at="2026-08-09T12:00:00+00:00",
         operation="eval_claim_decomposition",
         requested_model=runner.JUDGE_MODEL,
@@ -241,14 +260,14 @@ def _decomposition_failure_for(generated, *, cohort_manifest_sha256: str):
             "verbosity": runner.JUDGE_SETTINGS.verbosity,
         },
         provider={
-            "id": runner.DECOMPOSITION_FAILURE_RESPONSE_ID,
+            "id": response_id,
             "model": runner.JUDGE_MODEL,
             "created_at": 1786285152.0,
             "system_fingerprint": None,
         },
         usage_event=usage,
         failure_code=DecompositionFailureCode.EXACT_SPAN_MISMATCH,
-        provider_response_snapshot_sha256=(runner.DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256),
+        provider_response_snapshot_sha256=snapshot_sha,
     )
 
 
@@ -487,7 +506,7 @@ def test_completed_run_37_resumes_without_provider_calls_or_overwrite(
     )
 
 
-def test_run_37_preserves_h001_technical_failure_and_calls_only_remaining_36(
+def test_run_37_skips_two_presealed_calls_and_continues_past_a_later_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = _context()
@@ -503,7 +522,7 @@ def test_run_37_preserves_h001_technical_failure_and_calls_only_remaining_36(
     def is_preserved(path: Path) -> bool:
         if path.name in {"baseline-generated.json", "calibration-generated.json"}:
             return True
-        return path.name == "decomposition-1.json" and path.parent.name == "H001"
+        return path.name == "decomposition-1.json" and path.parent.name in {"H001", "H002"}
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(runner, "UsageLedger", _ZeroCostLedger)
@@ -543,7 +562,7 @@ def test_run_37_preserves_h001_technical_failure_and_calls_only_remaining_36(
 
     def decomposition_checkpoint(*, generated, client, **_kwargs):
         provider_clients.append((generated.item_id, client))
-        if generated.item_id == "H001":
+        if generated.item_id in {"H001", "H002"}:
             return _decomposition_failure_for(
                 generated,
                 cohort_manifest_sha256="c" * 64,
@@ -566,6 +585,29 @@ def test_run_37_preserves_h001_technical_failure_and_calls_only_remaining_36(
             pricing_version="test-v1",
             unpriced=False,
         )
+        if generated.item_id == "H003":
+            return build_private_decomposition_failure_checkpoint(
+                cohort_manifest_sha256="c" * 64,
+                item_id=generated.item_id,
+                answer_sha256=generated.answer_sha256,
+                repetition=1,
+                prompt_version=runner.CLAIM_DECOMPOSITION_PROMPT_VERSION,
+                prompt_sha256=runner.CLAIM_DECOMPOSITION_PROMPT_SHA256,
+                judge_model=runner.JUDGE_MODEL,
+                judge_settings={
+                    "reasoning_effort": runner.JUDGE_SETTINGS.reasoning_effort,
+                    "verbosity": runner.JUDGE_SETTINGS.verbosity,
+                },
+                provider={
+                    "id": usage.response_id,
+                    "model": runner.JUDGE_MODEL,
+                    "created_at": None,
+                    "system_fingerprint": None,
+                },
+                usage_event=usage,
+                failure_code=DecompositionFailureCode.EXACT_SPAN_MISMATCH,
+                provider_response_snapshot_sha256="3" * 64,
+            ).model_dump(mode="json")
         return build_private_decomposition_checkpoint(
             cohort_manifest_sha256="c" * 64,
             item_id=generated.item_id,
@@ -611,12 +653,12 @@ def test_run_37_preserves_h001_technical_failure_and_calls_only_remaining_36(
         context,
     )
 
-    assert provider_clients[0] == ("H001", None)
+    assert provider_clients[:2] == [("H001", None), ("H002", None)]
     assert [item_id for item_id, value in provider_clients if value is client] == [
-        item.item_id for item in generated[1:]
+        item.item_id for item in generated[2:]
     ]
-    assert len([value for _, value in provider_clients if value is client]) == 36
-    assert emitted == [(37, 36)]
+    assert len([value for _, value in provider_clients if value is client]) == 35
+    assert emitted == [(37, 34)]
 
 
 def test_retired_calibration_generate_cannot_make_paid_calls(
@@ -830,6 +872,676 @@ def test_existing_decomposition_checkpoint_is_strictly_bound() -> None:
             generated=generated,
             repetition=1,
             cohort_manifest_sha256="c" * 64,
+        )
+
+
+def test_reused_generation_and_decomposition_checkpoints_require_live_ledger_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    context = _context()
+    gold_item = context.gold_items[0]
+    generated = _generated_item(gold_item, 1)
+    cohort_manifest_sha = "c" * 64
+    run_root = tmp_path / "prefix-closure"
+    runner.write_json_atomic_no_overwrite(
+        run_root / "items" / generated.item_id / "generated.json",
+        runner.build_private_generation_checkpoint(
+            cohort_manifest_sha256=cohort_manifest_sha,
+            item=generated,
+        ),
+    )
+    cohort_item = SimpleNamespace(
+        item_id=generated.item_id,
+        question_sha256=generated.question_sha256,
+        stratum=generated.stratum,
+        expected_behavior=generated.expected_behavior,
+    )
+    closure_turns: list[str] = []
+
+    def reject_prefix(*, turn_id: str, **_kwargs: object) -> None:
+        closure_turns.append(turn_id)
+        raise runner.AnswerEvaluationError("live usage differs from sealed checkpoint")
+
+    monkeypatch.setattr(runner, "_require_turn_usage_event_closure", reject_prefix)
+    with pytest.raises(runner.AnswerEvaluationError, match="live usage differs"):
+        runner._run_one_generated_item(
+            args=argparse.Namespace(run_root=run_root),
+            context=context,
+            item=gold_item,
+            client=None,
+            usage_db=tmp_path / "usage.sqlite3",
+            runner_sha256="a" * 64,
+            cohort_manifest_sha256=cohort_manifest_sha,
+            cohort_item=cohort_item,
+        )
+
+    decomposition = _decomposition_for(generated)
+    usage = build_private_usage_event(
+        sequence=1,
+        response_id="resp_existing_decomposition",
+        recorded_at="2026-08-09T12:00:00+00:00",
+        operation="eval_claim_decomposition",
+        requested_model=runner.JUDGE_MODEL,
+        actual_model=runner.JUDGE_MODEL,
+        input_tokens=100,
+        cached_tokens=0,
+        cache_write_tokens=0,
+        output_tokens=20,
+        reasoning_tokens=5,
+        total_tokens=120,
+        estimated_cost_nano_usd=1000,
+        pricing_version="test-v1",
+        unpriced=False,
+    )
+    runner._write_decomposition_attempt_intent(
+        run_root=run_root,
+        generated=generated,
+        repetition=1,
+        cohort_manifest_sha256=cohort_manifest_sha,
+    )
+    runner.write_json_atomic_no_overwrite(
+        run_root / "items" / generated.item_id / "decomposition-1.json",
+        build_private_decomposition_checkpoint(
+            cohort_manifest_sha256=cohort_manifest_sha,
+            item_id=generated.item_id,
+            answer_sha256=generated.answer_sha256,
+            repetition=1,
+            prompt_version=runner.CLAIM_DECOMPOSITION_PROMPT_VERSION,
+            prompt_sha256=runner.CLAIM_DECOMPOSITION_PROMPT_SHA256,
+            judge_model=runner.JUDGE_MODEL,
+            judge_settings={
+                "reasoning_effort": runner.JUDGE_SETTINGS.reasoning_effort,
+                "verbosity": runner.JUDGE_SETTINGS.verbosity,
+            },
+            provider={
+                "id": usage.response_id,
+                "model": runner.JUDGE_MODEL,
+                "created_at": None,
+                "system_fingerprint": None,
+            },
+            usage_event=usage,
+            decomposition=decomposition,
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "decompose_answer_claims",
+        lambda *_a, **_k: pytest.fail("reused checkpoint triggered a provider call"),
+    )
+    with pytest.raises(runner.AnswerEvaluationError, match="live usage differs"):
+        runner._decomposition_checkpoint(
+            args=argparse.Namespace(run_root=run_root),
+            generated=generated,
+            repetition=1,
+            client=None,
+            usage_db=tmp_path / "usage.sqlite3",
+            cohort_manifest_sha256=cohort_manifest_sha,
+        )
+    assert closure_turns == [generated.item_id, f"{generated.item_id}:decomposition:1"]
+
+
+def test_typed_live_decomposition_failure_seals_once_and_later_item_continues(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    context = _context()
+    generated_h003 = _generated_item(context.gold_items[2], 3)
+    generated_h004 = _generated_item(context.gold_items[3], 4)
+    calls: list[str] = []
+
+    def decompose(_client: object, *, answer: str):
+        generated = generated_h003 if answer == generated_h003.answer else generated_h004
+        calls.append(generated.item_id)
+        provider = ProviderResponseMetadata(
+            id=f"resp_decomposition_{generated.item_id}",
+            model=runner.JUDGE_MODEL,
+            created_at=1786288000.0,
+            system_fingerprint=None,
+        )
+        if generated.item_id == "H003":
+            invalid = ClaimDecomposition(
+                claims=[
+                    AtomicClaim(
+                        claim_id="C001",
+                        text=generated.answer[1:6],
+                        char_start=0,
+                        char_end=5,
+                        cited_sources=[1],
+                    )
+                ]
+            )
+            raise ClaimDecompositionValidationError(
+                failure_code=ClaimDecompositionValidationCode.EXACT_SPAN_MISMATCH,
+                provider=provider,
+                parsed=invalid,
+            )
+        return SimpleNamespace(
+            provider=provider,
+            parsed=ClaimDecomposition(
+                claims=[
+                    AtomicClaim(
+                        claim_id="C001",
+                        text=generated.answer,
+                        char_start=0,
+                        char_end=len(generated.answer),
+                        cited_sources=[1],
+                    )
+                ]
+            ),
+        )
+
+    def usage_events(_path: Path, *, turn_id: str, **_kwargs: object):
+        item_id = turn_id.split(":", 1)[0]
+        return (
+            build_private_usage_event(
+                sequence=1,
+                response_id=f"resp_decomposition_{item_id}",
+                recorded_at="2026-08-09T12:00:00+00:00",
+                operation="eval_claim_decomposition",
+                requested_model=runner.JUDGE_MODEL,
+                actual_model=runner.JUDGE_MODEL,
+                input_tokens=100,
+                cached_tokens=0,
+                cache_write_tokens=0,
+                output_tokens=20,
+                reasoning_tokens=5,
+                total_tokens=120,
+                estimated_cost_nano_usd=1000,
+                pricing_version="test-v1",
+                unpriced=False,
+            ),
+        )
+
+    monkeypatch.setattr(runner, "decompose_answer_claims", decompose)
+    monkeypatch.setattr(runner, "_private_usage_events", usage_events)
+    monkeypatch.setattr(runner, "_require_no_orphan_usage", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "_require_turn_usage_event_closure", lambda **_k: None)
+    args = argparse.Namespace(run_root=tmp_path / "inline-failure")
+
+    h003_payload = runner._decomposition_checkpoint(
+        args=args,
+        generated=generated_h003,
+        repetition=1,
+        client=object(),
+        usage_db=tmp_path / "usage.sqlite3",
+        cohort_manifest_sha256="c" * 64,
+    )
+    assert h003_payload["failure_code"] == "exact_span_mismatch"
+    assert runner._decomposition_failure_snapshot_path(
+        args.run_root,
+        item_id="H003",
+        repetition=1,
+    ).is_file()
+    h004_payload = runner._decomposition_checkpoint(
+        args=args,
+        generated=generated_h004,
+        repetition=1,
+        client=object(),
+        usage_db=tmp_path / "usage.sqlite3",
+        cohort_manifest_sha256="c" * 64,
+    )
+    assert h004_payload["schema"] == runner.PRIVATE_DECOMPOSITION_CHECKPOINT_SCHEMA
+    repeated_h003 = runner._decomposition_checkpoint(
+        args=args,
+        generated=generated_h003,
+        repetition=1,
+        client=None,
+        usage_db=tmp_path / "usage.sqlite3",
+        cohort_manifest_sha256="c" * 64,
+    )
+    assert repeated_h003 == h003_payload
+    assert calls == ["H003", "H004"]
+
+
+def test_unknown_decomposition_failure_is_not_retried_or_misclassified(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    generated = _generated_item(_context().gold_items[2], 3)
+    calls = 0
+
+    def fail_unknown(_client: object, *, answer: str):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("provider connection failed")
+
+    monkeypatch.setattr(runner, "decompose_answer_claims", fail_unknown)
+    monkeypatch.setattr(runner, "_require_no_orphan_usage", lambda *_a, **_k: None)
+    args = argparse.Namespace(run_root=tmp_path / "unknown-failure")
+    with pytest.raises(RuntimeError, match="provider connection failed"):
+        runner._decomposition_checkpoint(
+            args=args,
+            generated=generated,
+            repetition=1,
+            client=object(),
+            usage_db=tmp_path / "usage.sqlite3",
+            cohort_manifest_sha256="c" * 64,
+        )
+    assert calls == 1
+    assert not (args.run_root / "items" / generated.item_id / "decomposition-1.json").exists()
+    assert runner._decomposition_attempt_intent_path(
+        args.run_root,
+        item_id=generated.item_id,
+        repetition=1,
+    ).is_file()
+    with pytest.raises(runner.AnswerEvaluationError, match="automatic replay is forbidden"):
+        runner._decomposition_checkpoint(
+            args=args,
+            generated=generated,
+            repetition=1,
+            client=object(),
+            usage_db=tmp_path / "usage.sqlite3",
+            cohort_manifest_sha256="c" * 64,
+        )
+    assert calls == 1
+
+
+def test_unavailable_cited_source_stops_before_success_checkpoint_and_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    generated = _generated_item(_context().gold_items[2], 3)
+    calls = 0
+
+    def invalid_sources(_client: object, *, answer: str):
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(
+            provider=ProviderResponseMetadata(
+                id="resp_unavailable_source",
+                model=runner.JUDGE_MODEL,
+                created_at=1786288000.0,
+                system_fingerprint=None,
+            ),
+            parsed=ClaimDecomposition(
+                claims=[
+                    AtomicClaim(
+                        claim_id="C001",
+                        text=answer,
+                        char_start=0,
+                        char_end=len(answer),
+                        cited_sources=[999],
+                    )
+                ]
+            ),
+        )
+
+    monkeypatch.setattr(runner, "decompose_answer_claims", invalid_sources)
+    monkeypatch.setattr(runner, "_require_no_orphan_usage", lambda *_a, **_k: None)
+    args = argparse.Namespace(run_root=tmp_path / "unavailable-source")
+    with pytest.raises(runner.AnswerEvaluationError, match="unavailable source"):
+        runner._decomposition_checkpoint(
+            args=args,
+            generated=generated,
+            repetition=1,
+            client=object(),
+            usage_db=tmp_path / "usage.sqlite3",
+            cohort_manifest_sha256="c" * 64,
+        )
+    assert calls == 1
+    assert not (args.run_root / "items" / generated.item_id / "decomposition-1.json").exists()
+    with pytest.raises(runner.AnswerEvaluationError, match="automatic replay is forbidden"):
+        runner._decomposition_checkpoint(
+            args=args,
+            generated=generated,
+            repetition=1,
+            client=object(),
+            usage_db=tmp_path / "usage.sqlite3",
+            cohort_manifest_sha256="c" * 64,
+        )
+    assert calls == 1
+
+
+def test_inline_failure_snapshot_must_reproduce_named_invariant(
+    tmp_path: Path,
+) -> None:
+    generated = _generated_item(_context().gold_items[2], 3)
+    parsed = ClaimDecomposition(
+        claims=[
+            AtomicClaim(
+                claim_id="C001",
+                text=generated.answer,
+                char_start=0,
+                char_end=len(generated.answer),
+                cited_sources=[1],
+            )
+        ]
+    )
+    provider = ProviderResponseMetadata(
+        id="resp_valid_but_misclassified",
+        model=runner.JUDGE_MODEL,
+        created_at=1786288000.0,
+        system_fingerprint=None,
+    )
+    usage = build_private_usage_event(
+        sequence=1,
+        response_id="resp_valid_but_misclassified",
+        recorded_at="2026-08-09T12:00:00+00:00",
+        operation="eval_claim_decomposition",
+        requested_model=runner.JUDGE_MODEL,
+        actual_model=runner.JUDGE_MODEL,
+        input_tokens=100,
+        cached_tokens=0,
+        cache_write_tokens=0,
+        output_tokens=20,
+        reasoning_tokens=5,
+        total_tokens=120,
+        estimated_cost_nano_usd=1000,
+        pricing_version="test-v1",
+        unpriced=False,
+    )
+    claimed_failure = ClaimDecompositionValidationError(
+        failure_code=ClaimDecompositionValidationCode.EXACT_SPAN_MISMATCH,
+        provider=provider,
+        parsed=parsed,
+    )
+    run_root = tmp_path / "misclassified"
+    snapshot_path = runner._decomposition_failure_snapshot_path(
+        run_root,
+        item_id=generated.item_id,
+        repetition=1,
+    )
+    runner.write_json_atomic_no_overwrite(
+        snapshot_path,
+        runner._inline_decomposition_failure_snapshot(
+            generated=generated,
+            repetition=1,
+            failure=claimed_failure,
+            usage_event=usage,
+        ),
+    )
+    checkpoint = build_private_decomposition_failure_checkpoint(
+        cohort_manifest_sha256="c" * 64,
+        item_id=generated.item_id,
+        answer_sha256=generated.answer_sha256,
+        repetition=1,
+        prompt_version=runner.CLAIM_DECOMPOSITION_PROMPT_VERSION,
+        prompt_sha256=runner.CLAIM_DECOMPOSITION_PROMPT_SHA256,
+        judge_model=runner.JUDGE_MODEL,
+        judge_settings={
+            "reasoning_effort": runner.JUDGE_SETTINGS.reasoning_effort,
+            "verbosity": runner.JUDGE_SETTINGS.verbosity,
+        },
+        provider={
+            "id": provider.id,
+            "model": provider.model,
+            "created_at": provider.created_at,
+            "system_fingerprint": provider.system_fingerprint,
+        },
+        usage_event=usage,
+        failure_code=DecompositionFailureCode.EXACT_SPAN_MISMATCH,
+        provider_response_snapshot_sha256=runner.sha256_file(snapshot_path),
+    )
+    with pytest.raises(runner.AnswerEvaluationError, match="does not reproduce"):
+        runner._validate_decomposition_failure_snapshot_binding(
+            run_root=run_root,
+            checkpoint=checkpoint,
+            generated=generated,
+        )
+
+
+def test_unknown_decomposition_failure_snapshot_schema_is_rejected(tmp_path: Path) -> None:
+    generated = _generated_item(_context().gold_items[2], 3)
+    usage = build_private_usage_event(
+        sequence=1,
+        response_id="resp_unknown_snapshot",
+        recorded_at="2026-08-09T12:00:00+00:00",
+        operation="eval_claim_decomposition",
+        requested_model=runner.JUDGE_MODEL,
+        actual_model=runner.JUDGE_MODEL,
+        input_tokens=100,
+        cached_tokens=0,
+        cache_write_tokens=0,
+        output_tokens=20,
+        reasoning_tokens=5,
+        total_tokens=120,
+        estimated_cost_nano_usd=1000,
+        pricing_version="test-v1",
+        unpriced=False,
+    )
+    run_root = tmp_path / "unknown-snapshot"
+    snapshot_path = runner._decomposition_failure_snapshot_path(
+        run_root,
+        item_id=generated.item_id,
+        repetition=1,
+    )
+    runner.write_json_atomic_no_overwrite(
+        snapshot_path,
+        {"schema": "archivist.answer_evaluation.unknown_failure/1"},
+    )
+    checkpoint = build_private_decomposition_failure_checkpoint(
+        cohort_manifest_sha256="c" * 64,
+        item_id=generated.item_id,
+        answer_sha256=generated.answer_sha256,
+        repetition=1,
+        prompt_version=runner.CLAIM_DECOMPOSITION_PROMPT_VERSION,
+        prompt_sha256=runner.CLAIM_DECOMPOSITION_PROMPT_SHA256,
+        judge_model=runner.JUDGE_MODEL,
+        judge_settings={
+            "reasoning_effort": runner.JUDGE_SETTINGS.reasoning_effort,
+            "verbosity": runner.JUDGE_SETTINGS.verbosity,
+        },
+        provider={
+            "id": usage.response_id,
+            "model": runner.JUDGE_MODEL,
+            "created_at": None,
+            "system_fingerprint": None,
+        },
+        usage_event=usage,
+        failure_code=DecompositionFailureCode.EXACT_SPAN_MISMATCH,
+        provider_response_snapshot_sha256=runner.sha256_file(snapshot_path),
+    )
+    with pytest.raises(runner.AnswerEvaluationError, match="schema is unsupported"):
+        runner._validate_decomposition_failure_snapshot_binding(
+            run_root=run_root,
+            checkpoint=checkpoint,
+            generated=generated,
+        )
+
+
+def test_usage_closure_binds_two_presealed_and_one_later_failure_then_rejects_orphan(
+    tmp_path: Path,
+) -> None:
+    context = _context()
+    generated = tuple(
+        _generated_item(item, sequence) for sequence, item in enumerate(context.gold_items, start=1)
+    )
+    outcomes = []
+    for item in generated:
+        if item.item_id in {"H001", "H002"}:
+            outcomes.append(_decomposition_failure_for(item, cohort_manifest_sha256="c" * 64))
+            continue
+        usage = build_private_usage_event(
+            sequence=1,
+            response_id=f"resp_decomposition_{item.item_id}",
+            recorded_at="2026-08-09T12:00:00+00:00",
+            operation="eval_claim_decomposition",
+            requested_model=runner.JUDGE_MODEL,
+            actual_model=runner.JUDGE_MODEL,
+            input_tokens=100,
+            cached_tokens=0,
+            cache_write_tokens=0,
+            output_tokens=20,
+            reasoning_tokens=5,
+            total_tokens=120,
+            estimated_cost_nano_usd=1000,
+            pricing_version="test-v1",
+            unpriced=False,
+        )
+        if item.item_id == "H003":
+            outcomes.append(
+                build_private_decomposition_failure_checkpoint(
+                    cohort_manifest_sha256="c" * 64,
+                    item_id=item.item_id,
+                    answer_sha256=item.answer_sha256,
+                    repetition=1,
+                    prompt_version=runner.CLAIM_DECOMPOSITION_PROMPT_VERSION,
+                    prompt_sha256=runner.CLAIM_DECOMPOSITION_PROMPT_SHA256,
+                    judge_model=runner.JUDGE_MODEL,
+                    judge_settings={
+                        "reasoning_effort": runner.JUDGE_SETTINGS.reasoning_effort,
+                        "verbosity": runner.JUDGE_SETTINGS.verbosity,
+                    },
+                    provider={
+                        "id": usage.response_id,
+                        "model": runner.JUDGE_MODEL,
+                        "created_at": None,
+                        "system_fingerprint": None,
+                    },
+                    usage_event=usage,
+                    failure_code=DecompositionFailureCode.EXACT_SPAN_MISMATCH,
+                    provider_response_snapshot_sha256="3" * 64,
+                )
+            )
+            continue
+        outcomes.append(
+            build_private_decomposition_checkpoint(
+                cohort_manifest_sha256="c" * 64,
+                item_id=item.item_id,
+                answer_sha256=item.answer_sha256,
+                repetition=1,
+                prompt_version=runner.CLAIM_DECOMPOSITION_PROMPT_VERSION,
+                prompt_sha256=runner.CLAIM_DECOMPOSITION_PROMPT_SHA256,
+                judge_model=runner.JUDGE_MODEL,
+                judge_settings={
+                    "reasoning_effort": runner.JUDGE_SETTINGS.reasoning_effort,
+                    "verbosity": runner.JUDGE_SETTINGS.verbosity,
+                },
+                provider={
+                    "id": f"resp_decomposition_{item.item_id}",
+                    "model": runner.JUDGE_MODEL,
+                    "created_at": None,
+                    "system_fingerprint": None,
+                },
+                usage_event=usage,
+                decomposition=_decomposition_for(item),
+            )
+        )
+
+    usage_db = tmp_path / "closure.sqlite3"
+    connection = sqlite3.connect(usage_db)
+    connection.execute(
+        """
+        CREATE TABLE usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            response_id TEXT NOT NULL,
+            recorded_at TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            requested_model TEXT NOT NULL,
+            actual_model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            cached_tokens INTEGER NOT NULL,
+            cache_write_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            reasoning_tokens INTEGER NOT NULL,
+            total_tokens INTEGER NOT NULL,
+            estimated_cost_nano_usd INTEGER NOT NULL,
+            pricing_version TEXT NOT NULL,
+            unpriced INTEGER NOT NULL
+        )
+        """
+    )
+
+    def insert(turn_id: str, event) -> None:
+        connection.execute(
+            """
+            INSERT INTO usage_events (
+                project_id, conversation_id, turn_id, response_id, recorded_at,
+                operation, requested_model, actual_model, input_tokens, cached_tokens,
+                cache_write_tokens, output_tokens, reasoning_tokens, total_tokens,
+                estimated_cost_nano_usd, pricing_version, unpriced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                runner.EVALUATION_ID,
+                "held-out-37",
+                turn_id,
+                event.response_id,
+                event.recorded_at,
+                event.operation,
+                event.requested_model,
+                event.actual_model,
+                event.input_tokens,
+                event.cached_tokens,
+                event.cache_write_tokens,
+                event.output_tokens,
+                event.reasoning_tokens,
+                event.total_tokens,
+                event.estimated_cost_nano_usd,
+                event.pricing_version,
+                int(event.unpriced),
+            ),
+        )
+
+    for item in generated:
+        for event in item.usage_events:
+            insert(item.item_id, event)
+    for item, outcome in zip(generated, outcomes, strict=True):
+        insert(f"{item.item_id}:decomposition:1", outcome.usage_events[0])
+    connection.commit()
+    connection.close()
+
+    runner._require_evaluation_usage_outcome_closure(
+        usage_db=usage_db,
+        generated_items=generated,
+        decomposition_outcomes=outcomes,
+    )
+    unpriced_event = (
+        outcomes[2]
+        .usage_events[0]
+        .model_copy(update={"estimated_cost_nano_usd": None, "unpriced": True})
+    )
+    unpriced_outcomes = list(outcomes)
+    unpriced_outcomes[2] = outcomes[2].model_copy(update={"usage_events": (unpriced_event,)})
+    with pytest.raises(runner.AnswerEvaluationError, match="hard cap with unpriced usage"):
+        runner._require_evaluation_usage_outcome_closure(
+            usage_db=usage_db,
+            generated_items=generated,
+            decomposition_outcomes=unpriced_outcomes,
+        )
+    connection = sqlite3.connect(usage_db)
+    extra = outcomes[-1].usage_events[0].model_copy(update={"response_id": "resp_orphan_extra"})
+    insert_connection = connection
+    insert_connection.execute(
+        """
+        INSERT INTO usage_events (
+            project_id, conversation_id, turn_id, response_id, recorded_at,
+            operation, requested_model, actual_model, input_tokens, cached_tokens,
+            cache_write_tokens, output_tokens, reasoning_tokens, total_tokens,
+            estimated_cost_nano_usd, pricing_version, unpriced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            runner.EVALUATION_ID,
+            "held-out-37",
+            "H038:decomposition:2",
+            extra.response_id,
+            extra.recorded_at,
+            extra.operation,
+            extra.requested_model,
+            extra.actual_model,
+            extra.input_tokens,
+            extra.cached_tokens,
+            extra.cache_write_tokens,
+            extra.output_tokens,
+            extra.reasoning_tokens,
+            extra.total_tokens,
+            extra.estimated_cost_nano_usd,
+            extra.pricing_version,
+            int(extra.unpriced),
+        ),
+    )
+    insert_connection.commit()
+    insert_connection.close()
+    with pytest.raises(runner.AnswerEvaluationError, match="orphan"):
+        runner._require_evaluation_usage_outcome_closure(
+            usage_db=usage_db,
+            generated_items=generated,
+            decomposition_outcomes=outcomes,
         )
 
 
@@ -1133,6 +1845,318 @@ def test_decomposition_failure_recovery_is_provider_free_sealed_and_idempotent(
     assert len(validation_calls) == 2
 
 
+def test_second_decomposition_failure_recovery_is_provider_free_and_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    context = _context()
+    context.corpus_identity = {
+        "chunks_sha256": "6" * 64,
+        "hnsw_space": "l2",
+        "collection_name": "test-collection",
+    }
+    context.collection = SimpleNamespace(count=lambda: 481)
+    private_root = tmp_path / "private-evaluations"
+    source_root = private_root / "source-recovery-02"
+    destination_root = private_root / "source-recovery-03"
+    source_root.mkdir(parents=True)
+    source_runner_sha = "7" * 64
+    source_manifest = runner._expected_cohort_manifest(
+        context,
+        runner_sha256=source_runner_sha,
+    )
+    source_manifest_path = source_root / "cohort-manifest.json"
+    runner.write_json_atomic_no_overwrite(source_manifest_path, source_manifest)
+    real_sha256_file = runner.sha256_file
+    real_validate_second = runner._validate_second_decomposition_failure_migration_binding
+    source_manifest_sha = real_sha256_file(source_manifest_path)
+    generated = tuple(
+        _generated_item(item, sequence) for sequence, item in enumerate(context.gold_items, start=1)
+    )
+    trace_hashes: dict[str, str] = {}
+    for item in generated:
+        item_root = source_root / "items" / item.item_id
+        checkpoint = runner.build_private_generation_checkpoint(
+            cohort_manifest_sha256=source_manifest_sha,
+            item=item,
+        )
+        runner.write_json_atomic_no_overwrite(item_root / "generated.json", checkpoint)
+        trace = item.trace_references[0]
+        trace_path = item_root / trace.path
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        trace_path.write_text(f"sealed trace for {item.item_id}\n", encoding="utf-8")
+        trace_hashes[item.item_id] = trace.sha256
+
+    calibration_path = source_root / "calibration-generated.json"
+    baseline_path = source_root / "baseline-generated.json"
+    prior_migration_path = source_root / "migration-audit.json"
+    usage_path = source_root / "full-evaluation-usage.sqlite3"
+    calibration_path.write_text(
+        json.dumps({"run_identity": context.run_identity}), encoding="utf-8"
+    )
+    baseline_path.write_text("{}", encoding="utf-8")
+    prior_migration_path.write_text("{}", encoding="utf-8")
+    usage_path.write_bytes(b"sealed 90-event logical ledger\n")
+    h001_snapshot = source_root / "provider-responses" / "H001-decomposition-1.json"
+    h001_snapshot.parent.mkdir(parents=True, exist_ok=True)
+    h001_snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "archivist.answer_evaluation.retrieved_provider_response/1",
+                "response_id": runner.DECOMPOSITION_FAILURE_RESPONSE_ID,
+                "model": runner.JUDGE_MODEL,
+                "status": "completed",
+            }
+        ),
+        encoding="utf-8",
+    )
+    h002_snapshot = tmp_path / "H002-response.json"
+    h002_snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "archivist.answer_evaluation.retrieved_provider_response/1",
+                "response_id": runner.SECOND_DECOMPOSITION_FAILURE_RESPONSE_ID,
+                "model": runner.JUDGE_MODEL,
+                "status": "completed",
+            }
+        ),
+        encoding="utf-8",
+    )
+    h001_snapshot_sha = real_sha256_file(h001_snapshot)
+    h002_snapshot_sha = real_sha256_file(h002_snapshot)
+    h001 = generated[0]
+    h002 = generated[1]
+    h001_usage = _decomposition_failure_for(
+        h001,
+        cohort_manifest_sha256=source_manifest_sha,
+    ).usage_events[0]
+    h002_usage = _decomposition_failure_for(
+        h002,
+        cohort_manifest_sha256=source_manifest_sha,
+    ).usage_events[0]
+    h001_source_failure = build_private_decomposition_failure_checkpoint(
+        cohort_manifest_sha256=source_manifest_sha,
+        item_id="H001",
+        answer_sha256=h001.answer_sha256,
+        repetition=1,
+        prompt_version=runner.CLAIM_DECOMPOSITION_PROMPT_VERSION,
+        prompt_sha256=runner.CLAIM_DECOMPOSITION_PROMPT_SHA256,
+        judge_model=runner.JUDGE_MODEL,
+        judge_settings={
+            "reasoning_effort": runner.JUDGE_SETTINGS.reasoning_effort,
+            "verbosity": runner.JUDGE_SETTINGS.verbosity,
+        },
+        provider={
+            "id": runner.DECOMPOSITION_FAILURE_RESPONSE_ID,
+            "model": runner.JUDGE_MODEL,
+            "created_at": 1786285152.0,
+            "system_fingerprint": None,
+        },
+        usage_event=h001_usage,
+        failure_code=DecompositionFailureCode.EXACT_SPAN_MISMATCH,
+        provider_response_snapshot_sha256=h001_snapshot_sha,
+    )
+    runner.write_json_atomic_no_overwrite(
+        source_root / "items" / "H001" / "decomposition-1.json",
+        h001_source_failure,
+    )
+    source_file_bytes = {
+        path.relative_to(source_root).as_posix(): path.read_bytes()
+        for path in source_root.rglob("*")
+        if path.is_file()
+    }
+    logical_events = tuple(
+        {"sequence": sequence, "response_id": f"resp-{sequence:03d}"} for sequence in range(1, 91)
+    )
+    turn_ids = tuple(
+        sorted(
+            [
+                *(str(item["id"]) for item in context.gold_items),
+                "H001:decomposition:1",
+                "H002:decomposition:1",
+            ]
+        )
+    )
+    calibration_ids = set(context.calibration_ids)
+    calibration = tuple(item for item in generated if item.item_id in calibration_ids)
+    validation_calls: list[Path] = []
+
+    def bound_sha256_file(path: Path) -> str:
+        candidate = Path(path)
+        if "retrieval-traces" in candidate.parts:
+            return trace_hashes[candidate.name.removesuffix(".json")]
+        return real_sha256_file(candidate)
+
+    def validate_second(**kwargs: object) -> tuple[str, tuple[str, ...]]:
+        run_root = Path(kwargs["run_root"])
+        assert (run_root / "migration-audit.json").is_file()
+        validation_calls.append(run_root)
+        return real_validate_second(**kwargs)
+
+    monkeypatch.setattr(runner, "PRIVATE_EVALUATION_ROOT", private_root)
+    monkeypatch.setattr(runner, "DEFAULT_DECOMPOSITION_FAILURE_RECOVERY_ROOT", source_root)
+    monkeypatch.setattr(
+        runner,
+        "DEFAULT_SECOND_DECOMPOSITION_FAILURE_RECOVERY_ROOT",
+        destination_root,
+    )
+    monkeypatch.setattr(
+        runner,
+        "DEFAULT_SECOND_DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT",
+        h002_snapshot,
+    )
+    monkeypatch.setattr(
+        runner, "SECOND_DECOMPOSITION_FAILURE_SOURCE_RUNNER_SHA256", source_runner_sha
+    )
+    monkeypatch.setattr(
+        runner,
+        "SECOND_DECOMPOSITION_FAILURE_SOURCE_COHORT_FILE_SHA256",
+        source_manifest_sha,
+    )
+    monkeypatch.setattr(
+        runner,
+        "SECOND_DECOMPOSITION_FAILURE_SOURCE_MIGRATION_FILE_SHA256",
+        real_sha256_file(prior_migration_path),
+    )
+    monkeypatch.setattr(
+        runner,
+        "SECOND_DECOMPOSITION_FAILURE_SOURCE_CALIBRATION_GENERATION_SHA256",
+        real_sha256_file(calibration_path),
+    )
+    monkeypatch.setattr(
+        runner,
+        "SECOND_DECOMPOSITION_FAILURE_SOURCE_BASELINE_GENERATION_SHA256",
+        real_sha256_file(baseline_path),
+    )
+    monkeypatch.setattr(
+        runner,
+        "SECOND_DECOMPOSITION_FAILURE_SOURCE_LEDGER_SHA256",
+        real_sha256_file(usage_path),
+    )
+    monkeypatch.setattr(
+        runner,
+        "SECOND_DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256",
+        h002_snapshot_sha,
+    )
+    monkeypatch.setattr(
+        runner,
+        "DECOMPOSITION_FAILURE_RESPONSE_SNAPSHOT_SHA256",
+        h001_snapshot_sha,
+    )
+    monkeypatch.setattr(runner, "sha256_file", bound_sha256_file)
+    monkeypatch.setattr(runner, "_usage_turn_ids", lambda _path: turn_ids)
+    monkeypatch.setattr(runner, "_logical_usage_bindings", lambda _path: logical_events)
+    monkeypatch.setattr(
+        runner,
+        "_validate_decomposition_failure_migration_binding",
+        lambda **_kwargs: ("a" * 64, ("H003",)),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validate_generation_artifact",
+        lambda path, **_kwargs: (calibration, bound_sha256_file(path)),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validate_baseline_generation_artifact",
+        lambda path, **_kwargs: (generated, bound_sha256_file(path)),
+    )
+    monkeypatch.setattr(
+        runner,
+        "replace",
+        lambda value, **changes: SimpleNamespace(**{**vars(value), **changes}),
+    )
+
+    def prove_failure(*, generated, **_kwargs):
+        is_h002 = generated.item_id == "H002"
+        return (
+            {
+                "id": (
+                    runner.SECOND_DECOMPOSITION_FAILURE_RESPONSE_ID
+                    if is_h002
+                    else runner.DECOMPOSITION_FAILURE_RESPONSE_ID
+                ),
+                "model": runner.JUDGE_MODEL,
+                "created_at": 1786285152.0,
+                "system_fingerprint": None,
+            },
+            h002_usage if is_h002 else h001_usage,
+            _decomposition_for(generated),
+        )
+
+    monkeypatch.setattr(runner, "_prove_h001_decomposition_failure", prove_failure)
+    monkeypatch.setattr(runner, "_prove_retrieved_decomposition_failure", prove_failure)
+    monkeypatch.setattr(
+        runner,
+        "_validate_second_decomposition_failure_migration_binding",
+        validate_second,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_create_openai_client",
+        lambda _key: pytest.fail("second recovery constructed a provider client"),
+    )
+    args = argparse.Namespace(source_run_root=source_root, run_root=destination_root)
+
+    runner._recover_second_decomposition_failure(args, context)
+
+    failures = sorted(
+        path.parent.name for path in (destination_root / "items").glob("H*/decomposition-1.json")
+    )
+    assert failures == ["H001", "H002"]
+    assert all(
+        runner._decomposition_attempt_intent_path(
+            destination_root,
+            item_id=item_id,
+            repetition=1,
+        ).is_file()
+        for item_id in failures
+    )
+    assert usage_path.read_bytes() == source_file_bytes["full-evaluation-usage.sqlite3"]
+    assert {
+        path.relative_to(source_root).as_posix(): path.read_bytes()
+        for path in source_root.rglob("*")
+        if path.is_file()
+    } == source_file_bytes
+    destination_bytes = {
+        path.relative_to(destination_root).as_posix(): path.read_bytes()
+        for path in destination_root.rglob("*")
+        if path.is_file()
+    }
+
+    runner._recover_second_decomposition_failure(args, context)
+
+    assert {
+        path.relative_to(destination_root).as_posix(): path.read_bytes()
+        for path in destination_root.rglob("*")
+        if path.is_file()
+    } == destination_bytes
+    assert len(validation_calls) == 2
+
+    audit_path = destination_root / "migration-audit.json"
+    tampered_audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    for failure in tampered_audit["decomposition_failures"]:
+        if failure["item_id"] == "H002":
+            failure["failed_candidate_decomposition_sha256"] = "0" * 64
+    tampered_audit.pop("artifact_sha256")
+    tampered_audit["artifact_sha256"] = canonical_json_sha256(tampered_audit)
+    audit_path.write_text(json.dumps(tampered_audit), encoding="utf-8")
+    with pytest.raises(runner.AnswerEvaluationError, match="technical-failure binding changed"):
+        runner._validate_second_decomposition_failure_migration_binding(
+            run_root=destination_root,
+            context=context,
+            runner_sha256=runner.sha256_file(Path(runner.__file__)),
+            cohort_manifest=runner.AnswerEvaluationCohortManifest.model_validate(
+                runner._load_json_object(
+                    destination_root / "cohort-manifest.json",
+                    label="test cohort",
+                )
+            ),
+            cohort_manifest_sha256=runner.sha256_file(destination_root / "cohort-manifest.json"),
+            usage_db=destination_root / "full-evaluation-usage.sqlite3",
+        )
+
+
 def _early_release_row() -> dict[str, object]:
     return {
         "response_id": "req_embedding_H003",
@@ -1427,6 +2451,17 @@ def test_prospective_cost_reserve_fails_before_a_call(
             4.0,
             reserve_usd=runner.GENERATION_ITEM_COST_RESERVE_USD,
             label="generation item H001",
+        )
+
+
+def test_unpriced_ledger_fails_closed_before_cost_cap_can_be_used() -> None:
+    ledger = SimpleNamespace(summary=lambda: {"all_time_usd": 0.0, "unpriced_events": 1})
+    with pytest.raises(runner.AnswerEvaluationError, match="unpriced provider usage"):
+        runner._require_cost_reserve(
+            ledger,
+            20.0,
+            reserve_usd=runner.DECOMPOSITION_CALL_COST_RESERVE_USD,
+            label="decomposition H003/1",
         )
 
 
