@@ -166,16 +166,33 @@ The public version endpoint binds a running process to Render's `RENDER_GIT_COMM
 manifest, active RAG policy, and versioned public request-cost contract before a measurement begins.
 On Render, its automatic commit identity is authoritative.
 
-The production cohort is **implemented and prepared, but not yet run**. Its protocol fixes the
-denominator at exactly 33 attempted answerable held-out items, with no retry or replacement. Each
-request is a fresh, sequential Essential/Complete/RAG first turn with empty history, and request
-starts remain at least 12 seconds apart so the measurement does not accidentally exercise the
-configured per-client rate limit. Warm status is established by readiness and process-identity
-checks rather than by making an unmeasured paid request. Server latency runs from request ingress
-through construction of the complete response; p50 is the median and p95 uses nearest rank over the
-explicitly reported number of valid successful completions. Error rate retains all 33 attempts,
-while missing or inconsistent telemetry is reported separately as an instrumentation failure. A
-successful response with zero request-scoped usage events is not allowed into the latency sample.
+The predeclared production cohort is now **complete** against deployed wrapper commit
+`e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. It attempted exactly 33 answerable held-out items with
+no retry or replacement. Twenty-nine were valid successful completions and four were request
+failures, for an all-attempt error rate of 12.1212%; there were zero instrumentation failures.
+Across the 29 successful completions, end-to-end server latency was 54.393 seconds at p50 and
+113.801 seconds at nearest-rank p95. Client-observed latency was 54.493 seconds at p50 and 113.829
+seconds at p95. The cohort recorded 500,164 tokens across 80 priced and zero unpriced events, with
+estimated API cost of `$4.90594694`.
+
+The four failures were fail-closed generation-contract rejections after successful planning and
+evidence selection: two `missing_unit_requirement_id` cases, one `obligation_role_mismatch`, and
+one `unsupported_requirement_has_unit`. They were not budget, transport, deployment, or telemetry
+failures. This preserves a strong observability result while exposing an 87.9% public
+response-contract completion rate that should be improved in a separately versioned release.
+
+Each measured request was a fresh, sequential Essential/Complete/RAG first turn with empty history,
+and request starts remained at least 12 seconds apart so the cohort did not accidentally exercise
+the configured per-client rate limit. Warm status was established by readiness and process-identity
+checks rather than by making an unmeasured paid request. Server latency ran from request ingress
+through construction of the complete response. The
+[public summary](docs/evidence/production-performance-v1-2026-08-11/public-summary.json) and
+[readable report](docs/evidence/production-performance-v1-2026-08-11/public-report.md) are
+text-free. The summary file SHA-256 is
+`dd13ad2cf60a863daf88e549106059a1d05126b40ffa3c66c3c8e18cb6246b7f`; its embedded canonical
+artifact hash is `e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30`.
+These numbers describe one observed warm production cohort, not an SLA, uptime study, load test,
+or latency guarantee.
 
 The public Complete-RAG path now has a server-owned, versioned **$2.00 per-request maximum**. The
 service checks that maximum against the monthly budget before RAG, projects each provider operation
@@ -186,9 +203,10 @@ and exact cohort spend remains unavailable unless every attempt has request-scop
 conversation/turn scopes are rejected before a cohort POST so stale production records cannot be
 reused as measurements.
 
-No production-latency number is publishable yet. The live run still requires deployment of the
-instrumented commit and separate owner authorization for the exact private-data scope and paid cost
-ceiling. The complete predeclared protocol is
+The source configuration temporarily raised the application budget for the separately authorized
+cohort and returns it to the ordinary `$5.00` monthly ceiling after the run. Because production
+deploys are manual, the live Render value must be checked against that source setting. The complete
+protocol, artifact boundary, and exact resume wording are in
 [`docs/production_performance.md`](docs/production_performance.md).
 
 ## Verification
@@ -432,10 +450,12 @@ commit in a detached worktree rather than the later documentation-only head.
 
 This is a complete **descriptive baseline**, not yet a full semantic answer-quality scorecard.
 Faithfulness, abstention, gold-claim recall, and related semantic measures remain pending by design.
-The next recommended measurement work is to diagnose and redesign the decomposition instrument in
-a new cohort, without changing or rerunning this baseline; an optional calibration/semantic
-supplement remains lower priority. V26 stays frozen, and the interactive application and earlier
-practical evaluations remain development evidence only.
+The next product repair is to strengthen the three generation-contract relationships exposed by
+the production cohort, using synthetic regression cases before any separately versioned live
+cohort. The next measurement-instrument work is to diagnose and redesign canonical decomposition
+without changing or rerunning the held-out baseline; an optional calibration/semantic supplement
+remains lower priority. V26 stays frozen, and the interactive application and earlier practical
+evaluations remain development evidence only.
 
 ## Documentation map
 
@@ -450,8 +470,11 @@ practical evaluations remain development evidence only.
 - [`docs/answer_delivery.md`](docs/answer_delivery.md) — Complete and Progressive delivery rules.
 - [`docs/public_demo_design.md`](docs/public_demo_design.md) — public exposure and citation design.
 - [`docs/public_deployment.md`](docs/public_deployment.md) — Render deployment and recovery runbook.
-- [`docs/production_performance.md`](docs/production_performance.md) — predeclared privacy-safe
-  production observability and latency cohort.
+- [`docs/production_performance.md`](docs/production_performance.md) — protocol and interpretation
+  for the completed privacy-safe production cohort; the publishable
+  [report](docs/evidence/production-performance-v1-2026-08-11/public-report.md) and
+  [JSON summary](docs/evidence/production-performance-v1-2026-08-11/public-summary.json) are
+  preserved alongside it.
 - [`docs/gold_set_authoring.md`](docs/gold_set_authoring.md) — private held-out authoring workflow.
 - [`docs/cost_tracking.md`](docs/cost_tracking.md) — local estimates, budgets, and billing caveats.
 - [`BLOGNOTES.md`](BLOGNOTES.md) and [`DEFECTS.md`](DEFECTS.md) — development narrative and defect

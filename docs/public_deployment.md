@@ -76,11 +76,14 @@ These are the first steps that require the owner's Render account and billing me
 7. Enter `OPENAI_API_KEY` directly in Render when the Blueprint asks for the unsynchronized
    secret. Never paste it into source control, a screenshot, or chat.
 
-The Blueprint sets the public OpenAI ceiling to `$10.00` per calendar month. The owner raised it
-from `$5.00` on 2026-08-11 to accommodate the separately capped 33-request production-performance
-cohort. Change `ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD` in Render only as a deliberate owner decision;
-the cohort runner's own authorization cap remains independent and cannot be increased by this
-setting. Render hosting charges are separate from OpenAI usage.
+The Blueprint sets the ordinary public OpenAI ceiling to `$5.00` per calendar month. It was
+temporarily raised to `$10.00` on 2026-08-11 for the separately capped 33-request production-
+performance cohort; the source-of-truth setting returned to `$5.00` after the run closed. Because
+production deploys are manual, verify that the live Render environment matches the Blueprint.
+Change
+`ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD` in Render only as a deliberate owner decision; a cohort
+runner's own authorization cap remains independent and cannot be increased by this setting.
+Render hosting charges are separate from OpenAI usage.
 
 ## Seed the private disk
 
@@ -232,9 +235,27 @@ compute and must not be described as a server-latency optimization.
 
 ## Production-performance cohort
 
-The fixed resume-claim cohort is specified in
-[Production performance protocol](production_performance.md). It is implemented and prepared but
-has **not** been run. Do not copy the earlier evaluation-generation p50 into a production claim.
+The fixed resume-claim cohort specified in
+[Production performance protocol](production_performance.md) completed on 2026-08-11 against
+deployed wrapper commit `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. It attempted all 33
+predeclared requests without retry or replacement: 29 were valid successful completions, four were
+request failures (12.1212% of all attempts), and zero were instrumentation failures. Server
+p50/p95 were 54.393/113.801 seconds across the 29 successes; client p50/p95 were
+54.493/113.829 seconds. The run recorded 500,164 tokens, 80 priced and zero unpriced events, and
+`$4.90594694` estimated API cost. The text-free
+[public summary](evidence/production-performance-v1-2026-08-11/public-summary.json) has file
+SHA-256 `dd13ad2cf60a863daf88e549106059a1d05126b40ffa3c66c3c8e18cb6246b7f`; its embedded canonical
+artifact hash is `e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30`.
+
+The four failed requests were not infrastructure or budget denials. Planning and direct-answer
+evidence selection succeeded, but structured generation failed closed: two
+`missing_unit_requirement_id`, one `obligation_role_mismatch`, and one
+`unsupported_requirement_has_unit`. Treat the 29/33 response-contract completion rate as a
+product-reliability finding; repair it in a new release and never replay this sealed cohort.
+
+Those results describe one observed warm production cohort, not an SLA, uptime study, load test,
+or guarantee. The commands below preserve the workflow for audit and separately declared future
+cohorts; they are not instructions to replay or replace any sealed attempt from the completed run.
 
 After committing and deploying the instrumented release, use a clean local checkout at the exact
 deployed commit to prepare the private manifest:

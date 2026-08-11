@@ -12,13 +12,15 @@ The corpus is also the moat. Rigorous evaluation depends on knowing the source m
 
 ## Current priorities and answer surfaces
 
-The highest-leverage unfinished measurement work is diagnosing the decomposition instrument and,
-in a separately declared cohort, rebuilding the claim-derived scoring path described in
-`EVAL_CONTRACT.md` and `ROADMAP.md`. The completed first baseline must stay unchanged. The objective
-is not "the answers look good." Retrieval, faithfulness, citation, and abstention behavior must be
-measured, bounded, reproducible, and have their failures written down. A system with mediocre but
-characterized numbers is better evidence than a system with excellent-looking answers and no
-defensible measurement.
+The highest-leverage unfinished product work is repairing the three structured-generation
+relationships exposed by the first production cohort. The highest-leverage unfinished measurement
+work remains diagnosing the decomposition instrument and, in a separately declared cohort,
+rebuilding the claim-derived scoring path described in `EVAL_CONTRACT.md` and `ROADMAP.md`. The
+completed baselines and production cohort must stay unchanged. The objective is not "the answers
+look good." Retrieval, faithfulness, citation, abstention, release reliability, latency, and spend
+must be measured, bounded, reproducible, and have their failures written down. A system with
+mediocre but characterized numbers is better evidence than a system with excellent-looking answers
+and no defensible measurement.
 
 As of 2026-08-09, the 37 retained owner-controlled held-out questions and their owner-adjudicated
 annotations are formally locked against frozen V26 candidate
@@ -45,6 +47,17 @@ dependent measures use only those eight substantively decomposed releases. Seman
 measures remain pending by design, so this is a complete descriptive baseline rather than a complete semantic
 scorecard. The closed ledger has 125 priced events, zero unpriced events, and `$7.02298147` in
 recorded spend, safely below the authorized `$20.00` cap.
+
+The first production-performance cohort is also complete. Against deployed wrapper commit
+`e71d9b79a60a894cb38451c37e0d43b7f9149fa9`, it attempted exactly 33 fresh
+Essential/Complete/RAG first turns with no retries or replacements. Twenty-nine were valid public
+response-contract completions and four failed (12.1212%); instrumentation failures were zero.
+Server p50/p95 were 54.393/113.801 seconds over the 29 successful completions. Usage closed at
+500,164 tokens, 80 priced and zero unpriced events, and `$4.90594694`. The four failures were
+fail-closed generation-contract rejections after successful planning and direct-answer evidence
+selection: two `missing_unit_requirement_id`, one `obligation_role_mismatch`, and one
+`unsupported_requirement_has_unit`. Never retry, replace, or overwrite this cohort. Repair those
+relationships with synthetic cases, then use a separately versioned cohort for any comparison.
 
 The next measurement priority is to diagnose and redesign the decomposition instrument on a new,
 explicitly separate measurement cohort. Its 27/37 technical-failure rate sharply limits how far

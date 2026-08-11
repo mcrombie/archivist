@@ -17,7 +17,7 @@ and its first formal held-out answer-quality baseline are complete. The latter i
 mechanical baseline, not yet a complete semantic answer-quality scorecard, and those accomplishments
 must not be conflated.
 
-## Current checkpoint — 2026-08-10
+## Current checkpoint — 2026-08-11
 
 The repository's current Answer Mode is `evidence-planned-v26`, with
 `query-planner-v11` and `evidence-coverage-v11`. It searches 481 retrieval-eligible chunks from the
@@ -40,12 +40,24 @@ retrieval evidence, historical claims, or citation rules. Progressive and Comple
 answer request, although the schema reordering required for checked-claim release opened the
 current generation cohorts.
 
-The public service is live at `https://archivist.mcrombie.com`, but the newly instrumented release
-has not yet been deployed or measured. Production deploys are manual. The prepared `/api/version`
-binding reads Render's `RENDER_GIT_COMMIT`; the fixed runner must verify that identity and one
-unchanged process epoch before claiming that the measured service and a repository commit are the
-same release. That identity also binds the versioned `$2.00` public Complete-RAG request ceiling;
-Render's automatic commit value is authoritative for the live cohort.
+The public service is live at `https://archivist.mcrombie.com`, and the first fixed production-
+performance cohort is complete against deployed wrapper commit
+`e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. Production deploys remain manual. `/api/version`
+bound Render's authoritative `RENDER_GIT_COMMIT`, one unchanged process epoch, the corpus and RAG
+identities, and the versioned `$2.00` public Complete-RAG request ceiling before any measured
+question was sent.
+
+The cohort attempted all 33 predeclared answerable items without retry or replacement. Twenty-nine
+were valid successful completions and four failed, for a 12.1212% all-attempt error rate; there
+were zero instrumentation failures. Server p50/p95 were 54.393/113.801 seconds across those 29
+successes; client p50/p95 were 54.493/113.829 seconds. The run recorded 500,164 tokens, 80 priced
+and zero unpriced events, and `$4.90594694` estimated API cost. This is one observed warm cohort,
+not an SLA or performance guarantee.
+
+The four failures were localized after successful planning and evidence selection at the
+generation-contract boundary: two `missing_unit_requirement_id` cases, one
+`obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. None was a budget,
+transport, deployment-identity, or instrumentation failure.
 
 ### Last measured development checkpoint
 
@@ -173,7 +185,7 @@ After formal lock:
 | **6. Faithfulness and abstention calibration** | **Deferred, lower priority** | After the full baseline is preserved, label the fixed ten-item subset, measure judge agreement, and settle §§6–7. This work may fill semantic fields in a separate supplement; it may not delay or overwrite the baseline. |
 | **7. Formal baseline and evaluation report** | **Complete descriptive baseline; semantic scoring pending** | Preserve the public/private hash-bound reports. Diagnose the decomposition instrument in a separate new measurement cohort before relying heavily on claim-derived results; any later semantic calibration is a separate supplement. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
-| **8A. Production observability and latency evidence** | **Implemented and prepared; live cohort unmeasured** | Privacy-safe correlation, server-total and per-stage timing, release and versioned request-cost identity, strict token/cost telemetry, and the fixed 33-attempt runner exist. Deploy and verify the exact release, then obtain separate authorization for the paid live cohort before publishing latency statistics. |
+| **8A. Production observability and latency evidence** | **Complete for the first observed cohort** | Preserve the text-free public artifacts and private audit root. The 33-attempt run produced 29 latency-eligible successes, four request failures, zero instrumentation failures, 54.393-second server p50, 113.801-second server p95, and `$4.90594694` estimated cost. Treat these as one observed warm cohort, not an SLA. |
 
 ## Next sequence
 
@@ -212,25 +224,27 @@ top of the list.
    instrument failures. Generation latency reports the 36 observed full turns: 1,817.196 seconds
    total, 50.478-second mean, 47.928-second p50, 91.695-second p95, and 108.685-second maximum.
    Semantic fields remain explicitly pending rather than blocking publication.
-9. **Next — run the prepared production-performance cohort.** Deploy the instrumented release,
-   verify `RENDER_GIT_COMMIT`, corpus/policy identity, and one stable process epoch, then obtain
-   separate authorization for exactly 33 paid attempts. Run the answerable held-out items as fresh,
-   sequential Essential/Complete/RAG first turns with empty history, no retry or replacement, and a
-   minimum 12-second interval between request starts. Report p50/p95 over the stated number of valid
-   successful completions, error rate over all 33 attempts, instrumentation failures separately,
-   cold/warm handling, and spend. Bind the server-exposed versioned `$2.00` per-request ceiling;
-   count any unknown transport attempt at that full amount for authorization, exclude successful
-   zero-usage observations from latency, and reject stale request scopes before POST. Until that live
-   run completes, production latency is unmeasured.
-10. **Fill resume and blog claims only from completed artifacts.** The retrieval bullet may use the
-    completed +1.26-point result with its mixed-effect caveat. The production-latency placeholders
-    remain blank until the fixed live cohort emits its text-free report.
-11. **Later — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
+9. **Completed — run the production-performance cohort.** The measured release passed the fixed
+   identity and warm-process checks, then attempted exactly 33 fresh, sequential Essential/Complete/
+   RAG first turns with empty history, no retry or replacement, and a minimum 12-second start
+   interval. Twenty-nine completions entered the latency sample; four request failures remained in
+   the all-attempt denominator; instrumentation failures were zero. Server p50/p95 were
+   54.393/113.801 seconds, and estimated spend was `$4.90594694`.
+10. **Completed — fill the evidence-backed production claim.** The text-free public report supports
+    the exact 33-attempt denominator, 29-success latency denominator, 12.1212% request-failure rate,
+    zero instrumentation failures, and observed cost. Publish the result as one warm cohort rather
+    than an SLA or generalized production guarantee.
+11. **Next — repair the three production generation-contract defects.** Strengthen the structured
+    generation contract so every non-premise-correction unit links to a requirement, obligation
+    dimensions accept only compatible unit roles, and unsupported requirements cannot own answer
+    units. Add synthetic regressions for all three closed codes. Any later live comparison must be
+    a separately versioned cohort; do not retry or overwrite this sealed run.
+12. **Then — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
     of 37 outputs violated exact-span validation, then prospectively declare and test a revised
     instrument without changing or rerunning this baseline. The eight substantively decomposed
     releases are enough to preserve limited mechanical measurements, not enough to support strong
     claim-derived conclusions.
-12. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+13. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
     subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
     technical failures are preserved, measure judge and decomposition agreement, and publish a
     hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
@@ -296,7 +310,9 @@ Deferred means valuable but not on the critical path to the first defensible mea
 
 ## Resume-claim release criteria
 
-The numerical Archivist bullets remain blank until all of the following are true:
+The numerical retrieval and production bullets are now publishable because their applicable gates
+have closed. The following remain permanent publication conditions; the faithfulness condition
+applies only if a later claim reports faithfulness:
 
 - the evaluated commit, deployed commit, corpus manifest, index, model/configuration, and gold-set
   hashes identify one frozen candidate;
@@ -317,24 +333,24 @@ The numerical Archivist bullets remain blank until all of the following are true
 - public artifacts contain no manuscript text, held-out question text, private prompts,
   credentials, or raw user conversations.
 
-The intended evidence-backed forms remain placeholders until those gates close:
+The retrieval evidence supports this form:
 
-> Published an N-question retrieval benchmark with owner-authored questions and source-level
+> Published a 37-question retrieval benchmark with owner-authored questions and source-level
 > owner-adjudicated annotations, measuring Recall@5 and context recall; dense/BM25
-> reciprocal-rank fusion changed macro Recall@5 from A% to B% (X percentage points) versus
-> vector-only retrieval.
+> reciprocal-rank fusion increased macro Recall@5 from 24.71% to 25.97% (+1.26 percentage points)
+> versus vector-only retrieval.
 
 > Deployed on Render with privacy-safe request tracing, per-stage latency, and token/cost
-> telemetry; p50 server latency was Y seconds across N warm production-like queries (p95 Z
-> seconds, error rate E%).
+> telemetry; in a predeclared 33-request warm production cohort, observed 54.393-second p50 and
+> 113.801-second p95 end-to-end server latency across 29 successful completions, with four request
+> failures (12.1212%), zero instrumentation failures, and `$4.90594694` estimated API cost.
 
-The production form remains a placeholder. The implementation and protocol exist, but no live
-33-attempt cohort has run. If one or more requests fail, the published form must say that p50/p95
-cover `S` valid successful completions in 33 attempts while `E%` uses all 33 attempts; it may not
-replace failures to keep the latency denominator at 33.
+The production form is an observed cohort result rather than an SLA, uptime study, load test, or
+guarantee. It states that p50/p95 cover 29 valid successful completions in 33 attempts while the
+12.1212% failure rate uses all 33 attempts; the four failures were not replaced.
 
-Use “improved” only if the frozen comparison actually improves. Replace every placeholder with the
-observed value and link the claim to the same reproducible artifacts.
+Use “improved” only where the frozen comparison actually improved, retain every denominator, and
+link each claim to the same reproducible artifacts.
 
 ## Publication sequence
 

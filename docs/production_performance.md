@@ -7,11 +7,37 @@ It does not score historical correctness, retrieval quality, faithfulness, or an
 
 ## Current status
 
-**Implemented and prepared; not yet deployed or measured.** No production latency value may be
-copied into the README, roadmap, blog, or resume until the live cohort closes and its text-free
-report validates. Running it will send the 33 locked question strings and the passages retrieved by
-the private Render service to OpenAI and will incur API cost. The owner must separately authorize
-that exact operation, data scope, and a numeric spending ceiling before the paid command runs.
+**Complete and measured — 2026-08-11.** The run of record is
+`production-performance-2026-08-11-01`, measured against deployed wrapper commit
+`e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. Its text-free
+[public summary](evidence/production-performance-v1-2026-08-11/public-summary.json) has file
+SHA-256 `dd13ad2cf60a863daf88e549106059a1d05126b40ffa3c66c3c8e18cb6246b7f`; the JSON's embedded
+canonical artifact hash is `e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30`.
+The cohort sent the 33 locked question strings and the passages retrieved by the private Render
+service to OpenAI under the owner's explicit authorization and cost cap.
+
+| Measure | Observed result |
+|---|---:|
+| Attempted requests | 33 |
+| Valid successful completions / latency denominator | 29 |
+| Request failures | 4 |
+| All-attempt request error rate | 12.1212% |
+| Instrumentation failures | 0 |
+| Server p50 / nearest-rank p95 | 54.393 s / 113.801 s |
+| Client p50 / nearest-rank p95 | 54.493 s / 113.829 s |
+| Tokens | 500,164 |
+| Priced / unpriced events | 80 / 0 |
+| Estimated API cost | `$4.90594694` |
+
+These are observations from one fixed warm production cohort. They are not an SLA, load test,
+uptime study, significance claim, or guarantee of future latency or reliability.
+
+The four failures were all fail-closed structured-generation contract rejections after successful
+planning and direct-answer evidence selection: two `missing_unit_requirement_id`, one
+`obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. They were not budget,
+transport, deployment-identity, retrieval-availability, or instrumentation failures. The latency
+figures therefore describe the 29 successful response-contract completions, while the 12.1212%
+failure rate remains a separate product-reliability result over all 33 attempts.
 
 ## Fixed cohort
 
@@ -100,11 +126,12 @@ accounted cost, and attempts with unavailable usage; an exact total is withheld 
 outcome remains unknown. They also state the ceiling version and amount, priced and unpriced event
 counts, and tokens. Provider billing remains authoritative.
 
-## Prepared runner workflow
+## Runner workflow and reproduction boundary
 
-Run these steps only after the instrumented commit is committed, pushed, deployed, and visible as
-Render's exact `RENDER_GIT_COMMIT`. The local checkout used by `prepare` must be clean and at that
-same commit.
+The completed run used the workflow below. Do not rerun or replace any of its 33 sealed attempts.
+For a separately declared future cohort, run these steps only after its instrumented commit is
+committed, pushed, deployed, and visible as Render's exact `RENDER_GIT_COMMIT`. The local checkout
+used by `prepare` must be clean and at that same commit.
 
 Prepare the sealed private manifest locally. This command is offline:
 
@@ -186,12 +213,13 @@ credentials, or raw user conversations.
 ## Interpretation and resume language
 
 This is one observed production cohort, not an SLA, uptime study, load test, significance claim, or
-single-number guarantee. The prepared resume form remains blank until measurement:
+single-number guarantee. The exact evidence-backed resume form is:
 
 > Deployed on Render with privacy-safe request correlation, per-stage timing, and token/cost
-> telemetry; in a predeclared 33-request warm production cohort, observed p50/p95 end-to-end server
-> latency of Y/Z seconds with E% request failures.
+> telemetry; in a predeclared 33-request warm production cohort, observed 54.393-second p50 and
+> 113.801-second p95 end-to-end server latency across 29 successful completions, with four request
+> failures (12.1212%), zero instrumentation failures, and `$4.90594694` estimated API cost.
 
-If fewer than 33 attempts are valid successful completions, the final sentence must instead say
-that p50/p95 cover `S` successful completions in 33 attempts. Failures may not be replaced to make
-the latency denominator look complete.
+For a shorter resume, round without hiding the denominators: “54.4 s p50 / 113.8 s p95 across 29
+successful completions in 33 attempts; 12.1% request failures and zero instrumentation failures.”
+The four failures were not replaced, and the latency denominator must not be represented as 33.

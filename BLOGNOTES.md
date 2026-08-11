@@ -4,15 +4,14 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-10
+## Current checkpoint — 2026-08-11
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
   local code reports `evidence-planned-v26`, `query-planner-v11`, and
   `evidence-coverage-v11` over 481 retrieval-eligible manuscript chunks. Render deploys remain
-  manual. A new public version identity binds `RENDER_GIT_COMMIT`, process epoch, policy, model, and
-  corpus manifest, plus the versioned `$2.00` Complete-RAG request ceiling, so the next production
-  measurement can confirm parity rather than assume it; the instrumented release has not yet been
-  deployed or measured.
+  manual. The production cohort bound deployed wrapper commit
+  `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`, one process epoch, policy, model, corpus manifest,
+  and the versioned `$2.00` Complete-RAG request ceiling before sending any measured question.
 - **Reader experience:** Complete answer is the default. Progressive response is an experimental
   advanced setting. Ten semantic modes and eleven visual appearances are implemented; they are
   public interpretive prototypes, not formal evidence that perspective changes preserve answer
@@ -45,19 +44,24 @@ anything that still requires measurement.
   exact generation-latency observations in the 37-item scope: 1,817.196 seconds total, 50.478-second
   mean, 47.928-second p50, 91.695-second p95, and 108.685-second maximum. These are evaluation
   generation-pipeline timings, not production HTTP latency.
-- **Production-performance status:** privacy-safe request correlation, complete-request and
-  per-stage timing, release identity, token/cost telemetry, and a fixed text-free cohort runner are
-  implemented locally. The production protocol uses exactly 33 attempted answerable held-out
-  first turns, no retry or replacement, a 12-second minimum start interval, and no paid warm-up.
-  A versioned server-owned `$2.00` per-request RAG ceiling, conservative accounting for unknown
-  transport outcomes, zero-usage exclusion, and stale-scope rejection close the final cost and
-  correlation gaps. It is prepared but unmeasured; no production-latency resume number is yet
-  defensible.
-- **Next evidence step:** preserve the descriptive baseline unchanged, deploy the instrumented
-  release, verify its exact identity, and obtain separate owner authorization for the paid
-  33-attempt production cohort. After that operational measurement, diagnose and redesign the
-  decomposition instrument in a separate cohort if stronger claim-derived scoring is still useful.
-  Semantic calibration remains optional, lower-priority supplemental work.
+- **Production-performance status:** the fixed warm cohort is complete. It attempted exactly 33
+  answerable held-out first turns with no retry or replacement. Twenty-nine were valid successful
+  completions and four were request failures (12.1212%); instrumentation failures were zero.
+  Server p50/p95 were 54.393/113.801 seconds across those 29 successes, while client p50/p95 were
+  54.493/113.829 seconds. The run recorded 500,164 tokens, 80 priced and zero unpriced events, and
+  `$4.90594694` estimated API cost. The public summary is text-free. Its file SHA-256 is
+  `dd13ad2cf60a863daf88e549106059a1d05126b40ffa3c66c3c8e18cb6246b7f`, and its embedded
+  canonical artifact hash is `e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30`.
+  This is one observed cohort, not an SLA or latency guarantee.
+- The four failures all occurred after successful planning and direct-answer evidence selection,
+  at the generation-contract release boundary: two `missing_unit_requirement_id`, one
+  `obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. This is reassuring for
+  infrastructure observability but not for product reliability: the public response-contract
+  completion rate was 29/33, or 87.9%.
+- **Next evidence step:** preserve the descriptive and production cohorts unchanged. The production
+  resume blank can now be filled with the exact observed denominators. If stronger claim-derived
+  answer scoring is still useful, diagnose and redesign the decomposition instrument in a separate
+  cohort. Semantic calibration remains optional, lower-priority supplemental work.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
@@ -3982,6 +3986,49 @@ retry nor a blank score—it is a disclosed instrument failure, preserved exactl
 Useful blog lesson: a benchmark can have both an experimental spending cap and an application
 safety budget. If they are not aligned before a no-retry run, the safety system itself becomes an
 unintended experimental variable.
+
+### 2026-08-11 - The production cohort filled the last resume blank without hiding failures
+
+- Ran the predeclared warm production cohort against deployed wrapper commit
+  `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. Two readiness checks and `/api/version` bound the
+  same process epoch, corpus, RAG policy, model, and versioned `$2.00` request ceiling before the
+  first paid request. There was no paid warm-up.
+- Attempted all 33 answerable held-out questions as fresh Essential/Complete/RAG first turns with
+  empty history, sequential execution, at least 12 seconds between request starts, and no retries or
+  replacements. Twenty-nine requests completed successfully and four failed, so the all-attempt
+  request-failure rate is **12.1212%**. The instrumentation-failure count is **zero**.
+- The successful-completion denominator matters. Across those 29—not all 33—server latency was
+  **54.393 seconds p50** and **113.801 seconds nearest-rank p95**. Client-observed latency was
+  **54.493 seconds p50** and **113.829 seconds p95**.
+- A private text-free diagnosis localized all four failures after successful planning and a
+  `direct_answer` evidence decision. Two generated answers omitted a required unit-to-requirement
+  link; one paired an obligation dimension with an impermissible unit role; one marked a
+  requirement unsupported while still assigning it an answer unit. The public service rejected
+  all four rather than releasing internally contradictory evidence mappings. None was a budget,
+  transport, deployment, retrieval-availability, or instrumentation failure.
+- The cohort recorded **500,164 tokens**, **80 priced events**, **zero unpriced events**, and
+  **`$4.90594694`** estimated API cost. Its publishable summary contains no H-item IDs, questions,
+  answers, sources, manuscript text, conversation identifiers, or provider response IDs; its
+  file SHA-256 is `dd13ad2cf60a863daf88e549106059a1d05126b40ffa3c66c3c8e18cb6246b7f`;
+  its embedded canonical artifact hash is
+  `e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30`.
+- The temporary `$10.00` service budget created room for the independently authorized cohort. Once
+  the sealed run closed beneath that cap, the source configuration returned the ordinary public
+  monthly ceiling to `$5.00`; the live Render value still requires the normal manual-deployment
+  parity check. The server's separate `$2.00` per-request ceiling remains unchanged.
+- The defensible resume sentence is now: “Deployed on Render with privacy-safe request correlation,
+  per-stage timing, and token/cost telemetry; in a predeclared 33-request warm production cohort,
+  observed 54.393-second p50 and 113.801-second p95 end-to-end server latency across 29 successful
+  completions, with four request failures (12.1212%), zero instrumentation failures, and
+  `$4.90594694` estimated API cost.”
+- This is deliberately an observed cohort, not an SLA, uptime claim, load test, or promise that a
+  future query will complete within either percentile. The four failures are part of the product
+  result, not rows to discard in pursuit of a cleaner median.
+
+Useful blog lesson: observability is most credible when it makes the uncomfortable rows harder to
+hide. The stronger portfolio evidence is not merely “median latency was measured”; it is that the
+attempt denominator, successful-latency denominator, request failures, instrumentation failures,
+and spend all closed together under one deployed identity.
 
 ## Update convention
 

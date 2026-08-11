@@ -59,6 +59,27 @@ before calibration.
 
 ---
 
+## [2026-08-11] Production cohort preserved four request failures in the denominator
+Phase/Brief: Production observability and resume-claim evidence
+Symptom: the fixed live cohort attempted all 33 predeclared requests and produced 29 valid
+successful completions plus four request failures, an all-attempt failure rate of 12.1212%. No
+request was retried or replaced. The observability path itself produced zero instrumentation
+failures.
+Cause: all four failures occurred after successful planning and a `direct_answer` evidence decision,
+when structured generation failed its relational release contract. Two were
+`missing_unit_requirement_id`; one was `obligation_role_mismatch`; one was
+`unsupported_requirement_has_unit`. None was a retrieval-availability, budget, transport,
+deployment-boundary, or telemetry failure. The generation contract correctly refused to release
+the invalid mappings, but only after the expensive planning/generation path had completed.
+Resolution and verification: preserve the sealed outcomes and publish the observed denominator
+unchanged. Server p50/p95 are 54.393/113.801 seconds across the 29 successful completions; client
+p50/p95 are 54.493/113.829 seconds. The text-free public summary records 33 attempts, four failures,
+zero instrumentation failures, 500,164 tokens, 80 priced and zero unpriced events, and
+`$4.90594694` estimated cost. Repair the three relationships with synthetic contract regressions,
+then measure any improvement only in a separately versioned cohort. Do not silently infer or repair
+semantic requirement/role mappings, and do not overwrite this run. These are cohort observations,
+not an SLA or generalized reliability claim.
+
 ## [2026-08-10] Runner-only cost reserve did not bound one live public RAG request
 Phase/Brief: Production observability and resume-claim evidence
 Symptom: the prepared cohort initially used a fixed `$1.00` runner-side next-attempt reserve, but
@@ -77,8 +98,10 @@ the runner requires headroom for the full maximum; an unknown transport attempt 
 replay and permanently consumes `$2.00` in conservative authorization accounting. A successful
 zero-usage response is an instrumentation failure and latency-ineligible. A pre-existing request
 scope is rejected before intent creation or POST, and Render's `RENDER_GIT_COMMIT` is authoritative
-when present. Offline tests cover these contracts, but the release remains undeployed and the live
-33-attempt cohort remains unmeasured.
+when present. Offline tests cover these contracts. The 2026-08-11 live cohort then completed all 33
+attempts with 80 priced and zero unpriced events, exact estimated cost of `$4.90594694`, and zero
+instrumentation failures, confirming that request-scoped usage remained measurable throughout the
+cohort.
 
 ## [2026-08-10] Production-latency cohort lacked a fixed attempt denominator
 Phase/Brief: Production observability and resume-claim evidence
@@ -97,9 +120,10 @@ paid warm-up; a 12-second minimum interval between request starts; an ingress-th
 response server-latency boundary; median p50 and nearest-rank p95 over explicitly counted valid
 successful completions; error rate over all 33 attempts; separate instrumentation-failure
 accounting; a predeclared cost cap bound to the server's versioned $2.00 per-request maximum; and
-text-free public artifacts. The runner and offline tests implement those rules, but the live cohort
-remains unmeasured until the exact release is deployed and the owner separately authorizes the paid
-run, private-data scope, and cost ceiling.
+text-free public artifacts. The runner and offline tests implement those rules. The authorized
+2026-08-11 cohort then preserved exactly 33 attempts without retry or replacement: 29 valid
+successes, four request failures (12.1212%), and zero instrumentation failures. Its server
+p50/p95 were 54.393/113.801 seconds across the 29 successes.
 
 ## [2026-08-09] Canonical decomposition instrument yielded only 10 usable readings from 37 attempts
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation

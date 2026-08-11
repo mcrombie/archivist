@@ -1,0 +1,56 @@
+{
+  "artifact_sha256": "e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30",
+  "attempted_count": 33,
+  "authorization": {
+    "cost_ceiling_enforcement": "server_reserves_the_full_request_ceiling_before_RAG_and_projects_every_provider_operation_before_send",
+    "max_cost_usd": 10.0,
+    "max_next_attempt_cost_nano_usd": 2000000000,
+    "max_next_attempt_cost_usd": 2.0,
+    "request_cost_ceiling_version": "public-rag-request-ceiling-v1"
+  },
+  "authorization_sha256": "0944cfb4969716692d383f115b9f90e76386d5b8b206e2a30ed7a74bd1773acb",
+  "automatic_retries": 0,
+  "cold_start_handling": "Two ready health checks; cold starts excluded and not measured",
+  "corpus_manifest_sha256": "b7ff94315a3f1f28c831e2c3ca62c385567d2b1447c19ff45139d175c3ff3c17",
+  "cost": {
+    "authorization_accounted_cost_usd": 4.90594694,
+    "estimated_cost_usd": 4.90594694,
+    "priced_event_count": 80,
+    "recorded_estimated_cost_usd": 4.90594694,
+    "recorded_total_tokens": 500164,
+    "unavailable_usage_attempt_count": 0,
+    "unpriced_event_count": 0,
+    "usage_measurement_complete": true
+  },
+  "deployment_commit": "e71d9b79a60a894cb38451c37e0d43b7f9149fa9",
+  "failure_count": 4,
+  "failure_rate": 0.121212,
+  "frozen_candidate_commit": "8d3c6c9c0e7175ff6bd248ee3e9f2863793f700e",
+  "frozen_candidate_rag_policy": "evidence-planned-v26",
+  "generated_at": "2026-08-11T17:59:00.059434+00:00",
+  "gold_set_sha256": "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2",
+  "instrumentation_failure_count": 0,
+  "latency_boundary": "Complete public endpoint middleware duration",
+  "latency_eligible_completion_count": 29,
+  "manifest_sha256": "026c8a4e9c2e658464d1f87ddcdfd7253d86c8cee170205458d9a4043d72d8c8",
+  "minimum_start_interval_seconds": 12.0,
+  "operator_client_latency": {
+    "observation_count": 29,
+    "p50_seconds": 54.493,
+    "p95_seconds": 113.829
+  },
+  "outcome_set_sha256": "b93094e0e9e929aa71f8e7922b690a7aaefe9350384a3f1c752d3f6aac5396fb",
+  "planned_attempt_count": 33,
+  "protocol_version": "production-performance-v1",
+  "question_set_sha256": "4bd59fb7cb56a77402dac5f59a1bd092eb6ae2353553ab1c9e85743289e8c6d8",
+  "replacement_attempts": 0,
+  "runtime_identity_sha256": "5fec0a7eb6858ecf6bf74bbdcdf0c199d6b37481e41a41c9640a52ef3ad7cddd",
+  "schema": "archivist.production_performance_public_summary/1",
+  "server_latency": {
+    "observation_count": 29,
+    "p50_seconds": 54.393,
+    "p95_seconds": 113.801
+  },
+  "successful_completion_count": 29,
+  "wrapper_commit": "e71d9b79a60a894cb38451c37e0d43b7f9149fa9"
+}
