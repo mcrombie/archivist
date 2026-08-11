@@ -17,6 +17,8 @@ fallback.
 - server-selected `public_demo` exposure profile
 - private full-corpus runtime bundle copied to the disk after deployment
 - OpenAI key stored only as a Render secret
+- release identity read from Render's automatic `RENDER_GIT_COMMIT` environment value
+- versioned `$2.00` maximum for each public Complete-RAG request, enforced by the server
 - application-enforced monthly OpenAI budget and request limits
 
 The repository-root `render.yaml` is the source of truth for the service configuration. Automatic
@@ -112,18 +114,24 @@ After restart:
 
 1. `GET /api/live` returns `200` with `{"status":"live"}`.
 2. `GET /api/health` returns `200` with `{"status":"ready"}`.
-3. `GET /api/config` reports the `public_demo` profile, 481 searchable and embedded chunks,
+3. `GET /api/version` reports schema `archivist.public_runtime_identity/2`, a non-null
+   `deployment_commit` equal to the exact commit deployed by Render, one `process_epoch`, the active
+   RAG policy and generator model, the corpus-manifest SHA-256, the frozen-candidate identity,
+   `public-rag-request-ceiling-v1`, and `2000000000` nano-USD (`$2.00`) as the public RAG request
+   ceiling. A missing or malformed `RENDER_GIT_COMMIT` is not acceptable for a measurement release;
+   Render's value is authoritative and cannot be masked by the local/test override.
+4. `GET /api/config` reports the `public_demo` profile, 481 searchable and embedded chunks,
    `full_source_text: false`, `public_page_locators: true`, and `progressive_answers: true`.
-4. The opening page loads from the service's HTTPS `onrender.com` fallback URL.
-5. One neutral question returns an answer with edition-qualified Typeset PDF page locators.
-6. Source cards expose no full chunk text, chunk IDs, physical PDF pages, or internal diagnostics.
-7. `/docs`, `/openapi.json`, project-management, embedding, source-file, and cost-setting routes
+5. The opening page loads from the service's HTTPS `onrender.com` fallback URL.
+6. One neutral question returns an answer with edition-qualified Typeset PDF page locators.
+7. Source cards expose no full chunk text, chunk IDs, physical PDF pages, or internal diagnostics.
+8. `/docs`, `/openapi.json`, project-management, embedding, source-file, and cost-setting routes
    return `404`.
-8. A request containing `n_results` or `allow_over_budget` returns `422`.
-9. A request larger than the public body limit returns `413`.
-10. Repeated requests eventually return `429` and a `Retry-After` header.
+9. A request containing `n_results` or `allow_over_budget` returns `422`.
+10. A request larger than the public body limit returns `413`.
+11. Repeated requests eventually return `429` and a `Retry-After` header.
 
-Do not connect Cromblog until all ten checks pass on the deployed URL.
+Do not connect Cromblog until all eleven checks pass on the deployed URL.
 
 ## Connect Cromblog
 
@@ -219,6 +227,64 @@ This smoke checks deployment behavior that the offline suite cannot establish, i
 proxy buffering and stream cleanup. Progressive response can reduce time to the first useful claim
 after generation begins, but it does not remove retrieval/planning latency or reduce total model
 compute and must not be described as a server-latency optimization.
+
+## Production-performance cohort
+
+The fixed resume-claim cohort is specified in
+[Production performance protocol](production_performance.md). It is implemented and prepared but
+has **not** been run. Do not copy the earlier evaluation-generation p50 into a production claim.
+
+After committing and deploying the instrumented release, use a clean local checkout at the exact
+deployed commit to prepare the private manifest:
+
+```powershell
+$archivistProdRunId = "production-performance-YYYY-MM-DD-01"
+$archivistProdRunRoot = "runtime/production-performance/$archivistProdRunId"
+uv run python scripts/run_production_performance.py prepare `
+  --run-root $archivistProdRunRoot `
+  --run-id $archivistProdRunId `
+  --base-url https://archivist.mcrombie.com
+```
+
+Transfer that private run root to `/var/data/runtime/production-performance/`. In Render Shell,
+from the deployed source directory, run the paid phase only after the owner separately authorizes
+the exact data scope and numeric cap:
+
+```sh
+ARCHIVIST_PROD_RUN_ID=production-performance-YYYY-MM-DD-01
+uv run python scripts/run_production_performance.py run \
+  --run-root "/var/data/runtime/production-performance/$ARCHIVIST_PROD_RUN_ID" \
+  --usage-db /var/data/runtime/usage.sqlite3 \
+  --authorize-production-performance \
+  --max-cost-usd <owner-authorized-cap>
+```
+
+The run command verifies two ready `/api/health` observations, `/api/version`, the exact deployed
+commit, and one unchanged process epoch before sending any question. It attempts exactly 33 fresh
+Essential/Complete/RAG first turns, sequentially and at least 12 seconds apart, with no retry,
+replacement, or paid warm-up. It also binds `/api/version`'s `public-rag-request-ceiling-v1`
+identity and requires the full server-enforced `$2.00` maximum beneath the owner cap before each
+next attempt. The server checks that maximum against the monthly budget before RAG, projects every
+provider operation before send, and requires strict request-scoped usage.
+
+Before creating an intent or POSTing, the runner rejects any prepared conversation/turn scope that
+already exists in the live ledger. A timeout or other ambiguous transport result is sealed without
+replay, stops that invocation, and consumes the full `$2.00` maximum in conservative authorization
+accounting before a later untouched ordinal may run. It is never reported as zero spend. A
+successful response with zero recorded usage is an instrumentation failure and is excluded from the
+latency denominator.
+
+Generate the aggregate reports on Render without another provider call:
+
+```sh
+uv run python scripts/run_production_performance.py report \
+  --run-root "/var/data/runtime/production-performance/$ARCHIVIST_PROD_RUN_ID" \
+  --usage-db /var/data/runtime/usage.sqlite3
+```
+
+Only `public-summary.json` and `public-report.md` are publishable. They contain aggregate identity,
+latency, outcome, token, and cost data but no H-item IDs or question text. Everything else in that
+run root stays private and gitignored.
 
 ## Operational limits
 

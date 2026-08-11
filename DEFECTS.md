@@ -59,6 +59,48 @@ before calibration.
 
 ---
 
+## [2026-08-10] Runner-only cost reserve did not bound one live public RAG request
+Phase/Brief: Production observability and resume-claim evidence
+Symptom: the prepared cohort initially used a fixed `$1.00` runner-side next-attempt reserve, but
+the public server had no matching versioned per-request contract. A single request could therefore
+cost more than the runner assumed. A client transport failure without a correlated observation
+could also be mistaken for zero spend, a contract-valid 2xx response with zero recorded usage could
+enter the latency sample, and a stale conversation/turn scope could collide with a prepared attempt.
+Cause: safety boundary mismatch. Cohort authorization, server admission, operation-level cost
+projection, request-scoped usage, and deployment identity were not yet one closed contract.
+Resolution and verification: the public Complete-RAG path now owns
+`public-rag-request-ceiling-v1`, a `$2.00` maximum exposed by `/api/version`. The service checks the
+full maximum against its monthly budget before RAG, projects every provider operation before send,
+and fails closed on missing, duplicate, unpriced, or over-ceiling usage. The prepared manifest,
+authorization, and runner bind the deployed ceiling version and amount. Before each next attempt,
+the runner requires headroom for the full maximum; an unknown transport attempt is sealed without
+replay and permanently consumes `$2.00` in conservative authorization accounting. A successful
+zero-usage response is an instrumentation failure and latency-ineligible. A pre-existing request
+scope is rejected before intent creation or POST, and Render's `RENDER_GIT_COMMIT` is authoritative
+when present. Offline tests cover these contracts, but the release remains undeployed and the live
+33-attempt cohort remains unmeasured.
+
+## [2026-08-10] Production-latency cohort lacked a fixed attempt denominator
+Phase/Brief: Production observability and resume-claim evidence
+Symptom: the roadmap called for "30-50 successful warm first turns" while also asking for an error
+rate. It did not say whether failed requests would be replaced, what made a request warm, where the
+latency clock began and ended, how p95 was calculated, how instrumentation failures differed from
+application failures, or how the paid cohort reserved room beneath its cost cap. Those omissions
+could have produced a success-only latency sample, a survivor-biased error denominator, and a run
+whose result could not be reproduced.
+Cause: spec gap in the brief. The proposed resume number had a target shape before the production
+measurement protocol had computable mechanics.
+Resolution and verification: `docs/production_performance.md` now fixes the cohort at exactly 33
+attempted answerable held-out items, with no retry or replacement; fresh sequential Essential,
+Complete-answer RAG first turns with empty history; process-identity and readiness checks without a
+paid warm-up; a 12-second minimum interval between request starts; an ingress-through-complete-
+response server-latency boundary; median p50 and nearest-rank p95 over explicitly counted valid
+successful completions; error rate over all 33 attempts; separate instrumentation-failure
+accounting; a predeclared cost cap bound to the server's versioned $2.00 per-request maximum; and
+text-free public artifacts. The runner and offline tests implement those rules, but the live cohort
+remains unmeasured until the exact release is deployed and the owner separately authorizes the paid
+run, private-data scope, and cost ceiling.
+
 ## [2026-08-09] Canonical decomposition instrument yielded only 10 usable readings from 37 attempts
 Phase/Brief: Phase 1, Briefs 5–7 held-out answer-quality evaluation
 Symptom: the frozen V26 baseline completed with exactly 37 answer-only `gpt-5.6-terra`

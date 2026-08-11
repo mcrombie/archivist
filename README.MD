@@ -156,6 +156,41 @@ reader URL; the generated `onrender.com` address remains an operational fallback
 recovery, environment variables, and smoke checks are documented in
 [`docs/public_deployment.md`](docs/public_deployment.md).
 
+### Production observability and performance status
+
+Archivist now has a privacy-safe production-measurement path: one random request identifier
+correlates a public request with its text-free server record; successful answer runs retain
+pipeline-stage timings, returned token usage, and estimated API cost; and safe failure records keep
+the HTTP outcome without storing the question, answer, manuscript passage, prompt, or source text.
+The public version endpoint binds a running process to Render's `RENDER_GIT_COMMIT`, the corpus
+manifest, active RAG policy, and versioned public request-cost contract before a measurement begins.
+On Render, its automatic commit identity is authoritative.
+
+The production cohort is **implemented and prepared, but not yet run**. Its protocol fixes the
+denominator at exactly 33 attempted answerable held-out items, with no retry or replacement. Each
+request is a fresh, sequential Essential/Complete/RAG first turn with empty history, and request
+starts remain at least 12 seconds apart so the measurement does not accidentally exercise the
+configured per-client rate limit. Warm status is established by readiness and process-identity
+checks rather than by making an unmeasured paid request. Server latency runs from request ingress
+through construction of the complete response; p50 is the median and p95 uses nearest rank over the
+explicitly reported number of valid successful completions. Error rate retains all 33 attempts,
+while missing or inconsistent telemetry is reported separately as an instrumentation failure. A
+successful response with zero request-scoped usage events is not allowed into the latency sample.
+
+The public Complete-RAG path now has a server-owned, versioned **$2.00 per-request maximum**. The
+service checks that maximum against the monthly budget before RAG, projects each provider operation
+before sending it, and requires strict usage accounting. The runner binds the deployed ceiling and
+requires the same $2.00 of headroom before each attempt. An ambiguous transport outcome is never
+replayed or treated as free: it consumes the full maximum in conservative authorization accounting,
+and exact cohort spend remains unavailable unless every attempt has request-scoped usage. Existing
+conversation/turn scopes are rejected before a cohort POST so stale production records cannot be
+reused as measurements.
+
+No production-latency number is publishable yet. The live run still requires deployment of the
+instrumented commit and separate owner authorization for the exact private-data scope and paid cost
+ceiling. The complete predeclared protocol is
+[`docs/production_performance.md`](docs/production_performance.md).
+
 ## Verification
 
 Run the offline backend checks:
@@ -379,6 +414,9 @@ H003 recovery: 1,817.196 seconds total, 50.478-second mean, 47.928-second p50, 9
 and 108.685-second maximum. The closed ledger contains 125 priced events, zero unpriced events, and
 **`$7.02298147`** total estimated API cost, safely below the authorized `$20.00` cap.
 
+Those are held-out **evaluation generation-pipeline** timings, not production HTTP/server latency.
+They do not fill the production-performance resume claim.
+
 The text-free public report and summary are
 `runtime/evaluations/v26-held-out-answer-quality-2026-08-07-harness-recovery-04/precalibration-public-report.md`
 and `precalibration-public-summary.json`. Their summary SHA-256 is
@@ -412,6 +450,8 @@ practical evaluations remain development evidence only.
 - [`docs/answer_delivery.md`](docs/answer_delivery.md) — Complete and Progressive delivery rules.
 - [`docs/public_demo_design.md`](docs/public_demo_design.md) — public exposure and citation design.
 - [`docs/public_deployment.md`](docs/public_deployment.md) — Render deployment and recovery runbook.
+- [`docs/production_performance.md`](docs/production_performance.md) — predeclared privacy-safe
+  production observability and latency cohort.
 - [`docs/gold_set_authoring.md`](docs/gold_set_authoring.md) — private held-out authoring workflow.
 - [`docs/cost_tracking.md`](docs/cost_tracking.md) — local estimates, budgets, and billing caveats.
 - [`BLOGNOTES.md`](BLOGNOTES.md) and [`DEFECTS.md`](DEFECTS.md) — development narrative and defect

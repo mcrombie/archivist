@@ -4,12 +4,15 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-09
+## Current checkpoint — 2026-08-10
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
   local code reports `evidence-planned-v26`, `query-planner-v11`, and
   `evidence-coverage-v11` over 481 retrieval-eligible manuscript chunks. Render deploys remain
-  manual, so production parity with the current Git commit must be confirmed rather than assumed.
+  manual. A new public version identity binds `RENDER_GIT_COMMIT`, process epoch, policy, model, and
+  corpus manifest, plus the versioned `$2.00` Complete-RAG request ceiling, so the next production
+  measurement can confirm parity rather than assume it; the instrumented release has not yet been
+  deployed or measured.
 - **Reader experience:** Complete answer is the default. Progressive response is an experimental
   advanced setting. Ten semantic modes and eleven visual appearances are implemented; they are
   public interpretive prototypes, not formal evidence that perspective changes preserve answer
@@ -40,15 +43,73 @@ anything that still requires measurement.
 - **Cost and latency:** the closed ledger records 125 priced events, zero unpriced events, and
   `$7.02298147` total estimated API cost under the `$20.00` cap. H003's audited recovery leaves 36
   exact generation-latency observations in the 37-item scope: 1,817.196 seconds total, 50.478-second
-  mean, 47.928-second p50, 91.695-second p95, and 108.685-second maximum.
-- **Next evidence step:** preserve this complete descriptive baseline unchanged. The 27/37
-  decomposition-instrument failure rate sharply limits the claim-derived interpretation, so the
-  next recommended work is to diagnose and redesign that instrument in a separately declared
-  measurement cohort. Do not change or rerun V26 or this held-out baseline to improve the result.
+  mean, 47.928-second p50, 91.695-second p95, and 108.685-second maximum. These are evaluation
+  generation-pipeline timings, not production HTTP latency.
+- **Production-performance status:** privacy-safe request correlation, complete-request and
+  per-stage timing, release identity, token/cost telemetry, and a fixed text-free cohort runner are
+  implemented locally. The production protocol uses exactly 33 attempted answerable held-out
+  first turns, no retry or replacement, a 12-second minimum start interval, and no paid warm-up.
+  A versioned server-owned `$2.00` per-request RAG ceiling, conservative accounting for unknown
+  transport outcomes, zero-usage exclusion, and stale-scope rejection close the final cost and
+  correlation gaps. It is prepared but unmeasured; no production-latency resume number is yet
+  defensible.
+- **Next evidence step:** preserve the descriptive baseline unchanged, deploy the instrumented
+  release, verify its exact identity, and obtain separate owner authorization for the paid
+  33-attempt production cohort. After that operational measurement, diagnose and redesign the
+  decomposition instrument in a separate cohort if stronger claim-derived scoring is still useful.
   Semantic calibration remains optional, lower-priority supplemental work.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-10 — Turned the last resume blank into a fixed production protocol
+
+- The first production-latency plan said “30–50 successful warm first turns” while also promising
+  an error rate. That wording left a serious loophole: failed requests could be replaced until the
+  success target was reached, producing a survivor-biased latency distribution and an unstable
+  error denominator. It also left warm status, the latency boundary, p95 calculation, and spending
+  reserve undefined.
+- Replaced that loose target with exactly 33 **attempted** requests: the answerable items from the
+  already locked 37-question set. Every item remains in the denominator once started. There is no
+  retry or replacement, every request has a fresh conversation and empty history, and the public
+  artifacts expose neither H identifiers nor question text.
+- Fixed the product path rather than constructing a faster test-only path: Essential mode,
+  Complete-answer delivery, ordinary RAG, sequential first turns, and at least 12 seconds between
+  request starts. The pacing interval is excluded from latency and prevents an accidental rate-
+  limit test against the six-per-minute per-client gate.
+- Defined “warm” narrowly and honestly. Two readiness observations and `/api/version` must bind one
+  running Render process epoch, exact `RENDER_GIT_COMMIT`, active policy/model, corpus manifest, and
+  frozen candidate. There is no unmeasured paid warm-up request and no claim that provider caches
+  are warm.
+- Defined server latency from request ingress through complete response construction. p50 is the
+  median; p95 is nearest rank; both use only the explicitly reported `S` valid successful
+  completions. Request error rate uses all 33 attempts, while missing or mismatched telemetry is a
+  separate instrumentation failure rather than a silently discarded row.
+- Added privacy-safe request correlation across the public observation, answer diagnostics, and
+  token/cost ledger. The publishable summary is aggregate and text-free; request-level private
+  artifacts remain gitignored. The paid runner also requires an explicit acknowledgement and
+  owner-authorized cohort cap.
+- Replaced the runner-invented `$1.00` reserve with a server-owned request contract. The public
+  Complete-RAG service exposes `public-rag-request-ceiling-v1` and its `$2.00` maximum through
+  `/api/version`, checks the full maximum against the monthly budget before RAG, projects each
+  provider operation before send, and requires usage to be recorded. The prepared manifest,
+  deployed identity, authorization record, and runner must all bind that same contract.
+- Made ambiguous transport outcomes expensive in the accounting rather than deceptively cheap. If
+  the client cannot prove whether a request was accepted or billed, that ordinal is sealed without
+  replay and consumes the full `$2.00` maximum against the owner authorization. Recorded cost stays
+  a lower bound and the exact total is marked unavailable until every attempt has measured usage.
+- A successful response with zero usage events is now an instrumentation failure and cannot enter
+  the latency distribution. The runner also rejects a pre-existing conversation/turn scope before
+  writing an intent or POSTing, so stale production records cannot impersonate a cohort attempt.
+  Render's `RENDER_GIT_COMMIT` wins over any local/test override and remains the authoritative live
+  release identity.
+- No live request or OpenAI call was made during this implementation. The release still has to be
+  deployed and identity-checked, and the owner must separately authorize the 33-question data scope
+  and numeric cost ceiling. Until then, the production p50, p95, error rate, and spend remain blank.
+
+Useful blog lesson: a median is not credible merely because the arithmetic is correct. The attempt
+denominator, failure policy, process identity, clock boundary, pacing, and cost stop all determine
+which observations were allowed to reach that median.
 
 ## 2026-08-09 — The 37-question baseline is complete, and the ruler is part of the result
 

@@ -17,7 +17,7 @@ and its first formal held-out answer-quality baseline are complete. The latter i
 mechanical baseline, not yet a complete semantic answer-quality scorecard, and those accomplishments
 must not be conflated.
 
-## Current checkpoint — 2026-08-09
+## Current checkpoint — 2026-08-10
 
 The repository's current Answer Mode is `evidence-planned-v26`, with
 `query-planner-v11` and `evidence-coverage-v11`. It searches 481 retrieval-eligible chunks from the
@@ -40,9 +40,12 @@ retrieval evidence, historical claims, or citation rules. Progressive and Comple
 answer request, although the schema reordering required for checked-claim release opened the
 current generation cohorts.
 
-The public service is live at `https://archivist.mcrombie.com`, but the repository cannot prove
-which commit Render is currently serving: production deploys are manual. Verify the deployed
-commit in Render before claiming that production and `main` are identical.
+The public service is live at `https://archivist.mcrombie.com`, but the newly instrumented release
+has not yet been deployed or measured. Production deploys are manual. The prepared `/api/version`
+binding reads Render's `RENDER_GIT_COMMIT`; the fixed runner must verify that identity and one
+unchanged process epoch before claiming that the measured service and a repository commit are the
+same release. That identity also binds the versioned `$2.00` public Complete-RAG request ceiling;
+Render's automatic commit value is authoritative for the live cohort.
 
 ### Last measured development checkpoint
 
@@ -170,7 +173,7 @@ After formal lock:
 | **6. Faithfulness and abstention calibration** | **Deferred, lower priority** | After the full baseline is preserved, label the fixed ten-item subset, measure judge agreement, and settle §§6–7. This work may fill semantic fields in a separate supplement; it may not delay or overwrite the baseline. |
 | **7. Formal baseline and evaluation report** | **Complete descriptive baseline; semantic scoring pending** | Preserve the public/private hash-bound reports. Diagnose the decomposition instrument in a separate new measurement cohort before relying heavily on claim-derived results; any later semantic calibration is a separate supplement. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
-| **8A. Production observability and latency evidence** | **Partial and unmeasured** | Stage timing and token/cost records exist. Add/confirm privacy-safe request correlation and run the declared warm production cohort before publishing latency statistics. |
+| **8A. Production observability and latency evidence** | **Implemented and prepared; live cohort unmeasured** | Privacy-safe correlation, server-total and per-stage timing, release and versioned request-cost identity, strict token/cost telemetry, and the fixed 33-attempt runner exist. Deploy and verify the exact release, then obtain separate authorization for the paid live cohort before publishing latency statistics. |
 
 ## Next sequence
 
@@ -209,23 +212,30 @@ top of the list.
    instrument failures. Generation latency reports the 36 observed full turns: 1,817.196 seconds
    total, 50.478-second mean, 47.928-second p50, 91.695-second p95, and 108.685-second maximum.
    Semantic fields remain explicitly pending rather than blocking publication.
-9. **Next — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26 of
-   37 outputs violated exact-span validation, then prospectively declare and test a revised
-   instrument without changing or rerunning this baseline. The eight substantively decomposed
-   releases are enough to preserve limited mechanical measurements, not enough to support strong
-   claim-derived conclusions.
-10. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
-   subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
-   technical failures are preserved, measure judge and decomposition agreement, and publish a
-   hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
-   the original baseline. This is optional, lower-priority work and must not be represented as part
-   of the completed descriptive baseline.
-11. **Measure production behavior.** Deploy the exact evaluated candidate, verify the production
-   commit, and collect the predeclared 30–50 successful warm first-turn cohort while reporting
-   failures, cold starts, follow-ups, p50, p95, and cost.
-12. **Fill resume and blog claims only from those artifacts.** If hybrid retrieval does not improve
-    the predeclared metric, report that result rather than tuning against the used holdout. A later
-    system change requires a new holdout for a new improvement claim.
+9. **Next — run the prepared production-performance cohort.** Deploy the instrumented release,
+   verify `RENDER_GIT_COMMIT`, corpus/policy identity, and one stable process epoch, then obtain
+   separate authorization for exactly 33 paid attempts. Run the answerable held-out items as fresh,
+   sequential Essential/Complete/RAG first turns with empty history, no retry or replacement, and a
+   minimum 12-second interval between request starts. Report p50/p95 over the stated number of valid
+   successful completions, error rate over all 33 attempts, instrumentation failures separately,
+   cold/warm handling, and spend. Bind the server-exposed versioned `$2.00` per-request ceiling;
+   count any unknown transport attempt at that full amount for authorization, exclude successful
+   zero-usage observations from latency, and reject stale request scopes before POST. Until that live
+   run completes, production latency is unmeasured.
+10. **Fill resume and blog claims only from completed artifacts.** The retrieval bullet may use the
+    completed +1.26-point result with its mixed-effect caveat. The production-latency placeholders
+    remain blank until the fixed live cohort emits its text-free report.
+11. **Later — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
+    of 37 outputs violated exact-span validation, then prospectively declare and test a revised
+    instrument without changing or rerunning this baseline. The eight substantively decomposed
+    releases are enough to preserve limited mechanical measurements, not enough to support strong
+    claim-derived conclusions.
+12. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+    subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
+    technical failures are preserved, measure judge and decomposition agreement, and publish a
+    hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
+    the original baseline. This is optional, lower-priority work and must not be represented as part
+    of the completed descriptive baseline.
 
 ## Why this order
 
@@ -241,9 +251,11 @@ evidence” from “the context builder or model did not use evidence that was f
 faithfulness, and abstention then measure separate boundaries rather than collapsing every failure
 into a subjective answer-quality score.
 
-Production latency comes last because it must describe the same candidate whose historical
-behavior was measured. Timing an older deployment or an unmeasured new prompt produces an
-operational number about a different system.
+Production latency follows the frozen measurements because it must identify the same V26 RAG
+policy and corpus boundary whose historical behavior was measured. The observability implementation
+may live in a later release commit, so the production report binds both that deployed commit and
+the unchanged policy/corpus identities. Timing an unidentified deployment or a new retrieval/prompt
+cohort would produce an operational number about a different system.
 
 ## Reader experience workstream
 
@@ -298,8 +310,10 @@ The numerical Archivist bullets remain blank until all of the following are true
   after results;
 - faithfulness dimensions use either an owner-ratified qualifying judge or the declared
   manual/pending fallback;
-- the production report covers the declared warm cohort and states p50, p95, error rate, spend,
-  and cold-start handling; and
+- the production report covers exactly 33 attempted answerable first turns with no retry or
+  replacement; states the valid-success denominator for p50/p95, the all-attempt error rate,
+  instrumentation failures, recorded and conservative cost accounting, unavailable-usage attempts,
+  the bound request-cost ceiling, and cold/warm handling; and
 - public artifacts contain no manuscript text, held-out question text, private prompts,
   credentials, or raw user conversations.
 
@@ -313,6 +327,11 @@ The intended evidence-backed forms remain placeholders until those gates close:
 > Deployed on Render with privacy-safe request tracing, per-stage latency, and token/cost
 > telemetry; p50 server latency was Y seconds across N warm production-like queries (p95 Z
 > seconds, error rate E%).
+
+The production form remains a placeholder. The implementation and protocol exist, but no live
+33-attempt cohort has run. If one or more requests fail, the published form must say that p50/p95
+cover `S` valid successful completions in 33 attempts while `E%` uses all 33 attempts; it may not
+replace failures to keep the latency denominator at 33.
 
 Use “improved” only if the frozen comparison actually improves. Replace every placeholder with the
 observed value and link the claim to the same reproducible artifacts.

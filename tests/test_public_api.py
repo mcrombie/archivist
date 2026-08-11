@@ -4,16 +4,19 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import web_api
+from costs import CostLimitExceeded, UsageLedger, current_usage_context
 from exposure_profile import ExposureConfigurationError, ExposureSettings
 from public_request_gate import (
     DEFAULT_CATEGORY,
     FULL_CONTEXT_CATEGORY,
     PublicRequestGate,
 )
+from public_telemetry import validated_deployment_commit
 from public_sources import (
     MAX_EXCERPT_CHARACTERS,
     MAX_EXCERPT_SOURCES,
@@ -29,6 +32,24 @@ LOCATOR_PATH = (
     BASE_DIR / "fixtures" / "edition_locators" / "typeset_pdf_0706.json"
 )
 MANIFEST_PATH = BASE_DIR / "fixtures" / "corpus_manifest.json"
+
+
+@pytest.fixture(autouse=True)
+def isolated_public_usage_ledger(request, monkeypatch):
+    directory = Path("runtime") / "test-public-ledgers"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{request.node.name}.sqlite3"
+    related_paths = [path, Path(f"{path}-wal"), Path(f"{path}-shm")]
+    for related in related_paths:
+        related.unlink(missing_ok=True)
+    monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(path))
+    yield
+    for related in related_paths:
+        related.unlink(missing_ok=True)
+    try:
+        directory.rmdir()
+    except OSError:
+        pass
 
 
 def public_settings(**overrides) -> ExposureSettings:
@@ -100,12 +121,39 @@ def test_public_profile_requires_a_server_budget():
         raise AssertionError("public mode started without a server budget")
 
 
+def test_deployment_commit_validation_never_masks_render_identity():
+    assert validated_deployment_commit(
+        {
+            "ARCHIVIST_DEPLOY_COMMIT": "invalid-local-override",
+            "RENDER_GIT_COMMIT": "A" * 40,
+        }
+    ) == "a" * 40
+    assert validated_deployment_commit(
+        {
+            "ARCHIVIST_DEPLOY_COMMIT": "b" * 40,
+            "RENDER_GIT_COMMIT": "c" * 40,
+        }
+    ) == "c" * 40
+    assert (
+        validated_deployment_commit(
+            {
+                "ARCHIVIST_DEPLOY_COMMIT": "d" * 40,
+                "RENDER_GIT_COMMIT": "not-a-sha",
+            }
+        )
+        is None
+    )
+    assert validated_deployment_commit(
+        {"ARCHIVIST_DEPLOY_COMMIT": "E" * 40}
+    ) == "e" * 40
+
+
 def test_public_app_exposes_only_the_allowlisted_api(monkeypatch):
     monkeypatch.setattr(web_api, "_public_project_config", lambda _settings: ready_config())
     monkeypatch.setattr(
         web_api,
         "_run_public_question",
-        lambda _request, _settings: {
+        lambda _request, _settings, **_kwargs: {
             "answer": "Synthetic answer.",
             "answer_status": "answered",
             "historiographical_lens": "evidence_first",
@@ -151,6 +199,221 @@ def test_public_app_exposes_only_the_allowlisted_api(monkeypatch):
         assert client.request(method, path).status_code == 404, (method, path)
 
 
+def test_public_complete_request_has_one_correlated_identity_and_observation(
+    monkeypatch,
+):
+    deploy_commit = "a" * 40
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("ARCHIVIST_DEPLOY_COMMIT", deploy_commit)
+    monkeypatch.setattr(web_api, "_public_project_config", lambda _settings: ready_config())
+
+    def fake_question(_request, _settings, **kwargs):
+        captured.update(kwargs)
+        captured["request_id"] = web_api._PUBLIC_REQUEST_ID.get()
+        return {
+            "answer": "Synthetic answer.",
+            "answer_status": "answered",
+            "source_schema": "archivist.public_sources/1",
+            "sources": [],
+        }
+
+    monkeypatch.setattr(web_api, "_run_public_question", fake_question)
+    client = TestClient(web_api.create_app(public_settings()))
+    response = client.post(
+        "/api/projects/current/question",
+        json={
+            "question": "What happened?",
+            "conversation_id": "cohort-001",
+            "turn_id": "turn-001",
+            "archivist_mode": "essential",
+            "answer_strategy": "rag",
+        },
+    )
+
+    request_id = response.headers["x-request-id"]
+    assert response.status_code == 200
+    assert len(request_id) == 32
+    assert captured["request_id"] == request_id
+    assert response.headers["x-archivist-commit"] == deploy_commit
+    assert response.headers["x-archivist-process-epoch"] == web_api.PROCESS_EPOCH
+    assert response.headers["server-timing"].startswith("app;dur=")
+    observation = UsageLedger().get_public_request_observation(request_id)
+    assert observation is not None
+    assert observation["conversation_id"] == "cohort-001"
+    assert observation["turn_id"] == "turn-001"
+    assert observation["delivery"] == "complete"
+    assert observation["http_status"] == 200
+
+
+def test_public_progressive_header_is_correlated_but_marked_ineligible(monkeypatch):
+    observed: list[str | None] = []
+
+    def fake_preflight(_request, _settings):
+        observed.append(web_api._PUBLIC_REQUEST_ID.get())
+
+    def fake_question(_request, _settings, **_kwargs):
+        observed.append(web_api._PUBLIC_REQUEST_ID.get())
+        return {
+            "answer": "Synthetic answer.",
+            "answer_status": "answered",
+            "source_schema": "archivist.public_sources/1",
+            "sources": [],
+        }
+
+    monkeypatch.setattr(web_api, "_preflight_public_progressive_question", fake_preflight)
+    monkeypatch.setattr(web_api, "_run_public_question", fake_question)
+    response = TestClient(web_api.create_app(public_settings())).post(
+        "/api/projects/current/question/progressive",
+        json={
+            "question": "What happened?",
+            "conversation_id": "progressive-conversation",
+            "turn_id": "progressive-turn",
+        },
+    )
+
+    request_id = response.headers["x-request-id"]
+    assert response.status_code == 200
+    assert observed == [request_id, request_id]
+    assert response.headers["server-timing"].startswith("app_header;dur=")
+    observation = UsageLedger().get_public_request_observation(request_id)
+    assert observation is not None
+    assert observation["route"] == "question_progressive"
+    assert observation["delivery"] == "progressive_header"
+
+
+def test_public_version_is_closed_text_free_and_bound_to_frozen_candidate(monkeypatch):
+    monkeypatch.setenv("ARCHIVIST_DEPLOY_COMMIT", "b" * 40)
+    monkeypatch.setattr(web_api, "_public_project_config", lambda _settings: ready_config())
+    client = TestClient(web_api.create_app(public_settings()))
+
+    response = client.get("/api/version")
+    health = client.get("/api/health")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert set(payload) == {
+        "schema",
+        "deployment_commit",
+        "process_epoch",
+        "rag_policy_version",
+        "generator_model",
+        "corpus_manifest_sha256",
+        "frozen_candidate_commit",
+        "frozen_candidate_rag_policy",
+        "public_rag_request_cost_ceiling_version",
+        "public_rag_request_cost_ceiling_nano_usd",
+    }
+    assert payload["schema"] == "archivist.public_runtime_identity/2"
+    assert payload["deployment_commit"] == "b" * 40
+    assert payload["process_epoch"] == web_api.PROCESS_EPOCH
+    assert payload["rag_policy_version"] == "evidence-planned-v26"
+    assert payload["generator_model"] == "gpt-5.6-sol"
+    assert (
+        payload["public_rag_request_cost_ceiling_version"]
+        == "public-rag-request-ceiling-v1"
+    )
+    assert payload["public_rag_request_cost_ceiling_nano_usd"] == 2_000_000_000
+    assert len(payload["corpus_manifest_sha256"]) == 64
+    for identity_response in (response, health):
+        assert identity_response.headers["x-archivist-commit"] == "b" * 40
+        assert (
+            identity_response.headers["x-archivist-process-epoch"]
+            == web_api.PROCESS_EPOCH
+        )
+    assert not {
+        "question",
+        "answer",
+        "source",
+        "history",
+        "passage",
+    }.intersection(all_keys(payload))
+
+
+def test_public_rag_reserves_full_request_before_answer_pipeline(monkeypatch):
+    observed: list[tuple[int, str | None]] = []
+
+    def reject_reservation(projected_cost_nano_usd, _ledger):
+        observed.append((projected_cost_nano_usd, current_usage_context().request_id))
+        raise CostLimitExceeded(
+            {
+                "hard_limit_enabled": True,
+                "exceeded": False,
+                "projected_exceeds_remaining": True,
+            }
+        )
+
+    monkeypatch.setattr(web_api, "enforce_projected_usage_budget", reject_reservation)
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: pytest.fail("answer pipeline must not begin"),
+    )
+    request_id = "e" * 32
+    with pytest.raises(HTTPException) as exc_info:
+        web_api._run_public_question(
+            web_api.PublicQuestionRequest(question="What happened?"),
+            public_settings(),
+            request_id=request_id,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert observed == [(2_000_000_000, request_id)]
+
+
+def test_public_complete_validation_error_is_correlated_and_persisted(monkeypatch):
+    monkeypatch.setenv("ARCHIVIST_DEPLOY_COMMIT", "c" * 40)
+    client = TestClient(web_api.create_app(public_settings()))
+
+    response = client.post(
+        "/api/projects/current/question",
+        json={
+            "question": "What happened?",
+            "conversation_id": "cohort-error",
+            "turn_id": "turn-error",
+            "n_results": 12,
+        },
+    )
+
+    request_id = response.headers["x-request-id"]
+    assert response.status_code == 422
+    assert response.headers["x-archivist-commit"] == "c" * 40
+    assert response.headers["x-archivist-process-epoch"] == web_api.PROCESS_EPOCH
+    assert response.headers["server-timing"].startswith("app;dur=")
+    observation = UsageLedger().find_public_request_observation(
+        conversation_id="cohort-error",
+        turn_id="turn-error",
+    )
+    assert observation is not None
+    assert observation["request_id"] == request_id
+    assert observation["http_status"] == 422
+
+
+def test_public_observation_persistence_failure_never_breaks_response(monkeypatch):
+    class BrokenLedger:
+        def record_public_request_observation(self, **_kwargs):
+            raise OSError("synthetic persistence failure")
+
+    monkeypatch.setattr(web_api, "UsageLedger", BrokenLedger)
+    monkeypatch.setattr(
+        web_api,
+        "_run_public_question",
+        lambda _request, _settings, **_kwargs: {
+            "answer": "Synthetic answer.",
+            "answer_status": "answered",
+            "source_schema": "archivist.public_sources/1",
+            "sources": [],
+        },
+    )
+    response = TestClient(web_api.create_app(public_settings())).post(
+        "/api/projects/current/question",
+        json={"question": "What happened?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Synthetic answer."
+    assert len(response.headers["x-request-id"]) == 32
+
+
 def test_public_request_rejects_client_tuning_and_budget_bypass(monkeypatch):
     monkeypatch.setattr(web_api, "_public_project_config", lambda _settings: ready_config())
     client = TestClient(web_api.create_app(public_settings()))
@@ -180,6 +443,16 @@ def test_public_request_size_is_enforced_when_content_length_lies(monkeypatch):
 
     assert response.status_code == 413
     assert response.json()["detail"]["code"] == "request_too_large"
+    assert (
+        response.json()["detail"]["request_id"]
+        == response.headers["x-request-id"]
+    )
+    assert response.headers["server-timing"].startswith("app;dur=")
+    assert (
+        UsageLedger()
+        .get_public_request_observation(response.headers["x-request-id"])["http_status"]
+        == 413
+    )
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
 
@@ -219,6 +492,7 @@ def test_public_source_payload_preserves_numbers_and_bounds_excerpts():
 
 def test_public_question_response_omits_internal_diagnostics_and_costs(monkeypatch):
     chunks = synthetic_chunks(2)
+    observed_request_ids: list[str | None] = []
 
     class FakeLedger:
         def get_settings(self):
@@ -236,24 +510,27 @@ def test_public_question_response_omits_internal_diagnostics_and_costs(monkeypat
 
     monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
     monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
-    monkeypatch.setattr(
-        web_api,
-        "answer_project_question_result",
-        lambda *_args, **_kwargs: SimpleNamespace(
+    def fake_answer(*_args, **_kwargs):
+        observed_request_ids.append(current_usage_context().request_id)
+        return SimpleNamespace(
             answer=(
                 "Alpha evidence 1 directly supports the requested historical claim. "
                 "[Source 1]"
             ),
             final_chunks=chunks,
             status="answered",
-        ),
-    )
+        )
+
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    request_id = "d" * 32
     response = web_api._run_public_question(
         web_api.PublicQuestionRequest(question="What happened?"),
         public_settings(),
+        request_id=request_id,
     )
 
     assert response["answer_status"] == "answered"
+    assert observed_request_ids == [request_id]
     assert not {
         "text",
         "display_groups",

@@ -19,11 +19,13 @@ from costs import (
     CostLimitExceeded,
     MODEL_PRICING,
     PRICING_VERSION,
+    PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
     TokenUsage,
     UsageLedger,
     calculate_cost_nano_usd,
     current_usage_context,
     extract_token_usage,
+    projected_provider_operation_cost_nano_usd,
     record_openai_response,
     tracked_embeddings_create,
     tracked_responses_create,
@@ -97,6 +99,7 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
         project_id="current",
         conversation_id="conversation-1",
         turn_id="turn-1",
+        request_id="a" * 32,
         diagnostics=payload,
         recorded_at="2026-07-24T12:00:00+00:00",
     )
@@ -108,6 +111,8 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
 
     assert stored is not None
     assert stored["validation_error_code"] == "citation_source_mismatch"
+    assert stored["request_id"] == "a" * 32
+    assert ledger.get_answer_run_diagnostics_by_request_id("a" * 32) == stored
     assert stored["cohort"]["rag_policy_version"] == "evidence-planned-v4"
     assert stored["planner"]["status"] == "not_called"
     assert stored["stage_timings_ms"]["answer_generation"] == 240.125
@@ -133,6 +138,7 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
         project_id="current",
         conversation_id="conversation-1",
         turn_id="turn-1",
+        request_id="b" * 32,
         diagnostics=repaired,
     )
     updated = ledger.get_answer_run_diagnostics(
@@ -142,11 +148,82 @@ def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path
     )
     assert updated is not None
     assert updated["run_id"] != first_run_id
+    assert updated["request_id"] == "b" * 32
+    assert ledger.get_answer_run_diagnostics_by_request_id("a" * 32) is None
     assert updated["answer_status"] == "answered"
     assert updated["content_outcome"] == "valid_partial"
     assert updated["repair_codes"] == ["source_mapping_mismatch"]
     assert updated["planner"]["exception_class"] == "SyntheticPlannerFailure"
     assert updated["planner"]["exception_code"] == "rate-limit/429"
+
+
+def test_public_request_observation_round_trip_recovery_and_privacy(ledger_path):
+    ledger = UsageLedger(ledger_path)
+    fields = {
+        "request_id": "c" * 32,
+        "recorded_at": "2026-08-10T12:00:00+00:00",
+        "deployment_commit": "d" * 40,
+        "process_epoch": "e" * 32,
+        "render_instance_id": "srv-opaque-1",
+        "route": "question",
+        "delivery": "complete",
+        "conversation_id": "cohort-01",
+        "turn_id": "turn-01",
+        "archivist_mode": "essential",
+        "answer_strategy": "rag",
+        "http_status": 200,
+        "duration_ms": 1234.5678,
+    }
+
+    assert ledger.record_public_request_observation(**fields)
+    assert not ledger.record_public_request_observation(**fields)
+    stored = ledger.get_public_request_observation("c" * 32)
+
+    assert stored == {
+        "schema": "archivist.public_request_observation/1",
+        **fields,
+        "duration_ms": 1234.568,
+    }
+    assert ledger.find_public_request_observation(
+        conversation_id="cohort-01",
+        turn_id="turn-01",
+    ) == stored
+    assert (
+        ledger.find_public_request_observation(
+            conversation_id="cohort-01",
+            turn_id="turn-01",
+            recorded_at_gte="2026-08-10T12:00:01+00:00",
+        )
+        is None
+    )
+    assert not {
+        "question",
+        "answer",
+        "source",
+        "history",
+        "ip",
+    }.intersection(stored)
+
+
+def test_request_id_correlates_usage_totals_without_changing_legacy_scope(ledger_path):
+    ledger = UsageLedger(ledger_path)
+    request_id = "f" * 32
+    assert ledger.record(
+        response_id="response-request-correlated",
+        operation="answer",
+        requested_model="gpt-5.6-sol",
+        actual_model="gpt-5.6-sol",
+        usage=TokenUsage(input_tokens=10, output_tokens=4, total_tokens=14),
+        project_id="current",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+        request_id=request_id,
+    )
+
+    totals = ledger.request_usage_totals(request_id)
+    assert totals["event_count"] == 1
+    assert totals["total_tokens"] == 14
+    assert ledger.request_usage_totals("0" * 32)["event_count"] == 0
 
 
 def test_answer_run_diagnostics_migration_marks_historical_planner_state_unknown(
@@ -483,7 +560,12 @@ def test_tracked_wrappers_record_context_and_are_idempotent(monkeypatch, ledger_
             )
 
     client = SimpleNamespace(responses=FakeResponses())
-    with usage_scope(project_id="p1", conversation_id="c1", turn_id="t1"):
+    with usage_scope(
+        project_id="p1",
+        conversation_id="c1",
+        turn_id="t1",
+        request_id="1" * 32,
+    ):
         first = tracked_responses_create(
             client,
             operation="answer_generation",
@@ -502,7 +584,7 @@ def test_tracked_wrappers_record_context_and_are_idempotent(monkeypatch, ledger_
         rows = connection.execute(
             """
             SELECT response_id, operation, project_id, conversation_id, turn_id,
-                   requested_model, actual_model
+                   request_id, requested_model, actual_model
             FROM usage_events
             """
         ).fetchall()
@@ -513,6 +595,7 @@ def test_tracked_wrappers_record_context_and_are_idempotent(monkeypatch, ledger_
             "p1",
             "c1",
             "t1",
+            "1" * 32,
             "gpt-5",
             "gpt-5-2025-08-07",
         )
@@ -1633,6 +1716,187 @@ def test_projected_budget_rejects_negative_estimates():
 
     with pytest.raises(ValueError, match="must be non-negative"):
         enforce_projected_usage_budget(-1)
+
+
+def test_public_rag_operation_projection_includes_input_output_and_schema():
+    class StructuredPayload(BaseModel):
+        result: str
+
+    small = projected_provider_operation_cost_nano_usd(
+        provider_kind="responses",
+        request={
+            "model": "gpt-5.6-sol",
+            "input": "short",
+            "text_format": StructuredPayload,
+            "max_output_tokens": 100,
+        },
+    )
+    larger = projected_provider_operation_cost_nano_usd(
+        provider_kind="responses",
+        request={
+            "model": "gpt-5.6-sol",
+            "input": "x" * 10_000,
+            "text_format": StructuredPayload,
+            "max_output_tokens": 1_000,
+        },
+    )
+
+    assert 0 < small < larger < PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD
+
+
+def test_public_rag_operation_projection_uses_worst_case_cache_write_rate():
+    request = {
+        "model": "gpt-5.6-sol",
+        "input": "bounded request",
+        "max_output_tokens": 1_000,
+    }
+    projected = projected_provider_operation_cost_nano_usd(
+        provider_kind="responses",
+        request=request,
+    )
+    serialized_bytes = len(
+        json.dumps(
+            request,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    input_upper_bound = (
+        serialized_bytes + costs.PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND
+    )
+    expected = calculate_cost_nano_usd(
+        "gpt-5.6-sol",
+        TokenUsage(
+            input_tokens=input_upper_bound,
+            cache_write_tokens=input_upper_bound,
+            output_tokens=1_000,
+            total_tokens=input_upper_bound + 1_000,
+        ),
+    )
+
+    assert projected == expected
+
+
+def test_request_operation_ceiling_blocks_before_provider_client_operation(monkeypatch):
+    class NearlySpentLedger:
+        def request_usage_cost_state(self, _request_id):
+            return {
+                "estimated_cost_nano_usd": 1_900_000_000,
+                "event_count": 1,
+                "unpriced_count": 0,
+            }
+
+    class FakeResponses:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **_request):
+            self.calls += 1
+            raise AssertionError("provider operation must not begin")
+
+    responses = FakeResponses()
+    monkeypatch.setattr(costs, "UsageLedger", NearlySpentLedger)
+    with usage_scope(
+        request_id="a" * 32,
+        request_cost_ceiling_nano_usd=PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
+    ):
+        with pytest.raises(CostLimitExceeded) as exc_info:
+            tracked_responses_create(
+                SimpleNamespace(responses=responses),
+                operation="answer_generation",
+                model="gpt-5.6-sol",
+                input="bounded prompt",
+                max_output_tokens=12_000,
+            )
+
+    assert responses.calls == 0
+    assert (
+        exc_info.value.budget["request_cost_failure"]
+        == "request_cost_ceiling_would_be_exceeded"
+    )
+
+
+def test_unknown_request_value_fails_closed_before_provider_client_operation(monkeypatch):
+    class EmptyLedger:
+        def request_usage_cost_state(self, _request_id):
+            return {
+                "estimated_cost_nano_usd": 0,
+                "event_count": 0,
+                "unpriced_count": 0,
+            }
+
+    class UnknownRequestValue:
+        pass
+
+    class FakeResponses:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **_request):
+            self.calls += 1
+            raise AssertionError("provider operation must not begin")
+
+    responses = FakeResponses()
+    monkeypatch.setattr(costs, "UsageLedger", EmptyLedger)
+    with usage_scope(
+        request_id="c" * 32,
+        request_cost_ceiling_nano_usd=PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
+    ):
+        with pytest.raises(CostLimitExceeded) as exc_info:
+            tracked_responses_create(
+                SimpleNamespace(responses=responses),
+                operation="answer_generation",
+                model="gpt-5.6-sol",
+                input=UnknownRequestValue(),
+                max_output_tokens=12_000,
+            )
+
+    assert responses.calls == 0
+    assert (
+        exc_info.value.budget["request_cost_failure"]
+        == "request_cost_projection_failed"
+    )
+
+
+def test_strict_request_scope_rejects_missing_usage_after_paid_operation(monkeypatch):
+    class EmptyLedger:
+        def request_usage_cost_state(self, _request_id):
+            return {
+                "estimated_cost_nano_usd": 0,
+                "event_count": 0,
+                "unpriced_count": 0,
+            }
+
+    class FakeResponses:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **_request):
+            self.calls += 1
+            return SimpleNamespace(id="paid-without-usage", model="gpt-5.6-sol")
+
+    responses = FakeResponses()
+    monkeypatch.setattr(costs, "UsageLedger", EmptyLedger)
+    monkeypatch.setattr(costs, "record_openai_response", lambda *_args, **_kwargs: False)
+    with usage_scope(
+        request_id="b" * 32,
+        request_cost_ceiling_nano_usd=PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
+    ):
+        with pytest.raises(CostLimitExceeded) as exc_info:
+            tracked_responses_create(
+                SimpleNamespace(responses=responses),
+                operation="query_planning",
+                model="gpt-5.6-sol",
+                input="bounded prompt",
+                max_output_tokens=4_000,
+            )
+
+    assert responses.calls == 1
+    assert (
+        exc_info.value.budget["request_cost_failure"]
+        == "usage_tracking_missing_or_duplicate"
+    )
 
 
 def test_explicit_budget_override_applies_to_every_tracked_operation(monkeypatch):

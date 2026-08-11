@@ -35,10 +35,19 @@ PRICING_VERSION = "2026-07-22"
 CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
 TOKENS_PER_MILLION = Decimal("1000000")
+PUBLIC_RAG_REQUEST_COST_CEILING_VERSION = "public-rag-request-ceiling-v1"
+PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD = 2_000_000_000
+# The provider tokenizes submitted prompt material rather than the JSON transport
+# byte-for-byte.  One UTF-8 byte per input token is already a conservative upper
+# bound for the submitted text.  This additional allowance covers request-field,
+# structured-schema, and SDK serialization overhead without relying on a tokenizer
+# or a provider call at admission time.
+PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND = 32_768
 LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000
 LONG_CONTEXT_INPUT_MULTIPLIER = Decimal("2")
 LONG_CONTEXT_OUTPUT_MULTIPLIER = Decimal("1.5")
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
+PUBLIC_REQUEST_OBSERVATION_SCHEMA = "archivist.public_request_observation/1"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 HISTORICAL_PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/1"
 ANSWER_RUN_TIMING_KEYS = frozenset(
@@ -137,6 +146,9 @@ SAFE_PLANNER_EXCEPTION_CODES = frozenset(
     }
 )
 _SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+_REQUEST_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
+_COMMIT_PATTERN = re.compile(r"^[a-f0-9]{40}$")
+_SAFE_PUBLIC_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/_-]{0,127}$")
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +216,10 @@ class UsageContext:
     project_id: str | None = None
     conversation_id: str | None = None
     turn_id: str | None = None
+    request_id: str | None = None
     enforce_budget: bool = False
     allow_over_budget: bool = False
+    request_cost_ceiling_nano_usd: int | None = None
 
 
 class CostLimitExceeded(RuntimeError):
@@ -232,8 +246,10 @@ def usage_scope(
     project_id: str | None = None,
     conversation_id: str | None = None,
     turn_id: str | None = None,
+    request_id: str | None = None,
     enforce_budget: bool | None = None,
     allow_over_budget: bool | None = None,
+    request_cost_ceiling_nano_usd: int | None = None,
 ) -> Iterator[UsageContext]:
     previous = current_usage_context()
     context = UsageContext(
@@ -242,9 +258,15 @@ def usage_scope(
             conversation_id if conversation_id is not None else previous.conversation_id
         ),
         turn_id=turn_id if turn_id is not None else previous.turn_id,
+        request_id=request_id if request_id is not None else previous.request_id,
         enforce_budget=(previous.enforce_budget if enforce_budget is None else enforce_budget),
         allow_over_budget=(
             previous.allow_over_budget if allow_over_budget is None else allow_over_budget
+        ),
+        request_cost_ceiling_nano_usd=(
+            request_cost_ceiling_nano_usd
+            if request_cost_ceiling_nano_usd is not None
+            else previous.request_cost_ceiling_nano_usd
         ),
     )
     token = _usage_context.set(context)
@@ -676,6 +698,7 @@ class UsageLedger:
                 project_id TEXT,
                 conversation_id TEXT,
                 turn_id TEXT,
+                request_id TEXT,
                 requested_model TEXT NOT NULL,
                 actual_model TEXT NOT NULL,
                 input_tokens INTEGER NOT NULL,
@@ -699,6 +722,7 @@ class UsageLedger:
                 project_id TEXT NOT NULL,
                 conversation_id TEXT NOT NULL,
                 turn_id TEXT NOT NULL,
+                request_id TEXT,
                 answer_status TEXT NOT NULL,
                 evidence_decision TEXT NOT NULL,
                 validation_result TEXT NOT NULL,
@@ -716,6 +740,24 @@ class UsageLedger:
             );
             CREATE INDEX IF NOT EXISTS answer_run_diagnostics_scope_idx
                 ON answer_run_diagnostics(project_id, conversation_id, turn_id);
+            CREATE TABLE IF NOT EXISTS public_request_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL UNIQUE,
+                recorded_at TEXT NOT NULL,
+                deployment_commit TEXT,
+                process_epoch TEXT NOT NULL,
+                render_instance_id TEXT,
+                route TEXT NOT NULL,
+                delivery TEXT NOT NULL,
+                conversation_id TEXT,
+                turn_id TEXT,
+                archivist_mode TEXT,
+                answer_strategy TEXT,
+                http_status INTEGER NOT NULL CHECK (http_status BETWEEN 100 AND 599),
+                duration_ms REAL NOT NULL CHECK (duration_ms >= 0)
+            );
+            CREATE INDEX IF NOT EXISTS public_request_scope_idx
+                ON public_request_observations(conversation_id, turn_id);
             CREATE TABLE IF NOT EXISTS cost_settings (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 monthly_budget_nano_usd INTEGER,
@@ -735,6 +777,16 @@ class UsageLedger:
             str(row[1])
             for row in connection.execute("PRAGMA table_info(answer_run_diagnostics)").fetchall()
         }
+        usage_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(usage_events)").fetchall()
+        }
+        if "request_id" not in usage_columns:
+            connection.execute("ALTER TABLE usage_events ADD COLUMN request_id TEXT")
+        if "request_id" not in diagnostic_columns:
+            connection.execute(
+                "ALTER TABLE answer_run_diagnostics ADD COLUMN request_id TEXT"
+            )
         if "cohort_json" not in diagnostic_columns:
             connection.execute(
                 f"""
@@ -784,6 +836,14 @@ class UsageLedger:
             """,
             (_HISTORICAL_UNKNOWN_PLANNER_JSON,),
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS usage_events_request_idx "
+            "ON usage_events(request_id)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS answer_run_diagnostics_request_idx "
+            "ON answer_run_diagnostics(request_id)"
+        )
         connection.commit()
 
     def record(
@@ -797,6 +857,7 @@ class UsageLedger:
         project_id: str | None = None,
         conversation_id: str | None = None,
         turn_id: str | None = None,
+        request_id: str | None = None,
         recorded_at: str | None = None,
     ) -> bool:
         estimated_cost = calculate_cost_nano_usd(actual_model, usage)
@@ -806,11 +867,12 @@ class UsageLedger:
                 INSERT INTO usage_events (
                     response_id, recorded_at, operation,
                     project_id, conversation_id, turn_id,
+                    request_id,
                     requested_model, actual_model,
                     input_tokens, cached_tokens, cache_write_tokens,
                     output_tokens, reasoning_tokens, total_tokens,
                     estimated_cost_nano_usd, pricing_version, unpriced
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(response_id) DO NOTHING
                 """,
                 (
@@ -820,6 +882,7 @@ class UsageLedger:
                     project_id,
                     conversation_id,
                     turn_id,
+                    request_id,
                     requested_model,
                     actual_model,
                     usage.input_tokens,
@@ -841,6 +904,7 @@ class UsageLedger:
         project_id: str | None,
         conversation_id: str | None,
         turn_id: str | None,
+        request_id: str | None = None,
         diagnostics: Mapping[str, object],
         recorded_at: str | None = None,
     ) -> bool:
@@ -855,14 +919,16 @@ class UsageLedger:
                 """
                 INSERT INTO answer_run_diagnostics (
                     run_id, recorded_at, project_id, conversation_id, turn_id,
+                    request_id,
                     answer_status, evidence_decision, validation_result,
                     content_outcome, answer_strategy,
                     validation_error_code, repair_applied, repair_codes_json,
                     cohort_json, planner_json, stage_timings_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project_id, conversation_id, turn_id) DO UPDATE SET
                     run_id = excluded.run_id,
                     recorded_at = excluded.recorded_at,
+                    request_id = excluded.request_id,
                     answer_status = excluded.answer_status,
                     evidence_decision = excluded.evidence_decision,
                     validation_result = excluded.validation_result,
@@ -881,6 +947,7 @@ class UsageLedger:
                     project_id,
                     conversation_id,
                     turn_id,
+                    request_id,
                     normalized["answer_status"],
                     normalized["evidence_decision"],
                     normalized["validation_result"],
@@ -918,7 +985,8 @@ class UsageLedger:
         with closing(self._connect()) as connection:
             row = connection.execute(
                 """
-                SELECT run_id, recorded_at, answer_status, evidence_decision,
+                SELECT run_id, recorded_at, request_id,
+                       answer_status, evidence_decision,
                        validation_result, content_outcome, answer_strategy,
                        validation_error_code, repair_applied,
                        repair_codes_json, cohort_json, planner_json,
@@ -934,6 +1002,9 @@ class UsageLedger:
             "schema": ANSWER_RUN_DIAGNOSTICS_SCHEMA,
             "run_id": str(row["run_id"]),
             "recorded_at": str(row["recorded_at"]),
+            "request_id": (
+                str(row["request_id"]) if row["request_id"] is not None else None
+            ),
             "answer_status": str(row["answer_status"]),
             "evidence_decision": str(row["evidence_decision"]),
             "validation_result": str(row["validation_result"]),
@@ -955,12 +1026,274 @@ class UsageLedger:
             "stage_timings_ms": json.loads(str(row["stage_timings_json"])),
         }
 
+    def get_answer_run_diagnostics_by_request_id(
+        self,
+        request_id: str,
+    ) -> dict[str, object] | None:
+        """Return text-free answer diagnostics correlated to one server request."""
+
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT project_id, conversation_id, turn_id
+                FROM answer_run_diagnostics
+                WHERE request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        result = self.get_answer_run_diagnostics(
+            project_id=str(row["project_id"]),
+            conversation_id=str(row["conversation_id"]),
+            turn_id=str(row["turn_id"]),
+        )
+        if result is not None and result.get("request_id") != request_id:
+            return None
+        return result
+
+    @staticmethod
+    def _validate_public_observation_value(
+        value: object,
+        *,
+        name: str,
+        nullable: bool = False,
+    ) -> str | None:
+        if value is None and nullable:
+            return None
+        if not isinstance(value, str) or _SAFE_PUBLIC_VALUE_PATTERN.fullmatch(value) is None:
+            raise ValueError(f"public observation contains invalid {name}")
+        return value
+
+    def record_public_request_observation(
+        self,
+        *,
+        request_id: str,
+        recorded_at: str,
+        deployment_commit: str | None,
+        process_epoch: str,
+        render_instance_id: str | None,
+        route: str,
+        delivery: str,
+        conversation_id: str | None,
+        turn_id: str | None,
+        archivist_mode: str | None,
+        answer_strategy: str | None,
+        http_status: int,
+        duration_ms: float,
+    ) -> bool:
+        """Persist one immutable terminal observation without request content."""
+
+        if _REQUEST_ID_PATTERN.fullmatch(request_id) is None:
+            raise ValueError("public observation contains invalid request_id")
+        if _REQUEST_ID_PATTERN.fullmatch(process_epoch) is None:
+            raise ValueError("public observation contains invalid process_epoch")
+        if deployment_commit is not None and _COMMIT_PATTERN.fullmatch(deployment_commit) is None:
+            raise ValueError("public observation contains invalid deployment_commit")
+        if not isinstance(recorded_at, str):
+            raise ValueError("public observation contains invalid recorded_at")
+        try:
+            parsed_recorded_at = datetime.fromisoformat(recorded_at)
+        except ValueError as exc:
+            raise ValueError("public observation contains invalid recorded_at") from exc
+        if parsed_recorded_at.tzinfo is None:
+            raise ValueError("public observation recorded_at must include a timezone")
+        if isinstance(http_status, bool) or not 100 <= int(http_status) <= 599:
+            raise ValueError("public observation contains invalid http_status")
+        if isinstance(duration_ms, bool):
+            raise ValueError("public observation contains invalid duration_ms")
+        selected_duration = float(duration_ms)
+        if not math.isfinite(selected_duration) or selected_duration < 0:
+            raise ValueError("public observation contains invalid duration_ms")
+
+        selected_values = {
+            "render_instance_id": self._validate_public_observation_value(
+                render_instance_id,
+                name="render_instance_id",
+                nullable=True,
+            ),
+            "route": self._validate_public_observation_value(route, name="route"),
+            "delivery": self._validate_public_observation_value(delivery, name="delivery"),
+            "conversation_id": self._validate_public_observation_value(
+                conversation_id,
+                name="conversation_id",
+                nullable=True,
+            ),
+            "turn_id": self._validate_public_observation_value(
+                turn_id,
+                name="turn_id",
+                nullable=True,
+            ),
+            "archivist_mode": self._validate_public_observation_value(
+                archivist_mode,
+                name="archivist_mode",
+                nullable=True,
+            ),
+            "answer_strategy": self._validate_public_observation_value(
+                answer_strategy,
+                name="answer_strategy",
+                nullable=True,
+            ),
+        }
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO public_request_observations (
+                    request_id, recorded_at, deployment_commit, process_epoch,
+                    render_instance_id, route, delivery, conversation_id, turn_id,
+                    archivist_mode, answer_strategy, http_status, duration_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(request_id) DO NOTHING
+                """,
+                (
+                    request_id,
+                    parsed_recorded_at.astimezone(timezone.utc).isoformat(),
+                    deployment_commit,
+                    process_epoch,
+                    selected_values["render_instance_id"],
+                    selected_values["route"],
+                    selected_values["delivery"],
+                    selected_values["conversation_id"],
+                    selected_values["turn_id"],
+                    selected_values["archivist_mode"],
+                    selected_values["answer_strategy"],
+                    int(http_status),
+                    round(selected_duration, 3),
+                ),
+            )
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def _public_observation_from_row(row: sqlite3.Row) -> dict[str, object]:
+        return {
+            "schema": PUBLIC_REQUEST_OBSERVATION_SCHEMA,
+            "request_id": str(row["request_id"]),
+            "recorded_at": str(row["recorded_at"]),
+            "deployment_commit": (
+                str(row["deployment_commit"])
+                if row["deployment_commit"] is not None
+                else None
+            ),
+            "process_epoch": str(row["process_epoch"]),
+            "render_instance_id": (
+                str(row["render_instance_id"])
+                if row["render_instance_id"] is not None
+                else None
+            ),
+            "route": str(row["route"]),
+            "delivery": str(row["delivery"]),
+            "conversation_id": (
+                str(row["conversation_id"])
+                if row["conversation_id"] is not None
+                else None
+            ),
+            "turn_id": str(row["turn_id"]) if row["turn_id"] is not None else None,
+            "archivist_mode": (
+                str(row["archivist_mode"])
+                if row["archivist_mode"] is not None
+                else None
+            ),
+            "answer_strategy": (
+                str(row["answer_strategy"])
+                if row["answer_strategy"] is not None
+                else None
+            ),
+            "http_status": int(row["http_status"]),
+            "duration_ms": float(row["duration_ms"]),
+        }
+
+    def get_public_request_observation(
+        self,
+        request_id: str,
+    ) -> dict[str, object] | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT request_id, recorded_at, deployment_commit, process_epoch,
+                       render_instance_id, route, delivery, conversation_id, turn_id,
+                       archivist_mode, answer_strategy, http_status, duration_ms
+                FROM public_request_observations
+                WHERE request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+        return None if row is None else self._public_observation_from_row(row)
+
+    def find_public_request_observation(
+        self,
+        *,
+        conversation_id: str,
+        turn_id: str,
+        recorded_at_gte: str | None = None,
+    ) -> dict[str, object] | None:
+        """Recover a terminal public request after a client lost its response."""
+
+        cutoff_clause = ""
+        parameters: list[object] = [conversation_id, turn_id]
+        if recorded_at_gte is not None:
+            try:
+                cutoff = datetime.fromisoformat(recorded_at_gte)
+            except ValueError as exc:
+                raise ValueError("recorded_at_gte must be an ISO timestamp") from exc
+            if cutoff.tzinfo is None:
+                raise ValueError("recorded_at_gte must include a timezone")
+            cutoff_clause = " AND recorded_at >= ?"
+            parameters.append(cutoff.astimezone(timezone.utc).isoformat())
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                f"""
+                SELECT request_id, recorded_at, deployment_commit, process_epoch,
+                       render_instance_id, route, delivery, conversation_id, turn_id,
+                       archivist_mode, answer_strategy, http_status, duration_ms
+                FROM public_request_observations
+                WHERE conversation_id = ? AND turn_id = ?
+                {cutoff_clause}
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                parameters,
+            ).fetchone()
+        return None if row is None else self._public_observation_from_row(row)
+
+    def request_usage_totals(self, request_id: str) -> dict[str, object]:
+        """Return all token and estimated-cost totals correlated to a request."""
+
+        with closing(self._connect()) as connection:
+            return self._totals(connection, request_id=request_id)
+
+    def request_usage_cost_state(self, request_id: str) -> dict[str, int]:
+        """Return the exact request cost/accounting state used by strict admission."""
+
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT COALESCE(SUM(estimated_cost_nano_usd), 0) AS cost,
+                       COUNT(*) AS event_count,
+                       COALESCE(SUM(unpriced), 0) AS unpriced_count
+                FROM usage_events
+                WHERE request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+        if row is None:
+            return {
+                "estimated_cost_nano_usd": 0,
+                "event_count": 0,
+                "unpriced_count": 0,
+            }
+        return {
+            "estimated_cost_nano_usd": int(row["cost"]),
+            "event_count": int(row["event_count"]),
+            "unpriced_count": int(row["unpriced_count"]),
+        }
+
     @staticmethod
     def _filters(
         *,
         project_id: str | None = None,
         conversation_id: str | None = None,
         turn_id: str | None = None,
+        request_id: str | None = None,
         month: str | None = None,
     ) -> tuple[str, list[object]]:
         clauses: list[str] = []
@@ -969,6 +1302,7 @@ class UsageLedger:
             ("project_id", project_id),
             ("conversation_id", conversation_id),
             ("turn_id", turn_id),
+            ("request_id", request_id),
         ):
             if value is not None:
                 clauses.append(f"{column} = ?")
@@ -999,12 +1333,14 @@ class UsageLedger:
         project_id: str | None = None,
         conversation_id: str | None = None,
         turn_id: str | None = None,
+        request_id: str | None = None,
         month: str | None = None,
     ) -> dict[str, object]:
         where, parameters = self._filters(
             project_id=project_id,
             conversation_id=conversation_id,
             turn_id=turn_id,
+            request_id=request_id,
             month=month,
         )
         row = connection.execute(
@@ -1286,7 +1622,171 @@ def record_openai_response(
         project_id=context.project_id,
         conversation_id=context.conversation_id,
         turn_id=context.turn_id,
+        request_id=context.request_id,
     )
+
+
+def _strict_request_cost_failure(
+    *,
+    reason: str,
+    projected_operation_nano_usd: int | None = None,
+    spent_nano_usd: int | None = None,
+) -> CostLimitExceeded:
+    context = current_usage_context()
+    return CostLimitExceeded(
+        {
+            "hard_limit_enabled": True,
+            "exceeded": True,
+            "request_cost_ceiling_version": PUBLIC_RAG_REQUEST_COST_CEILING_VERSION,
+            "request_cost_ceiling_nano_usd": context.request_cost_ceiling_nano_usd,
+            "request_cost_failure": reason,
+            "projected_operation_nano_usd": projected_operation_nano_usd,
+            "request_spent_nano_usd": spent_nano_usd,
+        }
+    )
+
+
+def _request_json_value(value: object) -> object:
+    """Project an SDK request value into a deterministic byte-counting shape."""
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _request_json_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_request_json_value(item) for item in value]
+    schema_reader = getattr(value, "model_json_schema", None)
+    if callable(schema_reader):
+        return {"structured_output_schema": _request_json_value(schema_reader())}
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _request_json_value(model_dump(mode="json"))
+    enum_value = getattr(value, "value", None)
+    if isinstance(enum_value, (bool, int, float, str)):
+        return enum_value
+    # Strict public calls use only the shapes above. An unknown object could carry
+    # arbitrarily large serialized state, so counting only its type would not be
+    # conservative. Reject it before the provider operation instead.
+    value_type = type(value)
+    raise TypeError(
+        "unsupported provider request value type: "
+        f"{value_type.__module__}.{value_type.__qualname__}"
+    )
+
+
+def projected_provider_operation_cost_nano_usd(
+    *,
+    provider_kind: str,
+    request: Mapping[str, object],
+) -> int:
+    """Conservatively price one exact serialized provider request before sending it."""
+
+    if provider_kind not in {"responses", "embeddings"}:
+        raise ValueError("provider_kind must be responses or embeddings")
+    model = str(request.get("model") or "")
+    if pricing_for_model(model) is None:
+        raise ValueError("provider request model does not have pinned pricing")
+    raw_max_output = request.get("max_output_tokens", 0)
+    if provider_kind == "responses":
+        if not isinstance(raw_max_output, int) or isinstance(raw_max_output, bool):
+            raise ValueError("strict response requests require max_output_tokens")
+        if raw_max_output <= 0:
+            raise ValueError("strict response requests require positive max_output_tokens")
+        max_output_tokens = raw_max_output
+    else:
+        max_output_tokens = 0
+
+    payload = _request_json_value(dict(request))
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    input_token_upper_bound = (
+        len(serialized) + PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND
+    )
+    cost = calculate_cost_nano_usd(
+        model,
+        TokenUsage(
+            input_tokens=input_token_upper_bound,
+            # Worst-case admission assumes every submitted input token incurs
+            # the documented 1.25x cache-write rate. A cold uncached request or
+            # a cached read is cheaper, so neither can exceed this projection.
+            cache_write_tokens=input_token_upper_bound,
+            output_tokens=max_output_tokens,
+            total_tokens=input_token_upper_bound + max_output_tokens,
+        ),
+    )
+    if cost is None:
+        raise ValueError("provider request model does not have pinned pricing")
+    return cost
+
+
+def enforce_request_operation_cost_ceiling(
+    *,
+    provider_kind: str,
+    request: Mapping[str, object],
+    ledger: UsageLedger | None = None,
+) -> None:
+    """Keep a strict request below its ceiling before every provider operation."""
+
+    context = current_usage_context()
+    ceiling = context.request_cost_ceiling_nano_usd
+    if ceiling is None:
+        return
+    if ceiling <= 0 or context.request_id is None:
+        raise _strict_request_cost_failure(reason="invalid_request_cost_scope")
+    try:
+        state = (ledger or UsageLedger()).request_usage_cost_state(context.request_id)
+        projected = projected_provider_operation_cost_nano_usd(
+            provider_kind=provider_kind,
+            request=request,
+        )
+    except CostLimitExceeded:
+        raise
+    except Exception as exc:
+        raise _strict_request_cost_failure(reason="request_cost_projection_failed") from exc
+    spent = int(state["estimated_cost_nano_usd"])
+    if int(state["unpriced_count"]) > 0:
+        raise _strict_request_cost_failure(
+            reason="unpriced_request_usage",
+            projected_operation_nano_usd=projected,
+            spent_nano_usd=spent,
+        )
+    if spent + projected > ceiling:
+        raise _strict_request_cost_failure(
+            reason="request_cost_ceiling_would_be_exceeded",
+            projected_operation_nano_usd=projected,
+            spent_nano_usd=spent,
+        )
+
+
+def _enforce_recorded_request_cost(ledger: UsageLedger) -> None:
+    context = current_usage_context()
+    ceiling = context.request_cost_ceiling_nano_usd
+    if ceiling is None:
+        return
+    if context.request_id is None:
+        raise _strict_request_cost_failure(reason="invalid_request_cost_scope")
+    try:
+        state = ledger.request_usage_cost_state(context.request_id)
+    except Exception as exc:
+        raise _strict_request_cost_failure(reason="request_cost_read_failed") from exc
+    spent = int(state["estimated_cost_nano_usd"])
+    if int(state["unpriced_count"]) > 0:
+        raise _strict_request_cost_failure(
+            reason="unpriced_request_usage",
+            spent_nano_usd=spent,
+        )
+    if spent > ceiling:
+        raise _strict_request_cost_failure(
+            reason="request_cost_ceiling_exceeded",
+            spent_nano_usd=spent,
+        )
 
 
 def _track_without_breaking_response(
@@ -1295,14 +1795,35 @@ def _track_without_breaking_response(
     operation: str,
     requested_model: str,
 ) -> None:
+    context = current_usage_context()
+    strict = context.request_cost_ceiling_nano_usd is not None
+    ledger = UsageLedger() if strict else None
     try:
-        record_openai_response(
-            response,
-            operation=operation,
-            requested_model=requested_model,
-        )
-    except Exception:
+        if ledger is None:
+            recorded = record_openai_response(
+                response,
+                operation=operation,
+                requested_model=requested_model,
+            )
+        else:
+            recorded = record_openai_response(
+                response,
+                operation=operation,
+                requested_model=requested_model,
+                ledger=ledger,
+            )
+    except CostLimitExceeded:
+        raise
+    except Exception as exc:
+        if strict:
+            raise _strict_request_cost_failure(reason="usage_tracking_failed") from exc
         logger.exception("Could not record local OpenAI usage")
+        return
+    if strict:
+        if not recorded:
+            raise _strict_request_cost_failure(reason="usage_tracking_missing_or_duplicate")
+        assert ledger is not None
+        _enforce_recorded_request_cost(ledger)
 
 
 def enforce_usage_budget(ledger: UsageLedger | None = None) -> None:
@@ -1335,7 +1856,7 @@ def enforce_projected_usage_budget(
         return
 
     budget = (ledger or UsageLedger()).budget_state()
-    if not budget["hard_limit_enabled"]:
+    if not bool(budget.get("hard_limit_enabled", False)):
         return
 
     remaining_usd = budget.get("remaining_usd")
@@ -1356,6 +1877,10 @@ def enforce_projected_usage_budget(
 
 def tracked_responses_create(client: object, *, operation: str, **request: Any) -> object:
     enforce_usage_budget()
+    enforce_request_operation_cost_ceiling(
+        provider_kind="responses",
+        request=request,
+    )
     response = client.responses.create(**request)
     _track_without_breaking_response(
         response,
@@ -1375,6 +1900,10 @@ def tracked_responses_parse(client: object, *, operation: str, **request: Any) -
     without issuing another request.
     """
     enforce_usage_budget()
+    enforce_request_operation_cost_ceiling(
+        provider_kind="responses",
+        request=request,
+    )
     requested_model = str(request.get("model", ""))
     raw_responses = getattr(client.responses, "with_raw_response", None)
     raw_parse = getattr(raw_responses, "parse", None)
@@ -1453,6 +1982,10 @@ def tracked_responses_stream(
     """
 
     enforce_usage_budget()
+    enforce_request_operation_cost_ceiling(
+        provider_kind="responses",
+        request={**request, "text_format": text_format},
+    )
     requested_model = str(request.get("model", ""))
     if "stream" in request:
         raise TypeError("tracked_responses_stream owns the stream parameter")
@@ -1555,6 +2088,10 @@ def tracked_responses_stream(
 
 def tracked_embeddings_create(client: object, *, operation: str, **request: Any) -> object:
     enforce_usage_budget()
+    enforce_request_operation_cost_ceiling(
+        provider_kind="embeddings",
+        request=request,
+    )
     response = client.embeddings.create(**request)
     _track_without_breaking_response(
         response,

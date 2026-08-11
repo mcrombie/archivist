@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -41,7 +42,13 @@ from archivist_modes import (
     archivist_mode_metadata,
     settings_for_archivist_mode,
 )
-from costs import CostLimitExceeded, UsageLedger, usage_scope
+from costs import (
+    PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
+    CostLimitExceeded,
+    UsageLedger,
+    enforce_projected_usage_budget,
+    usage_scope,
+)
 from exposure_profile import ExposureProfile, ExposureSettings
 from full_context_pipeline import eligible_full_context_chunks
 from importers import chapter_title_from_text
@@ -53,6 +60,14 @@ from perspectives import (
     settings_for_legacy_perspective,
 )
 from rag_pipeline import AnswerStrategy, answer_run_diagnostics
+from public_telemetry import (
+    PROCESS_EPOCH,
+    PublicTelemetryIdentityError,
+    new_public_request_observation,
+    observation_log_payload,
+    public_runtime_identity,
+    validated_deployment_commit,
+)
 from public_request_gate import (
     DEFAULT_CATEGORY,
     FULL_CONTEXT_CATEGORY,
@@ -87,6 +102,10 @@ SAFE_USAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 logger = logging.getLogger(__name__)
 EXPOSURE_SETTINGS = ExposureSettings.from_env()
 _PUBLIC_RUNTIME_VERIFIED = False
+_PUBLIC_REQUEST_ID: ContextVar[str | None] = ContextVar(
+    "archivist_public_request_id",
+    default=None,
+)
 
 app = FastAPI(
     title="Archivist API",
@@ -720,10 +739,11 @@ def _progressive_answer_response(
     *,
     public: bool,
     lifecycle: _StreamGateLifecycle | None = None,
+    trace_id: str | None = None,
 ) -> StreamingResponse:
     """Deliver checked claims while retaining an authoritative terminal result."""
 
-    timing = _ProgressiveDeliveryTiming(public=public)
+    timing = _ProgressiveDeliveryTiming(public=public, trace_id=trace_id)
 
     async def body():
         loop = asyncio.get_running_loop()
@@ -1150,6 +1170,8 @@ def _public_safe_error(
 
 
 def _with_public_security_headers(response: Response) -> Response:
+    response.headers["X-Archivist-Commit"] = validated_deployment_commit() or "unknown"
+    response.headers["X-Archivist-Process-Epoch"] = PROCESS_EPOCH
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Frame-Options"] = "DENY"
@@ -1217,10 +1239,12 @@ def _public_verbatim_audit_chunks(
 def _preflight_public_progressive_question(
     request: PublicQuestionRequest,
     settings: ExposureSettings,
+    *,
+    request_id: str | None = None,
 ) -> None:
     """Keep cheap policy/spend failures as ordinary HTTP responses."""
 
-    request_id = uuid4().hex
+    request_id = request_id or _PUBLIC_REQUEST_ID.get() or uuid4().hex
     if (
         request.answer_strategy is AnswerStrategy.FULL_CONTEXT
         and not settings.full_context_available
@@ -1269,9 +1293,11 @@ def _run_public_question(
     progress_callback: ProgressCallback | None = None,
     checked_claim_callback: CheckedClaimCallback | None = None,
     stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
+    request_id: str | None = None,
 ) -> dict[str, object]:
-    request_id = uuid4().hex
+    request_id = request_id or _PUBLIC_REQUEST_ID.get() or uuid4().hex
     ledger = UsageLedger()
+    answer_result: object | None = None
     released_claims: list[CheckedClaimCandidate] = []
     claim_release_failed = False
 
@@ -1335,9 +1361,22 @@ def _run_public_question(
             project_id="current",
             conversation_id=request.conversation_id,
             turn_id=request.turn_id,
+            request_id=request_id,
             enforce_budget=True,
             allow_over_budget=False,
+            request_cost_ceiling_nano_usd=(
+                PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD
+                if request.answer_strategy is AnswerStrategy.RAG
+                else None
+            ),
         ):
+            if request.answer_strategy is AnswerStrategy.RAG:
+                # Reserve a whole conservative request before Answer Mode can
+                # construct a provider client or issue its first operation.
+                enforce_projected_usage_budget(
+                    PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
+                    ledger,
+                )
             answer_kwargs: dict[str, object] = {
                 "n_results": settings.public_n_results,
                 "historiographical_lens": request.historiographical_lens,
@@ -1385,18 +1424,6 @@ def _run_public_question(
                 manifest_path=BASE_DIR / "fixtures" / "corpus_manifest.json",
             )
 
-        try:
-            ledger.record_answer_run_diagnostics(
-                project_id="current",
-                conversation_id=request.conversation_id,
-                turn_id=request.turn_id,
-                diagnostics=answer_run_diagnostics(answer_result),
-            )
-        except Exception:
-            logger.exception(
-                "Could not persist public answer diagnostics request_id=%s",
-                request_id,
-            )
         mode_metadata = archivist_mode_metadata(request.archivist_mode)
         return {
             "answer": answer_result.answer,
@@ -1453,6 +1480,21 @@ def _run_public_question(
                 "request_id": request_id,
             },
         ) from None
+    finally:
+        if answer_result is not None:
+            try:
+                ledger.record_answer_run_diagnostics(
+                    project_id="current",
+                    conversation_id=request.conversation_id,
+                    turn_id=request.turn_id,
+                    request_id=request_id,
+                    diagnostics=answer_run_diagnostics(answer_result),
+                )
+            except Exception:
+                logger.exception(
+                    "Could not persist public answer diagnostics request_id=%s",
+                    request_id,
+                )
 
 
 def _create_public_app(settings: ExposureSettings) -> FastAPI:
@@ -1497,6 +1539,49 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
             return FULL_CONTEXT_CATEGORY
         return DEFAULT_CATEGORY
 
+    def _request_observation_metadata(body: bytes) -> dict[str, str | None]:
+        """Read only allowlisted, text-free fields from a public request body."""
+
+        try:
+            payload = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if not isinstance(payload, Mapping):
+            return {
+                "conversation_id": None,
+                "turn_id": None,
+                "archivist_mode": None,
+                "answer_strategy": None,
+            }
+
+        def safe_scope(name: str) -> str | None:
+            value = payload.get(name)
+            if (
+                not isinstance(value, str)
+                or not value
+                or len(value) > 128
+                or not value.isascii()
+            ):
+                return None
+            if not all(character.isalnum() or character in "._:-" for character in value):
+                return None
+            return value
+
+        try:
+            mode = ArchivistMode(payload.get("archivist_mode", ArchivistMode.ESSENTIAL.value))
+        except (TypeError, ValueError):
+            mode = None
+        try:
+            strategy = AnswerStrategy(payload.get("answer_strategy", AnswerStrategy.RAG.value))
+        except (TypeError, ValueError):
+            strategy = None
+        return {
+            "conversation_id": safe_scope("conversation_id"),
+            "turn_id": safe_scope("turn_id"),
+            "archivist_mode": mode.value if mode is not None else None,
+            "answer_strategy": strategy.value if strategy is not None else None,
+        }
+
     @public_app.middleware("http")
     async def public_security_boundary(request: Request, call_next):
         is_question = (
@@ -1507,6 +1592,73 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                 "/api/projects/current/question/progressive",
             }
         )
+        started_ns = perf_counter_ns()
+        request_id = uuid4().hex if is_question else None
+        if request_id is not None:
+            request.state.public_request_id = request_id
+        delivery = (
+            "progressive_header"
+            if request.url.path.endswith("/progressive")
+            else "complete"
+        )
+        route = (
+            "question_progressive"
+            if delivery == "progressive_header"
+            else "question"
+        )
+        observation_metadata: dict[str, str | None] = {
+            "conversation_id": None,
+            "turn_id": None,
+            "archivist_mode": None,
+            "answer_strategy": None,
+        }
+
+        def finalize(response: Response) -> Response:
+            if request_id is None:
+                return _with_public_security_headers(response)
+            duration_ms = round(
+                max(0, perf_counter_ns() - started_ns) / 1_000_000,
+                3,
+            )
+            commit = validated_deployment_commit()
+            response.headers["X-Request-ID"] = request_id
+            response.headers["X-Archivist-Commit"] = commit or "unknown"
+            response.headers["X-Archivist-Process-Epoch"] = PROCESS_EPOCH
+            if delivery == "complete":
+                response.headers["Server-Timing"] = f"app;dur={duration_ms:.3f}"
+            else:
+                response.headers["Server-Timing"] = f"app_header;dur={duration_ms:.3f}"
+            observation = new_public_request_observation(
+                request_id=request_id,
+                route=route,
+                delivery=delivery,
+                conversation_id=observation_metadata["conversation_id"],
+                turn_id=observation_metadata["turn_id"],
+                archivist_mode=observation_metadata["archivist_mode"],
+                answer_strategy=observation_metadata["answer_strategy"],
+                http_status=response.status_code,
+                duration_ms=duration_ms,
+            )
+            try:
+                persisted = observation.as_dict()
+                persisted.pop("schema", None)
+                UsageLedger().record_public_request_observation(**persisted)
+            except Exception:
+                logger.exception(
+                    "Could not persist public request observation request_id=%s",
+                    request_id,
+                )
+            logger.info(
+                "public_request_observation %s",
+                json.dumps(
+                    observation_log_payload(observation),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            )
+            return _with_public_security_headers(response)
+
         client_id = request.client.host if request.client is not None else "unknown"
         entered_gate = False
         gate_lease: _GateLease | None = None
@@ -1519,22 +1671,23 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                 except ValueError:
                     too_large = True
                 if too_large:
-                    return _with_public_security_headers(
+                    return finalize(
                         _public_safe_error(
                             status_code=413,
                             code="request_too_large",
                             message="This question is too large for the public demo.",
-                            request_id=uuid4().hex,
+                            request_id=request_id,
                         )
                     )
             body = await request.body()
+            observation_metadata = _request_observation_metadata(body)
             if len(body) > settings.public_max_request_bytes:
-                return _with_public_security_headers(
+                return finalize(
                     _public_safe_error(
                         status_code=413,
                         code="request_too_large",
                         message="This question is too large for the public demo.",
-                        request_id=uuid4().hex,
+                        request_id=request_id,
                     )
                 )
             category = _request_category(body)
@@ -1545,7 +1698,7 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                     and decision.reason
                     in {"category_rate_limit", "category_concurrency_limit"}
                 )
-                return _with_public_security_headers(
+                return finalize(
                     _public_safe_error(
                         status_code=429,
                         code=(
@@ -1559,7 +1712,7 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                             if full_context_limited
                             else "Archivist is busy. Please wait before trying again."
                         ),
-                        request_id=uuid4().hex,
+                        request_id=request_id,
                         retry_after=decision.retry_after_seconds,
                     )
                 )
@@ -1570,6 +1723,16 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
             request.state.public_gate_lease = gate_lease
         try:
             response = await call_next(request)
+        except Exception:
+            if request_id is None:
+                raise
+            logger.exception("Unhandled public question failure request_id=%s", request_id)
+            response = _public_safe_error(
+                status_code=500,
+                code="public_request_failed",
+                message="Archivist could not complete this request.",
+                request_id=request_id,
+            )
         finally:
             if (
                 entered_gate
@@ -1577,7 +1740,7 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                 and not getattr(request.state, "public_gate_release_deferred", False)
             ):
                 gate_lease.release()
-        return _with_public_security_headers(response)
+        return finalize(response)
 
     if FRONTEND_DIST.exists():
         public_app.mount(
@@ -1614,6 +1777,22 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                 },
             ) from None
 
+    @public_app.get("/api/version")
+    def public_version() -> dict[str, object]:
+        """Expose only the closed, text-free identity of the running candidate."""
+
+        try:
+            return public_runtime_identity()
+        except PublicTelemetryIdentityError:
+            logger.exception("Public runtime identity check failed")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "service_not_ready",
+                    "message": "Archivist is not ready.",
+                },
+            ) from None
+
     @public_app.get("/api/config")
     def public_config() -> dict[str, object]:
         try:
@@ -1629,29 +1808,55 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
             ) from None
 
     @public_app.post("/api/projects/current/question")
-    def public_question(request: PublicQuestionRequest) -> dict[str, object]:
-        return _run_public_question(request, settings)
+    def public_question(
+        request: PublicQuestionRequest,
+        http_request: Request,
+    ) -> dict[str, object]:
+        token = _PUBLIC_REQUEST_ID.set(
+            getattr(http_request.state, "public_request_id", None)
+        )
+        try:
+            return _run_public_question(request, settings)
+        finally:
+            _PUBLIC_REQUEST_ID.reset(token)
 
     @public_app.post("/api/projects/current/question/progressive")
     async def public_progressive_question(
         request: PublicQuestionRequest,
         http_request: Request,
     ) -> StreamingResponse:
-        _preflight_public_progressive_question(request, settings)
+        request_id = getattr(http_request.state, "public_request_id", None)
+        token = _PUBLIC_REQUEST_ID.set(request_id)
+        try:
+            _preflight_public_progressive_question(request, settings)
+        finally:
+            _PUBLIC_REQUEST_ID.reset(token)
         lease = getattr(http_request.state, "public_gate_lease", None)
         lifecycle = _StreamGateLifecycle(
             lease if isinstance(lease, _GateLease) else None
         )
+        def run_progressive(
+            progress: ProgressCallback,
+            checked_claim: CheckedClaimCallback,
+            stream_milestone: ProviderStreamMilestoneCallback,
+        ) -> dict[str, object]:
+            worker_token = _PUBLIC_REQUEST_ID.set(request_id)
+            try:
+                return _run_public_question(
+                    request,
+                    settings,
+                    progress_callback=progress,
+                    checked_claim_callback=checked_claim,
+                    stream_milestone_callback=stream_milestone,
+                )
+            finally:
+                _PUBLIC_REQUEST_ID.reset(worker_token)
+
         response = _progressive_answer_response(
-            lambda progress, checked_claim, stream_milestone: _run_public_question(
-                request,
-                settings,
-                progress_callback=progress,
-                checked_claim_callback=checked_claim,
-                stream_milestone_callback=stream_milestone,
-            ),
+            run_progressive,
             public=True,
             lifecycle=lifecycle,
+            trace_id=request_id,
         )
         if isinstance(lease, _GateLease):
             # The worker and stream now jointly own this lease. Middleware must
