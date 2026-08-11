@@ -3965,6 +3965,24 @@ Useful blog lesson: sometimes the model being evaluated has already answered, wh
 used as a ruler consumes its entire allowance and says nothing. The honest result is neither a
 retry nor a blank score—it is a disclosed instrument failure, preserved exactly once.
 
+### 2026-08-11 - Separating the cohort cap from the service budget
+
+- The owner authorized the locked 33-request production-performance cohort with no retries or
+  replacements and a `$10.00` cohort cap. A read-only check of the live usage ledger showed no
+  calendar-month spend, but the service still had its older `$5.00` monthly ceiling.
+- Those two limits serve different purposes. The runner's `$10.00` cap limits this one cohort. The
+  service budget governs every public request and must retain the versioned `$2.00` worst-case
+  request allowance before accepting another turn. Leaving it at `$5.00` could therefore convert
+  budget-denied requests into irreversible failures in the fixed 33-attempt denominator even when
+  the cohort remained below its authorized cap.
+- The Blueprint ceiling was aligned to `$10.00` before deployment. The runner still cannot exceed
+  the owner's `$10.00` authorization, does not retry or replace failures, and reports recorded cost
+  separately from conservative authorization accounting.
+
+Useful blog lesson: a benchmark can have both an experimental spending cap and an application
+safety budget. If they are not aligned before a no-retry run, the safety system itself becomes an
+unintended experimental variable.
+
 ## Update convention
 
 Add a dated subsection after any change that materially affects:
