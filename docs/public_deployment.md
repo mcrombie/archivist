@@ -76,14 +76,15 @@ These are the first steps that require the owner's Render account and billing me
 7. Enter `OPENAI_API_KEY` directly in Render when the Blueprint asks for the unsynchronized
    secret. Never paste it into source control, a screenshot, or chat.
 
-The Blueprint sets the ordinary public OpenAI ceiling to `$5.00` per calendar month. It was
-temporarily raised to `$10.00` on 2026-08-11 for the separately capped 33-request production-
-performance cohort; the source-of-truth setting returned to `$5.00` after the run closed. Because
-production deploys are manual, verify that the live Render environment matches the Blueprint.
-Change
-`ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD` in Render only as a deliberate owner decision; a cohort
-runner's own authorization cap remains independent and cannot be increased by this setting.
-Render hosting charges are separate from OpenAI usage.
+The Blueprint sets the ordinary public OpenAI ceiling to `$10.00` per calendar month. The history
+matters: it was temporarily raised from `$5.00` to `$10.00` on 2026-08-11 for the separately capped
+33-request production-performance cohort, then returned to `$5.00` after that run closed. On
+2026-08-12, the owner made a separate decision to raise the ongoing public-demo ceiling to
+`$10.00`. The persistent ledger retains spend already recorded in the current UTC calendar month;
+raising the ceiling does not reset it. Because production deploys are manual, verify that the live
+Render environment matches the Blueprint. Change `ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD` in Render
+only as a deliberate owner decision; a cohort runner's own authorization cap remains independent
+and cannot be increased by this setting. Render hosting charges are separate from OpenAI usage.
 
 ## Seed the private disk
 

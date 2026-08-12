@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { createServer } from "vite";
 
@@ -77,6 +78,42 @@ const requestArguments = [
 try {
   const delivery = await server.ssrLoadModule("/src/delivery.ts");
   const api = await server.ssrLoadModule("/src/api.ts");
+
+  const chatCss = readFileSync(new URL("../src/chat.css", import.meta.url), "utf8");
+  const settingsPanelRules = [
+    ...chatCss.matchAll(
+      /\.chat-answer-settings-disclosure\s*>\s*\.chat-answer-settings-panel\s*\{([^}]*)\}/g
+    )
+  ].map((match) => match[1]);
+  const scrollableSettingsPanelRule = settingsPanelRules.find((rule) => /overflow-y:\s*auto\s*;/.test(rule)) ?? "";
+  const landingSettingsPanelRule = chatCss.match(
+    /\.chat-composer\.is-landing\s+\.chat-answer-settings-disclosure\s*>\s*\.chat-answer-settings-panel\s*\{([^}]*)\}/
+  )?.[1] ?? "";
+  assert.match(
+    landingSettingsPanelRule,
+    /position:\s*static\s*;/,
+    "landing settings must expand in document flow so the page can scroll on short viewports"
+  );
+  assert.match(
+    landingSettingsPanelRule,
+    /max-height:\s*none\s*;/,
+    "landing settings must not create a nested height limit"
+  );
+  assert.match(
+    landingSettingsPanelRule,
+    /overflow-y:\s*visible\s*;/,
+    "landing settings must leave vertical scrolling to the document"
+  );
+  assert.match(
+    scrollableSettingsPanelRule,
+    /max-height:\s*min\(\s*680px,\s*calc\(100dvh\s*-\s*var\(--chat-dock-height,\s*84px\)\s*-\s*32px\s*-\s*env\(safe-area-inset-top\)\)\s*\)\s*;/,
+    "the docked settings panel should remain bounded by the visual viewport and safe area"
+  );
+  assert.match(
+    scrollableSettingsPanelRule,
+    /overflow-y:\s*auto\s*;/,
+    "the bounded settings panel must provide its own vertical scrolling"
+  );
 
   const storedProgressive = memoryStorage({
     [delivery.RESPONSE_DELIVERY_STORAGE_KEY]: "progressive"

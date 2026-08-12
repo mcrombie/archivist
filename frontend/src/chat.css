@@ -1033,14 +1033,14 @@ body {
 }
 
 .chat-composer.is-landing .chat-composer-options {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  position: relative;
+  display: block;
   padding-top: 8px;
 }
 
 .chat-composer.is-landing .chat-answer-settings-disclosure > summary {
+  width: fit-content;
+  max-width: calc(100% - 84px);
   min-width: 144px;
   min-height: 38px;
   padding: 4px 9px;
@@ -1060,16 +1060,17 @@ body {
 }
 
 .chat-composer.is-landing .chat-answer-settings-disclosure > .chat-answer-settings-panel {
-  top: calc(100% + 12px);
-  right: 0;
-  bottom: auto;
-  left: 0;
-  width: auto;
+  position: static;
+  width: 100%;
+  max-height: none;
+  margin-top: 12px;
+  overflow-y: visible;
 }
 
 .chat-composer.is-landing .chat-composer-submit {
-  flex: 1 1 auto;
-  justify-content: flex-end;
+  position: absolute;
+  top: 8px;
+  right: 0;
 }
 
 .chat-composer.is-landing .chat-composer-submit > span,
@@ -1173,7 +1174,10 @@ body {
   background: color-mix(in srgb, var(--chat-surface) 97%, transparent);
   box-shadow: 0 22px 64px rgba(0, 0, 0, 0.38);
   padding: 16px;
-  max-height: min(680px, calc(100vh - 150px));
+  max-height: min(
+    680px,
+    calc(100dvh - var(--chat-dock-height, 84px) - 32px - env(safe-area-inset-top))
+  );
   overflow-y: auto;
   overscroll-behavior: contain;
   backdrop-filter: blur(22px) saturate(1.1);

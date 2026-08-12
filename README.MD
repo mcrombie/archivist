@@ -122,7 +122,7 @@ To exercise the hardened public profile locally:
 
 ```powershell
 $env:ARCHIVIST_EXPOSURE_PROFILE = "public_demo"
-$env:ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD = "5.00"
+$env:ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD = "10.00"
 uv run uvicorn web_api:app --app-dir src
 ```
 
@@ -203,10 +203,12 @@ and exact cohort spend remains unavailable unless every attempt has request-scop
 conversation/turn scopes are rejected before a cohort POST so stale production records cannot be
 reused as measurements.
 
-The source configuration temporarily raised the application budget for the separately authorized
-cohort and returns it to the ordinary `$5.00` monthly ceiling after the run. Because production
-deploys are manual, the live Render value must be checked against that source setting. The complete
-protocol, artifact boundary, and exact resume wording are in
+The source configuration temporarily raised the application budget to `$10.00` for the separately
+authorized 2026-08-11 cohort and returned it to `$5.00` after the run. On 2026-08-12, the owner
+separately raised the ordinary public-demo ceiling to `$10.00`. That change does not erase this
+calendar month's recorded spend or alter the server-owned `$2.00` per-request maximum. Because
+production deploys are manual, the live Render value must be checked against the source setting.
+The complete protocol, artifact boundary, and exact resume wording are in
 [`docs/production_performance.md`](docs/production_performance.md).
 
 ## Verification

@@ -59,6 +59,19 @@ before calibration.
 
 ---
 
+## [2026-08-12] Opening-page advanced settings were clipped below the viewport
+Phase/Brief: Public reader usability after the production cohort
+Symptom: on the opening page, expanding the reading options and their advanced disclosures could
+place the lower controls below the visible page with no usable route to scroll them into view.
+Cause: presentation defect. The landing settings panel was absolutely positioned beneath the
+composer inside a section with clipped overflow. Its own bounded scroll area extended beyond that
+clipping ancestor, and because it was outside normal flow it could not make the page taller.
+Resolution and verification: the landing disclosure now remains in normal document flow and uses
+ordinary page scrolling; only the docked conversation version remains an overlay with its own
+viewport-bounded scrolling. The docked height calculation now uses the dynamic viewport and safe
+area. Frontend delivery/mode tests and the production build pass. This repair changes no model or
+evaluation behavior.
+
 ## [2026-08-11] Production cohort preserved four request failures in the denominator
 Phase/Brief: Production observability and resume-claim evidence
 Symptom: the fixed live cohort attempted all 33 predeclared requests and produced 29 valid

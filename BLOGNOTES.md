@@ -4,7 +4,7 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-11
+## Current checkpoint — 2026-08-12
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
   local code reports `evidence-planned-v26`, `query-planner-v11`, and
@@ -12,10 +12,17 @@ anything that still requires measurement.
   manual. The production cohort bound deployed wrapper commit
   `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`, one process epoch, policy, model, corpus manifest,
   and the versioned `$2.00` Complete-RAG request ceiling before sending any measured question.
+- **Public spend ceiling:** the owner raised the ongoing public-demo ceiling from `$5.00` to
+  `$10.00` on 2026-08-12. The source configuration records that decision; Render's manual Blueprint
+  sync must still make the live environment match it. The persistent August ledger retains the
+  `$4.90594694` production-cohort spend, leaving `$5.09405306` beneath the new ceiling before any
+  later public usage. The separate `$2.00` conservative per-request maximum is unchanged.
 - **Reader experience:** Complete answer is the default. Progressive response is an experimental
   advanced setting. Ten semantic modes and eleven visual appearances are implemented; they are
   public interpretive prototypes, not formal evidence that perspective changes preserve answer
-  quality. The separate full-context-v2 experiment remains disabled on the public server.
+  quality. Opening-page advanced settings now expand in document flow so all controls remain
+  reachable by ordinary page scrolling; docked settings remain a viewport-bounded overlay. The
+  separate full-context-v2 experiment remains disabled on the public server.
 - **Measurement:** the unchanged ten-question cohort is development evidence. The 37-item
   owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
   held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
@@ -65,6 +72,42 @@ anything that still requires measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-12 — Let advanced settings enlarge the opening page
+
+- A desktop usability check found that expanding Archivist's reading options on the opening page
+  could reveal more controls than the viewport allowed, while the bottom of the panel remained
+  unreachable. The panel was absolutely positioned below the compact composer inside a clipped
+  landing section, so neither the document nor the panel's own scrollbar could expose everything.
+- Kept the compact overlay behavior for an active conversation, but made the opening-page
+  disclosure participate in normal document flow. Expanding its advanced delivery,
+  interpretation, or appearance controls now makes the page longer and lets ordinary page
+  scrolling reach the final controls. The docked overlay also uses the dynamic viewport and safe
+  area when calculating its scrollable height on small screens.
+- This was a presentation-only repair. It did not change the selected reader mode, evidence scope,
+  prompts, retrieval, model calls, or any preserved evaluation result.
+
+## 2026-08-12 — Give the public demo a deliberate monthly allowance
+
+- After the production cohort, Archivist's ordinary `$5.00` monthly ceiling left only
+  `$0.09405306` above the `$4.90594694` already recorded in August. That was below the service's
+  separate `$2.00` conservative reserve for admitting another Complete-RAG request, so the public
+  demo correctly stopped before making another paid call.
+- The owner deliberately raised the ongoing public-demo ceiling to `$10.00`. This is distinct from
+  the temporary `$10.00` allowance used for the fixed 2026-08-11 cohort: the cohort limit was an
+  experimental cap, while this change funds ordinary reader access. The dated cohort history and
+  sealed results remain unchanged.
+- Raising the ceiling does not erase recorded usage. Against the existing August cohort spend, it
+  creates `$5.09405306` of remaining application-level headroom. Actual OpenAI billing remains
+  authoritative, and the `$2.00` maximum per request plus existing rate and concurrency limits stay
+  in force.
+- The repository Blueprint is the source of truth, but Render deploys are manual. The new ceiling
+  takes effect only after the Blueprint is synchronized and the live environment and persistent
+  ledger agree with the deployed source.
+
+Useful blog lesson: a safety budget should distinguish a one-time benchmark authorization from the
+ordinary allowance needed to keep a public demonstration usable. Raising the latter changes future
+spending authority; it does not rewrite past spend.
 
 ## 2026-08-10 — Turned the last resume blank into a fixed production protocol
 

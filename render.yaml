@@ -25,7 +25,7 @@ services:
       - key: ARCHIVIST_DATA_ROOT
         value: /var/data
       - key: ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD
-        value: "5.00"
+        value: "10.00"
       - key: ARCHIVIST_PUBLIC_REQUESTS_PER_MINUTE
         value: "6"
       - key: ARCHIVIST_PUBLIC_GLOBAL_REQUESTS_PER_MINUTE
