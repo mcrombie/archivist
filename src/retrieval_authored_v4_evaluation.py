@@ -108,6 +108,9 @@ V4_PUBLIC_REPORT_SCHEMA = "archivist.retrieval_authored_v4_public_report/1"
 V4_TRACE_SCOPE_CONTINUATION_SCHEMA = (
     "archivist.retrieval_authored_v4_trace_scope_continuation/1"
 )
+V4_HARNESS_SCOPE_CONTINUATION_SCHEMA = (
+    "archivist.retrieval_authored_v4_harness_scope_continuation/1"
+)
 
 EVALUATION_ID = "retrieval-authored-v4-professional-2026-08-13"
 COHORT_CLASSIFICATION = "reused_locked_benchmark_not_pristine_held_out"
@@ -212,6 +215,10 @@ class V4Paths:
     @property
     def trace_scope_continuation(self) -> Path:
         return self.root / "trace-scope-continuation.json"
+
+    @property
+    def harness_scope_continuation(self) -> Path:
+        return self.root / "harness-scope-continuation.json"
 
     @property
     def frozen_instrument_source(self) -> Path:
@@ -434,6 +441,33 @@ def _git_commit(base_dir: Path) -> str:
     if result.returncode != 0:
         raise V4EvaluationError("could not resolve git commit")
     return result.stdout.strip()
+
+
+def _git_is_ancestor(base_dir: Path, *, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=base_dir,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _git_changed_paths(
+    base_dir: Path,
+    *,
+    ancestor: str,
+    descendant: str,
+) -> tuple[str, ...]:
+    result = subprocess.run(
+        ["git", "diff", "--name-only", ancestor, descendant, "--"],
+        cwd=base_dir,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise V4EvaluationError("could not resolve harness continuation diff")
+    return tuple(sorted(line.strip() for line in result.stdout.splitlines() if line.strip()))
 
 
 def _nano_usd(value: Decimal) -> int:
@@ -1716,20 +1750,30 @@ def prepare_v4_cohort(
                 raise V4EvaluationError("existing v4 cohort manifest identity changed")
             continuation = read_json_object(paths.trace_scope_continuation)
             current_commit = _git_commit(base_dir)
+            trace_recovery_commit = _required_string(
+                continuation,
+                "recovery_harness_commit",
+            )
             if (
                 continuation.get("schema") != V4_TRACE_SCOPE_CONTINUATION_SCHEMA
                 or continuation.get("original_harness_commit")
                 != existing.get("system_under_test", {}).get("harness_commit")
-                or continuation.get("recovery_harness_commit") != current_commit
             ):
                 raise V4EvaluationError("trace-scope recovery harness identity changed")
             expected_continuation = _trace_scope_continuation_payload(
                 paths,
-                harness_commit=current_commit,
+                harness_commit=trace_recovery_commit,
                 require_h011_unattempted=False,
             )
             if continuation != expected_continuation:
                 raise V4EvaluationError("trace-scope continuation binding changed")
+            if current_commit != trace_recovery_commit:
+                _validate_harness_scope_continuation(
+                    base_dir=base_dir,
+                    paths=paths,
+                    current_commit=current_commit,
+                    trace_recovery_commit=trace_recovery_commit,
+                )
             normalized_current = json.loads(json.dumps(cohort_manifest))
             normalized_current["system_under_test"]["harness_commit"] = existing[
                 "system_under_test"
@@ -1997,6 +2041,220 @@ def reconcile_trace_scope_continuation(
         harness_commit=current_commit,
     )
     write_or_validate_json(paths.trace_scope_continuation, payload)
+    return payload
+
+
+_HARNESS_SCOPE_ALLOWED_PATHS = frozenset(
+    {
+        "BLOGNOTES.md",
+        "DEFECTS.md",
+        "docs/retrieval_authored_v4_evaluation.md",
+        "scripts/run_retrieval_authored_v4_evaluation.py",
+        "src/retrieval_authored_v4_evaluation.py",
+        "tests/test_retrieval_authored_v4_evaluation.py",
+    }
+)
+
+
+def _harness_scope_continuation_payload(
+    *,
+    base_dir: Path,
+    paths: V4Paths,
+    trace_recovery_commit: str,
+    recovery_commit: str,
+    cap_nano_usd: int,
+    require_h036_unattempted: bool,
+) -> dict[str, object]:
+    changed_paths = _git_changed_paths(
+        base_dir,
+        ancestor=trace_recovery_commit,
+        descendant=recovery_commit,
+    )
+    if (
+        not changed_paths
+        or not set(changed_paths) <= _HARNESS_SCOPE_ALLOWED_PATHS
+        or "src/retrieval_authored_v4_evaluation.py" not in changed_paths
+        or "tests/test_retrieval_authored_v4_evaluation.py" not in changed_paths
+    ):
+        raise V4EvaluationError("harness-scope recovery changed undeclared files")
+    h036_intent_path, h036_marker_path, h036_outcome_path = attempt_paths(
+        paths,
+        turn_id="rubric:H036",
+    )
+    if not h036_intent_path.is_file():
+        raise V4EvaluationError("harness-scope recovery requires sealed H036 intent")
+    intent = read_json_object(h036_intent_path)
+    projection = intent.get("request_projection")
+    if (
+        intent.get("schema") != V4_INTENT_SCHEMA
+        or intent.get("evaluation_id") != EVALUATION_ID
+        or intent.get("turn_id") != "rubric:H036"
+        or intent.get("phase") != "rubric"
+        or intent.get("item_id") != "H036"
+        or intent.get("attempt_count") != 1
+        or intent.get("automatic_retries") != 0
+        or not isinstance(projection, Mapping)
+        or projection.get("operation") != "eval_item_rubric"
+    ):
+        raise V4EvaluationError("H036 intent is outside the declared cost-scope defect")
+    if require_h036_unattempted:
+        if h036_marker_path.exists() or h036_outcome_path.exists():
+            raise V4EvaluationError("H036 crossed the provider boundary before reconciliation")
+        evidence = operation_evidence(
+            paths,
+            turn_id="rubric:H036",
+            operation="eval_item_rubric",
+        )
+        if evidence["event_count"] != 0:
+            raise V4EvaluationError("H036 has provider usage before reconciliation")
+        h036_index = LOCKED_ITEM_IDS.index("H036")
+        if not all(
+            _completed_turn(paths, turn_id=f"rubric:{item_id}")
+            for item_id in LOCKED_ITEM_IDS[:h036_index]
+        ):
+            raise V4EvaluationError("rubric outcomes before H036 are incomplete")
+        for item_id in LOCKED_ITEM_IDS[h036_index + 1 :]:
+            later_paths = attempt_paths(paths, turn_id=f"rubric:{item_id}")
+            if any(path.exists() for path in later_paths):
+                raise V4EvaluationError("a rubric item after H036 was attempted")
+            if operation_evidence(
+                paths,
+                turn_id=f"rubric:{item_id}",
+                operation="eval_item_rubric",
+            )["event_count"]:
+                raise V4EvaluationError("a rubric item after H036 has provider usage")
+    manifest = read_json_object(paths.cohort_manifest)
+    trace_continuation = read_json_object(paths.trace_scope_continuation)
+    state = budget_state(paths, cap_nano_usd=cap_nano_usd)
+    return {
+        "schema": V4_HARNESS_SCOPE_CONTINUATION_SCHEMA,
+        "evaluation_id": EVALUATION_ID,
+        "cohort_manifest_file_sha256": sha256_file(paths.cohort_manifest),
+        "cohort_manifest_canonical_sha256": canonical_json_sha256(manifest),
+        "trace_scope_continuation_file_sha256": sha256_file(
+            paths.trace_scope_continuation
+        ),
+        "trace_scope_continuation_canonical_sha256": canonical_json_sha256(
+            trace_continuation
+        ),
+        "trace_recovery_harness_commit": trace_recovery_commit,
+        "recovery_harness_commit": recovery_commit,
+        "changed_paths": list(changed_paths),
+        "repair": "cumulative_request_ceiling_remaining_double_count_v1",
+        "provider_calls_made": 0,
+        "prior_outcomes_rewritten": False,
+        "next_turn_id": "rubric:H036",
+        "next_turn_unattempted_at_reconciliation": True,
+        "h036_intent_file_sha256": sha256_file(h036_intent_path),
+        "h036_intent_canonical_sha256": canonical_json_sha256(intent),
+        "h036_request_shape_sha256": projection["provider_request_shape_sha256"],
+        "h036_projected_worst_case_nano_usd": projection[
+            "projected_worst_case_nano_usd"
+        ],
+        "budget_at_reconciliation": state,
+    }
+
+
+def _validate_harness_scope_continuation(
+    *,
+    base_dir: Path,
+    paths: V4Paths,
+    current_commit: str,
+    trace_recovery_commit: str,
+) -> None:
+    if not paths.harness_scope_continuation.is_file():
+        raise V4EvaluationError("harness-scope continuation is unavailable")
+    value = read_json_object(paths.harness_scope_continuation)
+    if (
+        value.get("schema") != V4_HARNESS_SCOPE_CONTINUATION_SCHEMA
+        or value.get("evaluation_id") != EVALUATION_ID
+        or value.get("cohort_manifest_file_sha256")
+        != sha256_file(paths.cohort_manifest)
+        or value.get("cohort_manifest_canonical_sha256")
+        != canonical_json_sha256(read_json_object(paths.cohort_manifest))
+        or value.get("trace_scope_continuation_file_sha256")
+        != sha256_file(paths.trace_scope_continuation)
+        or value.get("trace_scope_continuation_canonical_sha256")
+        != canonical_json_sha256(read_json_object(paths.trace_scope_continuation))
+        or value.get("trace_recovery_harness_commit") != trace_recovery_commit
+        or value.get("recovery_harness_commit") != current_commit
+        or value.get("repair")
+        != "cumulative_request_ceiling_remaining_double_count_v1"
+        or value.get("provider_calls_made") != 0
+        or value.get("prior_outcomes_rewritten") is not False
+        or value.get("next_turn_id") != "rubric:H036"
+        or value.get("next_turn_unattempted_at_reconciliation") is not True
+    ):
+        raise V4EvaluationError("harness-scope continuation identity changed")
+    changed_paths = _git_changed_paths(
+        base_dir,
+        ancestor=trace_recovery_commit,
+        descendant=current_commit,
+    )
+    if list(changed_paths) != value.get("changed_paths"):
+        raise V4EvaluationError("harness-scope continuation diff changed")
+    h036_intent_path = attempt_paths(paths, turn_id="rubric:H036")[0]
+    intent = read_json_object(h036_intent_path)
+    projection = intent.get("request_projection")
+    if (
+        value.get("h036_intent_file_sha256") != sha256_file(h036_intent_path)
+        or value.get("h036_intent_canonical_sha256")
+        != canonical_json_sha256(intent)
+        or not isinstance(projection, Mapping)
+        or value.get("h036_request_shape_sha256")
+        != projection.get("provider_request_shape_sha256")
+        or value.get("h036_projected_worst_case_nano_usd")
+        != projection.get("projected_worst_case_nano_usd")
+    ):
+        raise V4EvaluationError("harness-scope H036 binding changed")
+
+
+def reconcile_harness_scope_continuation(
+    *,
+    base_dir: Path,
+    paths: V4Paths,
+    product_commit: str,
+    maximum_usd: Decimal,
+) -> dict[str, object]:
+    worktree = build_git_worktree_identity(base_dir)
+    if worktree.get("working_tree") != "clean":
+        raise V4EvaluationError("harness-scope reconciliation requires a clean tree")
+    manifest = read_json_object(paths.cohort_manifest)
+    trace_continuation = read_json_object(paths.trace_scope_continuation)
+    current_commit = _git_commit(base_dir)
+    trace_recovery_commit = _required_string(
+        trace_continuation,
+        "recovery_harness_commit",
+    )
+    cap_nano_usd = _nano_usd(maximum_usd)
+    if (
+        manifest.get("system_under_test", {}).get("product_commit") != product_commit
+        or manifest.get("paid_scope", {}).get("maximum_total_cost_nano_usd")
+        != cap_nano_usd
+        or current_commit == trace_recovery_commit
+        or not _git_is_ancestor(
+            base_dir,
+            ancestor=trace_recovery_commit,
+            descendant=current_commit,
+        )
+    ):
+        raise V4EvaluationError("harness-scope reconciliation identity changed")
+    expected_trace = _trace_scope_continuation_payload(
+        paths,
+        harness_commit=trace_recovery_commit,
+        require_h011_unattempted=False,
+    )
+    if trace_continuation != expected_trace:
+        raise V4EvaluationError("trace-scope continuation changed before harness repair")
+    payload = _harness_scope_continuation_payload(
+        base_dir=base_dir,
+        paths=paths,
+        trace_recovery_commit=trace_recovery_commit,
+        recovery_commit=current_commit,
+        cap_nano_usd=cap_nano_usd,
+        require_h036_unattempted=True,
+    )
+    write_or_validate_json(paths.harness_scope_continuation, payload)
     return payload
 
 
@@ -3201,6 +3459,7 @@ __all__ = [
     "prepare_attempt",
     "prepare_v4_cohort",
     "project_request",
+    "reconcile_harness_scope_continuation",
     "reconcile_trace_scope_continuation",
     "reserve_zero_event",
     "run_decomposition",

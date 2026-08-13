@@ -61,6 +61,7 @@ Example commands, after replacing the cap with the separately authorized exact a
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py reconcile-trace-scope --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py generate-rest --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py decompose --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
+.venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py reconcile-harness-scope --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py rubric --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py social --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py report --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --max-total-cost-usd <authorized-cap>
@@ -81,3 +82,11 @@ effective cohort ceiling (owner cap less ambiguity reservations); the ledger
 and exact request projection still enforce the actual remaining balance. A
 clean descendant commit may therefore resume at H036 without retrying any
 provider operation.
+
+Because the sealed cohort manifest binds the harness commit, that descendant
+must first run the provider-free `reconcile-harness-scope` command. The
+append-only continuation binds the original trace continuation, the exact Git
+diff, the existing H036 intent and request projection, the cost snapshot, and
+the fact that H036 had no boundary marker, outcome, or usage event. It does not
+rewrite the manifest or any prior outcome. Paid `rubric` resumption is allowed
+only from the exact bound recovery commit.

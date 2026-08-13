@@ -240,6 +240,68 @@ def test_master_scope_uses_effective_cap_not_remaining_balance(
         assert context.request_cost_ceiling_nano_usd != 400_000_000
 
 
+def test_harness_scope_continuation_binds_unattempted_rubric_turn(
+    local_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _paths(local_root)
+    v4.atomic_seal_json(
+        paths.cohort_manifest,
+        {
+            "system_under_test": {
+                "harness_commit": "a" * 40,
+                "product_commit": "c" * 40,
+            },
+            "paid_scope": {"maximum_total_cost_nano_usd": 7_000_000_000},
+        },
+    )
+    v4.atomic_seal_json(paths.trace_scope_continuation, {"sealed": "trace"})
+    projection = _projection(cost=163_890_625)
+    projection["operation"] = "eval_item_rubric"
+    projection["request_binding"] = {"item_id": "H036"}
+    projection["request_binding_sha256"] = v4.canonical_json_sha256(
+        {"item_id": "H036"}
+    )
+    intent = v4.build_attempt_intent(
+        cohort_manifest_sha256="b" * 64,
+        turn_id="rubric:H036",
+        item_id="H036",
+        phase="rubric",
+        projection=projection,
+    )
+    v4.atomic_seal_json(
+        v4.attempt_paths(paths, turn_id="rubric:H036")[0],
+        intent,
+    )
+    changed = (
+        "docs/retrieval_authored_v4_evaluation.md",
+        "scripts/run_retrieval_authored_v4_evaluation.py",
+        "src/retrieval_authored_v4_evaluation.py",
+        "tests/test_retrieval_authored_v4_evaluation.py",
+    )
+    monkeypatch.setattr(v4, "_git_changed_paths", lambda *args, **kwargs: changed)
+
+    payload = v4._harness_scope_continuation_payload(
+        base_dir=Path.cwd(),
+        paths=paths,
+        trace_recovery_commit="d" * 40,
+        recovery_commit="e" * 40,
+        cap_nano_usd=7_000_000_000,
+        require_h036_unattempted=False,
+    )
+    v4.atomic_seal_json(paths.harness_scope_continuation, payload)
+    v4._validate_harness_scope_continuation(
+        base_dir=Path.cwd(),
+        paths=paths,
+        current_commit="e" * 40,
+        trace_recovery_commit="d" * 40,
+    )
+
+    assert payload["provider_calls_made"] == 0
+    assert payload["next_turn_id"] == "rubric:H036"
+    assert payload["h036_intent_canonical_sha256"] == v4.canonical_json_sha256(intent)
+
+
 def test_crash_after_boundary_seals_reserve_without_replay(local_root: Path) -> None:
     paths = _paths(local_root)
     intent = _intent()

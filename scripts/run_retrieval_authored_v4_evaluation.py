@@ -22,6 +22,7 @@ from retrieval_authored_v4_evaluation import (  # noqa: E402
     default_paths,
     preflight,
     prepare_v4_cohort,
+    reconcile_harness_scope_continuation,
     reconcile_trace_scope_continuation,
     run_decomposition,
     run_professional_remaining,
@@ -51,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
             "preflight",
             "prepare",
             "reconcile-trace-scope",
+            "reconcile-harness-scope",
             "sentinel",
             "generate-rest",
             "decompose",
@@ -130,6 +132,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("SEALED PROVIDER-FREE V4 TRACE-SCOPE CONTINUATION")
             print(f"Bound sentinel outcomes: {len(result['outcomes'])}/10")
             print("Next untouched item: H011; no provider call was made.")
+            return 0
+        if args.command == "reconcile-harness-scope":
+            result = reconcile_harness_scope_continuation(
+                base_dir=BASE_DIR,
+                paths=paths,
+                product_commit=args.product_commit,
+                maximum_usd=cap,
+            )
+            print("SEALED PROVIDER-FREE V4 HARNESS-SCOPE CONTINUATION")
+            print(f"Bound repair paths: {len(result['changed_paths'])}")
+            print("Next untouched turn: rubric:H036; no provider call was made.")
             return 0
         cohort = prepare_v4_cohort(
             base_dir=BASE_DIR,
