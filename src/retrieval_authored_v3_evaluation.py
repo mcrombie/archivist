@@ -325,6 +325,44 @@ AMBIGUITY_RECOVERY_DECLARATIONS: Mapping[str, Mapping[str, object]] = {
             "a545f0497f4f79cc365cd1ba8c5ab3f4cc0ba176172e7cf2834a5c5d5c30c513"
         ),
     },
+    "H031": {
+        "sequence": 6,
+        "turn_id": "H031:generation",
+        "previous_recovery_harness_commit": (
+            "71ba7984757b243c569df5a34b0ab1f549cab464"
+        ),
+        "previous_continuation_file": "ambiguity-continuations/0005-H027.json",
+        "generation_intent_file_sha256": (
+            "7f1c039de5f989778680f0d8af4b2c76fabf490a0eaeaaeafbbe5cc915637ddb"
+        ),
+        "generation_intent_canonical_sha256": (
+            "8db62e33153d0dcd12d38c7ab7cb7aa7ca4045afcf1aa531a09ceb592cc637bf"
+        ),
+        "generation_outcome_file_sha256": (
+            "9246559e008624984eacacbd607fc4c904e6046f3d2224cb4190e1a80f702366"
+        ),
+        "generation_outcome_canonical_sha256": (
+            "c20edfb9d9d663f7d7086809a490efc2365cbea88715ae9abf46b1d0fe1d98b1"
+        ),
+        "previous_continuation_file_sha256": (
+            "ec044853da4f1d1cc9f61af860b74fde17e65ca9ac00008239199499477faa7f"
+        ),
+        "provider_request_shape_sha256": (
+            "e98380bdca0e025b294cbd07b251701a041293b6e815e8d8742eeabcb17b05d6"
+        ),
+        "provider_request_serialized_bytes": 23_616,
+        "provider_request_token_overhead_upper_bound": 32_768,
+        "provider_input_token_upper_bound": 56_384,
+        "max_output_tokens": 1_800,
+        "projected_worst_case_reserved_nano_usd": 406_400_000,
+        "request_binding_sha256": (
+            "48a22a71fe118b18aa0aae28b2255ef769865ea00180debf7d309addb79b9add"
+        ),
+        "next_item_id": "H032",
+        "later_generation_item_ids_sha256": (
+            "9dc593fb9cd4be53e4309f9edcabc463b564e8af1003df1b9c70da6a8ddf9cd5"
+        ),
+    },
 }
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
