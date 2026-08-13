@@ -356,6 +356,32 @@ def test_h021_recovery_declaration_is_externally_bound():
     assert declaration["next_item_id"] == "H022"
 
 
+def test_h025_recovery_declaration_is_externally_bound():
+    declaration = v3.AMBIGUITY_RECOVERY_DECLARATIONS["H025"]
+
+    assert declaration["sequence"] == 3
+    assert declaration["previous_recovery_harness_commit"] == (
+        "ae6b579b34e23005302d274d9f2ff3d2be2d52e9"
+    )
+    assert declaration["previous_continuation_file_sha256"] == (
+        "85ca14894d438da4e544d934a2b765ba4b615d934991210efd37525448260c7c"
+    )
+    assert declaration["generation_intent_file_sha256"] == (
+        "7ed3889d3e73dd9b9057c2a0fc99a0570a998767f0f6dbc28a0b1b05b8a40e42"
+    )
+    assert declaration["generation_outcome_file_sha256"] == (
+        "eea018822db00a3378a64dbd2fac79153ece7b876cbe60a2dfe2b2a406abb21b"
+    )
+    assert declaration["provider_request_shape_sha256"] == (
+        "f57dedaba8fc55930d60b5b0718ed5a86d2fdd20f7f3c82031b60f517dd02336"
+    )
+    assert declaration["request_binding_sha256"] == (
+        "de0060d3299973783267fd02d959b721ea12373eadf5e2497194852c7e5f9044"
+    )
+    assert declaration["projected_worst_case_reserved_nano_usd"] == 405_556_250
+    assert declaration["next_item_id"] == "H026"
+
+
 def test_recovery_budget_without_continuations_does_not_create_ledger(tmp_path):
     ledger = tmp_path / "absent.sqlite3"
 

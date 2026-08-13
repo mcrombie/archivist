@@ -24,7 +24,7 @@ decompositions, ledgers, gold annotations, and production artifacts are read-onl
 8. Produce a public-safe summary after every required outcome exists.
 
 All paid phases share one ignored `usage.sqlite3`, one request ID, and the owner's cumulative
-`$7.00` authorization. H002, H003, and H021 each reached the provider boundary once but produced no
+`$7.00` authorization. H002, H003, H021, and H025 each reached the provider boundary once but produced no
 response or ledger event. All remain sealed technical failures and none is ever retried or
 replaced. The immutable H002 continuation stays byte-for-byte unchanged. A committed recovery
 declaration and append-only continuation entry bind each later zero-event item's intent, outcome,
@@ -36,7 +36,9 @@ H002 reserves `$0.399575000`; H003's exact offline projection reserves `$0.39815
 serialized request bytes plus the fixed 32,768-token upper-bound overhead, 55,065 input-token upper
 bound, and 1,800 maximum output tokens). H021's exact offline projection reserves `$0.392612500`
 (21,410 serialized request bytes, 54,178 input-token upper bound, and 1,800 maximum output tokens).
-Their cumulative `$1.190343750` reserve lowers the dynamic tracked ceiling to `$5.809656250`.
+H025's exact offline projection reserves `$0.405556250` (23,481 serialized request bytes, 56,249
+input-token upper bound, and 1,800 maximum output tokens). Their cumulative `$1.595900000` reserve
+lowers the dynamic tracked ceiling to `$5.404100000`.
 A future ambiguity requires another committed declaration and
 no-overwrite chain entry; cumulative reserve plus recorded spend must stay within `$7.00`. Each
 provider boundary has no SDK retry. Private questions, answers, dossiers, rubrics, and response metadata remain below
