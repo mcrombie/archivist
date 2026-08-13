@@ -24,13 +24,20 @@ decompositions, ledgers, gold annotations, and production artifacts are read-onl
 8. Produce a public-safe summary after every required outcome exists.
 
 All paid phases share one ignored `usage.sqlite3`, one request ID, and the owner's cumulative
-`$7.00` authorization. H002 reached the provider boundary once but produced no response or ledger
-event. It remains a sealed technical failure and is never retried or replaced. A separate recovery
-harness binds the original manifest and H002 artifacts by exact hashes, reserves H002's full
-`$0.399575` projected worst-case cost, and lowers the tracked request/monthly ceiling to
-`$6.600425`. Only this exact H002 zero-event state may be carried forward; any later ambiguous,
-zero-event, or unpriced attempt still stops all subsequent calls. Each provider boundary has no SDK
-retry. Private questions, answers, dossiers, rubrics, and response metadata remain below
+`$7.00` authorization. H002 and H003 each reached the provider boundary once but produced no
+response or ledger event. Both remain sealed technical failures and neither is ever retried or
+replaced. The immutable H002 continuation stays byte-for-byte unchanged. A committed recovery
+declaration and append-only continuation entry bind each later zero-event item's intent, outcome,
+exact reconstructed provider request, projection, prior continuation hash, and new descendant
+recovery commit. Reconciliation is an explicit offline command after each failure; an unreserved
+zero-event outcome stops before any later call.
+
+H002 reserves `$0.399575000`; H003's exact offline projection reserves `$0.398156250` (22,297
+serialized request bytes plus the fixed 32,768-token upper-bound overhead, 55,065 input-token upper
+bound, and 1,800 maximum output tokens). Their cumulative `$0.797731250` reserve lowers the dynamic
+tracked ceiling to `$6.202268750`. A future ambiguity requires another committed declaration and
+no-overwrite chain entry; cumulative reserve plus recorded spend must stay within `$7.00`. Each
+provider boundary has no SDK retry. Private questions, answers, dossiers, rubrics, and response metadata remain below
 `runtime/evaluations/retrieval-authored-v3-professional-2026-08-13`.
 
 ## Commands
@@ -48,8 +55,13 @@ retry. Private questions, answers, dossiers, rubrics, and response metadata rema
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py report
 ```
 
+Run `reconcile-ambiguity` again after any later exact zero-event stop, from the newly committed
+recovery harness, before resuming `generate`. The command discovers the first unreconciled item and
+never accepts or retries an arbitrary failure.
+
 The final report distinguishes local retrieval time from the authored-response boundary, reports
 generated successes and Essential fallbacks separately, and includes retrieval coverage, citation
 syntax/resolvability, citation completeness over valid decompositions, mechanical cited-chunk/gold
-location overlap, exploratory gold-claim coverage, exact recorded spend, the H002 reserve,
-recorded-plus-reserved worst-case accounting, and operation counts.
+location overlap, exploratory gold-claim coverage, every per-item ambiguity reserve, cumulative
+reserve, dynamic effective ceiling, recorded-plus-reserved worst-case accounting, and operation
+counts.

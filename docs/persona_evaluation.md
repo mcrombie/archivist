@@ -42,17 +42,24 @@ evaluation:
 - request ID: `retrieval-authored-v3-professional-2026-08-13-master`
 - project ID: `archivist-v3-evaluation`
 - owner-authorized cumulative cap: 7,000,000,000 nano-USD (`$7.00`)
-- H002 ambiguity reserve: 399,575,000 nano-USD
-- effective tracked ceiling: 6,600,425,000 nano-USD (`$6.600425`)
+- cumulative ambiguity reserve: dynamically read from the adapter's immutable continuation chain
+- effective tracked ceiling: owner cap minus the cumulative ambiguity reserve
 
-The reserve treats the unledgered but potentially billable H002 attempt conservatively. The CLI
-still requires the owner's exact `$7.00` authorization; the reserve is not a smaller authorization
-and does not create another allowance. Before any persona call, the harness validates that the
-shared ledger contains only the master request and no unpriced event. It then requires the full
-untouched four-call projection to fit within the adapter-reported effective remainder. Every call
-uses 6,600,425,000 nano-USD as its request ceiling, and the shared ledger's monthly hard budget is
-set to the same effective ceiling. The manifest, authorization artifact, attempt intents, and final
-report distinguish the owner cap, ambiguity reserve, effective ceiling, and tracked remainder.
+The reserve treats every unledgered but potentially billable provider-boundary attempt
+conservatively. The current committed chain through H003 contains two reservations totaling
+797,731,250 nano-USD, producing an effective tracked ceiling of 6,202,268,750 nano-USD
+(`$6.202268750`). Later committed continuation entries can lower that ceiling again without a
+persona-harness code change.
+
+The CLI still requires the owner's exact `$7.00` authorization; a cumulative reserve is not a
+smaller authorization and does not create another allowance. Before any persona call, the harness
+validates that the shared ledger contains only the master request and no unpriced event. It also
+validates the adapter-reported reservation count/list, cumulative reserve, effective ceiling,
+tracked spend, remainder, and exact-USD representations. The full untouched four-call projection
+must fit within that dynamic remainder. Every call and the shared ledger's monthly hard budget use
+the adapter-reported effective ceiling. The manifest, authorization artifact, attempt intents, and
+final report distinguish the owner cap, complete reservation chain, effective ceiling, and tracked
+remainder.
 
 ## Fail-closed artifacts and resume
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import persona_evaluation as persona
 from archivist_modes import ArchivistMode, supported_generated_modes
 from character_conversation import (
     CharacterConversationResponse,
@@ -14,11 +15,8 @@ from character_conversation import (
 )
 from costs import TokenUsage, UsageLedger, current_usage_context
 from persona_evaluation import (
-    AMBIGUITY_RESERVE_NANO_USD,
     DEFAULT_RUN_ROOT,
     DEFAULT_USAGE_DB,
-    MASTER_COST_CEILING_NANO_USD,
-    MASTER_COST_CEILING_USD,
     MASTER_PROJECT_ID,
     MASTER_REQUEST_ID,
     OWNER_AUTHORIZED_COST_CAP_NANO_USD,
@@ -32,13 +30,21 @@ from persona_evaluation import (
     run_evaluation,
 )
 from retrieval_authored_v3_evaluation import (
-    AMBIGUOUS_H002_RESERVED_NANO_USD,
     EVALUATION_ID,
     MASTER_COST_CAP_NANO_USD,
     MASTER_COST_CAP_USD,
     MASTER_REQUEST_ID as V3_MASTER_REQUEST_ID,
-    RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
     default_paths,
+)
+
+
+H002_RESERVED_NANO_USD = 399_575_000
+H003_RESERVED_NANO_USD = 398_156_250
+COMMITTED_H003_CUMULATIVE_RESERVED_NANO_USD = (
+    H002_RESERVED_NANO_USD + H003_RESERVED_NANO_USD
+)
+COMMITTED_H003_EFFECTIVE_CEILING_NANO_USD = (
+    MASTER_COST_CAP_NANO_USD - COMMITTED_H003_CUMULATIVE_RESERVED_NANO_USD
 )
 
 
@@ -49,6 +55,60 @@ def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:
         evaluation_root / "conversational-persona",
         evaluation_root / "usage.sqlite3",
     )
+
+
+def _committed_h003_budget_state(usage_db: Path) -> dict[str, object]:
+    tracked = 0
+    if usage_db.exists():
+        tracked = int(
+            UsageLedger(usage_db).request_usage_cost_state(MASTER_REQUEST_ID)[
+                "estimated_cost_nano_usd"
+            ]
+        )
+    effective = COMMITTED_H003_EFFECTIVE_CEILING_NANO_USD
+    if tracked > effective:
+        raise persona.V3EvaluationError(
+            "tracked spend exceeds the recovery effective ceiling"
+        )
+    remaining = effective - tracked
+
+    def exact(value: int) -> str:
+        return f"{Decimal(value) / Decimal(1_000_000_000):.9f}"
+
+    reservations = [
+        {
+            "sequence": 0,
+            "item_id": "H002",
+            "projected_worst_case_reserved_nano_usd": H002_RESERVED_NANO_USD,
+            "cumulative_reserved_nano_usd": H002_RESERVED_NANO_USD,
+        },
+        {
+            "sequence": 1,
+            "item_id": "H003",
+            "projected_worst_case_reserved_nano_usd": H003_RESERVED_NANO_USD,
+            "cumulative_reserved_nano_usd": (
+                COMMITTED_H003_CUMULATIVE_RESERVED_NANO_USD
+            ),
+        },
+    ]
+    return {
+        "owner_authorized_cap_nano_usd": MASTER_COST_CAP_NANO_USD,
+        "ambiguity_reserve_nano_usd": (
+            COMMITTED_H003_CUMULATIVE_RESERVED_NANO_USD
+        ),
+        "ambiguity_reservation_count": 2,
+        "ambiguity_reservations": reservations,
+        "effective_tracked_ceiling_nano_usd": effective,
+        "tracked_spend_nano_usd": tracked,
+        "effective_remaining_nano_usd": remaining,
+        "owner_authorized_cap_usd_exact": exact(MASTER_COST_CAP_NANO_USD),
+        "ambiguity_reserve_usd_exact": exact(
+            COMMITTED_H003_CUMULATIVE_RESERVED_NANO_USD
+        ),
+        "effective_tracked_ceiling_usd_exact": exact(effective),
+        "tracked_spend_usd_exact": exact(tracked),
+        "effective_remaining_usd_exact": exact(remaining),
+    }
 
 
 class _Client:
@@ -80,13 +140,17 @@ _REPLIES = {
 }
 
 
-def _recorded_generator(calls: list[tuple[str, str]]):
+def _recorded_generator(
+    calls: list[tuple[str, str]],
+    *,
+    expected_ceiling_nano_usd: int = MASTER_COST_CAP_NANO_USD,
+):
     def generate(client, *, question, mode):
         context = current_usage_context()
         assert context.request_id == MASTER_REQUEST_ID
         assert context.project_id == MASTER_PROJECT_ID
         assert context.conversation_id == PERSONA_CONVERSATION_ID
-        assert context.request_cost_ceiling_nano_usd == MASTER_COST_CEILING_NANO_USD
+        assert context.request_cost_ceiling_nano_usd == expected_ceiling_nano_usd
         assert context.enforce_budget is True
         assert context.allow_over_budget is False
         assert "manuscript" not in question.casefold()
@@ -144,9 +208,11 @@ def test_manifest_is_provider_free_and_covers_current_generated_registry(tmp_pat
     assert manifest["max_output_tokens"] == 576
     assert manifest["master_request_id"] == MASTER_REQUEST_ID
     assert manifest["owner_authorized_cap_nano_usd"] == 7_000_000_000
-    assert manifest["ambiguity_reserve_nano_usd"] == 399_575_000
-    assert manifest["effective_tracked_ceiling_nano_usd"] == 6_600_425_000
-    assert manifest["effective_tracked_ceiling_usd_exact"] == "6.600425000"
+    assert manifest["ambiguity_reserve_nano_usd"] == 0
+    assert manifest["ambiguity_reservation_count"] == 0
+    assert manifest["ambiguity_reservations"] == []
+    assert manifest["effective_tracked_ceiling_nano_usd"] == 7_000_000_000
+    assert manifest["effective_tracked_ceiling_usd_exact"] == "7.000000000"
     assert manifest["projected_cohort_cost_nano_usd"] == sum(
         item["projected_cost_nano_usd"] for item in manifest["items"]
     )
@@ -173,9 +239,6 @@ def test_defaults_share_adapter_root_ledger_request_and_cap():
     assert MASTER_REQUEST_ID == f"{EVALUATION_ID}-master"
     assert OWNER_AUTHORIZED_COST_CAP_NANO_USD == MASTER_COST_CAP_NANO_USD
     assert OWNER_AUTHORIZED_COST_CAP_USD == MASTER_COST_CAP_USD
-    assert AMBIGUITY_RESERVE_NANO_USD == AMBIGUOUS_H002_RESERVED_NANO_USD
-    assert MASTER_COST_CEILING_NANO_USD == RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
-    assert MASTER_COST_CEILING_USD == Decimal("6.600425")
     assert MASTER_COST_CAP_USD == Decimal("7.00")
 
 
@@ -235,15 +298,17 @@ def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
     assert report["character_distinctness_pass_count"] == 4
     assert report["all_persona_replies_unique"] is True
     assert report["cohort_cost_nano_usd"] > 0
-    assert report["cohort_cost_nano_usd"] < MASTER_COST_CEILING_NANO_USD
+    assert report["cohort_cost_nano_usd"] < MASTER_COST_CAP_NANO_USD
     assert report["owner_authorized_cap_nano_usd"] == 7_000_000_000
     assert report["owner_authorized_cap_usd_exact"] == "7.000000000"
-    assert report["ambiguity_reserve_nano_usd"] == 399_575_000
-    assert report["ambiguity_reserve_usd_exact"] == "0.399575000"
-    assert report["effective_tracked_ceiling_nano_usd"] == 6_600_425_000
-    assert report["effective_tracked_ceiling_usd_exact"] == "6.600425000"
+    assert report["ambiguity_reserve_nano_usd"] == 0
+    assert report["ambiguity_reserve_usd_exact"] == "0.000000000"
+    assert report["ambiguity_reservation_count"] == 0
+    assert report["ambiguity_reservations"] == []
+    assert report["effective_tracked_ceiling_nano_usd"] == 7_000_000_000
+    assert report["effective_tracked_ceiling_usd_exact"] == "7.000000000"
     assert report["effective_remaining_nano_usd_at_report"] == (
-        MASTER_COST_CEILING_NANO_USD
+        MASTER_COST_CAP_NANO_USD
         - report["master_ledger_cost_nano_usd_at_report"]
     )
     assert Decimal(report["effective_remaining_usd_exact_at_report"]) == (
@@ -255,7 +320,7 @@ def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
     assert all(mode["follow_up_to_manuscript"] for mode in report["modes"])
     assert ledger.request_usage_cost_state(MASTER_REQUEST_ID)["event_count"] == 4
     assert ledger.get_settings() == {
-        "monthly_budget_usd": 6.600425,
+        "monthly_budget_usd": 7.0,
         "warning_threshold_percent": 80,
         "hard_limit_enabled": True,
     }
@@ -267,6 +332,61 @@ def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
         usage_db=usage_db,
         evaluation_root=evaluation_root,
     ) == report
+
+
+def test_committed_h003_chain_drives_manifest_scope_budget_and_report(
+    monkeypatch,
+    tmp_path,
+):
+    evaluation_root, run_root, usage_db = _paths(tmp_path)
+    monkeypatch.setattr(
+        persona,
+        "master_budget_state",
+        _committed_h003_budget_state,
+    )
+    manifest = prepare_evaluation(
+        run_root=run_root,
+        usage_db=usage_db,
+        evaluation_root=evaluation_root,
+    )
+
+    assert manifest["ambiguity_reservation_count"] == 2
+    assert [value["item_id"] for value in manifest["ambiguity_reservations"]] == [
+        "H002",
+        "H003",
+    ]
+    assert manifest["ambiguity_reserve_nano_usd"] == 797_731_250
+    assert manifest["effective_tracked_ceiling_nano_usd"] == 6_202_268_750
+
+    calls: list[tuple[str, str]] = []
+    report = run_evaluation(
+        authorized=True,
+        maximum_usd=Decimal("7.00"),
+        client_factory=_Client,
+        generator=_recorded_generator(
+            calls,
+            expected_ceiling_nano_usd=(
+                COMMITTED_H003_EFFECTIVE_CEILING_NANO_USD
+            ),
+        ),
+        run_root=run_root,
+        usage_db=usage_db,
+        evaluation_root=evaluation_root,
+    )
+
+    assert len(calls) == 4
+    assert report["ambiguity_reservation_count"] == 2
+    assert [value["item_id"] for value in report["ambiguity_reservations"]] == [
+        "H002",
+        "H003",
+    ]
+    assert report["ambiguity_reserve_usd_exact"] == "0.797731250"
+    assert report["effective_tracked_ceiling_usd_exact"] == "6.202268750"
+    assert UsageLedger(usage_db).get_settings() == {
+        "monthly_budget_usd": 6.20226875,
+        "warning_threshold_percent": 80,
+        "hard_limit_enabled": True,
+    }
 
 
 def test_completed_run_resumes_without_client_or_provider_calls(tmp_path):
@@ -381,8 +501,16 @@ def test_shared_master_cap_blocks_before_intent_or_client(tmp_path):
     assert not (run_root / "attempts").exists()
 
 
-def test_h002_reserve_blocks_projection_that_would_fit_under_owner_cap(tmp_path):
+def test_cumulative_reserve_blocks_projection_that_would_fit_under_owner_cap(
+    monkeypatch,
+    tmp_path,
+):
     evaluation_root, run_root, usage_db = _paths(tmp_path)
+    monkeypatch.setattr(
+        persona,
+        "master_budget_state",
+        _committed_h003_budget_state,
+    )
     manifest = prepare_evaluation(
         run_root=run_root,
         usage_db=usage_db,
@@ -390,8 +518,10 @@ def test_h002_reserve_blocks_projection_that_would_fit_under_owner_cap(tmp_path)
     )
     projected = int(manifest["projected_cohort_cost_nano_usd"])
     # Sol output is 30,000 nano-USD/token. Choose prior spend so all four
-    # projections fit beneath $7, but not beneath the H002-reserved ceiling.
-    output_tokens = (MASTER_COST_CEILING_NANO_USD - projected) // 30_000 + 1
+    # projections fit beneath $7, but not beneath the cumulative reserve.
+    output_tokens = (
+        COMMITTED_H003_EFFECTIVE_CEILING_NANO_USD - projected
+    ) // 30_000 + 1
     UsageLedger(usage_db).record(
         response_id="synthetic-prior-reserve-edge",
         operation="answer_generation",
@@ -405,13 +535,13 @@ def test_h002_reserve_blocks_projection_that_would_fit_under_owner_cap(tmp_path)
     )
     state = UsageLedger(usage_db).request_usage_cost_state(MASTER_REQUEST_ID)
     assert int(state["estimated_cost_nano_usd"]) + projected > (
-        MASTER_COST_CEILING_NANO_USD
+        COMMITTED_H003_EFFECTIVE_CEILING_NANO_USD
     )
     assert int(state["estimated_cost_nano_usd"]) + projected < (
         OWNER_AUTHORIZED_COST_CAP_NANO_USD
     )
 
-    with pytest.raises(PersonaEvaluationError, match="effective tracked ceiling"):
+    with pytest.raises(PersonaEvaluationError, match="effective tracked remainder"):
         run_evaluation(
             authorized=True,
             maximum_usd=Decimal("7.00"),

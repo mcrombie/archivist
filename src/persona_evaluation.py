@@ -49,13 +49,11 @@ from costs import (
     usage_scope,
 )
 from retrieval_authored_v3_evaluation import (
-    AMBIGUOUS_H002_RESERVED_NANO_USD,
     EVALUATION_ID,
     MASTER_COST_CAP_NANO_USD,
     MASTER_COST_CAP_USD,
     MASTER_PROJECT_ID,
     MASTER_REQUEST_ID,
-    RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
     V3EvaluationError,
     default_paths,
     master_budget_state,
@@ -77,11 +75,6 @@ DEFAULT_USAGE_DB = default_paths(BASE_DIR).ledger
 PERSONA_CONVERSATION_ID = f"{EVALUATION_ID}-persona-evaluation"
 OWNER_AUTHORIZED_COST_CAP_NANO_USD = MASTER_COST_CAP_NANO_USD
 OWNER_AUTHORIZED_COST_CAP_USD = MASTER_COST_CAP_USD
-AMBIGUITY_RESERVE_NANO_USD = AMBIGUOUS_H002_RESERVED_NANO_USD
-MASTER_COST_CEILING_NANO_USD = RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
-MASTER_COST_CEILING_USD = (
-    Decimal(MASTER_COST_CEILING_NANO_USD) / Decimal(1_000_000_000)
-)
 
 _MANUSCRIPT_LEAD_RE = re.compile(
     r"\b(?:the\s+manuscript|cradle\s+of\s+the\s+empire)\b",
@@ -278,24 +271,49 @@ def _provider_request(case: PersonaEvaluationCase) -> dict[str, object]:
 
 
 def _validated_master_budget_state(usage_db: Path) -> dict[str, object]:
-    """Read the adapter-owned reserve and ledger state without weakening it."""
+    """Read and validate the adapter-owned cumulative reservation chain."""
 
     try:
         validate_master_ledger(usage_db)
         state = master_budget_state(usage_db)
     except V3EvaluationError as exc:
         raise PersonaEvaluationError(str(exc)) from exc
-    expected = {
-        "owner_authorized_cap_nano_usd": OWNER_AUTHORIZED_COST_CAP_NANO_USD,
-        "ambiguity_reserve_nano_usd": AMBIGUITY_RESERVE_NANO_USD,
-        "effective_tracked_ceiling_nano_usd": MASTER_COST_CEILING_NANO_USD,
-    }
-    if any(state.get(key) != value for key, value in expected.items()):
-        raise PersonaEvaluationError("v3 master budget reserve contract changed")
-    for key in ("tracked_spend_nano_usd", "effective_remaining_nano_usd"):
+    if state.get("owner_authorized_cap_nano_usd") != OWNER_AUTHORIZED_COST_CAP_NANO_USD:
+        raise PersonaEvaluationError("v3 owner-authorized budget cap changed")
+    integer_fields = (
+        "ambiguity_reserve_nano_usd",
+        "ambiguity_reservation_count",
+        "effective_tracked_ceiling_nano_usd",
+        "tracked_spend_nano_usd",
+        "effective_remaining_nano_usd",
+    )
+    for key in integer_fields:
         value = state.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise PersonaEvaluationError("v3 master budget state is invalid")
+    reserve = int(state["ambiguity_reserve_nano_usd"])
+    effective_ceiling = int(state["effective_tracked_ceiling_nano_usd"])
+    tracked = int(state["tracked_spend_nano_usd"])
+    remaining = int(state["effective_remaining_nano_usd"])
+    reservations = state.get("ambiguity_reservations")
+    if (
+        not isinstance(reservations, list)
+        or len(reservations) != int(state["ambiguity_reservation_count"])
+        or not all(isinstance(value, Mapping) for value in reservations)
+        or reserve + effective_ceiling != OWNER_AUTHORIZED_COST_CAP_NANO_USD
+        or tracked + remaining != effective_ceiling
+    ):
+        raise PersonaEvaluationError("v3 cumulative reservation state is inconsistent")
+    for key, nano_value in (
+        ("owner_authorized_cap_usd_exact", OWNER_AUTHORIZED_COST_CAP_NANO_USD),
+        ("ambiguity_reserve_usd_exact", reserve),
+        ("effective_tracked_ceiling_usd_exact", effective_ceiling),
+        ("tracked_spend_usd_exact", tracked),
+        ("effective_remaining_usd_exact", remaining),
+    ):
+        expected = f"{Decimal(nano_value) / Decimal(1_000_000_000):.9f}"
+        if state.get(key) != expected:
+            raise PersonaEvaluationError("v3 exact budget accounting changed")
     return dict(state)
 
 
@@ -312,7 +330,8 @@ def build_prepared_manifest(
         usage_db=usage_db,
         evaluation_root=evaluation_root,
     )
-    _validated_master_budget_state(selected_usage)
+    budget_state = _validated_master_budget_state(selected_usage)
+    effective_ceiling = int(budget_state["effective_tracked_ceiling_nano_usd"])
     expected_modes = tuple(case.mode for case in PERSONA_EVALUATION_CASES)
     if len(expected_modes) != len(set(expected_modes)):
         raise PersonaEvaluationError("persona evaluation contains a duplicate mode")
@@ -334,8 +353,10 @@ def build_prepared_manifest(
             provider_kind="responses",
             request=request,
         )
-        if projection <= 0 or projection > MASTER_COST_CEILING_NANO_USD:
-            raise PersonaEvaluationError("persona call projection is outside the master cap")
+        if projection <= 0 or projection > effective_ceiling:
+            raise PersonaEvaluationError(
+                "persona call projection is outside the effective tracked ceiling"
+            )
         metadata = character_conversation_prompt_metadata(case.mode)
         items.append(
             {
@@ -354,9 +375,9 @@ def build_prepared_manifest(
     projected_cohort_cost = sum(
         int(item["projected_cost_nano_usd"]) for item in items
     )
-    if projected_cohort_cost > MASTER_COST_CEILING_NANO_USD:
+    if projected_cohort_cost > int(budget_state["effective_remaining_nano_usd"]):
         raise PersonaEvaluationError(
-            "persona cohort projection exceeds the effective tracked ceiling"
+            "persona cohort projection exceeds the effective tracked remainder"
         )
 
     return _sealed(
@@ -373,9 +394,22 @@ def build_prepared_manifest(
             "conversation_id": PERSONA_CONVERSATION_ID,
             "owner_authorized_cap_nano_usd": OWNER_AUTHORIZED_COST_CAP_NANO_USD,
             "owner_authorized_cap_usd": f"{OWNER_AUTHORIZED_COST_CAP_USD:.2f}",
-            "ambiguity_reserve_nano_usd": AMBIGUITY_RESERVE_NANO_USD,
-            "effective_tracked_ceiling_nano_usd": MASTER_COST_CEILING_NANO_USD,
-            "effective_tracked_ceiling_usd_exact": f"{MASTER_COST_CEILING_USD:.9f}",
+            "ambiguity_reserve_nano_usd": budget_state[
+                "ambiguity_reserve_nano_usd"
+            ],
+            "ambiguity_reserve_usd_exact": budget_state[
+                "ambiguity_reserve_usd_exact"
+            ],
+            "ambiguity_reservation_count": budget_state[
+                "ambiguity_reservation_count"
+            ],
+            "ambiguity_reservations": budget_state["ambiguity_reservations"],
+            "effective_tracked_ceiling_nano_usd": budget_state[
+                "effective_tracked_ceiling_nano_usd"
+            ],
+            "effective_tracked_ceiling_usd_exact": budget_state[
+                "effective_tracked_ceiling_usd_exact"
+            ],
             "projected_cohort_cost_nano_usd": projected_cohort_cost,
             "character_policy_version": CHARACTER_CONVERSATION_POLICY_VERSION,
             "renderer_version": CHARACTER_CONVERSATION_RENDERER_VERSION,
@@ -465,8 +499,13 @@ def _authorization(
             "shared_usage_db": manifest["usage_db"],
             "max_cost_usd": f"{maximum_usd:.2f}",
             "owner_authorized_max_cost_nano_usd": OWNER_AUTHORIZED_COST_CAP_NANO_USD,
-            "ambiguity_reserve_nano_usd": AMBIGUITY_RESERVE_NANO_USD,
-            "effective_tracked_ceiling_nano_usd": MASTER_COST_CEILING_NANO_USD,
+            "ambiguity_reserve_nano_usd": manifest["ambiguity_reserve_nano_usd"],
+            "ambiguity_reservation_count": manifest[
+                "ambiguity_reservation_count"
+            ],
+            "effective_tracked_ceiling_nano_usd": manifest[
+                "effective_tracked_ceiling_nano_usd"
+            ],
             "operation_scope": (
                 "one no-retry gpt-5.6-sol character-conversation call for each untouched "
                 "fixed persona item; no embeddings, retrieval, manuscript, or retries"
@@ -830,6 +869,10 @@ def build_diagnostics_report(
             "ambiguity_reserve_usd_exact": master_state[
                 "ambiguity_reserve_usd_exact"
             ],
+            "ambiguity_reservation_count": master_state[
+                "ambiguity_reservation_count"
+            ],
+            "ambiguity_reservations": master_state["ambiguity_reservations"],
             "effective_tracked_ceiling_nano_usd": master_state[
                 "effective_tracked_ceiling_nano_usd"
             ],
@@ -936,8 +979,14 @@ def run_evaluation(
 
     with _shared_usage_database(selected_usage):
         ledger = UsageLedger(selected_usage)
+        budget_state = _validated_master_budget_state(selected_usage)
+        effective_ceiling = int(
+            budget_state["effective_tracked_ceiling_nano_usd"]
+        )
         ledger.update_settings(
-            monthly_budget_usd=MASTER_COST_CEILING_USD,
+            monthly_budget_usd=(
+                Decimal(effective_ceiling) / Decimal(1_000_000_000)
+            ),
             warning_threshold_percent=80,
             hard_limit_enabled=True,
         )
@@ -1009,7 +1058,9 @@ def run_evaluation(
                     request_id=MASTER_REQUEST_ID,
                     enforce_budget=True,
                     allow_over_budget=False,
-                    request_cost_ceiling_nano_usd=MASTER_COST_CEILING_NANO_USD,
+                    request_cost_ceiling_nano_usd=int(
+                        master_state["effective_tracked_ceiling_nano_usd"]
+                    ),
                 ):
                     result = generator(
                         client,
@@ -1137,9 +1188,6 @@ def load_diagnostics_report(
 __all__ = [
     "DEFAULT_RUN_ROOT",
     "DEFAULT_USAGE_DB",
-    "AMBIGUITY_RESERVE_NANO_USD",
-    "MASTER_COST_CEILING_NANO_USD",
-    "MASTER_COST_CEILING_USD",
     "MASTER_PROJECT_ID",
     "MASTER_REQUEST_ID",
     "PERSONA_CONVERSATION_ID",

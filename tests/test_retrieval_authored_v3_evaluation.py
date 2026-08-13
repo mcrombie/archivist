@@ -18,10 +18,8 @@ from authored_response import (
 )
 from costs import TokenUsage, UsageLedger, current_usage_context
 from retrieval_authored_v3_evaluation import (
-    AMBIGUOUS_H002_RESERVED_NANO_USD,
     MASTER_COST_CAP_USD,
     MASTER_REQUEST_ID,
-    RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
     ProviderCapturingClient,
     V3EvaluationError,
     V3Paths,
@@ -283,10 +281,7 @@ def test_master_scope_reuses_one_request_id_and_one_ledger(tmp_path):
     with master_usage_scope(paths, maximum_usd=Decimal("7.00"), turn_id="G001:decomposition"):
         context = current_usage_context()
         assert context.request_id == MASTER_REQUEST_ID
-        assert (
-            context.request_cost_ceiling_nano_usd
-            == RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
-        )
+        assert context.request_cost_ceiling_nano_usd == 7_000_000_000
         UsageLedger().record(
             response_id="response-one",
             operation="eval_claim_decomposition_v2",
@@ -338,26 +333,16 @@ def test_started_provider_attempt_without_usage_is_ambiguous_and_stops():
         )
 
 
-def test_recovery_budget_reserves_exact_h002_worst_case_without_creating_ledger(
-    tmp_path,
-):
+def test_recovery_budget_without_continuations_does_not_create_ledger(tmp_path):
     ledger = tmp_path / "absent.sqlite3"
 
     state = master_budget_state(ledger)
 
     assert not ledger.exists()
-    assert state == {
-        "owner_authorized_cap_nano_usd": 7_000_000_000,
-        "ambiguity_reserve_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
-        "effective_tracked_ceiling_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
-        "tracked_spend_nano_usd": 0,
-        "effective_remaining_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
-        "owner_authorized_cap_usd_exact": "7.000000000",
-        "ambiguity_reserve_usd_exact": "0.399575000",
-        "effective_tracked_ceiling_usd_exact": "6.600425000",
-        "tracked_spend_usd_exact": "0.000000000",
-        "effective_remaining_usd_exact": "6.600425000",
-    }
+    assert state["ambiguity_reserve_nano_usd"] == 0
+    assert state["ambiguity_reservation_count"] == 0
+    assert state["effective_tracked_ceiling_nano_usd"] == 7_000_000_000
+    assert state["effective_remaining_usd_exact"] == "7.000000000"
 
 
 def _write_synthetic_reserved_h002(monkeypatch, paths: V3Paths) -> None:
@@ -400,62 +385,168 @@ def _write_synthetic_reserved_h002(monkeypatch, paths: V3Paths) -> None:
         path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         monkeypatch.setattr(v3, file_constant, hashlib.sha256(path.read_bytes()).hexdigest())
         monkeypatch.setattr(v3, canonical_constant, v3.canonical_json_sha256(value))
-
-
-def test_reconcile_seals_only_exact_h002_zero_event_and_no_h003(monkeypatch, tmp_path):
-    paths = _paths(tmp_path / "run")
-    _write_synthetic_reserved_h002(monkeypatch, paths)
-    recovery_commit = "1" * 40
-    monkeypatch.setattr(v3, "_git_commit", lambda _base: recovery_commit)
-
-    continuation = reconcile_generation_ambiguity(
-        SimpleNamespace(paths=paths),
-        base_dir=tmp_path,
+    legacy = v3._continuation_payload(recovery_commit=v3.H002_RECOVERY_HARNESS_COMMIT)
+    paths.ambiguity_continuation.write_text(
+        json.dumps(legacy, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
-
-    assert continuation["original_harness_commit"] == v3.ORIGINAL_HARNESS_COMMIT
-    assert continuation["recovery_harness_commit"] == recovery_commit
-    assert continuation["preservation"]["h002_retried"] is False
-    assert continuation["h002_ambiguous_attempt"]["usage_event_count"] == 0
-    assert continuation["continuation_boundary"] == {
-        "next_item_id": "H003",
-        "h003_generation_intent_existed_at_reconciliation": False,
-        "h003_generation_outcome_existed_at_reconciliation": False,
-        "h003_usage_event_count_at_reconciliation": 0,
-    }
-    assert continuation["cost_reservation"]["effective_tracked_ceiling_nano_usd"] == (
-        6_600_425_000
-    )
-
-
-def test_reconcile_rejects_any_h003_attempt_artifact(monkeypatch, tmp_path):
-    paths = _paths(tmp_path / "run")
-    _write_synthetic_reserved_h002(monkeypatch, paths)
-    monkeypatch.setattr(v3, "_git_commit", lambda _base: "2" * 40)
-    h003_intent = paths.root / "items" / "H003" / "generation-intent.json"
-    h003_intent.parent.mkdir(parents=True, exist_ok=True)
-    h003_intent.write_text("{}\n", encoding="utf-8")
-
-    with pytest.raises(V3EvaluationError, match="H003 was already attempted"):
-        reconcile_generation_ambiguity(
-            SimpleNamespace(paths=paths),
-            base_dir=tmp_path,
-        )
-
-
-def test_reserved_zero_event_exception_is_h002_only(monkeypatch, tmp_path):
-    paths = _paths(tmp_path / "run")
-    observed: list[tuple[Path, str]] = []
-    monkeypatch.setattr(v3, "_git_commit", lambda _base: "3" * 40)
     monkeypatch.setattr(
         v3,
-        "validate_ambiguity_continuation",
-        lambda value, *, recovery_commit: observed.append((value.root, recovery_commit)),
+        "EXPECTED_H002_CONTINUATION_FILE_SHA256",
+        hashlib.sha256(paths.ambiguity_continuation.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        v3,
+        "EXPECTED_H002_CONTINUATION_CANONICAL_SHA256",
+        v3.canonical_json_sha256(legacy),
     )
 
-    assert v3._reserved_h002_zero_event_is_valid(paths, item_id="H002") is True
-    assert v3._reserved_h002_zero_event_is_valid(paths, item_id="H003") is False
-    assert observed == [(paths.root, "3" * 40)]
+
+def _write_zero_event_generation(paths: V3Paths, item_id: str) -> None:
+    root = paths.root / "items" / item_id
+    root.mkdir(parents=True, exist_ok=True)
+    intent = {"schema": "intent", "item_id": item_id, "attempt_count": 1}
+    evidence = v3._turn_operation_evidence(
+        paths,
+        turn_id=f"{item_id}:generation",
+        expected_operation="answer_generation",
+    )
+    outcome = {
+        "schema": "outcome",
+        "item_id": item_id,
+        "provider_attempt_count": 1,
+        "status": "technical_failure",
+        "delivered_answer_status": "essential_fallback",
+        "provider": {"response_id": None},
+        "operation_evidence": evidence,
+        "intent_sha256": v3.canonical_json_sha256(intent),
+        "dossier": {},
+    }
+    (root / "generation-intent.json").write_text(
+        json.dumps(intent, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (root / "generation.json").write_text(
+        json.dumps(outcome, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _synthetic_ambiguity_cohort(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    _write_synthetic_reserved_h002(monkeypatch, paths)
+    paths.instrument_freeze.write_text("{}\n", encoding="utf-8")
+    _write_zero_event_generation(paths, "H003")
+    cohort = SimpleNamespace(
+        paths=paths,
+        items=(
+            {"id": "H003", "question": "Synthetic H003?"},
+            {"id": "H004", "question": "Synthetic H004?"},
+        ),
+        manifest={"schema": "manifest"},
+    )
+    monkeypatch.setattr(
+        v3,
+        "_professional_request_projection",
+        lambda *_args, **_kwargs: {
+            "projected_worst_case_reserved_nano_usd": 100,
+            "projection_method": "costs.projected_provider_operation_cost_nano_usd",
+            "provider_kind": "responses",
+            "request_binding": {"synthetic": True},
+            "request_binding_sha256": v3.canonical_json_sha256({"synthetic": True}),
+            "provider_request_shape_sha256": "a" * 64,
+            "provider_request_serialized_bytes": 10,
+            "provider_request_token_overhead_upper_bound": 20,
+            "provider_input_token_upper_bound": 30,
+            "max_output_tokens": 40,
+        },
+    )
+    h003_intent = paths.root / "items" / "H003" / "generation-intent.json"
+    h003_outcome = paths.root / "items" / "H003" / "generation.json"
+    monkeypatch.setattr(
+        v3,
+        "AMBIGUITY_RECOVERY_DECLARATIONS",
+        {
+            "H003": {
+                "sequence": 1,
+                "turn_id": "H003:generation",
+                "previous_recovery_harness_commit": v3.H002_RECOVERY_HARNESS_COMMIT,
+                "previous_continuation_file": "ambiguity-continuation.json",
+                "generation_intent_file_sha256": hashlib.sha256(
+                    h003_intent.read_bytes()
+                ).hexdigest(),
+                "generation_intent_canonical_sha256": v3.canonical_json_sha256(
+                    v3.read_json_object(h003_intent)
+                ),
+                "generation_outcome_file_sha256": hashlib.sha256(
+                    h003_outcome.read_bytes()
+                ).hexdigest(),
+                "generation_outcome_canonical_sha256": v3.canonical_json_sha256(
+                    v3.read_json_object(h003_outcome)
+                ),
+                "previous_continuation_file_sha256": v3.EXPECTED_H002_CONTINUATION_FILE_SHA256,
+                "provider_request_shape_sha256": "a" * 64,
+                "provider_request_serialized_bytes": 10,
+                "provider_request_token_overhead_upper_bound": 20,
+                "provider_input_token_upper_bound": 30,
+                "max_output_tokens": 40,
+                "projected_worst_case_reserved_nano_usd": 100,
+                "request_binding_sha256": v3.canonical_json_sha256(
+                    {"synthetic": True}
+                ),
+                "next_item_id": "H004",
+                "later_generation_item_ids_sha256": v3.canonical_json_sha256(
+                    ["H004"]
+                ),
+            }
+        },
+    )
+    monkeypatch.setattr(v3, "_git_is_ancestor", lambda *_args, **_kwargs: True)
+    return paths, cohort
+
+
+def test_reconcile_appends_hash_chain_and_preserves_legacy_bytes(monkeypatch, tmp_path):
+    paths, cohort = _synthetic_ambiguity_cohort(monkeypatch, tmp_path)
+    recovery_commit = "1" * 40
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: recovery_commit)
+    legacy_bytes = paths.ambiguity_continuation.read_bytes()
+
+    continuation = reconcile_generation_ambiguity(cohort, base_dir=tmp_path)
+
+    assert paths.ambiguity_continuation.read_bytes() == legacy_bytes
+    assert continuation["sequence"] == 1
+    assert continuation["item_id"] == "H003"
+    assert continuation["retried"] is False
+    assert continuation["projected_worst_case_reserved_nano_usd"] == 100
+    assert continuation["cumulative_reserved_nano_usd"] == 399_575_100
+    assert continuation["effective_tracked_ceiling_nano_usd"] == 6_600_424_900
+    assert continuation["next_item_id"] == "H004"
+    assert continuation["previous_continuation_file_sha256"] == hashlib.sha256(
+        legacy_bytes
+    ).hexdigest()
+    assert (paths.ambiguity_entries / "0001-H003.json").is_file()
+
+
+def test_reconcile_rejects_any_later_attempt_after_ambiguity(monkeypatch, tmp_path):
+    paths, cohort = _synthetic_ambiguity_cohort(monkeypatch, tmp_path)
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "2" * 40)
+    h004_intent = paths.root / "items" / "H004" / "generation-intent.json"
+    h004_intent.parent.mkdir(parents=True, exist_ok=True)
+    h004_intent.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(V3EvaluationError, match="attempted after unreconciled H003"):
+        reconcile_generation_ambiguity(cohort, base_dir=tmp_path)
+
+
+def test_reserved_zero_event_exception_is_chain_derived(monkeypatch, tmp_path):
+    paths, cohort = _synthetic_ambiguity_cohort(monkeypatch, tmp_path)
+    recovery_commit = "3" * 40
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: recovery_commit)
+    reconcile_generation_ambiguity(cohort, base_dir=tmp_path)
+
+    assert v3._reserved_zero_event_is_valid(paths, item_id="H002") is True
+    assert v3._reserved_zero_event_is_valid(paths, item_id="H003") is True
+    assert v3._reserved_zero_event_is_valid(paths, item_id="H004") is False
 
 
 def test_original_manifest_may_differ_only_by_bound_recovery_commit(monkeypatch):

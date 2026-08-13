@@ -42,12 +42,20 @@ from authored_response import (
     AuthoredResponseResult,
     AuthoredResponseStatus,
     authored_response_prompt_metadata,
+    build_authored_response_input,
+    build_authored_response_instructions,
     generate_authored_response,
     validate_and_render_authored_response,
 )
 from character_conversation import is_character_conversation_question
 from corpus import get_all_chunks
-from costs import UsageLedger, usage_scope
+from costs import (
+    PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND,
+    UsageLedger,
+    _request_json_value,
+    projected_provider_operation_cost_nano_usd,
+    usage_scope,
+)
 from evaluation_artifacts import build_corpus_identity, build_git_worktree_identity
 from evaluation_judge import (
     ITEM_RUBRIC_PROMPT_SHA256,
@@ -105,6 +113,12 @@ V3_PUBLIC_SUMMARY_SCHEMA = "archivist.retrieval_authored_v3_public_summary/1"
 V3_AMBIGUITY_CONTINUATION_SCHEMA = (
     "archivist.retrieval_authored_v3_ambiguity_continuation/1"
 )
+V3_AMBIGUITY_CONTINUATION_CHAIN_SCHEMA = (
+    "archivist.retrieval_authored_v3_ambiguity_continuation_chain/1"
+)
+V3_AMBIGUITY_CONTINUATION_ENTRY_SCHEMA = (
+    "archivist.retrieval_authored_v3_ambiguity_continuation_entry/1"
+)
 
 EVALUATION_ID = "retrieval-authored-v3-professional-2026-08-13"
 COHORT_CLASSIFICATION = "reused_locked_benchmark_not_pristine_held_out"
@@ -116,9 +130,50 @@ MASTER_COST_CAP_NANO_USD = 7_000_000_000
 MASTER_COST_CAP_USD = Decimal("7.00")
 ORIGINAL_HARNESS_COMMIT = "fe229c891e741c73c67b47076a1af10c3ff4948a"
 AMBIGUOUS_H002_RESERVED_NANO_USD = 399_575_000
-RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD = (
-    MASTER_COST_CAP_NANO_USD - AMBIGUOUS_H002_RESERVED_NANO_USD
+RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD = 6_600_425_000
+H002_RECOVERY_HARNESS_COMMIT = "9edbaba921047a83ab57df23b68b4c7e967a21c6"
+EXPECTED_H002_CONTINUATION_FILE_SHA256 = (
+    "429a719e249ab7705988b65a1126587737ab12fbb9814202e706931f89738269"
 )
+EXPECTED_H002_CONTINUATION_CANONICAL_SHA256 = (
+    "7e4046098141a15234da7b158f9594eb5cf8324ab0a4b2627f0a31c61a7a7d07"
+)
+AMBIGUITY_RECOVERY_DECLARATIONS: Mapping[str, Mapping[str, object]] = {
+    "H003": {
+        "sequence": 1,
+        "turn_id": "H003:generation",
+        "previous_recovery_harness_commit": H002_RECOVERY_HARNESS_COMMIT,
+        "previous_continuation_file": "ambiguity-continuation.json",
+        "generation_intent_file_sha256": (
+            "2fbc96dfc731396a14fb1ae8991e02200fd9cf4fb2196605f8545a85a8229b16"
+        ),
+        "generation_intent_canonical_sha256": (
+            "d33567d8cce8d8314deed5eb6e30da917c2fdf0c714f67df8265d7b3bc0698f1"
+        ),
+        "generation_outcome_file_sha256": (
+            "f3cc6338c161c838f12b9ec7afea9261c3fcdb9ed344472f16da8ebe02281fa5"
+        ),
+        "generation_outcome_canonical_sha256": (
+            "7ea69222e92ea421bc86fc3cbb9fd27e5185bdd410fbc91acf3c9879c4e014b4"
+        ),
+        "previous_continuation_file_sha256": EXPECTED_H002_CONTINUATION_FILE_SHA256,
+        "provider_request_shape_sha256": (
+            "da5e71fe6fdef52d162e24a80275bd386ffe71ad892a4178ee02ce45afc467a3"
+        ),
+        "provider_request_serialized_bytes": 22_297,
+        "provider_request_token_overhead_upper_bound": 32_768,
+        "provider_input_token_upper_bound": 55_065,
+        "max_output_tokens": 1_800,
+        "projected_worst_case_reserved_nano_usd": 398_156_250,
+        "request_binding_sha256": (
+            "bec1d6f3f4ab30f116d326206a9575d461eb6b8df77e5267a9166363557f3173"
+        ),
+        "next_item_id": "H004",
+        "later_generation_item_ids_sha256": (
+            "75e332da0125cf75d81758aacd3645e006f0bb3067404230763d180be7471a96"
+        ),
+    }
+}
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
 EXPECTED_PROVENANCE_SHA256 = "b4a023cce4639558ce5c26dc1ec473e072bef72ba2fb77dfab8b7d61ddc4ae6a"
@@ -185,6 +240,14 @@ class V3Paths:
     @property
     def ambiguity_continuation(self) -> Path:
         return self.root / "ambiguity-continuation.json"
+
+    @property
+    def ambiguity_chain(self) -> Path:
+        return self.root / "ambiguity-continuation-chain.json"
+
+    @property
+    def ambiguity_entries(self) -> Path:
+        return self.root / "ambiguity-continuations"
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +377,17 @@ def _git_commit(base_dir: Path) -> str:
     if completed.returncode != 0:
         raise V3EvaluationError("could not resolve harness commit")
     return completed.stdout.strip()
+
+
+def _git_is_ancestor(base_dir: Path, *, ancestor: str, descendant: str) -> bool:
+    completed = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=base_dir,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return completed.returncode == 0
 
 
 def _require_hash(path: Path, expected: str, label: str) -> None:
@@ -693,20 +767,399 @@ def _validate_h002_reserved_state(paths: V3Paths) -> None:
 
 
 def validate_ambiguity_continuation(paths: V3Paths, *, recovery_commit: str) -> None:
-    expected = _continuation_payload(recovery_commit=recovery_commit)
-    if not paths.ambiguity_continuation.is_file():
-        raise V3EvaluationError("the H002 ambiguity has not been reconciled")
-    if read_json_object(paths.ambiguity_continuation) != expected:
-        raise V3EvaluationError("H002 ambiguity continuation manifest changed")
+    state = _ambiguity_chain_state(paths)
+    if not state["reservations"]:
+        raise V3EvaluationError("no zero-event ambiguity has been reconciled")
+    if state["tail_recovery_harness_commit"] != recovery_commit:
+        raise V3EvaluationError("ambiguity continuation is not bound to the current harness")
+
+
+def _legacy_h002_reservation(paths: V3Paths) -> dict[str, object] | None:
+    if not paths.ambiguity_continuation.exists():
+        return None
+    if sha256_file(paths.ambiguity_continuation) != EXPECTED_H002_CONTINUATION_FILE_SHA256:
+        raise V3EvaluationError("legacy H002 continuation file hash changed")
+    payload = read_json_object(paths.ambiguity_continuation)
+    if canonical_json_sha256(payload) != EXPECTED_H002_CONTINUATION_CANONICAL_SHA256:
+        raise V3EvaluationError("legacy H002 continuation canonical hash changed")
+    if payload != _continuation_payload(recovery_commit=H002_RECOVERY_HARNESS_COMMIT):
+        raise V3EvaluationError("legacy H002 continuation payload changed")
     _validate_h002_reserved_state(paths)
+    return {
+        "sequence": 0,
+        "item_id": "H002",
+        "turn_id": "H002:generation",
+        "projected_worst_case_reserved_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
+        "cumulative_reserved_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
+        "effective_tracked_ceiling_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
+        "recovery_harness_commit": H002_RECOVERY_HARNESS_COMMIT,
+        "continuation_file": paths.ambiguity_continuation.name,
+        "continuation_file_sha256": EXPECTED_H002_CONTINUATION_FILE_SHA256,
+    }
 
 
-def _reserved_h002_zero_event_is_valid(paths: V3Paths, *, item_id: str) -> bool:
-    if item_id != "H002":
-        return False
+def _ambiguity_entry_files(paths: V3Paths) -> list[Path]:
+    if not paths.ambiguity_entries.exists():
+        return []
+    return sorted(path for path in paths.ambiguity_entries.glob("*.json") if path.is_file())
+
+
+def _validate_reserved_zero_event(
+    paths: V3Paths,
+    *,
+    item_id: str,
+    intent_file_sha256: str,
+    intent_canonical_sha256: str,
+    outcome_file_sha256: str,
+    outcome_canonical_sha256: str,
+) -> None:
+    root = _item_dir(paths, item_id)
+    intent_path = root / "generation-intent.json"
+    outcome_path = root / "generation.json"
+    for path, file_hash, canonical_hash, label in (
+        (intent_path, intent_file_sha256, intent_canonical_sha256, "intent"),
+        (outcome_path, outcome_file_sha256, outcome_canonical_sha256, "outcome"),
+    ):
+        if not path.is_file() or sha256_file(path) != file_hash:
+            raise V3EvaluationError(f"{item_id} reserved {label} file hash changed")
+        if canonical_json_sha256(read_json_object(path)) != canonical_hash:
+            raise V3EvaluationError(f"{item_id} reserved {label} canonical hash changed")
+    intent = read_json_object(intent_path)
+    outcome = read_json_object(outcome_path)
+    if (
+        intent.get("item_id") != item_id
+        or intent.get("attempt_count") != 1
+        or outcome.get("item_id") != item_id
+        or outcome.get("provider_attempt_count") != 1
+        or outcome.get("status") != "technical_failure"
+        or outcome.get("delivered_answer_status") != "essential_fallback"
+        or outcome.get("intent_sha256") != canonical_json_sha256(intent)
+    ):
+        raise V3EvaluationError(f"{item_id} is not an exact zero-event generation outcome")
+    provider = outcome.get("provider")
+    evidence = outcome.get("operation_evidence")
+    if (
+        not isinstance(provider, Mapping)
+        or provider.get("response_id") is not None
+        or not isinstance(evidence, Mapping)
+        or evidence.get("turn_id") != f"{item_id}:generation"
+        or evidence.get("event_count") != 0
+        or evidence.get("scope_valid") is not True
+        or evidence.get("operations_valid") is not True
+    ):
+        raise V3EvaluationError(f"{item_id} zero-event provider evidence changed")
+    current = _turn_operation_evidence(
+        paths,
+        turn_id=f"{item_id}:generation",
+        expected_operation="answer_generation",
+    )
+    if current.get("event_count") != 0 or current != evidence:
+        raise V3EvaluationError(f"{item_id} unexpectedly has recorded provider usage")
+
+
+def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
+    reservations: list[dict[str, object]] = []
+    legacy = _legacy_h002_reservation(paths)
+    if legacy is None:
+        if _ambiguity_entry_files(paths):
+            raise V3EvaluationError("ambiguity chain has no immutable H002 anchor")
+        return {
+            "reservations": [],
+            "cumulative_reserved_nano_usd": 0,
+            "effective_tracked_ceiling_nano_usd": MASTER_COST_CAP_NANO_USD,
+            "tail_recovery_harness_commit": ORIGINAL_HARNESS_COMMIT,
+            "tail_file_sha256": None,
+        }
+    reservations.append(legacy)
+    cumulative = AMBIGUOUS_H002_RESERVED_NANO_USD
+    previous_file = paths.ambiguity_continuation.name
+    previous_hash = EXPECTED_H002_CONTINUATION_FILE_SHA256
+    previous_recovery_commit = H002_RECOVERY_HARNESS_COMMIT
+    seen = {"H002"}
+    for expected_sequence, path in enumerate(_ambiguity_entry_files(paths), start=1):
+        entry = read_json_object(path)
+        expected_name_prefix = f"{expected_sequence:04d}-"
+        if not path.name.startswith(expected_name_prefix):
+            raise V3EvaluationError("ambiguity continuation sequence is not contiguous")
+        item_id = _required_string(entry, "item_id")
+        if path.name != f"{expected_sequence:04d}-{item_id}.json":
+            raise V3EvaluationError("ambiguity continuation filename changed")
+        projected = entry.get("projected_worst_case_reserved_nano_usd")
+        if (
+            entry.get("schema") != V3_AMBIGUITY_CONTINUATION_ENTRY_SCHEMA
+            or entry.get("evaluation_id") != EVALUATION_ID
+            or entry.get("sequence") != expected_sequence
+            or entry.get("turn_id") != f"{item_id}:generation"
+            or item_id in seen
+            or entry.get("previous_continuation_file") != previous_file
+            or entry.get("previous_continuation_file_sha256") != previous_hash
+            or entry.get("previous_recovery_harness_commit") != previous_recovery_commit
+            or not isinstance(projected, int)
+            or isinstance(projected, bool)
+            or projected <= 0
+        ):
+            raise V3EvaluationError(f"ambiguity continuation entry changed: {path.name}")
+        cumulative += projected
+        if cumulative > MASTER_COST_CAP_NANO_USD:
+            raise V3EvaluationError("cumulative ambiguity reserve exceeds owner authorization")
+        if (
+            entry.get("cumulative_reserved_nano_usd") != cumulative
+            or entry.get("effective_tracked_ceiling_nano_usd")
+            != MASTER_COST_CAP_NANO_USD - cumulative
+            or entry.get("provider_boundary_attempt_count") != 1
+            or entry.get("provider_response_observed") is not False
+            or entry.get("usage_event_count") != 0
+            or entry.get("retried") is not False
+            or entry.get("automatic_retries") != 0
+            or entry.get("later_generation_attempt_artifact_count") != 0
+            or entry.get("later_generation_usage_event_count") != 0
+            or not isinstance(entry.get("later_generation_item_ids_sha256"), str)
+            or entry.get("projection_method")
+            != "costs.projected_provider_operation_cost_nano_usd"
+            or entry.get("provider_kind") != "responses"
+            or not isinstance(entry.get("request_binding"), Mapping)
+            or entry.get("request_binding_sha256")
+            != canonical_json_sha256(entry.get("request_binding"))
+        ):
+            raise V3EvaluationError(f"ambiguity reserve accounting changed: {path.name}")
+        declaration = AMBIGUITY_RECOVERY_DECLARATIONS.get(item_id)
+        if declaration is None:
+            raise V3EvaluationError(
+                f"ambiguity continuation has no committed declaration: {item_id}"
+            )
+        declared_entry = {
+            key: entry.get(key)
+            for key in (
+                "generation_intent_file_sha256",
+                "generation_intent_canonical_sha256",
+                "generation_outcome_file_sha256",
+                "generation_outcome_canonical_sha256",
+                "previous_continuation_file_sha256",
+                "provider_request_shape_sha256",
+                "provider_request_serialized_bytes",
+                "provider_request_token_overhead_upper_bound",
+                "provider_input_token_upper_bound",
+                "max_output_tokens",
+                "projected_worst_case_reserved_nano_usd",
+                "sequence",
+                "turn_id",
+                "previous_recovery_harness_commit",
+                "previous_continuation_file",
+                "request_binding_sha256",
+                "next_item_id",
+                "later_generation_item_ids_sha256",
+            )
+        }
+        if declared_entry != dict(declaration):
+            raise V3EvaluationError(
+                f"ambiguity continuation differs from committed declaration: {item_id}"
+            )
+        _validate_reserved_zero_event(
+            paths,
+            item_id=item_id,
+            intent_file_sha256=_required_string(entry, "generation_intent_file_sha256"),
+            intent_canonical_sha256=_required_string(
+                entry, "generation_intent_canonical_sha256"
+            ),
+            outcome_file_sha256=_required_string(entry, "generation_outcome_file_sha256"),
+            outcome_canonical_sha256=_required_string(
+                entry, "generation_outcome_canonical_sha256"
+            ),
+        )
+        raw_next_item_id = entry.get("next_item_id")
+        if raw_next_item_id is not None and (
+            not isinstance(raw_next_item_id, str) or not raw_next_item_id.strip()
+        ):
+            raise V3EvaluationError(f"ambiguity next-item boundary changed: {path.name}")
+        next_item_id = raw_next_item_id
+        next_root = _item_dir(paths, next_item_id) if next_item_id is not None else None
+        if entry.get("next_item_unattempted_at_reconciliation") is not True:
+            raise V3EvaluationError(f"ambiguity continuation boundary changed: {path.name}")
+        seen.add(item_id)
+        previous_file = f"{paths.ambiguity_entries.name}/{path.name}"
+        previous_hash = sha256_file(path)
+        previous_recovery_commit = _required_string(entry, "recovery_harness_commit")
+        reservations.append(
+            {
+                "sequence": expected_sequence,
+                "item_id": item_id,
+                "turn_id": f"{item_id}:generation",
+                "projected_worst_case_reserved_nano_usd": projected,
+                "cumulative_reserved_nano_usd": cumulative,
+                "effective_tracked_ceiling_nano_usd": MASTER_COST_CAP_NANO_USD - cumulative,
+                "recovery_harness_commit": previous_recovery_commit,
+                "continuation_file": previous_file,
+                "continuation_file_sha256": previous_hash,
+                "next_item_id": next_item_id,
+                "next_item_currently_attempted": bool(
+                    next_root is not None
+                    and (
+                        (next_root / "generation-intent.json").exists()
+                        or (next_root / "generation.json").exists()
+                        or _turn_operation_evidence(
+                            paths,
+                            turn_id=f"{next_item_id}:generation",
+                            expected_operation="answer_generation",
+                        ).get("event_count")
+                        != 0
+                    )
+                ),
+            }
+        )
+    return {
+        "reservations": reservations,
+        "cumulative_reserved_nano_usd": cumulative,
+        "effective_tracked_ceiling_nano_usd": MASTER_COST_CAP_NANO_USD - cumulative,
+        "tail_recovery_harness_commit": previous_recovery_commit,
+        "tail_file_sha256": previous_hash,
+        "tail_file": previous_file,
+    }
+
+
+def _reserved_zero_event_is_valid(paths: V3Paths, *, item_id: str) -> bool:
     recovery_commit = _git_commit(Path(__file__).resolve().parent.parent)
     validate_ambiguity_continuation(paths, recovery_commit=recovery_commit)
-    return True
+    state = _ambiguity_chain_state(paths)
+    return item_id in {
+        str(value["item_id"])
+        for value in state["reservations"]
+        if isinstance(value, Mapping)
+    }
+
+
+def _professional_request_projection(
+    cohort: PreparedV3Cohort,
+    *,
+    item: Mapping[str, object],
+    sealed_outcome: Mapping[str, object],
+) -> dict[str, object]:
+    """Rebuild and price the exact deterministic request that reached the boundary."""
+
+    item_id = _required_string(item, "id")
+    question = _required_string(item, "question")
+    vector = cohort.embeddings.get(item_id)
+    if vector is None:
+        raise V3EvaluationError(f"cached embedding is missing for {item_id}")
+    _, retrieval_outcome, _ = retrieve_with_cached_embedding(
+        question=question,
+        embedding=vector,
+        collection=cohort.collection,
+        chunks=cohort.chunks,
+        corpus_trace=cohort.corpus_trace,
+        profile_k=False,
+    )
+    dossier = build_retrieval_dossier(
+        question,
+        list(retrieval_outcome.final_chunks),
+        retrieval_query=question,
+    )
+    sealed_dossier = sealed_outcome.get("dossier")
+    if not isinstance(sealed_dossier, Mapping):
+        raise V3EvaluationError(f"{item_id} sealed dossier is missing")
+    projected_units = [
+        {
+            "unit_id": unit.unit_id,
+            "chunk_id": unit.chunk_id,
+            "source_numbers": list(unit.source.source_numbers),
+            "text_scope": unit.text_scope,
+            "text": unit.text,
+            "text_sha256": hashlib.sha256(unit.text.encode("utf-8")).hexdigest(),
+        }
+        for unit in dossier.units
+    ]
+    if (
+        sealed_dossier.get("dossier_id") != dossier.dossier_id
+        or sealed_dossier.get("model_visible_units") != projected_units
+        or sealed_dossier.get("diagnostics") != dossier.diagnostics
+    ):
+        raise V3EvaluationError(f"{item_id} exact provider request cannot be reproduced")
+    resolved_turn = ResolvedTurn(
+        standalone_question=question,
+        trusted_user_texts=(question,),
+    )
+    lens, voice, worldview = settings_for_archivist_mode(ArchivistMode.PROFESSIONAL)
+    instructions = build_authored_response_instructions(
+        ArchivistMode.PROFESSIONAL,
+        historiographical_lens=lens,
+        voice=voice,
+        worldview=worldview,
+    )
+    request_input = build_authored_response_input(
+        question=question,
+        resolved_turn=resolved_turn,
+        dossier=dossier,
+        mode=ArchivistMode.PROFESSIONAL,
+    )
+    request = {
+        "instructions": instructions,
+        "input": request_input,
+        "text_format": AuthoredResponse,
+        "max_output_tokens": MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+        **AUTHORED_RESPONSE_SETTINGS.responses_create_kwargs(),
+    }
+    projected = projected_provider_operation_cost_nano_usd(
+        provider_kind="responses",
+        request=request,
+    )
+    serialized_request = json.dumps(
+        _request_json_value(request),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    input_token_upper_bound = (
+        len(serialized_request) + PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND
+    )
+    request_binding = {
+        "model": AUTHORED_RESPONSE_SETTINGS.model,
+        "reasoning_effort": AUTHORED_RESPONSE_SETTINGS.reasoning_effort,
+        "verbosity": AUTHORED_RESPONSE_SETTINGS.verbosity,
+        "max_output_tokens": MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+        "instructions_sha256": hashlib.sha256(instructions.encode("utf-8")).hexdigest(),
+        "input_sha256": hashlib.sha256(request_input.encode("utf-8")).hexdigest(),
+        "structured_output_schema_sha256": _authored_schema_sha256(),
+        "dossier_id": dossier.dossier_id,
+    }
+    return {
+        "projected_worst_case_reserved_nano_usd": projected,
+        "projection_method": "costs.projected_provider_operation_cost_nano_usd",
+        "provider_kind": "responses",
+        "request_binding": request_binding,
+        "request_binding_sha256": canonical_json_sha256(request_binding),
+        "provider_request_shape_sha256": hashlib.sha256(serialized_request).hexdigest(),
+        "provider_request_serialized_bytes": len(serialized_request),
+        "provider_request_token_overhead_upper_bound": (
+            PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND
+        ),
+        "provider_input_token_upper_bound": input_token_upper_bound,
+        "max_output_tokens": MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    }
+
+
+def _is_exact_unreserved_zero_event(
+    paths: V3Paths,
+    *,
+    item_id: str,
+    outcome: Mapping[str, object],
+) -> bool:
+    provider = outcome.get("provider")
+    evidence = outcome.get("operation_evidence")
+    return bool(
+        outcome.get("item_id") == item_id
+        and outcome.get("provider_attempt_count") == 1
+        and outcome.get("status") == "technical_failure"
+        and outcome.get("delivered_answer_status") == "essential_fallback"
+        and isinstance(provider, Mapping)
+        and provider.get("response_id") is None
+        and isinstance(evidence, Mapping)
+        and evidence.get("event_count") == 0
+        and evidence
+        == _turn_operation_evidence(
+            paths,
+            turn_id=f"{item_id}:generation",
+            expected_operation="answer_generation",
+        )
+    )
 
 
 def reconcile_generation_ambiguity(
@@ -714,26 +1167,158 @@ def reconcile_generation_ambiguity(
     *,
     base_dir: Path,
 ) -> dict[str, object]:
-    """Seal the one authorized provider-free continuation without retrying H002."""
+    """Append one hash-bound zero-event reserve without retrying that item."""
 
     recovery_commit = _git_commit(base_dir)
-    if recovery_commit == ORIGINAL_HARNESS_COMMIT:
-        raise V3EvaluationError("ambiguity recovery requires a distinct committed harness")
-    _validate_h002_reserved_state(cohort.paths)
-    h003_root = _item_dir(cohort.paths, "H003")
-    if (h003_root / "generation-intent.json").exists() or (
-        h003_root / "generation.json"
-    ).exists():
-        raise V3EvaluationError("H003 was already attempted before reconciliation")
-    h003_evidence = _turn_operation_evidence(
-        cohort.paths,
-        turn_id="H003:generation",
-        expected_operation="answer_generation",
+    state = _ambiguity_chain_state(cohort.paths)
+    previous_recovery_commit = str(state["tail_recovery_harness_commit"])
+    if recovery_commit == previous_recovery_commit:
+        raise V3EvaluationError("each ambiguity reconciliation requires a new clean commit")
+    if not _git_is_ancestor(
+        base_dir,
+        ancestor=previous_recovery_commit,
+        descendant=recovery_commit,
+    ):
+        raise V3EvaluationError("recovery commit does not descend from the prior continuation")
+    reserved_ids = {
+        str(value["item_id"])
+        for value in state["reservations"]
+        if isinstance(value, Mapping)
+    }
+    freeze_sha256 = sha256_file(cohort.paths.instrument_freeze)
+    candidate: tuple[int, Mapping[str, object], Mapping[str, object]] | None = None
+    for index, item in enumerate(cohort.items):
+        item_id = _required_string(item, "id")
+        root = _item_dir(cohort.paths, item_id)
+        intent_path = root / "generation-intent.json"
+        outcome_path = root / "generation.json"
+        if item_id in reserved_ids:
+            continue
+        if not outcome_path.exists():
+            if intent_path.exists():
+                raise V3EvaluationError(
+                    f"{item_id} has an intent without a sealed ambiguity outcome"
+                )
+            break
+        outcome = read_json_object(outcome_path)
+        if _is_exact_unreserved_zero_event(
+            cohort.paths,
+            item_id=item_id,
+            outcome=outcome,
+        ):
+            candidate = (index, item, outcome)
+            break
+        intent = {
+            **_generation_intent(item, cohort.manifest),
+            "instrument_freeze_sha256": freeze_sha256,
+        }
+        _validate_generation_pair(cohort, item=item, intent=intent)
+    if candidate is None:
+        raise V3EvaluationError("no unreconciled exact zero-event generation outcome exists")
+    index, item, outcome = candidate
+    item_id = _required_string(item, "id")
+    later_ids = [_required_string(value, "id") for value in cohort.items[index + 1 :]]
+    for later_id in later_ids:
+        later_root = _item_dir(cohort.paths, later_id)
+        later_evidence = _turn_operation_evidence(
+            cohort.paths,
+            turn_id=f"{later_id}:generation",
+            expected_operation="answer_generation",
+        )
+        if (
+            (later_root / "generation-intent.json").exists()
+            or (later_root / "generation.json").exists()
+            or later_evidence.get("event_count") != 0
+        ):
+            raise V3EvaluationError(
+                f"{later_id} was attempted after unreconciled {item_id} ambiguity"
+            )
+    intent_path = _item_dir(cohort.paths, item_id) / "generation-intent.json"
+    outcome_path = _item_dir(cohort.paths, item_id) / "generation.json"
+    intent = read_json_object(intent_path)
+    if outcome.get("intent_sha256") != canonical_json_sha256(intent):
+        raise V3EvaluationError(f"{item_id} ambiguity intent binding changed")
+    projection = _professional_request_projection(
+        cohort,
+        item=item,
+        sealed_outcome=outcome,
     )
-    if h003_evidence.get("event_count") != 0:
-        raise V3EvaluationError("H003 already has provider usage before reconciliation")
-    payload = _continuation_payload(recovery_commit=recovery_commit)
-    write_or_validate_json(cohort.paths.ambiguity_continuation, payload)
+    declaration = AMBIGUITY_RECOVERY_DECLARATIONS.get(item_id)
+    if declaration is None:
+        raise V3EvaluationError(
+            f"{item_id} requires a committed ambiguity recovery declaration"
+        )
+    sequence = len(state["reservations"])
+    next_item_id = later_ids[0] if later_ids else None
+    declared_projection = {
+        key: projection.get(key)
+        for key in (
+            "provider_request_shape_sha256",
+            "provider_request_serialized_bytes",
+            "provider_request_token_overhead_upper_bound",
+            "provider_input_token_upper_bound",
+            "max_output_tokens",
+            "projected_worst_case_reserved_nano_usd",
+            "request_binding_sha256",
+        )
+    }
+    declared_artifacts = {
+        "sequence": sequence,
+        "turn_id": f"{item_id}:generation",
+        "previous_recovery_harness_commit": previous_recovery_commit,
+        "previous_continuation_file": state["tail_file"],
+        "generation_intent_file_sha256": sha256_file(intent_path),
+        "generation_intent_canonical_sha256": canonical_json_sha256(intent),
+        "generation_outcome_file_sha256": sha256_file(outcome_path),
+        "generation_outcome_canonical_sha256": canonical_json_sha256(outcome),
+        "previous_continuation_file_sha256": state["tail_file_sha256"],
+        "next_item_id": next_item_id,
+        "later_generation_item_ids_sha256": canonical_json_sha256(later_ids),
+        **declared_projection,
+    }
+    if dict(declaration) != declared_artifacts:
+        raise V3EvaluationError(
+            f"{item_id} ambiguity artifacts or exact request projection differ from declaration"
+        )
+    projected = int(projection["projected_worst_case_reserved_nano_usd"])
+    cumulative = int(state["cumulative_reserved_nano_usd"]) + projected
+    if cumulative > MASTER_COST_CAP_NANO_USD:
+        raise V3EvaluationError("cumulative ambiguity reserve exceeds owner authorization")
+    tracked = int(master_budget_state(cohort.paths.ledger)["tracked_spend_nano_usd"])
+    if tracked + cumulative > MASTER_COST_CAP_NANO_USD:
+        raise V3EvaluationError(
+            "tracked spend plus cumulative ambiguity reserve exceeds owner authorization"
+        )
+    payload = {
+        "schema": V3_AMBIGUITY_CONTINUATION_ENTRY_SCHEMA,
+        "evaluation_id": EVALUATION_ID,
+        "sequence": sequence,
+        "item_id": item_id,
+        "turn_id": f"{item_id}:generation",
+        "recovery_harness_commit": recovery_commit,
+        "previous_recovery_harness_commit": previous_recovery_commit,
+        "previous_continuation_file": state["tail_file"],
+        "previous_continuation_file_sha256": state["tail_file_sha256"],
+        "generation_intent_file_sha256": sha256_file(intent_path),
+        "generation_intent_canonical_sha256": canonical_json_sha256(intent),
+        "generation_outcome_file_sha256": sha256_file(outcome_path),
+        "generation_outcome_canonical_sha256": canonical_json_sha256(outcome),
+        "provider_boundary_attempt_count": 1,
+        "provider_response_observed": False,
+        "usage_event_count": 0,
+        "retried": False,
+        **projection,
+        "cumulative_reserved_nano_usd": cumulative,
+        "effective_tracked_ceiling_nano_usd": MASTER_COST_CAP_NANO_USD - cumulative,
+        "next_item_id": next_item_id,
+        "next_item_unattempted_at_reconciliation": True,
+        "later_generation_item_ids_sha256": canonical_json_sha256(later_ids),
+        "later_generation_attempt_artifact_count": 0,
+        "later_generation_usage_event_count": 0,
+        "automatic_retries": 0,
+    }
+    entry_path = cohort.paths.ambiguity_entries / f"{sequence:04d}-{item_id}.json"
+    write_json_no_overwrite(entry_path, payload)
     validate_ambiguity_continuation(cohort.paths, recovery_commit=recovery_commit)
     master_budget_state(cohort.paths.ledger)
     return payload
@@ -882,10 +1467,11 @@ def master_usage_scope(
     previous = os.environ.get("ARCHIVIST_USAGE_DB")
     os.environ["ARCHIVIST_USAGE_DB"] = str(paths.ledger)
     try:
+        budget = master_budget_state(paths.ledger)
         ledger = UsageLedger(paths.ledger)
         effective_ceiling_nano = min(
             ceiling_nano,
-            RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
+            int(budget["effective_tracked_ceiling_nano_usd"]),
         )
         ledger.update_settings(
             monthly_budget_usd=(
@@ -934,10 +1520,29 @@ def validate_master_ledger(path: Path) -> None:
         raise V3EvaluationError("shared ledger contains unpriced usage")
 
 
+def _runtime_paths_for_ledger(path: Path) -> V3Paths:
+    placeholder = path.parent / ".ambiguity-runtime-placeholder"
+    return V3Paths(
+        root=path.parent,
+        gold=placeholder,
+        provenance=placeholder,
+        question_commitment=placeholder,
+        corpus_manifest=placeholder,
+        chunks=placeholder,
+        cache=placeholder,
+        catalog=placeholder,
+        uv_lock=placeholder,
+        chroma=placeholder,
+    )
+
+
 def master_budget_state(path: Path) -> dict[str, object]:
-    """Return the shared tracked budget after reserving the ambiguous H002 maximum."""
+    """Return tracked budget after every immutable zero-event reservation."""
 
     validate_master_ledger(path)
+    chain = _ambiguity_chain_state(_runtime_paths_for_ledger(path))
+    reserve = int(chain["cumulative_reserved_nano_usd"])
+    effective_ceiling = int(chain["effective_tracked_ceiling_nano_usd"])
     tracked = 0
     if path.exists():
         with sqlite3.connect(path) as connection:
@@ -951,24 +1556,24 @@ def master_budget_state(path: Path) -> dict[str, object]:
                     (MASTER_REQUEST_ID,),
                 ).fetchone()[0]
             )
-    if tracked > RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD:
+    if tracked > effective_ceiling:
         raise V3EvaluationError("tracked spend exceeds the recovery effective ceiling")
 
     def exact_usd(nano_usd: int) -> str:
         return f"{Decimal(nano_usd) / Decimal(1_000_000_000):.9f}"
 
-    remaining = RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD - tracked
+    remaining = effective_ceiling - tracked
     return {
         "owner_authorized_cap_nano_usd": MASTER_COST_CAP_NANO_USD,
-        "ambiguity_reserve_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
-        "effective_tracked_ceiling_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
+        "ambiguity_reserve_nano_usd": reserve,
+        "ambiguity_reservation_count": len(chain["reservations"]),
+        "ambiguity_reservations": chain["reservations"],
+        "effective_tracked_ceiling_nano_usd": effective_ceiling,
         "tracked_spend_nano_usd": tracked,
         "effective_remaining_nano_usd": remaining,
         "owner_authorized_cap_usd_exact": exact_usd(MASTER_COST_CAP_NANO_USD),
-        "ambiguity_reserve_usd_exact": exact_usd(AMBIGUOUS_H002_RESERVED_NANO_USD),
-        "effective_tracked_ceiling_usd_exact": exact_usd(
-            RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
-        ),
+        "ambiguity_reserve_usd_exact": exact_usd(reserve),
+        "effective_tracked_ceiling_usd_exact": exact_usd(effective_ceiling),
         "tracked_spend_usd_exact": exact_usd(tracked),
         "effective_remaining_usd_exact": exact_usd(remaining),
     }
@@ -1804,7 +2409,7 @@ def _validate_generation_pair(
         status == "technical_failure"
         and not provider_response_observed
         and current_evidence.get("event_count") == 0
-        and _reserved_h002_zero_event_is_valid(cohort.paths, item_id=item_id)
+        and _reserved_zero_event_is_valid(cohort.paths, item_id=item_id)
     )
     if not reserved_h002:
         _require_operation_evidence(
@@ -2650,26 +3255,49 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
         int(budget["tracked_spend_nano_usd"])
         + int(budget["ambiguity_reserve_nano_usd"])
     )
-    continuation = read_json_object(cohort.paths.ambiguity_continuation)
+    chain = _ambiguity_chain_state(cohort.paths)
+    ambiguity_items = [
+        {
+            "sequence": value["sequence"],
+            "item_id": value["item_id"],
+            "provider_boundary_attempt_count": 1,
+            "provider_response_observed": False,
+            "usage_event_count": 0,
+            "retried": False,
+            "projected_worst_case_reserved_nano_usd": value[
+                "projected_worst_case_reserved_nano_usd"
+            ],
+            "cumulative_reserved_nano_usd": value[
+                "cumulative_reserved_nano_usd"
+            ],
+            "effective_tracked_ceiling_nano_usd": value[
+                "effective_tracked_ceiling_nano_usd"
+            ],
+            "recovery_harness_commit": value["recovery_harness_commit"],
+            "continuation_file_sha256": value["continuation_file_sha256"],
+        }
+        for value in chain["reservations"]
+        if isinstance(value, Mapping)
+    ]
     return {
         "schema": V3_PUBLIC_SUMMARY_SCHEMA,
         "evaluation_id": EVALUATION_ID,
         "classification": COHORT_CLASSIFICATION,
         "product_commit": PRODUCT_COMMIT,
         "harness_commit": cohort.manifest["system_under_test"]["harness_commit"],
-        "ambiguity_continuation": {
-            "schema": continuation["schema"],
-            "original_harness_commit": continuation["original_harness_commit"],
-            "recovery_harness_commit": continuation["recovery_harness_commit"],
-            "item_id": continuation["h002_ambiguous_attempt"]["item_id"],
-            "provider_boundary_attempt_count": continuation[
-                "h002_ambiguous_attempt"
-            ]["provider_boundary_attempt_count"],
-            "provider_response_observed": False,
-            "usage_event_count": 0,
-            "retried": False,
-            "continued_from_item_id": continuation["continuation_boundary"][
-                "next_item_id"
+        "ambiguity_continuations": {
+            "schema": V3_AMBIGUITY_CONTINUATION_CHAIN_SCHEMA,
+            "original_harness_commit": ORIGINAL_HARNESS_COMMIT,
+            "reservation_count": len(ambiguity_items),
+            "reservations": ambiguity_items,
+            "cumulative_reserved_nano_usd": chain[
+                "cumulative_reserved_nano_usd"
+            ],
+            "effective_tracked_ceiling_nano_usd": chain[
+                "effective_tracked_ceiling_nano_usd"
+            ],
+            "tail_recovery_harness_commit": chain[
+                "tail_recovery_harness_commit"
             ],
         },
         "item_count": len(generations),
@@ -2764,12 +3392,14 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
             "owner_authorized_cap_usd_exact": budget[
                 "owner_authorized_cap_usd_exact"
             ],
-            "ambiguous_h002_projected_worst_case_reserved_nano_usd": budget[
+            "cumulative_ambiguity_reserved_nano_usd": budget[
                 "ambiguity_reserve_nano_usd"
             ],
-            "ambiguous_h002_projected_worst_case_reserved_usd_exact": budget[
+            "cumulative_ambiguity_reserved_usd_exact": budget[
                 "ambiguity_reserve_usd_exact"
             ],
+            "ambiguity_reservation_count": budget["ambiguity_reservation_count"],
+            "ambiguity_reservations": ambiguity_items,
             "effective_tracked_ceiling_nano_usd": budget[
                 "effective_tracked_ceiling_nano_usd"
             ],
@@ -2779,11 +3409,11 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
             "recorded_tracked_spend_nano_usd": budget["tracked_spend_nano_usd"],
             "recorded_tracked_spend_usd_exact": budget["tracked_spend_usd_exact"],
             "recorded_total_usd": usage["all_time_usd"] if usage else 0.0,
-            "recorded_plus_h002_reserve_nano_usd": accounted_worst_case_nano,
-            "recorded_plus_h002_reserve_usd_exact": (
+            "recorded_plus_ambiguity_reserve_nano_usd": accounted_worst_case_nano,
+            "recorded_plus_ambiguity_reserve_usd_exact": (
                 f"{Decimal(accounted_worst_case_nano) / Decimal(1_000_000_000):.9f}"
             ),
-            "h002_actual_cost": "unknown_no_response_or_usage_observation",
+            "unknown_actual_cost_item_ids": [value["item_id"] for value in ambiguity_items],
             "unpriced_events": usage["unpriced_events"] if usage else 0,
             "operations": usage["operations"] if usage else [],
             "shared_with_development_and_social_phases": True,
@@ -2793,7 +3423,7 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
             "Cached query vectors eliminate query-embedding calls; reported authoring-boundary wall time is neither provider-only nor end-to-end latency.",
             "Semantic gold-claim coverage is an exploratory uncalibrated judge estimate, not owner-adjudicated formal scoring.",
             "Canonical model names are mutable provider snapshots; requested and returned IDs are retained per item.",
-            "H002 reached the provider boundary once but produced no response or usage observation; it was not retried, its exact projected worst-case cost was reserved, and the cohort continued at H003 under a separately hash-bound harness.",
+            "Each listed ambiguity reached the provider boundary once without a response or usage observation; none was retried, each exact projected worst-case cost was reserved, and continuation required a separately committed hash-chain entry.",
         ],
     }
 

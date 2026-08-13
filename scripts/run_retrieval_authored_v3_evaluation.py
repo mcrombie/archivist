@@ -152,16 +152,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "reconcile-ambiguity":
             value = reconcile_generation_ambiguity(cohort, base_dir=BASE_DIR)
-            reservation = value["cost_reservation"]
-            print("SEALED H002 ZERO-EVENT AMBIGUITY CONTINUATION")
-            print("H002 will not be retried; continuation begins with H003.")
+            print(f"SEALED {value['item_id']} ZERO-EVENT AMBIGUITY CONTINUATION")
+            print(
+                f"{value['item_id']} will not be retried; "
+                f"continuation begins with {value['next_item_id']}."
+            )
             print(
                 "Reserved nano-USD: "
-                f"{reservation['ambiguous_h002_projected_worst_case_reserved_nano_usd']}"
+                f"{value['projected_worst_case_reserved_nano_usd']}"
+            )
+            print(
+                "Cumulative reserved nano-USD: "
+                f"{value['cumulative_reserved_nano_usd']}"
             )
             print(
                 "Effective tracked ceiling nano-USD: "
-                f"{reservation['effective_tracked_ceiling_nano_usd']}"
+                f"{value['effective_tracked_ceiling_nano_usd']}"
             )
             return 0
         if args.command == "dev-decompose":
