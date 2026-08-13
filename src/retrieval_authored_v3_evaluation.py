@@ -363,6 +363,47 @@ AMBIGUITY_RECOVERY_DECLARATIONS: Mapping[str, Mapping[str, object]] = {
             "9dc593fb9cd4be53e4309f9edcabc463b564e8af1003df1b9c70da6a8ddf9cd5"
         ),
     },
+    "H001:decomposition": {
+        "sequence": 7,
+        "turn_id": "H001:decomposition",
+        "phase": "decomposition",
+        "operation": "eval_claim_decomposition_v2",
+        "previous_recovery_harness_commit": (
+            "3f4cac4bb3a95e0aefcdbde9d6842ec45c96e1f1"
+        ),
+        "previous_continuation_file": "ambiguity-continuations/0006-H031.json",
+        "intent_file_sha256": (
+            "6b42361ffbf2cc548873d517ef8ba0363a8efef4cece0897cba575a18a1f33be"
+        ),
+        "intent_canonical_sha256": (
+            "8ce5e8986d88713910cc179f9e07d261d589a9df76539f3308fb85e021b3ad13"
+        ),
+        "outcome_file_sha256": (
+            "7d1fdc89e7c0b7b6c24f1dc14b89b8db9f8e09b67624ad2405487c03cf56b2a9"
+        ),
+        "outcome_canonical_sha256": (
+            "7172afc5a8b30501473d0f529e8ac6faa38f8509e12b79085d121f9f0512764f"
+        ),
+        "previous_continuation_file_sha256": (
+            "cc33f875abe1f1fbcbacd21e3bd39921875693467ea045d6bf454df27edcf863"
+        ),
+        "provider_request_shape_sha256": (
+            "cf42cd51897a3e9602d94505bb423dbe3f883c00e7449506141e83b064c63e64"
+        ),
+        "provider_request_serialized_bytes": 4_347,
+        "provider_request_token_overhead_upper_bound": 32_768,
+        "provider_input_token_upper_bound": 37_115,
+        "max_output_tokens": 4_000,
+        "projected_worst_case_reserved_nano_usd": 175_984_375,
+        "request_binding_sha256": (
+            "b958c251e09725081c5e590b58eeadbbfd9788d94a7d44a6f2046ffbdb579a97"
+        ),
+        "next_item_id": "H002",
+        "next_turn_id": "H002:decomposition",
+        "later_phase_turn_ids_sha256": (
+            "b3f133f9d42296f387c30d0d3e9c3513492780491c25f99c7da6c0d03750c6f7"
+        ),
+    },
 }
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
@@ -979,6 +1020,8 @@ def _legacy_h002_reservation(paths: V3Paths) -> dict[str, object] | None:
         "sequence": 0,
         "item_id": "H002",
         "turn_id": "H002:generation",
+        "phase": "generation",
+        "operation": "answer_generation",
         "projected_worst_case_reserved_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
         "cumulative_reserved_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
         "effective_tracked_ceiling_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
@@ -994,18 +1037,54 @@ def _ambiguity_entry_files(paths: V3Paths) -> list[Path]:
     return sorted(path for path in paths.ambiguity_entries.glob("*.json") if path.is_file())
 
 
+def _phase_artifact_paths(paths: V3Paths, *, item_id: str, phase: str) -> tuple[Path, Path]:
+    root = _item_dir(paths, item_id)
+    if phase == "generation":
+        return root / "generation-intent.json", root / "generation.json"
+    if phase == "decomposition":
+        return root / "decomposition-intent.json", root / "decomposition.json"
+    if phase == "rubric":
+        return root / "rubric-intent.json", root / "rubric.json"
+    raise V3EvaluationError(f"unknown provider phase: {phase}")
+
+
+def _phase_operation(phase: str) -> str:
+    if phase == "generation":
+        return "answer_generation"
+    if phase == "decomposition":
+        return str(_decomposition_identity()["operation"])
+    if phase == "rubric":
+        return "eval_item_rubric"
+    raise V3EvaluationError(f"unknown provider phase: {phase}")
+
+
+def _ambiguity_declaration(turn_id: str) -> Mapping[str, object] | None:
+    declared = AMBIGUITY_RECOVERY_DECLARATIONS.get(turn_id)
+    if declared is not None:
+        return declared
+    item_id, separator, phase = turn_id.partition(":")
+    if separator and phase == "generation":
+        return AMBIGUITY_RECOVERY_DECLARATIONS.get(item_id)
+    return None
+
+
 def _validate_reserved_zero_event(
     paths: V3Paths,
     *,
     item_id: str,
+    phase: str,
+    operation: str,
     intent_file_sha256: str,
     intent_canonical_sha256: str,
     outcome_file_sha256: str,
     outcome_canonical_sha256: str,
 ) -> None:
-    root = _item_dir(paths, item_id)
-    intent_path = root / "generation-intent.json"
-    outcome_path = root / "generation.json"
+    turn_id = f"{item_id}:{phase}"
+    intent_path, outcome_path = _phase_artifact_paths(
+        paths,
+        item_id=item_id,
+        phase=phase,
+    )
     for path, file_hash, canonical_hash, label in (
         (intent_path, intent_file_sha256, intent_canonical_sha256, "intent"),
         (outcome_path, outcome_file_sha256, outcome_canonical_sha256, "outcome"),
@@ -1020,31 +1099,47 @@ def _validate_reserved_zero_event(
         intent.get("item_id") != item_id
         or intent.get("attempt_count") != 1
         or outcome.get("item_id") != item_id
+        or outcome.get("attempt_count") != 1
         or outcome.get("provider_attempt_count") != 1
         or outcome.get("status") != "technical_failure"
-        or outcome.get("delivered_answer_status") != "essential_fallback"
         or outcome.get("intent_sha256") != canonical_json_sha256(intent)
+        or outcome.get("automatic_retries") != 0
     ):
-        raise V3EvaluationError(f"{item_id} is not an exact zero-event generation outcome")
+        raise V3EvaluationError(f"{turn_id} is not an exact zero-event outcome")
     provider = outcome.get("provider")
     evidence = outcome.get("operation_evidence")
+    if phase == "generation":
+        no_response = bool(
+            isinstance(provider, Mapping)
+            and provider.get("response_id") is None
+            and outcome.get("delivered_answer_status") == "essential_fallback"
+        )
+    else:
+        no_response = provider is None or bool(
+            isinstance(provider, Mapping) and provider.get("id") is None
+        )
     if (
-        not isinstance(provider, Mapping)
-        or provider.get("response_id") is not None
+        not no_response
         or not isinstance(evidence, Mapping)
-        or evidence.get("turn_id") != f"{item_id}:generation"
+        or evidence.get("turn_id") != turn_id
         or evidence.get("event_count") != 0
         or evidence.get("scope_valid") is not True
         or evidence.get("operations_valid") is not True
     ):
-        raise V3EvaluationError(f"{item_id} zero-event provider evidence changed")
+        raise V3EvaluationError(f"{turn_id} zero-event provider evidence changed")
+    if phase == "decomposition" and (
+        "claims" in outcome or "claim_count" in outcome
+    ):
+        raise V3EvaluationError(f"{turn_id} unexpectedly contains scored claims")
+    if phase == "rubric" and ("verdict" in outcome or "coverage" in outcome):
+        raise V3EvaluationError(f"{turn_id} unexpectedly contains rubric scoring")
     current = _turn_operation_evidence(
         paths,
-        turn_id=f"{item_id}:generation",
-        expected_operation="answer_generation",
+        turn_id=turn_id,
+        expected_operation=operation,
     )
     if current.get("event_count") != 0 or current != evidence:
-        raise V3EvaluationError(f"{item_id} unexpectedly has recorded provider usage")
+        raise V3EvaluationError(f"{turn_id} unexpectedly has recorded provider usage")
 
 
 def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
@@ -1065,22 +1160,35 @@ def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
     previous_file = paths.ambiguity_continuation.name
     previous_hash = EXPECTED_H002_CONTINUATION_FILE_SHA256
     previous_recovery_commit = H002_RECOVERY_HARNESS_COMMIT
-    seen = {"H002"}
+    seen = {"H002:generation"}
     for expected_sequence, path in enumerate(_ambiguity_entry_files(paths), start=1):
         entry = read_json_object(path)
         expected_name_prefix = f"{expected_sequence:04d}-"
         if not path.name.startswith(expected_name_prefix):
             raise V3EvaluationError("ambiguity continuation sequence is not contiguous")
         item_id = _required_string(entry, "item_id")
-        if path.name != f"{expected_sequence:04d}-{item_id}.json":
+        turn_id = _required_string(entry, "turn_id")
+        turn_item_id, separator, phase = turn_id.partition(":")
+        if not separator or turn_item_id != item_id:
+            raise V3EvaluationError(f"ambiguity continuation turn changed: {path.name}")
+        legacy_generation_entry = "phase" not in entry
+        expected_name = (
+            f"{expected_sequence:04d}-{item_id}.json"
+            if legacy_generation_entry
+            else f"{expected_sequence:04d}-{item_id}-{phase}.json"
+        )
+        if path.name != expected_name:
             raise V3EvaluationError("ambiguity continuation filename changed")
+        operation = _phase_operation(phase)
         projected = entry.get("projected_worst_case_reserved_nano_usd")
         if (
             entry.get("schema") != V3_AMBIGUITY_CONTINUATION_ENTRY_SCHEMA
             or entry.get("evaluation_id") != EVALUATION_ID
             or entry.get("sequence") != expected_sequence
-            or entry.get("turn_id") != f"{item_id}:generation"
-            or item_id in seen
+            or turn_id in seen
+            or (legacy_generation_entry and phase != "generation")
+            or (not legacy_generation_entry and entry.get("phase") != phase)
+            or (not legacy_generation_entry and entry.get("operation") != operation)
             or entry.get("previous_continuation_file") != previous_file
             or entry.get("previous_continuation_file_sha256") != previous_hash
             or entry.get("previous_recovery_harness_commit") != previous_recovery_commit
@@ -1101,9 +1209,6 @@ def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
             or entry.get("usage_event_count") != 0
             or entry.get("retried") is not False
             or entry.get("automatic_retries") != 0
-            or entry.get("later_generation_attempt_artifact_count") != 0
-            or entry.get("later_generation_usage_event_count") != 0
-            or not isinstance(entry.get("later_generation_item_ids_sha256"), str)
             or entry.get("projection_method")
             != "costs.projected_provider_operation_cost_nano_usd"
             or entry.get("provider_kind") != "responses"
@@ -1112,49 +1217,63 @@ def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
             != canonical_json_sha256(entry.get("request_binding"))
         ):
             raise V3EvaluationError(f"ambiguity reserve accounting changed: {path.name}")
-        declaration = AMBIGUITY_RECOVERY_DECLARATIONS.get(item_id)
+        if legacy_generation_entry:
+            if (
+                entry.get("later_generation_attempt_artifact_count") != 0
+                or entry.get("later_generation_usage_event_count") != 0
+                or not isinstance(entry.get("later_generation_item_ids_sha256"), str)
+            ):
+                raise V3EvaluationError(f"ambiguity boundary changed: {path.name}")
+        elif (
+            entry.get("later_phase_attempt_artifact_count") != 0
+            or entry.get("later_phase_usage_event_count") != 0
+            or not isinstance(entry.get("later_phase_turn_ids_sha256"), str)
+        ):
+            raise V3EvaluationError(f"ambiguity boundary changed: {path.name}")
+        declaration = _ambiguity_declaration(turn_id)
         if declaration is None:
             raise V3EvaluationError(
-                f"ambiguity continuation has no committed declaration: {item_id}"
+                f"ambiguity continuation has no committed declaration: {turn_id}"
             )
-        declared_entry = {
-            key: entry.get(key)
-            for key in (
-                "generation_intent_file_sha256",
-                "generation_intent_canonical_sha256",
-                "generation_outcome_file_sha256",
-                "generation_outcome_canonical_sha256",
-                "previous_continuation_file_sha256",
-                "provider_request_shape_sha256",
-                "provider_request_serialized_bytes",
-                "provider_request_token_overhead_upper_bound",
-                "provider_input_token_upper_bound",
-                "max_output_tokens",
-                "projected_worst_case_reserved_nano_usd",
-                "sequence",
-                "turn_id",
-                "previous_recovery_harness_commit",
-                "previous_continuation_file",
-                "request_binding_sha256",
-                "next_item_id",
-                "later_generation_item_ids_sha256",
-            )
-        }
+        declared_entry = {key: entry.get(key) for key in declaration}
         if declared_entry != dict(declaration):
             raise V3EvaluationError(
-                f"ambiguity continuation differs from committed declaration: {item_id}"
+                f"ambiguity continuation differs from committed declaration: {turn_id}"
+            )
+        if legacy_generation_entry:
+            intent_file_sha256 = _required_string(
+                entry,
+                "generation_intent_file_sha256",
+            )
+            intent_canonical_sha256 = _required_string(
+                entry,
+                "generation_intent_canonical_sha256",
+            )
+            outcome_file_sha256 = _required_string(
+                entry,
+                "generation_outcome_file_sha256",
+            )
+            outcome_canonical_sha256 = _required_string(
+                entry,
+                "generation_outcome_canonical_sha256",
+            )
+        else:
+            intent_file_sha256 = _required_string(entry, "intent_file_sha256")
+            intent_canonical_sha256 = _required_string(entry, "intent_canonical_sha256")
+            outcome_file_sha256 = _required_string(entry, "outcome_file_sha256")
+            outcome_canonical_sha256 = _required_string(
+                entry,
+                "outcome_canonical_sha256",
             )
         _validate_reserved_zero_event(
             paths,
             item_id=item_id,
-            intent_file_sha256=_required_string(entry, "generation_intent_file_sha256"),
-            intent_canonical_sha256=_required_string(
-                entry, "generation_intent_canonical_sha256"
-            ),
-            outcome_file_sha256=_required_string(entry, "generation_outcome_file_sha256"),
-            outcome_canonical_sha256=_required_string(
-                entry, "generation_outcome_canonical_sha256"
-            ),
+            phase=phase,
+            operation=operation,
+            intent_file_sha256=intent_file_sha256,
+            intent_canonical_sha256=intent_canonical_sha256,
+            outcome_file_sha256=outcome_file_sha256,
+            outcome_canonical_sha256=outcome_canonical_sha256,
         )
         raw_next_item_id = entry.get("next_item_id")
         if raw_next_item_id is not None and (
@@ -1162,10 +1281,29 @@ def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
         ):
             raise V3EvaluationError(f"ambiguity next-item boundary changed: {path.name}")
         next_item_id = raw_next_item_id
-        next_root = _item_dir(paths, next_item_id) if next_item_id is not None else None
-        if entry.get("next_item_unattempted_at_reconciliation") is not True:
+        next_turn_id = entry.get("next_turn_id", None)
+        if legacy_generation_entry:
+            next_turn_id = (
+                f"{next_item_id}:generation" if next_item_id is not None else None
+            )
+        elif next_turn_id != (
+            f"{next_item_id}:{phase}" if next_item_id is not None else None
+        ):
+            raise V3EvaluationError(f"ambiguity next-turn boundary changed: {path.name}")
+        next_intent: Path | None = None
+        next_outcome: Path | None = None
+        if next_item_id is not None:
+            next_intent, next_outcome = _phase_artifact_paths(
+                paths,
+                item_id=next_item_id,
+                phase=phase,
+            )
+        if (
+            not legacy_generation_entry
+            and entry.get("next_item_unattempted_at_reconciliation") is not True
+        ):
             raise V3EvaluationError(f"ambiguity continuation boundary changed: {path.name}")
-        seen.add(item_id)
+        seen.add(turn_id)
         previous_file = f"{paths.ambiguity_entries.name}/{path.name}"
         previous_hash = sha256_file(path)
         previous_recovery_commit = _required_string(entry, "recovery_harness_commit")
@@ -1173,7 +1311,9 @@ def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
             {
                 "sequence": expected_sequence,
                 "item_id": item_id,
-                "turn_id": f"{item_id}:generation",
+                "turn_id": turn_id,
+                "phase": phase,
+                "operation": operation,
                 "projected_worst_case_reserved_nano_usd": projected,
                 "cumulative_reserved_nano_usd": cumulative,
                 "effective_tracked_ceiling_nano_usd": MASTER_COST_CAP_NANO_USD - cumulative,
@@ -1181,15 +1321,17 @@ def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
                 "continuation_file": previous_file,
                 "continuation_file_sha256": previous_hash,
                 "next_item_id": next_item_id,
+                "next_turn_id": next_turn_id,
                 "next_item_currently_attempted": bool(
-                    next_root is not None
+                    next_intent is not None
+                    and next_outcome is not None
                     and (
-                        (next_root / "generation-intent.json").exists()
-                        or (next_root / "generation.json").exists()
+                        next_intent.exists()
+                        or next_outcome.exists()
                         or _turn_operation_evidence(
                             paths,
-                            turn_id=f"{next_item_id}:generation",
-                            expected_operation="answer_generation",
+                            turn_id=str(next_turn_id),
+                            expected_operation=operation,
                         ).get("event_count")
                         != 0
                     )
@@ -1206,12 +1348,18 @@ def _ambiguity_chain_state(paths: V3Paths) -> dict[str, object]:
     }
 
 
-def _reserved_zero_event_is_valid(paths: V3Paths, *, item_id: str) -> bool:
+def _reserved_zero_event_is_valid(
+    paths: V3Paths,
+    *,
+    item_id: str,
+    phase: str = "generation",
+) -> bool:
     recovery_commit = _git_commit(Path(__file__).resolve().parent.parent)
     validate_ambiguity_continuation(paths, recovery_commit=recovery_commit)
     state = _ambiguity_chain_state(paths)
-    return item_id in {
-        str(value["item_id"])
+    turn_id = f"{item_id}:{phase}"
+    return turn_id in {
+        str(value["turn_id"])
         for value in state["reservations"]
         if isinstance(value, Mapping)
     }
@@ -1326,38 +1474,292 @@ def _professional_request_projection(
     }
 
 
+def _project_provider_request(
+    *,
+    request: Mapping[str, object],
+    request_binding: Mapping[str, object],
+) -> dict[str, object]:
+    projected = projected_provider_operation_cost_nano_usd(
+        provider_kind="responses",
+        request=request,
+    )
+    serialized_request = json.dumps(
+        _request_json_value(request),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    input_token_upper_bound = (
+        len(serialized_request) + PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND
+    )
+    return {
+        "projected_worst_case_reserved_nano_usd": projected,
+        "projection_method": "costs.projected_provider_operation_cost_nano_usd",
+        "provider_kind": "responses",
+        "request_binding": dict(request_binding),
+        "request_binding_sha256": canonical_json_sha256(request_binding),
+        "provider_request_shape_sha256": hashlib.sha256(serialized_request).hexdigest(),
+        "provider_request_serialized_bytes": len(serialized_request),
+        "provider_request_token_overhead_upper_bound": (
+            PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND
+        ),
+        "provider_input_token_upper_bound": input_token_upper_bound,
+        "max_output_tokens": int(request["max_output_tokens"]),
+    }
+
+
+def _decomposition_request_projection(
+    cohort: PreparedV3Cohort,
+    *,
+    item: Mapping[str, object],
+) -> dict[str, object]:
+    from evaluation_decomposition_v2 import (
+        ClaimTextDecomposition,
+        DECOMPOSITION_MAX_OUTPUT_TOKENS,
+        DECOMPOSITION_OPERATION,
+        DECOMPOSITION_OUTPUT_SCHEMA_SHA256,
+        DECOMPOSITION_PROMPT,
+        DECOMPOSITION_SETTINGS,
+        build_decomposition_input,
+        serialize_decomposition_input,
+    )
+
+    item_id = _required_string(item, "id")
+    generated = read_json_object(_item_dir(cohort.paths, item_id) / "generation.json")
+    answer = _required_string(generated, "answer")
+    answer_sha256 = hashlib.sha256(answer.encode("utf-8")).hexdigest()
+    if generated.get("answer_sha256") != answer_sha256:
+        raise V3EvaluationError(f"{item_id} generated answer binding changed")
+    request_input = serialize_decomposition_input(
+        build_decomposition_input(answer=answer)
+    )
+    request = {
+        "instructions": DECOMPOSITION_PROMPT,
+        "input": request_input,
+        "text_format": ClaimTextDecomposition,
+        "max_output_tokens": DECOMPOSITION_MAX_OUTPUT_TOKENS,
+        **DECOMPOSITION_SETTINGS.responses_create_kwargs(),
+    }
+    binding = {
+        "phase": "decomposition",
+        "operation": DECOMPOSITION_OPERATION,
+        "model": DECOMPOSITION_SETTINGS.model,
+        "reasoning_effort": DECOMPOSITION_SETTINGS.reasoning_effort,
+        "verbosity": DECOMPOSITION_SETTINGS.verbosity,
+        "max_output_tokens": DECOMPOSITION_MAX_OUTPUT_TOKENS,
+        "instructions_sha256": hashlib.sha256(
+            DECOMPOSITION_PROMPT.encode("utf-8")
+        ).hexdigest(),
+        "input_sha256": hashlib.sha256(request_input.encode("utf-8")).hexdigest(),
+        "structured_output_schema_sha256": DECOMPOSITION_OUTPUT_SCHEMA_SHA256,
+        "answer_sha256": answer_sha256,
+    }
+    return _project_provider_request(request=request, request_binding=binding)
+
+
+def _rubric_request_projection(
+    cohort: PreparedV3Cohort,
+    *,
+    item: Mapping[str, object],
+) -> dict[str, object]:
+    from evaluation_decomposition_v2 import RUBRIC_MAX_OUTPUT_TOKENS
+    from evaluation_judge import (
+        ITEM_RUBRIC_PROMPT,
+        AtomicClaim,
+        ClaimDecomposition,
+        ItemRubricVerdict,
+    )
+
+    item_id = _required_string(item, "id")
+    generated = read_json_object(_item_dir(cohort.paths, item_id) / "generation.json")
+    decomposition = read_json_object(
+        _item_dir(cohort.paths, item_id) / "decomposition.json"
+    )
+    if decomposition.get("status") != "valid":
+        raise V3EvaluationError(f"{item_id} rubric had no provider-boundary request")
+    claims = ClaimDecomposition(
+        claims=[AtomicClaim.model_validate(value) for value in decomposition["claims"]]
+    )
+    rubric = build_item_rubric_input(
+        question=_required_string(item, "question"),
+        gold_item=item,
+    )
+    payload = {
+        "answer": _required_string(generated, "answer"),
+        "answer_claims": [
+            {"claim_id": claim.claim_id, "text": claim.text}
+            for claim in claims.claims
+        ],
+        "rubric": rubric.model_dump(mode="json"),
+    }
+    request_input = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    request = {
+        "instructions": ITEM_RUBRIC_PROMPT,
+        "input": request_input,
+        "text_format": ItemRubricVerdict,
+        "max_output_tokens": RUBRIC_MAX_OUTPUT_TOKENS,
+        **JUDGE_SETTINGS.responses_create_kwargs(),
+    }
+    binding = {
+        "phase": "rubric",
+        "operation": "eval_item_rubric",
+        "model": JUDGE_SETTINGS.model,
+        "reasoning_effort": JUDGE_SETTINGS.reasoning_effort,
+        "verbosity": JUDGE_SETTINGS.verbosity,
+        "max_output_tokens": RUBRIC_MAX_OUTPUT_TOKENS,
+        "instructions_sha256": hashlib.sha256(
+            ITEM_RUBRIC_PROMPT.encode("utf-8")
+        ).hexdigest(),
+        "input_sha256": hashlib.sha256(request_input.encode("utf-8")).hexdigest(),
+        "structured_output_schema_sha256": canonical_json_sha256(
+            ItemRubricVerdict.model_json_schema()
+        ),
+        "answer_sha256": generated["answer_sha256"],
+        "decomposition_sha256": canonical_json_sha256(decomposition),
+    }
+    return _project_provider_request(request=request, request_binding=binding)
+
+
+def _provider_phase_request_projection(
+    cohort: PreparedV3Cohort,
+    *,
+    item: Mapping[str, object],
+    phase: str,
+    sealed_outcome: Mapping[str, object],
+) -> dict[str, object]:
+    if phase == "generation":
+        return _professional_request_projection(
+            cohort,
+            item=item,
+            sealed_outcome=sealed_outcome,
+        )
+    if phase == "decomposition":
+        return _decomposition_request_projection(cohort, item=item)
+    if phase == "rubric":
+        return _rubric_request_projection(cohort, item=item)
+    raise V3EvaluationError(f"unknown provider phase: {phase}")
+
+
 def _is_exact_unreserved_zero_event(
     paths: V3Paths,
     *,
     item_id: str,
+    phase: str,
+    operation: str,
     outcome: Mapping[str, object],
 ) -> bool:
     provider = outcome.get("provider")
     evidence = outcome.get("operation_evidence")
+    if phase == "generation":
+        no_response = bool(
+            isinstance(provider, Mapping)
+            and provider.get("response_id") is None
+            and outcome.get("delivered_answer_status") == "essential_fallback"
+        )
+    else:
+        no_response = provider is None or bool(
+            isinstance(provider, Mapping) and provider.get("id") is None
+        )
     return bool(
         outcome.get("item_id") == item_id
         and outcome.get("provider_attempt_count") == 1
         and outcome.get("status") == "technical_failure"
-        and outcome.get("delivered_answer_status") == "essential_fallback"
-        and isinstance(provider, Mapping)
-        and provider.get("response_id") is None
+        and outcome.get("automatic_retries") == 0
+        and no_response
         and isinstance(evidence, Mapping)
         and evidence.get("event_count") == 0
         and evidence
         == _turn_operation_evidence(
             paths,
-            turn_id=f"{item_id}:generation",
-            expected_operation="answer_generation",
+            turn_id=f"{item_id}:{phase}",
+            expected_operation=operation,
         )
     )
 
 
-def reconcile_generation_ambiguity(
+def _phase_expected_intent(
+    cohort: PreparedV3Cohort,
+    *,
+    item: Mapping[str, object],
+    phase: str,
+) -> dict[str, object]:
+    item_id = _required_string(item, "id")
+    if phase == "generation":
+        return {
+            **_generation_intent(item, cohort.manifest),
+            "instrument_freeze_sha256": sha256_file(cohort.paths.instrument_freeze),
+        }
+    generated = read_json_object(_item_dir(cohort.paths, item_id) / "generation.json")
+    if phase == "decomposition":
+        return {
+            "schema": V3_DECOMPOSITION_INTENT_SCHEMA,
+            "evaluation_id": EVALUATION_ID,
+            "item_id": item_id,
+            "answer_sha256": generated["answer_sha256"],
+            "instrument": dict(_decomposition_identity()),
+            "instrument_freeze_sha256": sha256_file(cohort.paths.instrument_freeze),
+            "input_boundary": "answer_only_no_gold_no_source_text",
+            "attempt_count": 1,
+            "automatic_retries": 0,
+            "master_request_id": MASTER_REQUEST_ID,
+        }
+    if phase == "rubric":
+        decomposition = read_json_object(
+            _item_dir(cohort.paths, item_id) / "decomposition.json"
+        )
+        return {
+            "schema": V3_RUBRIC_INTENT_SCHEMA,
+            "evaluation_id": EVALUATION_ID,
+            "item_id": item_id,
+            "answer_sha256": generated["answer_sha256"],
+            "decomposition_sha256": canonical_json_sha256(decomposition),
+            "measurement_status": "exploratory_uncalibrated",
+            "phase_precondition": (
+                "all_37_generation_and_decomposition_outcomes_sealed"
+            ),
+            "attempt_count": 1 if decomposition.get("status") == "valid" else 0,
+            "automatic_retries": 0,
+            "master_request_id": MASTER_REQUEST_ID,
+        }
+    raise V3EvaluationError(f"unknown provider phase: {phase}")
+
+
+def _validate_phase_pair(
+    cohort: PreparedV3Cohort,
+    *,
+    item: Mapping[str, object],
+    phase: str,
+    intent: Mapping[str, object],
+) -> None:
+    item_id = _required_string(item, "id")
+    if phase == "generation":
+        _validate_generation_pair(cohort, item=item, intent=intent)
+        return
+    if phase == "decomposition":
+        _validate_decomposition_pair(
+            cohort.paths,
+            item_id=item_id,
+            intent=intent,
+            development=False,
+        )
+        return
+    if phase == "rubric":
+        _validate_rubric_pair(cohort, item=item, intent=intent)
+        return
+    raise V3EvaluationError(f"unknown provider phase: {phase}")
+
+
+def reconcile_provider_ambiguity(
     cohort: PreparedV3Cohort,
     *,
     base_dir: Path,
 ) -> dict[str, object]:
-    """Append one hash-bound zero-event reserve without retrying that item."""
+    """Append one phase-aware hash-bound reserve without retrying that turn."""
 
     recovery_commit = _git_commit(base_dir)
     state = _ambiguity_chain_state(cohort.paths)
@@ -1370,76 +1772,135 @@ def reconcile_generation_ambiguity(
         descendant=recovery_commit,
     ):
         raise V3EvaluationError("recovery commit does not descend from the prior continuation")
-    reserved_ids = {
-        str(value["item_id"])
+    reserved_turn_ids = {
+        str(value["turn_id"])
         for value in state["reservations"]
         if isinstance(value, Mapping)
     }
-    freeze_sha256 = sha256_file(cohort.paths.instrument_freeze)
-    candidate: tuple[int, Mapping[str, object], Mapping[str, object]] | None = None
-    for index, item in enumerate(cohort.items):
-        item_id = _required_string(item, "id")
-        root = _item_dir(cohort.paths, item_id)
-        intent_path = root / "generation-intent.json"
-        outcome_path = root / "generation.json"
-        if item_id in reserved_ids:
-            continue
-        if not outcome_path.exists():
-            if intent_path.exists():
-                raise V3EvaluationError(
-                    f"{item_id} has an intent without a sealed ambiguity outcome"
-                )
+    phases = ("generation", "decomposition", "rubric")
+    candidate: tuple[
+        str,
+        int,
+        Mapping[str, object],
+        Mapping[str, object],
+        Mapping[str, object],
+    ] | None = None
+    for phase in phases:
+        phase_incomplete = False
+        operation = _phase_operation(phase)
+        for index, item in enumerate(cohort.items):
+            item_id = _required_string(item, "id")
+            turn_id = f"{item_id}:{phase}"
+            intent_path, outcome_path = _phase_artifact_paths(
+                cohort.paths,
+                item_id=item_id,
+                phase=phase,
+            )
+            if turn_id in reserved_turn_ids:
+                continue
+            if not outcome_path.exists():
+                if intent_path.exists():
+                    raise V3EvaluationError(
+                        f"{turn_id} has an intent without a sealed ambiguity outcome"
+                    )
+                phase_incomplete = True
+                break
+            intent = _phase_expected_intent(cohort, item=item, phase=phase)
+            outcome = read_json_object(outcome_path)
+            if _is_exact_unreserved_zero_event(
+                cohort.paths,
+                item_id=item_id,
+                phase=phase,
+                operation=operation,
+                outcome=outcome,
+            ):
+                candidate = (phase, index, item, intent, outcome)
+                break
+            _validate_phase_pair(
+                cohort,
+                item=item,
+                phase=phase,
+                intent=intent,
+            )
+        if candidate is not None or phase_incomplete:
             break
-        outcome = read_json_object(outcome_path)
-        if _is_exact_unreserved_zero_event(
-            cohort.paths,
-            item_id=item_id,
-            outcome=outcome,
-        ):
-            candidate = (index, item, outcome)
-            break
-        intent = {
-            **_generation_intent(item, cohort.manifest),
-            "instrument_freeze_sha256": freeze_sha256,
-        }
-        _validate_generation_pair(cohort, item=item, intent=intent)
     if candidate is None:
-        raise V3EvaluationError("no unreconciled exact zero-event generation outcome exists")
-    index, item, outcome = candidate
+        raise V3EvaluationError("no unreconciled exact zero-event provider outcome exists")
+    phase, index, item, intent, outcome = candidate
     item_id = _required_string(item, "id")
-    later_ids = [_required_string(value, "id") for value in cohort.items[index + 1 :]]
-    for later_id in later_ids:
-        later_root = _item_dir(cohort.paths, later_id)
+    turn_id = f"{item_id}:{phase}"
+    operation = _phase_operation(phase)
+    later_ids = [
+        _required_string(value, "id") for value in cohort.items[index + 1 :]
+    ]
+    later_turn_ids = [f"{later_id}:{phase}" for later_id in later_ids]
+    for later_id, later_turn_id in zip(later_ids, later_turn_ids, strict=True):
+        later_intent, later_outcome = _phase_artifact_paths(
+            cohort.paths,
+            item_id=later_id,
+            phase=phase,
+        )
         later_evidence = _turn_operation_evidence(
             cohort.paths,
-            turn_id=f"{later_id}:generation",
-            expected_operation="answer_generation",
+            turn_id=later_turn_id,
+            expected_operation=operation,
         )
         if (
-            (later_root / "generation-intent.json").exists()
-            or (later_root / "generation.json").exists()
+            later_intent.exists()
+            or later_outcome.exists()
             or later_evidence.get("event_count") != 0
         ):
             raise V3EvaluationError(
-                f"{later_id} was attempted after unreconciled {item_id} ambiguity"
+                f"{later_turn_id} was attempted after unreconciled {turn_id} ambiguity"
             )
-    intent_path = _item_dir(cohort.paths, item_id) / "generation-intent.json"
-    outcome_path = _item_dir(cohort.paths, item_id) / "generation.json"
-    intent = read_json_object(intent_path)
+    phase_index = phases.index(phase)
+    for future_phase in phases[phase_index + 1 :]:
+        future_operation = _phase_operation(future_phase)
+        for future_item in cohort.items:
+            future_item_id = _required_string(future_item, "id")
+            future_turn_id = f"{future_item_id}:{future_phase}"
+            future_intent, future_outcome = _phase_artifact_paths(
+                cohort.paths,
+                item_id=future_item_id,
+                phase=future_phase,
+            )
+            if (
+                future_intent.exists()
+                or future_outcome.exists()
+                or _turn_operation_evidence(
+                    cohort.paths,
+                    turn_id=future_turn_id,
+                    expected_operation=future_operation,
+                ).get("event_count")
+                != 0
+            ):
+                raise V3EvaluationError(
+                    f"{future_turn_id} was attempted after unreconciled {turn_id} ambiguity"
+                )
+    intent_path, outcome_path = _phase_artifact_paths(
+        cohort.paths,
+        item_id=item_id,
+        phase=phase,
+    )
+    sealed_intent = read_json_object(intent_path)
+    if sealed_intent != dict(intent):
+        raise V3EvaluationError(f"{turn_id} ambiguity intent changed")
     if outcome.get("intent_sha256") != canonical_json_sha256(intent):
-        raise V3EvaluationError(f"{item_id} ambiguity intent binding changed")
-    projection = _professional_request_projection(
+        raise V3EvaluationError(f"{turn_id} ambiguity intent binding changed")
+    projection = _provider_phase_request_projection(
         cohort,
         item=item,
+        phase=phase,
         sealed_outcome=outcome,
     )
-    declaration = AMBIGUITY_RECOVERY_DECLARATIONS.get(item_id)
+    declaration = _ambiguity_declaration(turn_id)
     if declaration is None:
         raise V3EvaluationError(
-            f"{item_id} requires a committed ambiguity recovery declaration"
+            f"{turn_id} requires a committed ambiguity recovery declaration"
         )
     sequence = len(state["reservations"])
     next_item_id = later_ids[0] if later_ids else None
+    next_turn_id = later_turn_ids[0] if later_turn_ids else None
     declared_projection = {
         key: projection.get(key)
         for key in (
@@ -1452,23 +1913,43 @@ def reconcile_generation_ambiguity(
             "request_binding_sha256",
         )
     }
-    declared_artifacts = {
-        "sequence": sequence,
-        "turn_id": f"{item_id}:generation",
-        "previous_recovery_harness_commit": previous_recovery_commit,
-        "previous_continuation_file": state["tail_file"],
-        "generation_intent_file_sha256": sha256_file(intent_path),
-        "generation_intent_canonical_sha256": canonical_json_sha256(intent),
-        "generation_outcome_file_sha256": sha256_file(outcome_path),
-        "generation_outcome_canonical_sha256": canonical_json_sha256(outcome),
-        "previous_continuation_file_sha256": state["tail_file_sha256"],
-        "next_item_id": next_item_id,
-        "later_generation_item_ids_sha256": canonical_json_sha256(later_ids),
-        **declared_projection,
-    }
+    legacy_generation_declaration = "generation_intent_file_sha256" in declaration
+    if legacy_generation_declaration:
+        declared_artifacts = {
+            "sequence": sequence,
+            "turn_id": turn_id,
+            "previous_recovery_harness_commit": previous_recovery_commit,
+            "previous_continuation_file": state["tail_file"],
+            "generation_intent_file_sha256": sha256_file(intent_path),
+            "generation_intent_canonical_sha256": canonical_json_sha256(intent),
+            "generation_outcome_file_sha256": sha256_file(outcome_path),
+            "generation_outcome_canonical_sha256": canonical_json_sha256(outcome),
+            "previous_continuation_file_sha256": state["tail_file_sha256"],
+            "next_item_id": next_item_id,
+            "later_generation_item_ids_sha256": canonical_json_sha256(later_ids),
+            **declared_projection,
+        }
+    else:
+        declared_artifacts = {
+            "sequence": sequence,
+            "turn_id": turn_id,
+            "phase": phase,
+            "operation": operation,
+            "previous_recovery_harness_commit": previous_recovery_commit,
+            "previous_continuation_file": state["tail_file"],
+            "intent_file_sha256": sha256_file(intent_path),
+            "intent_canonical_sha256": canonical_json_sha256(intent),
+            "outcome_file_sha256": sha256_file(outcome_path),
+            "outcome_canonical_sha256": canonical_json_sha256(outcome),
+            "previous_continuation_file_sha256": state["tail_file_sha256"],
+            "next_item_id": next_item_id,
+            "next_turn_id": next_turn_id,
+            "later_phase_turn_ids_sha256": canonical_json_sha256(later_turn_ids),
+            **declared_projection,
+        }
     if dict(declaration) != declared_artifacts:
         raise V3EvaluationError(
-            f"{item_id} ambiguity artifacts or exact request projection differ from declaration"
+            f"{turn_id} artifacts or exact request projection differ from declaration"
         )
     projected = int(projection["projected_worst_case_reserved_nano_usd"])
     cumulative = int(state["cumulative_reserved_nano_usd"]) + projected
@@ -1484,15 +1965,11 @@ def reconcile_generation_ambiguity(
         "evaluation_id": EVALUATION_ID,
         "sequence": sequence,
         "item_id": item_id,
-        "turn_id": f"{item_id}:generation",
+        "turn_id": turn_id,
         "recovery_harness_commit": recovery_commit,
         "previous_recovery_harness_commit": previous_recovery_commit,
         "previous_continuation_file": state["tail_file"],
         "previous_continuation_file_sha256": state["tail_file_sha256"],
-        "generation_intent_file_sha256": sha256_file(intent_path),
-        "generation_intent_canonical_sha256": canonical_json_sha256(intent),
-        "generation_outcome_file_sha256": sha256_file(outcome_path),
-        "generation_outcome_canonical_sha256": canonical_json_sha256(outcome),
         "provider_boundary_attempt_count": 1,
         "provider_response_observed": False,
         "usage_event_count": 0,
@@ -1502,16 +1979,52 @@ def reconcile_generation_ambiguity(
         "effective_tracked_ceiling_nano_usd": MASTER_COST_CAP_NANO_USD - cumulative,
         "next_item_id": next_item_id,
         "next_item_unattempted_at_reconciliation": True,
-        "later_generation_item_ids_sha256": canonical_json_sha256(later_ids),
-        "later_generation_attempt_artifact_count": 0,
-        "later_generation_usage_event_count": 0,
         "automatic_retries": 0,
     }
-    entry_path = cohort.paths.ambiguity_entries / f"{sequence:04d}-{item_id}.json"
+    if legacy_generation_declaration:
+        payload.update(
+            {
+                "generation_intent_file_sha256": sha256_file(intent_path),
+                "generation_intent_canonical_sha256": canonical_json_sha256(intent),
+                "generation_outcome_file_sha256": sha256_file(outcome_path),
+                "generation_outcome_canonical_sha256": canonical_json_sha256(outcome),
+                "later_generation_item_ids_sha256": canonical_json_sha256(later_ids),
+                "later_generation_attempt_artifact_count": 0,
+                "later_generation_usage_event_count": 0,
+            }
+        )
+        entry_name = f"{sequence:04d}-{item_id}.json"
+    else:
+        payload.update(
+            {
+                "phase": phase,
+                "operation": operation,
+                "intent_file_sha256": sha256_file(intent_path),
+                "intent_canonical_sha256": canonical_json_sha256(intent),
+                "outcome_file_sha256": sha256_file(outcome_path),
+                "outcome_canonical_sha256": canonical_json_sha256(outcome),
+                "next_turn_id": next_turn_id,
+                "later_phase_turn_ids_sha256": canonical_json_sha256(later_turn_ids),
+                "later_phase_attempt_artifact_count": 0,
+                "later_phase_usage_event_count": 0,
+            }
+        )
+        entry_name = f"{sequence:04d}-{item_id}-{phase}.json"
+    entry_path = cohort.paths.ambiguity_entries / entry_name
     write_json_no_overwrite(entry_path, payload)
     validate_ambiguity_continuation(cohort.paths, recovery_commit=recovery_commit)
     master_budget_state(cohort.paths.ledger)
     return payload
+
+
+def reconcile_generation_ambiguity(
+    cohort: PreparedV3Cohort,
+    *,
+    base_dir: Path,
+) -> dict[str, object]:
+    """Backward-compatible alias for the phase-aware reconciliation command."""
+
+    return reconcile_provider_ambiguity(cohort, base_dir=base_dir)
 
 
 def _select_cohort_manifest(
@@ -2786,11 +3299,21 @@ def _validate_decomposition_pair(
         raise V3EvaluationError(f"{item_id} decomposition usage evidence changed")
     provider = outcome.get("provider")
     response_observed = bool(isinstance(provider, Mapping) and provider.get("id"))
-    _require_operation_evidence(
-        current_evidence,
-        completed_response_required=(status == "valid" or response_observed),
-        label=f"{item_id} decomposition",
+    reserved_zero_event = (
+        status == "technical_failure"
+        and not response_observed
+        and _reserved_zero_event_is_valid(
+            paths,
+            item_id=item_id,
+            phase="decomposition",
+        )
     )
+    if not reserved_zero_event:
+        _require_operation_evidence(
+            current_evidence,
+            completed_response_required=(status == "valid" or response_observed),
+            label=f"{item_id} decomposition",
+        )
     if status == "valid":
         claims = outcome.get("claims")
         if not isinstance(claims, list) or outcome.get("claim_count") != len(claims):
@@ -3096,11 +3619,21 @@ def _validate_rubric_pair(
     provider = outcome.get("provider")
     response_observed = bool(isinstance(provider, Mapping) and provider.get("id"))
     if expected_attempts:
-        _require_operation_evidence(
-            current_evidence,
-            completed_response_required=(status == "scored" or response_observed),
-            label=f"{item_id} rubric",
+        reserved_zero_event = (
+            status == "technical_failure"
+            and not response_observed
+            and _reserved_zero_event_is_valid(
+                cohort.paths,
+                item_id=item_id,
+                phase="rubric",
+            )
         )
+        if not reserved_zero_event:
+            _require_operation_evidence(
+                current_evidence,
+                completed_response_required=(status == "scored" or response_observed),
+                label=f"{item_id} rubric",
+            )
     elif current_evidence["event_count"] != 0:
         raise V3EvaluationError(f"{item_id} unscored rubric recorded a provider event")
     if status == "scored":
@@ -3450,6 +3983,9 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
         {
             "sequence": value["sequence"],
             "item_id": value["item_id"],
+            "turn_id": value["turn_id"],
+            "phase": value["phase"],
+            "operation": value["operation"],
             "provider_boundary_attempt_count": 1,
             "provider_response_observed": False,
             "usage_event_count": 0,
@@ -3604,6 +4140,7 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
                 f"{Decimal(accounted_worst_case_nano) / Decimal(1_000_000_000):.9f}"
             ),
             "unknown_actual_cost_item_ids": [value["item_id"] for value in ambiguity_items],
+            "unknown_actual_cost_turn_ids": [value["turn_id"] for value in ambiguity_items],
             "unpriced_events": usage["unpriced_events"] if usage else 0,
             "operations": usage["operations"] if usage else [],
             "shared_with_development_and_social_phases": True,
@@ -3649,6 +4186,7 @@ __all__ = [
     "prepare_v3_cohort",
     "preflight_all_cached_items",
     "reconcile_generation_ambiguity",
+    "reconcile_provider_ambiguity",
     "require_complete_decomposition",
     "require_complete_generation",
     "require_instrument_freeze",

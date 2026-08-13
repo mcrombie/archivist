@@ -460,6 +460,34 @@ def test_h031_recovery_declaration_is_externally_bound():
     assert declaration["next_item_id"] == "H032"
 
 
+def test_h001_decomposition_recovery_declaration_is_externally_bound():
+    declaration = v3.AMBIGUITY_RECOVERY_DECLARATIONS["H001:decomposition"]
+
+    assert declaration["sequence"] == 7
+    assert declaration["phase"] == "decomposition"
+    assert declaration["operation"] == "eval_claim_decomposition_v2"
+    assert declaration["previous_recovery_harness_commit"] == (
+        "3f4cac4bb3a95e0aefcdbde9d6842ec45c96e1f1"
+    )
+    assert declaration["previous_continuation_file_sha256"] == (
+        "cc33f875abe1f1fbcbacd21e3bd39921875693467ea045d6bf454df27edcf863"
+    )
+    assert declaration["intent_file_sha256"] == (
+        "6b42361ffbf2cc548873d517ef8ba0363a8efef4cece0897cba575a18a1f33be"
+    )
+    assert declaration["outcome_file_sha256"] == (
+        "7d1fdc89e7c0b7b6c24f1dc14b89b8db9f8e09b67624ad2405487c03cf56b2a9"
+    )
+    assert declaration["provider_request_shape_sha256"] == (
+        "cf42cd51897a3e9602d94505bb423dbe3f883c00e7449506141e83b064c63e64"
+    )
+    assert declaration["request_binding_sha256"] == (
+        "b958c251e09725081c5e590b58eeadbbfd9788d94a7d44a6f2046ffbdb579a97"
+    )
+    assert declaration["projected_worst_case_reserved_nano_usd"] == 175_984_375
+    assert declaration["next_turn_id"] == "H002:decomposition"
+
+
 def test_recovery_budget_without_continuations_does_not_create_ledger(tmp_path):
     ledger = tmp_path / "absent.sqlite3"
 
@@ -541,6 +569,7 @@ def _write_zero_event_generation(paths: V3Paths, item_id: str) -> None:
     outcome = {
         "schema": "outcome",
         "item_id": item_id,
+        "attempt_count": 1,
         "provider_attempt_count": 1,
         "status": "technical_failure",
         "delivered_answer_status": "essential_fallback",
@@ -548,6 +577,7 @@ def _write_zero_event_generation(paths: V3Paths, item_id: str) -> None:
         "operation_evidence": evidence,
         "intent_sha256": v3.canonical_json_sha256(intent),
         "dossier": {},
+        "automatic_retries": 0,
     }
     (root / "generation-intent.json").write_text(
         json.dumps(intent, indent=2, sort_keys=True) + "\n",
@@ -587,6 +617,13 @@ def _synthetic_ambiguity_cohort(monkeypatch, tmp_path):
             "provider_input_token_upper_bound": 30,
             "max_output_tokens": 40,
         },
+    )
+    monkeypatch.setattr(
+        v3,
+        "_phase_expected_intent",
+        lambda *_args, item, **_kwargs: v3.read_json_object(
+            paths.root / "items" / str(item["id"]) / "generation-intent.json"
+        ),
     )
     h003_intent = paths.root / "items" / "H003" / "generation-intent.json"
     h003_outcome = paths.root / "items" / "H003" / "generation.json"
@@ -654,6 +691,26 @@ def test_reconcile_appends_hash_chain_and_preserves_legacy_bytes(monkeypatch, tm
     assert (paths.ambiguity_entries / "0001-H003.json").is_file()
 
 
+def test_legacy_generation_entry_does_not_require_new_phase_boundary_field(
+    monkeypatch,
+    tmp_path,
+):
+    paths, cohort = _synthetic_ambiguity_cohort(monkeypatch, tmp_path)
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "1" * 40)
+    reconcile_generation_ambiguity(cohort, base_dir=tmp_path)
+    entry_path = paths.ambiguity_entries / "0001-H003.json"
+    entry = v3.read_json_object(entry_path)
+    entry.pop("next_item_unattempted_at_reconciliation", None)
+    entry_path.write_text(
+        json.dumps(entry, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    state = v3._ambiguity_chain_state(paths)
+
+    assert state["reservations"][-1]["turn_id"] == "H003:generation"
+
+
 def test_reconcile_rejects_any_later_attempt_after_ambiguity(monkeypatch, tmp_path):
     paths, cohort = _synthetic_ambiguity_cohort(monkeypatch, tmp_path)
     monkeypatch.setattr(v3, "_git_commit", lambda _base: "2" * 40)
@@ -674,6 +731,63 @@ def test_reserved_zero_event_exception_is_chain_derived(monkeypatch, tmp_path):
     assert v3._reserved_zero_event_is_valid(paths, item_id="H002") is True
     assert v3._reserved_zero_event_is_valid(paths, item_id="H003") is True
     assert v3._reserved_zero_event_is_valid(paths, item_id="H004") is False
+
+
+def test_decomposition_resume_skips_only_declared_zero_event(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    item_id = "H001"
+    intent = {
+        "item_id": item_id,
+        "answer_sha256": "a" * 64,
+        "instrument": {"operation": "eval_claim_decomposition_v2"},
+    }
+    evidence = v3._turn_operation_evidence(
+        paths,
+        turn_id="H001:decomposition",
+        expected_operation="eval_claim_decomposition_v2",
+    )
+    outcome = {
+        "schema": v3.V3_DECOMPOSITION_OUTCOME_SCHEMA,
+        "item_id": item_id,
+        "status": "technical_failure",
+        "answer_sha256": intent["answer_sha256"],
+        "intent_sha256": v3.canonical_json_sha256(intent),
+        "provider_attempt_count": 1,
+        "provider": None,
+        "operation_evidence": evidence,
+        "attempt_count": 1,
+        "automatic_retries": 0,
+    }
+    intent_path, outcome_path = v3._decomposition_paths(
+        paths,
+        item_id,
+        development=False,
+    )
+    intent_path.parent.mkdir(parents=True, exist_ok=True)
+    intent_path.write_text(json.dumps(intent), encoding="utf-8")
+    outcome_path.write_text(json.dumps(outcome), encoding="utf-8")
+    monkeypatch.setattr(
+        v3,
+        "_reserved_zero_event_is_valid",
+        lambda *_args, **kwargs: kwargs.get("phase") == "decomposition",
+    )
+
+    validated = v3._validate_decomposition_pair(
+        paths,
+        item_id=item_id,
+        intent=intent,
+        development=False,
+    )
+
+    assert validated["status"] == "technical_failure"
+    monkeypatch.setattr(v3, "_reserved_zero_event_is_valid", lambda *_args, **_kwargs: False)
+    with pytest.raises(V3EvaluationError, match="billing state is ambiguous"):
+        v3._validate_decomposition_pair(
+            paths,
+            item_id=item_id,
+            intent=intent,
+            development=False,
+        )
 
 
 def test_original_manifest_may_differ_only_by_bound_recovery_commit(monkeypatch):

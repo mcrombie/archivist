@@ -24,8 +24,9 @@ decompositions, ledgers, gold annotations, and production artifacts are read-onl
 8. Produce a public-safe summary after every required outcome exists.
 
 All paid phases share one ignored `usage.sqlite3`, one request ID, and the owner's cumulative
-`$7.00` authorization. H002, H003, H021, H025, H026, H027, and H031 each reached the provider boundary once but produced no
-response or ledger event. All remain sealed technical failures and none is ever retried or
+`$7.00` authorization. Generation turns H002, H003, H021, H025, H026, H027, and H031, followed by
+H001's held-out decomposition turn, each reached the provider boundary once but produced no response
+or ledger event. All remain sealed technical failures and none is ever retried or
 replaced. The immutable H002 continuation stays byte-for-byte unchanged. A committed recovery
 declaration and append-only continuation entry bind each later zero-event item's intent, outcome,
 exact reconstructed provider request, projection, prior continuation hash, and new descendant
@@ -41,8 +42,10 @@ input-token upper bound, and 1,800 maximum output tokens). H026's projection res
 (23,533 serialized request bytes, 56,301 input-token upper bound, and 1,800 maximum output tokens).
 H027's projection reserves `$0.390450000` (21,064 serialized request bytes, 53,832 input-token upper
 bound, and 1,800 maximum output tokens). H031's projection reserves `$0.406400000` (23,616 serialized
-request bytes, 56,384 input-token upper bound, and 1,800 maximum output tokens). Their cumulative
-`$2.798631250` reserve lowers the dynamic tracked ceiling to `$4.201368750`.
+request bytes, 56,384 input-token upper bound, and 1,800 maximum output tokens). H001's Terra
+decomposition projection reserves `$0.175984375` (4,347 serialized request bytes, 37,115 input-token
+upper bound, and 4,000 maximum output tokens). Their cumulative `$2.974615625` reserve lowers the
+dynamic tracked ceiling to `$4.025384375`.
 A future ambiguity requires another committed declaration and
 no-overwrite chain entry; cumulative reserve plus recorded spend must stay within `$7.00`. Each
 provider boundary has no SDK retry. Private questions, answers, dossiers, rubrics, and response metadata remain below
@@ -63,13 +66,13 @@ provider boundary has no SDK retry. Private questions, answers, dossiers, rubric
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py report
 ```
 
-Run `reconcile-ambiguity` again after any later exact zero-event stop, from the newly committed
-recovery harness, before resuming `generate`. The command discovers the first unreconciled item and
-never accepts or retries an arbitrary failure.
+Run `reconcile-ambiguity` again after an exact zero-event stop in generation, decomposition, or
+rubric, from the newly committed recovery harness, before resuming that phase. The command discovers
+the first unreconciled provider turn and never accepts or retries an arbitrary failure.
 
 The final report distinguishes local retrieval time from the authored-response boundary, reports
 generated successes and Essential fallbacks separately, and includes retrieval coverage, citation
 syntax/resolvability, citation completeness over valid decompositions, mechanical cited-chunk/gold
-location overlap, exploratory gold-claim coverage, every per-item ambiguity reserve, cumulative
+location overlap, exploratory gold-claim coverage, every phase/operation ambiguity reserve, cumulative
 reserve, dynamic effective ceiling, recorded-plus-reserved worst-case accounting, and operation
 counts.

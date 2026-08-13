@@ -23,7 +23,7 @@ from retrieval_authored_v3_evaluation import (  # noqa: E402
     freeze_decomposition_instrument,
     preflight_all_cached_items,
     prepare_v3_cohort,
-    reconcile_generation_ambiguity,
+    reconcile_provider_ambiguity,
     run_development_decomposition_phase,
     run_exploratory_rubric_phase,
     run_generation_phase,
@@ -151,11 +151,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         if args.command == "reconcile-ambiguity":
-            value = reconcile_generation_ambiguity(cohort, base_dir=BASE_DIR)
-            print(f"SEALED {value['item_id']} ZERO-EVENT AMBIGUITY CONTINUATION")
+            value = reconcile_provider_ambiguity(cohort, base_dir=BASE_DIR)
+            print(f"SEALED {value['turn_id']} ZERO-EVENT AMBIGUITY CONTINUATION")
             print(
-                f"{value['item_id']} will not be retried; "
-                f"continuation begins with {value['next_item_id']}."
+                f"{value['turn_id']} will not be retried; "
+                f"continuation begins with {value.get('next_turn_id') or value['next_item_id']}."
             )
             print(
                 "Reserved nano-USD: "
