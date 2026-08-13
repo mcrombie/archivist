@@ -130,9 +130,11 @@ anything that still requires measurement.
   smoke or measurement. The narrow Edwin Sandys smoke made exactly three no-retry calls against the
   superseded closed-cue selector in 8.357, 6.839, and 5.162 seconds, for 6,292 tokens and
   `$0.060071250`; it does not measure this new path. Ad hoc current-policy turns diagnosed the
-  provider-schema mismatch described above, but no declared v4 live smoke,
-  latency cohort, or quality cohort has run, so the new default and its character-social branch
-  carry no speed, quality, or reliability claim.
+  provider-schema mismatch described above. The declared v4 cohort has now sealed its ten-item
+  Professional sentinel: ten generated outcomes, ten priced events, zero embedding calls, and
+  `$0.458209000` recorded cost. It stopped before H011 on a trace-identifier defect, so the cohort
+  is incomplete and the new default and its character-social branch still carry no speed, quality,
+  or reliability claim.
   Ruthless Red Realist reuses the Ember & Ink appearance and applies a cold strategic focus on
   power, leverage, incentives, bargaining, tradeoffs, credible commitments, and institutional
   capacity. Its Machiavelli/Kissinger inspiration is deliberately high-level: no outside text was
@@ -151,6 +153,21 @@ anything that still requires measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-13 — The v4 sentinel stopped on its own trace identifier
+
+- With fresh owner authorization, H001-H010 each made one no-retry Professional authoring attempt.
+  All ten sealed generated outcomes, ten priced events recorded `$0.458209000`, and cached vectors
+  kept embedding calls at zero.
+- The remaining phase stopped before H011, not because of answer quality, latency, or retrieval.
+  The harness had copied its private ledger key `generation:H###` into the retrieval trace, whose
+  deliberately restricted identifier grammar does not allow a colon. All ten traces had exactly
+  that same mechanical defect; no H011 intent, outcome, or usage event exists.
+- The repair preserves every sentinel answer, trace, and usage artifact byte-for-byte and makes no
+  provider call. A committed descendant harness seals their hashes plus the sole colon-to-hyphen
+  trace-scope normalization, proves H011 was untouched, and only then permits the once-only cohort
+  to continue. Future traces normalize that identifier before sealing, and the sentinel command
+  now validates its own mechanical gates before reporting success.
 
 ## 2026-08-13 — Close the timeout diagnostic before changing the clock
 

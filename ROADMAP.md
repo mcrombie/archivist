@@ -223,8 +223,8 @@ After formal lock:
 | **8A. Production observability and latency evidence** | **Complete for the first observed cohort** | Preserve the text-free public artifacts and private audit root. The 33-attempt run produced 29 latency-eligible successes, four request failures, zero instrumentation failures, 54.393-second server p50, 113.801-second server p95, and `$4.90594694` estimated cost. Treat these as one observed warm cohort, not an SLA. |
 | **8B. V27 compact generation representation** | **Historical experiment; unpromoted and superseded** | Preserve the offline experiment and its proposed A/B in `docs/latency_optimization.md`. No paid candidate call ran, its old UI selector is gone, and it is not the current product path. |
 | **8C. Application-compiled answer path** | **Historical product iteration; superseded** | Preserve the closed-cue implementation history and its narrow three-call smoke. Its three 32-word cards overcorrected for structural safety and produced answers that were often too thin or off-target. Do not use its smoke as evidence about the current policy. |
-| **8D. Retrieval-authored answer path** | **Current v4 default implemented offline; live behavior unmeasured** | Preserve v1–v3 as historical behavior. V4 retains the hybrid retrieval, rich dossier, strict authored schema, one no-retry Sol call, local citations, required follow-ups, and generic direct-evidence fallback. It raises the shared provider boundary to 35 seconds and authoring cap to thirty, and adds granular text-free failure diagnostics. Essential still uses one embedding and no prose call. A new cohort is required before any v4 latency, quality, or reliability claim. |
-| **8E. Retrieval-authored v4 evaluation** | **Offline adapter complete; no live call** | Follow [`docs/retrieval_authored_v4_evaluation.md`](docs/retrieval_authored_v4_evaluation.md). Reuse the validated cached embeddings for all 37 questions. Attempt H001–H010 exactly once as a mechanical sentinel, then begin the remaining run at H011 without repeating the prefix. Persist intent and exact worst-case projection before every boundary; automatically reserve a zero-event ambiguity without replay. Decompose only after generation with the frozen text-anchor-v2 instrument and a 60-second evaluation-only timeout, then rubric. Every paid command needs fresh explicit authorization and the exact cumulative cap. |
+| **8D. Retrieval-authored answer path** | **Current v4 default; formal cohort in progress** | Preserve v1–v3 as historical behavior. V4 retains the hybrid retrieval, rich dossier, strict authored schema, one no-retry Sol call, local citations, required follow-ups, and generic direct-evidence fallback. It raises the shared provider boundary to 35 seconds and authoring cap to thirty, and adds granular text-free failure diagnostics. Essential still uses one embedding and no prose call. Do not claim a v4 latency, quality, or reliability improvement before the cohort closes. |
+| **8E. Retrieval-authored v4 evaluation** | **H001–H010 sealed; provider-free trace reconciliation required before H011** | Follow [`docs/retrieval_authored_v4_evaluation.md`](docs/retrieval_authored_v4_evaluation.md). The authorized sentinel sealed ten generated outcomes for `$0.458209000` with zero embedding calls, then stopped before H011 because its colon-delimited ledger key violated the trace identifier grammar. Reconcile only that field through the hash-bound, zero-call continuation; never repeat H001–H010. Persist intent and exact worst-case projection before every later boundary; automatically reserve a zero-event ambiguity without replay. Decompose only after generation with the frozen text-anchor-v2 instrument and a 60-second evaluation-only timeout, then rubric. |
 | **8F. Conversational persona evaluation** | **Integrated v4 suite; live cohort not started** | Run Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist as a separate four-mode social suite. Report status, latency, cost, manuscript-leading follow-ups, and transparent character-distinctness diagnostics. No provider call or result claim exists yet. |
 
 ## Next sequence
@@ -336,11 +336,12 @@ top of the list.
     thirty seconds, and records granular text-free failure classes behind the unchanged generic
     reader fallback. The isolated adapter binds product commit `536acc8`, the validated cached
     embeddings, once-only H001–H010 prefix, automatic exact ambiguity reserve, 60-second
-    decomposition timeout, and separate four-mode social suite. No live call or quality result
-    belongs to this step.
-19. **Next, only after fresh explicit authorization and an exact cumulative cap — run v4.** Prepare
-    the separate cohort, run H001–H010 once as a mechanical sentinel, and—only if identity,
-    one-call, trace, citation, and cap invariants hold—start the remaining generation at H011.
+    decomposition timeout, and separate four-mode social suite.
+19. **In progress under explicit authorization and the exact cumulative cap — run v4.** H001-H010
+    sealed once as generated outcomes for `$0.458209000`; cached vectors made zero embedding calls.
+    The remaining command stopped before H011 because the trace copied a colon-delimited ledger
+    turn key. Commit and seal the provider-free, hash-bound trace-scope continuation, never repeat
+    the prefix, and only then start remaining generation at H011.
     Sentinel answer quality, latency, and cost are report-only, not promotion vetoes. Decompose only
     after all 37 generation dispositions, then rubric, then the separate Professional/Princess/
     Baron/Red Realist social suite. A zero-event boundary consumes its exact projected reserve and

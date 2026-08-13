@@ -105,6 +105,9 @@ V4_DECOMPOSITION_OUTCOME_SCHEMA = "archivist.retrieval_authored_v4_decomposition
 V4_SOCIAL_OUTCOME_SCHEMA = "archivist.retrieval_authored_v4_social_outcome/1"
 V4_RUBRIC_OUTCOME_SCHEMA = "archivist.retrieval_authored_v4_rubric_outcome/1"
 V4_PUBLIC_REPORT_SCHEMA = "archivist.retrieval_authored_v4_public_report/1"
+V4_TRACE_SCOPE_CONTINUATION_SCHEMA = (
+    "archivist.retrieval_authored_v4_trace_scope_continuation/1"
+)
 
 EVALUATION_ID = "retrieval-authored-v4-professional-2026-08-13"
 COHORT_CLASSIFICATION = "reused_locked_benchmark_not_pristine_held_out"
@@ -205,6 +208,10 @@ class V4Paths:
     @property
     def report(self) -> Path:
         return self.root / "public-report.json"
+
+    @property
+    def trace_scope_continuation(self) -> Path:
+        return self.root / "trace-scope-continuation.json"
 
     @property
     def frozen_instrument_source(self) -> Path:
@@ -1700,7 +1707,31 @@ def prepare_v4_cohort(
     if paths.cohort_manifest.exists():
         existing = read_json_object(paths.cohort_manifest)
         if existing != cohort_manifest:
-            raise V4EvaluationError("existing v4 cohort manifest identity changed")
+            if not paths.trace_scope_continuation.is_file():
+                raise V4EvaluationError("existing v4 cohort manifest identity changed")
+            continuation = read_json_object(paths.trace_scope_continuation)
+            current_commit = _git_commit(base_dir)
+            if (
+                continuation.get("schema") != V4_TRACE_SCOPE_CONTINUATION_SCHEMA
+                or continuation.get("original_harness_commit")
+                != existing.get("system_under_test", {}).get("harness_commit")
+                or continuation.get("recovery_harness_commit") != current_commit
+            ):
+                raise V4EvaluationError("trace-scope recovery harness identity changed")
+            expected_continuation = _trace_scope_continuation_payload(
+                paths,
+                harness_commit=current_commit,
+                require_h011_unattempted=False,
+            )
+            if continuation != expected_continuation:
+                raise V4EvaluationError("trace-scope continuation binding changed")
+            normalized_current = json.loads(json.dumps(cohort_manifest))
+            normalized_current["system_under_test"]["harness_commit"] = existing[
+                "system_under_test"
+            ]["harness_commit"]
+            normalized_current["working_tree"] = existing["working_tree"]
+            if normalized_current != existing:
+                raise V4EvaluationError("recovery changed the sealed cohort identity")
         selected = existing
     else:
         selected = cohort_manifest
@@ -1856,9 +1887,193 @@ def _validate_sentinel_mechanics(paths: V4Paths, *, item_id: str) -> None:
     ):
         raise V4EvaluationError(f"sentinel mechanics changed: {item_id}")
     try:
-        validate_text_free_retrieval_trace(trace)
+        validate_text_free_retrieval_trace(
+            _validated_trace_for_contract(paths, item_id=item_id, trace=trace)
+        )
     except (TypeError, ValueError) as exc:
         raise V4EvaluationError(f"sentinel retrieval trace is invalid: {item_id}") from exc
+
+
+def _trace_scope_continuation_payload(
+    paths: V4Paths,
+    *,
+    harness_commit: str,
+    require_h011_unattempted: bool = True,
+) -> dict[str, object]:
+    outcomes: list[dict[str, object]] = []
+    for item_id in SENTINEL_ITEM_IDS:
+        outcome_path = attempt_paths(paths, turn_id=f"generation:{item_id}")[2]
+        if not outcome_path.is_file():
+            raise V4EvaluationError(f"trace continuation requires sealed {item_id}")
+        outcome = read_json_object(outcome_path)
+        trace = outcome.get("retrieval_trace")
+        scope = trace.get("scope") if isinstance(trace, Mapping) else None
+        original_turn_id = scope.get("turn_id") if isinstance(scope, Mapping) else None
+        normalized_turn_id = f"generation-{item_id}"
+        if original_turn_id != f"generation:{item_id}":
+            raise V4EvaluationError(f"{item_id} trace scope is outside the declared defect")
+        normalized = json.loads(json.dumps(trace))
+        normalized["scope"]["turn_id"] = normalized_turn_id
+        validate_text_free_retrieval_trace(normalized)
+        outcomes.append(
+            {
+                "item_id": item_id,
+                "outcome_file_sha256": sha256_file(outcome_path),
+                "outcome_canonical_sha256": canonical_json_sha256(outcome),
+                "original_trace_sha256": canonical_json_sha256(trace),
+                "original_turn_id": original_turn_id,
+                "normalized_trace_sha256": canonical_json_sha256(normalized),
+                "normalized_turn_id": normalized_turn_id,
+                "operation_evidence_sha256": canonical_json_sha256(
+                    outcome["operation_evidence"]
+                ),
+            }
+        )
+    if require_h011_unattempted:
+        h011_paths = attempt_paths(paths, turn_id="generation:H011")
+        if any(path.exists() for path in h011_paths) or operation_evidence(
+            paths,
+            turn_id="generation:H011",
+            operation="answer_generation",
+        )["event_count"]:
+            raise V4EvaluationError("H011 was attempted before trace-scope reconciliation")
+    manifest = read_json_object(paths.cohort_manifest)
+    return {
+        "schema": V4_TRACE_SCOPE_CONTINUATION_SCHEMA,
+        "evaluation_id": EVALUATION_ID,
+        "cohort_manifest_file_sha256": sha256_file(paths.cohort_manifest),
+        "cohort_manifest_canonical_sha256": canonical_json_sha256(manifest),
+        "original_harness_commit": manifest["system_under_test"]["harness_commit"],
+        "recovery_harness_commit": harness_commit,
+        "normalization": "trace_scope_turn_id_colon_to_hyphen_v1",
+        "provider_calls_made": 0,
+        "sentinel_outcomes_rewritten": False,
+        "next_item_id": "H011",
+        "next_item_unattempted_at_reconciliation": True,
+        "outcomes": outcomes,
+    }
+
+
+def reconcile_trace_scope_continuation(
+    *,
+    base_dir: Path,
+    paths: V4Paths,
+    product_commit: str,
+    maximum_usd: Decimal,
+) -> dict[str, object]:
+    worktree = build_git_worktree_identity(base_dir)
+    if worktree.get("working_tree") != "clean":
+        raise V4EvaluationError("trace-scope reconciliation requires a clean tree")
+    current_commit = _git_commit(base_dir)
+    manifest = read_json_object(paths.cohort_manifest)
+    cap_nano_usd = _nano_usd(maximum_usd)
+    if (
+        manifest.get("system_under_test", {}).get("product_commit")
+        != product_commit
+        or manifest.get("paid_scope", {}).get("maximum_total_cost_nano_usd")
+        != cap_nano_usd
+    ):
+        raise V4EvaluationError("trace-scope reconciliation authorization changed")
+    original_commit = _required_string(
+        manifest.get("system_under_test", {}),
+        "harness_commit",
+    )
+    if current_commit == original_commit:
+        raise V4EvaluationError("trace-scope recovery must use a descendant harness commit")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", original_commit, current_commit],
+        cwd=base_dir,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise V4EvaluationError("trace-scope recovery commit is not a harness descendant")
+    payload = _trace_scope_continuation_payload(
+        paths,
+        harness_commit=current_commit,
+    )
+    write_or_validate_json(paths.trace_scope_continuation, payload)
+    return payload
+
+
+def _validated_trace_for_contract(
+    paths: V4Paths,
+    *,
+    item_id: str,
+    trace: Mapping[str, object],
+) -> Mapping[str, object]:
+    try:
+        validate_text_free_retrieval_trace(trace)
+        return trace
+    except (TypeError, ValueError):
+        if not paths.trace_scope_continuation.is_file():
+            raise
+    continuation = read_json_object(paths.trace_scope_continuation)
+    manifest = read_json_object(paths.cohort_manifest)
+    if (
+        continuation.get("schema") != V4_TRACE_SCOPE_CONTINUATION_SCHEMA
+        or continuation.get("evaluation_id") != EVALUATION_ID
+        or continuation.get("cohort_manifest_file_sha256")
+        != sha256_file(paths.cohort_manifest)
+        or continuation.get("cohort_manifest_canonical_sha256")
+        != canonical_json_sha256(manifest)
+        or continuation.get("original_harness_commit")
+        != manifest["system_under_test"]["harness_commit"]
+        or continuation.get("normalization")
+        != "trace_scope_turn_id_colon_to_hyphen_v1"
+        or continuation.get("provider_calls_made") != 0
+        or continuation.get("sentinel_outcomes_rewritten") is not False
+        or continuation.get("next_item_id") != "H011"
+        or continuation.get("next_item_unattempted_at_reconciliation") is not True
+    ):
+        raise V4EvaluationError("trace-scope continuation identity changed")
+    expected = _trace_scope_continuation_payload(
+        paths,
+        harness_commit=_required_string(continuation, "recovery_harness_commit"),
+        require_h011_unattempted=False,
+    )
+    if continuation != expected:
+        raise V4EvaluationError("trace-scope continuation binding changed")
+    entries = continuation.get("outcomes")
+    entry = next(
+        (
+            value
+            for value in entries
+            if isinstance(value, Mapping) and value.get("item_id") == item_id
+        ),
+        None,
+    ) if isinstance(entries, list) else None
+    if entry is None or entry.get("original_trace_sha256") != canonical_json_sha256(trace):
+        raise V4EvaluationError(f"{item_id} trace is not bound to the continuation")
+    normalized = json.loads(json.dumps(trace))
+    normalized["scope"]["turn_id"] = entry["normalized_turn_id"]
+    if canonical_json_sha256(normalized) != entry.get("normalized_trace_sha256"):
+        raise V4EvaluationError(f"{item_id} normalized trace binding changed")
+    return normalized
+
+
+def _normalize_generation_trace_scope(
+    outcome: dict[str, object],
+    *,
+    item_id: str,
+) -> None:
+    trace = outcome.get("retrieval_trace")
+    scope = trace.get("scope") if isinstance(trace, dict) else None
+    if not isinstance(scope, dict):
+        raise V4EvaluationError(f"{item_id} generation lost retrieval trace scope")
+    original = scope.get("turn_id")
+    if original not in {None, f"generation:{item_id}", f"generation-{item_id}"}:
+        raise V4EvaluationError(f"{item_id} generation trace scope changed")
+    if scope.get("project_id") is None:
+        scope["project_id"] = MASTER_PROJECT_ID
+    if scope.get("conversation_id") is None:
+        scope["conversation_id"] = MASTER_CONVERSATION_ID
+    scope["turn_id"] = f"generation-{item_id}"
+    try:
+        validate_text_free_retrieval_trace(trace)
+    except (TypeError, ValueError) as exc:
+        raise V4EvaluationError(
+            f"{item_id} normalized generation trace is invalid"
+        ) from exc
 
 
 def run_professional_generation(
@@ -1975,6 +2190,7 @@ def run_professional_generation(
                 },
             }
         )
+        _normalize_generation_trace_scope(outcome, item_id=item_id)
         if outcome.get("status") == "generated" and (
             not str(provider.get("response_id") or "").strip()
             or provider.get("model") != AUTHORED_RESPONSE_SETTINGS.model
@@ -2002,6 +2218,8 @@ def run_professional_sentinel(
         maximum_usd=maximum_usd,
         sentinel=True,
     )
+    for item_id in SENTINEL_ITEM_IDS:
+        _validate_sentinel_mechanics(cohort.paths, item_id=item_id)
 
 
 def run_professional_remaining(
@@ -2978,6 +3196,7 @@ __all__ = [
     "prepare_attempt",
     "prepare_v4_cohort",
     "project_request",
+    "reconcile_trace_scope_continuation",
     "reserve_zero_event",
     "run_decomposition",
     "run_professional_remaining",

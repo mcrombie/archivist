@@ -571,13 +571,15 @@ Faithfulness, abstention, gold-claim recall, and related semantic measures remai
 The current product is `retrieval-authored-v4`, while keeping `retrieval-authored-v1`,
 `retrieval-authored-v2`, `retrieval-authored-v3`, frozen V26, the superseded selector
 smoke, and all completed
-measurements unchanged. The new default has not had a paid latency or quality cohort, so no speed,
-quality, or reliability improvement is claimed. Its offline v4 evaluation adapter is implemented,
-but it has made no live call. A future run requires fresh explicit authorization and a matching
-cumulative cap, reuses the validated 37-question embedding cache, attempts H001-H010 exactly once
-as a mechanical sentinel before H011-H037, automatically reserves exact worst-case cost for a
-zero-event ambiguity without replay, gives decomposition a 60-second evaluation-only timeout, and
-runs the four generated modes in a separate conversational suite. An optional
+measurements unchanged. The new default has not completed a paid latency or quality cohort, so no
+speed, quality, or reliability improvement is claimed. Its authorized v4 sentinel sealed ten
+generated H001-H010 outcomes for `$0.458209000` with zero embedding calls, then stopped before H011
+because a colon-delimited private ledger key violated the trace identifier grammar. The
+provider-free continuation preserves those outcomes and certifies only a colon-to-hyphen trace
+normalization. The remaining run retains the matching cumulative cap, reuses the validated
+37-question embedding cache, never repeats H001-H010, automatically reserves exact worst-case cost
+for a zero-event ambiguity without replay, gives decomposition a 60-second evaluation-only
+timeout, and runs the four generated modes in a separate conversational suite. An optional
 calibration/semantic supplement remains lower priority.
 
 ## Documentation map

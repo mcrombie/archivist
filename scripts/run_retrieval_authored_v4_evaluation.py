@@ -22,6 +22,7 @@ from retrieval_authored_v4_evaluation import (  # noqa: E402
     default_paths,
     preflight,
     prepare_v4_cohort,
+    reconcile_trace_scope_continuation,
     run_decomposition,
     run_professional_remaining,
     run_professional_sentinel,
@@ -49,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "preflight",
             "prepare",
+            "reconcile-trace-scope",
             "sentinel",
             "generate-rest",
             "decompose",
@@ -118,6 +120,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "run-of-record CLI requires the declared private v4 root"
             )
         paths = default_paths(BASE_DIR, root=args.run_root)
+        if args.command == "reconcile-trace-scope":
+            result = reconcile_trace_scope_continuation(
+                base_dir=BASE_DIR,
+                paths=paths,
+                product_commit=args.product_commit,
+                maximum_usd=cap,
+            )
+            print("SEALED PROVIDER-FREE V4 TRACE-SCOPE CONTINUATION")
+            print(f"Bound sentinel outcomes: {len(result['outcomes'])}/10")
+            print("Next untouched item: H011; no provider call was made.")
+            return 0
         cohort = prepare_v4_cohort(
             base_dir=BASE_DIR,
             paths=paths,

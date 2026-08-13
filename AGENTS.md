@@ -21,10 +21,11 @@ earlier authorized
 three-mode Edwin Sandys smoke measured the now-superseded `application-compiled-v1` cue selector;
 its 8.357, 6.839, and 5.162-second calls and `$0.060071250` estimated cost are historical
 compatibility evidence only and are not evidence about the current authored-response path. The highest-leverage unfinished
-measurement work is now encoded in a v4-specific adapter but has made no live call. It must first
-exercise a fixed ten-question Professional prefix once, then run the remaining 27 only if the
-predeclared mechanical gates pass; claim decomposition and the four-mode social suite remain
-separate phases. The
+measurement work is now encoded in a v4-specific adapter. Its authorized once-only H001-H010
+Professional sentinel sealed ten generated outcomes for `$0.458209000` with zero embedding calls,
+then stopped before H011 because a private ledger colon had entered the trace identifier. A
+provider-free, hash-bound continuation must reconcile only that mechanical trace field before the
+remaining 27 may run; claim decomposition and the four-mode social suite remain separate phases. The
 completed baselines and production cohort must stay unchanged. The objective is not "the answers
 look good." Retrieval, faithfulness, citation, abstention, release reliability, latency, and spend
 must be measured, bounded, reproducible, and have their failures written down. A system with

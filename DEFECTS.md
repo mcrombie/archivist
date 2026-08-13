@@ -63,6 +63,23 @@ record of why that temporary contract existed.
 
 ---
 
+## [2026-08-13] V4 sentinel traces inherited a ledger-only colon in `turn_id`
+Phase/Brief: Retrieval-authored v4 evaluation, once-only H001-H010 sentinel
+Symptom: all ten Professional sentinel outcomes were generated and sealed, but the first
+`generate-rest` preflight stopped before H011 because each copied retrieval trace used
+`generation:H###` as `scope.turn_id`. The text-free trace contract deliberately rejects colons in
+identifiers. Ten priced generation events recorded `$0.458209000`; no H011 artifact or event was
+created.
+Cause: **measurement-harness specification gap.** The v4 harness reused one colon-delimited string
+for both its private ledger turn key and the retrieval trace's restricted identifier field, and
+the sentinel command did not run its own post-seal trace check before announcing completion.
+Resolution and verification: the ten immutable outcomes are not rewritten or replayed. A clean,
+descendant harness can seal one provider-free continuation binding every original outcome and
+trace hash to the sole deterministic `generation-H###` normalization, while proving H011 was
+untouched. Future generation outcomes normalize that trace-only identifier before sealing, and the
+sentinel command now runs all mechanical checks itself. Focused tests cover immutable binding,
+normalization without source mutation, H011 boundary protection, and post-sentinel validation.
+
 ## [2026-08-13] The v3 authoring deadline collapsed slow calls into opaque fallbacks
 Phase/Brief: Retrieval-authored v3 diagnostic cohort and v4 operational boundary
 Symptom: seven of 37 once-only Professional generation attempts returned Essential fallback. The

@@ -267,6 +267,69 @@ def test_social_matrix_is_four_modes_by_three_cases() -> None:
     assert len(v4.SOCIAL_MODES) * len(v4.SOCIAL_QUESTIONS) == 12
 
 
+def test_trace_scope_continuation_normalizes_only_sealed_sentinel_ids(
+    local_root: Path,
+) -> None:
+    paths = _paths(local_root)
+    manifest = {
+        "system_under_test": {"harness_commit": "a" * 40},
+        "paid_scope": {"maximum_total_cost_nano_usd": 7_000_000_000},
+    }
+    v4.atomic_seal_json(paths.cohort_manifest, manifest)
+    original_traces: dict[str, dict[str, object]] = {}
+    for item_id in v4.SENTINEL_ITEM_IDS:
+        trace = {
+            "scope": {
+                "project_id": "archivist-v4-evaluation",
+                "conversation_id": v4.EVALUATION_ID,
+                "turn_id": f"generation:{item_id}",
+            }
+        }
+        original_traces[item_id] = trace
+        outcome = {
+            "retrieval_trace": trace,
+            "operation_evidence": {"turn_id": f"generation:{item_id}"},
+        }
+        v4.atomic_seal_json(
+            v4.attempt_paths(paths, turn_id=f"generation:{item_id}")[2],
+            outcome,
+        )
+
+    payload = v4._trace_scope_continuation_payload(
+        paths,
+        harness_commit="b" * 40,
+    )
+    v4.atomic_seal_json(paths.trace_scope_continuation, payload)
+
+    assert len(payload["outcomes"]) == 10
+    assert payload["provider_calls_made"] == 0
+    assert payload["sentinel_outcomes_rewritten"] is False
+    for item_id, trace in original_traces.items():
+        normalized = v4._validated_trace_for_contract(
+            paths,
+            item_id=item_id,
+            trace=trace,
+        )
+        assert normalized["scope"]["turn_id"] == f"generation-{item_id}"
+        assert trace["scope"]["turn_id"] == f"generation:{item_id}"
+
+
+def test_future_generation_trace_is_normalized_before_sealing() -> None:
+    outcome: dict[str, object] = {
+        "retrieval_trace": {
+            "scope": {
+                "project_id": "archivist-v4-evaluation",
+                "conversation_id": v4.EVALUATION_ID,
+                "turn_id": "generation:H011",
+            }
+        }
+    }
+
+    v4._normalize_generation_trace_scope(outcome, item_id="H011")
+
+    assert outcome["retrieval_trace"]["scope"]["turn_id"] == "generation-H011"
+
+
 def test_decomposition_timeout_is_longer_than_product_authoring_timeout() -> None:
     assert v4.DECOMPOSITION_TIMEOUT_SECONDS == 60.0
     assert v4.DECOMPOSITION_TIMEOUT_SECONDS > v4.AUTHORED_AUTHORING_TIMEOUT_SECONDS
@@ -653,12 +716,19 @@ def test_zero_event_generation_delivers_deterministic_essential_fallback(
         item: object,
         exc: Exception,
     ) -> dict[str, object]:
-        return {
-            "item_id": "H001",
-            "status": "technical_failure",
-            "answer": fallback_answer,
-            "answer_sha256": hashlib.sha256(fallback_answer.encode()).hexdigest(),
-        }
+            return {
+                "item_id": "H001",
+                "status": "technical_failure",
+                "answer": fallback_answer,
+                "answer_sha256": hashlib.sha256(fallback_answer.encode()).hexdigest(),
+                "retrieval_trace": {
+                    "scope": {
+                        "project_id": None,
+                        "conversation_id": None,
+                        "turn_id": None,
+                    }
+                },
+            }
 
     monkeypatch.setattr(v4, "_generation_items", lambda *_args, **_kwargs: (item,))
     monkeypatch.setattr(v4, "generation_request_projection", lambda *_args, **_kwargs: projection)

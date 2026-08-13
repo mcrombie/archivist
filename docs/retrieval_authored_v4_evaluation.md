@@ -43,12 +43,22 @@ worst-case cost reserve. A process interruption after the boundary is settled pr
 never replayed. Execution continues only while recorded spend plus all reserves plus the next exact
 projection fits the sealed cap.
 
+The first authorized sentinel sealed ten generated outcomes and ten priced events for
+`$0.458209000`, with zero embedding calls. Its post-sentinel gate then found that the harness had
+copied colon-delimited private ledger keys (`generation:H###`) into the trace's restricted
+`scope.turn_id`. The remaining command stopped before H011. The outcomes may not be rewritten or
+replayed. A clean descendant harness must run the provider-free reconciliation below once; it
+binds every original outcome and trace hash to only the deterministic `generation-H###`
+trace-scope normalization and proves H011 is untouched. Future generation outcomes normalize that
+trace-only field before sealing.
+
 Example commands, after replacing the cap with the separately authorized exact amount:
 
 ```powershell
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py preflight --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py prepare --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py sentinel --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
+.venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py reconcile-trace-scope --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py generate-rest --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py decompose --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v4_evaluation.py rubric --product-commit 536acc818193f4963a2d31ed9e3acc20732e40d6 --authorize-openai --max-total-cost-usd <authorized-cap>
