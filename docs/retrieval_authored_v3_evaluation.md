@@ -24,9 +24,13 @@ decompositions, ledgers, gold annotations, and production artifacts are read-onl
 8. Produce a public-safe summary after every required outcome exists.
 
 All paid phases share one ignored `usage.sqlite3`, one request ID, and the owner's cumulative
-`$7.00` hard ceiling. Each provider boundary has no SDK retry. An item with ambiguous or unpriced
-usage stops all later calls; it is never replayed or replaced. Private questions, answers, dossiers,
-rubrics, and response metadata remain below
+`$7.00` authorization. H002 reached the provider boundary once but produced no response or ledger
+event. It remains a sealed technical failure and is never retried or replaced. A separate recovery
+harness binds the original manifest and H002 artifacts by exact hashes, reserves H002's full
+`$0.399575` projected worst-case cost, and lowers the tracked request/monthly ceiling to
+`$6.600425`. Only this exact H002 zero-event state may be carried forward; any later ambiguous,
+zero-event, or unpriced attempt still stops all subsequent calls. Each provider boundary has no SDK
+retry. Private questions, answers, dossiers, rubrics, and response metadata remain below
 `runtime/evaluations/retrieval-authored-v3-professional-2026-08-13`.
 
 ## Commands
@@ -35,6 +39,7 @@ rubrics, and response metadata remain below
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py preflight
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py dev-decompose --authorize-openai --max-total-cost-usd 7.00
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py freeze
+.venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py reconcile-ambiguity
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py generate --authorize-openai --max-total-cost-usd 7.00
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py decompose --authorize-openai --max-total-cost-usd 7.00
 .venv\Scripts\python.exe scripts\run_retrieval_authored_v3_evaluation.py rubric --authorize-openai --max-total-cost-usd 7.00
@@ -46,4 +51,5 @@ rubrics, and response metadata remain below
 The final report distinguishes local retrieval time from the authored-response boundary, reports
 generated successes and Essential fallbacks separately, and includes retrieval coverage, citation
 syntax/resolvability, citation completeness over valid decompositions, mechanical cited-chunk/gold
-location overlap, exploratory gold-claim coverage, exact recorded spend, and operation counts.
+location overlap, exploratory gold-claim coverage, exact recorded spend, the H002 reserve,
+recorded-plus-reserved worst-case accounting, and operation counts.

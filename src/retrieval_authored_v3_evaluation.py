@@ -102,6 +102,9 @@ V3_RUBRIC_INTENT_SCHEMA = "archivist.retrieval_authored_v3_rubric_intent/1"
 V3_RUBRIC_OUTCOME_SCHEMA = "archivist.retrieval_authored_v3_rubric_outcome/1"
 V3_INSTRUMENT_FREEZE_SCHEMA = "archivist.retrieval_authored_v3_instrument_freeze/1"
 V3_PUBLIC_SUMMARY_SCHEMA = "archivist.retrieval_authored_v3_public_summary/1"
+V3_AMBIGUITY_CONTINUATION_SCHEMA = (
+    "archivist.retrieval_authored_v3_ambiguity_continuation/1"
+)
 
 EVALUATION_ID = "retrieval-authored-v3-professional-2026-08-13"
 COHORT_CLASSIFICATION = "reused_locked_benchmark_not_pristine_held_out"
@@ -111,6 +114,11 @@ MASTER_PROJECT_ID = "archivist-v3-evaluation"
 MASTER_CONVERSATION_ID = EVALUATION_ID
 MASTER_COST_CAP_NANO_USD = 7_000_000_000
 MASTER_COST_CAP_USD = Decimal("7.00")
+ORIGINAL_HARNESS_COMMIT = "fe229c891e741c73c67b47076a1af10c3ff4948a"
+AMBIGUOUS_H002_RESERVED_NANO_USD = 399_575_000
+RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD = (
+    MASTER_COST_CAP_NANO_USD - AMBIGUOUS_H002_RESERVED_NANO_USD
+)
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
 EXPECTED_PROVENANCE_SHA256 = "b4a023cce4639558ce5c26dc1ec473e072bef72ba2fb77dfab8b7d61ddc4ae6a"
@@ -121,6 +129,24 @@ EXPECTED_CACHE_SHA256 = "80524b064086d4b677b0f7f5b2cf5f0579256ba7c262c63c06c3807
 EXPECTED_QUESTION_SET_SHA256 = "4bd59fb7cb56a77402dac5f59a1bd092eb6ae2353553ab1c9e85743289e8c6d8"
 EXPECTED_INDEX_IDENTITY_SHA256 = (
     "2c0a15e6fb728528942cc1cdf664b532aab63dda2956981a607242bce361448c"
+)
+EXPECTED_ORIGINAL_COHORT_MANIFEST_FILE_SHA256 = (
+    "8ca62c90d4d8ae4bce80d577f67f72d9a744c620df5981005aa361b956270c59"
+)
+EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256 = (
+    "4f383c051d91d75f68054bcc3ce953e77207ea1e6973c2a65441c4c6ac343898"
+)
+EXPECTED_H002_GENERATION_INTENT_FILE_SHA256 = (
+    "b27abeeac65a1bffe7843bce682e80d8e3ddf5b02960daef2799e1bc1ccb39e9"
+)
+EXPECTED_H002_GENERATION_INTENT_CANONICAL_SHA256 = (
+    "41fbcc218a8e60d9c45f94e37bbcdddb70399885dc3f82a4b2ac03b3030260a9"
+)
+EXPECTED_H002_GENERATION_OUTCOME_FILE_SHA256 = (
+    "01b4e4a32a38c6814383b3eb0aa49ab490e0d0a29dd9212fa2232245cc33636e"
+)
+EXPECTED_H002_GENERATION_OUTCOME_CANONICAL_SHA256 = (
+    "38fed537ed2221596fa390b93bd3b931de711803e5add061e575e16146718d87"
 )
 EXPECTED_ITEM_COUNT = 37
 EXPECTED_COLLECTION_COUNT = 481
@@ -155,6 +181,10 @@ class V3Paths:
     @property
     def instrument_freeze(self) -> Path:
         return self.root / "instrument-freeze.json"
+
+    @property
+    def ambiguity_continuation(self) -> Path:
+        return self.root / "ambiguity-continuation.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,6 +560,206 @@ def build_v3_manifest(
     }
 
 
+def _validate_original_manifest_identity(
+    original: Mapping[str, object],
+    current: Mapping[str, object],
+) -> None:
+    """Prove an existing manifest is the exact clean fe229c8 run identity."""
+
+    if canonical_json_sha256(original) != EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256:
+        raise V3EvaluationError("existing cohort manifest is not the declared original manifest")
+    system = original.get("system_under_test")
+    worktree = original.get("working_tree")
+    if not isinstance(system, Mapping) or system.get("harness_commit") != ORIGINAL_HARNESS_COMMIT:
+        raise V3EvaluationError("original cohort harness commit changed")
+    if (
+        not isinstance(worktree, Mapping)
+        or worktree.get("working_tree") != "clean"
+        or worktree.get("git_commit") != ORIGINAL_HARNESS_COMMIT
+        or worktree.get("dirty_fingerprint") is not None
+    ):
+        raise V3EvaluationError("original cohort worktree identity changed")
+    normalized = deepcopy(dict(current))
+    normalized_system = normalized.get("system_under_test")
+    normalized_worktree = normalized.get("working_tree")
+    if not isinstance(normalized_system, dict) or not isinstance(normalized_worktree, dict):
+        raise V3EvaluationError("current cohort identity is malformed")
+    normalized_system["harness_commit"] = ORIGINAL_HARNESS_COMMIT
+    normalized_worktree["git_commit"] = ORIGINAL_HARNESS_COMMIT
+    if normalized != dict(original):
+        raise V3EvaluationError("current harness changed more than the sealed recovery adapter")
+
+
+def _continuation_payload(*, recovery_commit: str) -> dict[str, object]:
+    return {
+        "schema": V3_AMBIGUITY_CONTINUATION_SCHEMA,
+        "evaluation_id": EVALUATION_ID,
+        "original_harness_commit": ORIGINAL_HARNESS_COMMIT,
+        "recovery_harness_commit": recovery_commit,
+        "original_cohort_manifest_file_sha256": (
+            EXPECTED_ORIGINAL_COHORT_MANIFEST_FILE_SHA256
+        ),
+        "original_cohort_manifest_canonical_sha256": (
+            EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256
+        ),
+        "preservation": {
+            "original_manifest_and_item_artifacts_mutated": False,
+            "h002_retried": False,
+            "automatic_retries": 0,
+        },
+        "h002_ambiguous_attempt": {
+            "item_id": "H002",
+            "turn_id": "H002:generation",
+            "provider_boundary_attempt_count": 1,
+            "usage_event_count": 0,
+            "provider_response_observed": False,
+            "generation_intent_file_sha256": EXPECTED_H002_GENERATION_INTENT_FILE_SHA256,
+            "generation_intent_canonical_sha256": (
+                EXPECTED_H002_GENERATION_INTENT_CANONICAL_SHA256
+            ),
+            "generation_outcome_file_sha256": EXPECTED_H002_GENERATION_OUTCOME_FILE_SHA256,
+            "generation_outcome_canonical_sha256": (
+                EXPECTED_H002_GENERATION_OUTCOME_CANONICAL_SHA256
+            ),
+        },
+        "continuation_boundary": {
+            "next_item_id": "H003",
+            "h003_generation_intent_existed_at_reconciliation": False,
+            "h003_generation_outcome_existed_at_reconciliation": False,
+            "h003_usage_event_count_at_reconciliation": 0,
+        },
+        "cost_reservation": {
+            "owner_authorized_cap_nano_usd": MASTER_COST_CAP_NANO_USD,
+            "ambiguous_h002_projected_worst_case_reserved_nano_usd": (
+                AMBIGUOUS_H002_RESERVED_NANO_USD
+            ),
+            "effective_tracked_ceiling_nano_usd": (
+                RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
+            ),
+            "reservation_method": (
+                "exact offline projected worst-case for the submitted H002 provider request"
+            ),
+        },
+    }
+
+
+def _validate_h002_reserved_state(paths: V3Paths) -> None:
+    intent_path = _item_dir(paths, "H002") / "generation-intent.json"
+    outcome_path = _item_dir(paths, "H002") / "generation.json"
+    for path, file_hash, canonical_hash, label in (
+        (
+            paths.cohort_manifest,
+            EXPECTED_ORIGINAL_COHORT_MANIFEST_FILE_SHA256,
+            EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256,
+            "original cohort manifest",
+        ),
+        (
+            intent_path,
+            EXPECTED_H002_GENERATION_INTENT_FILE_SHA256,
+            EXPECTED_H002_GENERATION_INTENT_CANONICAL_SHA256,
+            "H002 generation intent",
+        ),
+        (
+            outcome_path,
+            EXPECTED_H002_GENERATION_OUTCOME_FILE_SHA256,
+            EXPECTED_H002_GENERATION_OUTCOME_CANONICAL_SHA256,
+            "H002 generation outcome",
+        ),
+    ):
+        if not path.is_file() or sha256_file(path) != file_hash:
+            raise V3EvaluationError(f"{label} file hash changed")
+        if canonical_json_sha256(read_json_object(path)) != canonical_hash:
+            raise V3EvaluationError(f"{label} canonical hash changed")
+    intent = read_json_object(intent_path)
+    outcome = read_json_object(outcome_path)
+    if (
+        intent.get("item_id") != "H002"
+        or intent.get("attempt_count") != 1
+        or outcome.get("provider_attempt_count") != 1
+        or outcome.get("status") != "technical_failure"
+        or outcome.get("delivered_answer_status") != "essential_fallback"
+    ):
+        raise V3EvaluationError("H002 is not the exact reserved zero-event outcome")
+    provider = outcome.get("provider")
+    if not isinstance(provider, Mapping) or provider.get("response_id") is not None:
+        raise V3EvaluationError("H002 unexpectedly has a provider response")
+    evidence = _turn_operation_evidence(
+        paths,
+        turn_id="H002:generation",
+        expected_operation="answer_generation",
+    )
+    if evidence.get("event_count") != 0:
+        raise V3EvaluationError("H002 unexpectedly has recorded usage")
+
+
+def validate_ambiguity_continuation(paths: V3Paths, *, recovery_commit: str) -> None:
+    expected = _continuation_payload(recovery_commit=recovery_commit)
+    if not paths.ambiguity_continuation.is_file():
+        raise V3EvaluationError("the H002 ambiguity has not been reconciled")
+    if read_json_object(paths.ambiguity_continuation) != expected:
+        raise V3EvaluationError("H002 ambiguity continuation manifest changed")
+    _validate_h002_reserved_state(paths)
+
+
+def _reserved_h002_zero_event_is_valid(paths: V3Paths, *, item_id: str) -> bool:
+    if item_id != "H002":
+        return False
+    recovery_commit = _git_commit(Path(__file__).resolve().parent.parent)
+    validate_ambiguity_continuation(paths, recovery_commit=recovery_commit)
+    return True
+
+
+def reconcile_generation_ambiguity(
+    cohort: PreparedV3Cohort,
+    *,
+    base_dir: Path,
+) -> dict[str, object]:
+    """Seal the one authorized provider-free continuation without retrying H002."""
+
+    recovery_commit = _git_commit(base_dir)
+    if recovery_commit == ORIGINAL_HARNESS_COMMIT:
+        raise V3EvaluationError("ambiguity recovery requires a distinct committed harness")
+    _validate_h002_reserved_state(cohort.paths)
+    h003_root = _item_dir(cohort.paths, "H003")
+    if (h003_root / "generation-intent.json").exists() or (
+        h003_root / "generation.json"
+    ).exists():
+        raise V3EvaluationError("H003 was already attempted before reconciliation")
+    h003_evidence = _turn_operation_evidence(
+        cohort.paths,
+        turn_id="H003:generation",
+        expected_operation="answer_generation",
+    )
+    if h003_evidence.get("event_count") != 0:
+        raise V3EvaluationError("H003 already has provider usage before reconciliation")
+    payload = _continuation_payload(recovery_commit=recovery_commit)
+    write_or_validate_json(cohort.paths.ambiguity_continuation, payload)
+    validate_ambiguity_continuation(cohort.paths, recovery_commit=recovery_commit)
+    master_budget_state(cohort.paths.ledger)
+    return payload
+
+
+def _select_cohort_manifest(
+    *,
+    paths: V3Paths,
+    built_manifest: Mapping[str, object],
+    base_dir: Path,
+    reconcile_ambiguity: bool,
+) -> Mapping[str, object]:
+    if not paths.cohort_manifest.exists():
+        return built_manifest
+    original_manifest = read_json_object(paths.cohort_manifest)
+    if original_manifest == dict(built_manifest):
+        return built_manifest
+    _validate_original_manifest_identity(original_manifest, built_manifest)
+    if not reconcile_ambiguity:
+        validate_ambiguity_continuation(
+            paths,
+            recovery_commit=_git_commit(base_dir),
+        )
+    return original_manifest
+
+
 def prepare_v3_cohort(
     *,
     base_dir: Path,
@@ -538,6 +768,7 @@ def prepare_v3_cohort(
     chunks: list[dict[str, Any]] | None = None,
     require_clean: bool = True,
     persist_manifest: bool = False,
+    reconcile_ambiguity: bool = False,
 ) -> PreparedV3Cohort:
     if paths.root.resolve() != _private_evaluation_root(base_dir, paths.root):
         raise V3EvaluationError("v3 evaluation root did not resolve canonically")
@@ -617,7 +848,13 @@ def prepare_v3_cohort(
         index_identity=index_identity,
         require_clean=require_clean,
     )
-    if persist_manifest:
+    selected_manifest = _select_cohort_manifest(
+        paths=paths,
+        built_manifest=cohort_manifest,
+        base_dir=base_dir,
+        reconcile_ambiguity=reconcile_ambiguity,
+    )
+    if persist_manifest and not paths.cohort_manifest.exists():
         paths.root.mkdir(parents=True, exist_ok=True)
         write_or_validate_json(paths.cohort_manifest, cohort_manifest)
     return PreparedV3Cohort(
@@ -628,7 +865,7 @@ def prepare_v3_cohort(
         collection=active_collection,
         chunks=active_chunks,
         corpus_trace=corpus_trace,
-        manifest=cohort_manifest,
+        manifest=selected_manifest,
     )
 
 
@@ -646,12 +883,18 @@ def master_usage_scope(
     os.environ["ARCHIVIST_USAGE_DB"] = str(paths.ledger)
     try:
         ledger = UsageLedger(paths.ledger)
+        effective_ceiling_nano = min(
+            ceiling_nano,
+            RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
+        )
         ledger.update_settings(
-            monthly_budget_usd=maximum_usd,
+            monthly_budget_usd=(
+                Decimal(effective_ceiling_nano) / Decimal(1_000_000_000)
+            ),
             warning_threshold_percent=80,
             hard_limit_enabled=True,
         )
-        _validate_master_ledger(paths.ledger)
+        master_budget_state(paths.ledger)
         try:
             with usage_scope(
                 project_id=MASTER_PROJECT_ID,
@@ -660,11 +903,11 @@ def master_usage_scope(
                 request_id=MASTER_REQUEST_ID,
                 enforce_budget=True,
                 allow_over_budget=False,
-                request_cost_ceiling_nano_usd=ceiling_nano,
+                request_cost_ceiling_nano_usd=effective_ceiling_nano,
             ):
                 yield ledger
         finally:
-            _validate_master_ledger(paths.ledger)
+            master_budget_state(paths.ledger)
     finally:
         if previous is None:
             os.environ.pop("ARCHIVIST_USAGE_DB", None)
@@ -672,7 +915,7 @@ def master_usage_scope(
             os.environ["ARCHIVIST_USAGE_DB"] = previous
 
 
-def _validate_master_ledger(path: Path) -> None:
+def validate_master_ledger(path: Path) -> None:
     if not path.exists():
         return
     with sqlite3.connect(path) as connection:
@@ -689,6 +932,46 @@ def _validate_master_ledger(path: Path) -> None:
         raise V3EvaluationError("shared ledger contains an unscoped paid event")
     if unpriced:
         raise V3EvaluationError("shared ledger contains unpriced usage")
+
+
+def master_budget_state(path: Path) -> dict[str, object]:
+    """Return the shared tracked budget after reserving the ambiguous H002 maximum."""
+
+    validate_master_ledger(path)
+    tracked = 0
+    if path.exists():
+        with sqlite3.connect(path) as connection:
+            tracked = int(
+                connection.execute(
+                    """
+                    SELECT COALESCE(SUM(estimated_cost_nano_usd), 0)
+                    FROM usage_events
+                    WHERE request_id = ?
+                    """,
+                    (MASTER_REQUEST_ID,),
+                ).fetchone()[0]
+            )
+    if tracked > RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD:
+        raise V3EvaluationError("tracked spend exceeds the recovery effective ceiling")
+
+    def exact_usd(nano_usd: int) -> str:
+        return f"{Decimal(nano_usd) / Decimal(1_000_000_000):.9f}"
+
+    remaining = RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD - tracked
+    return {
+        "owner_authorized_cap_nano_usd": MASTER_COST_CAP_NANO_USD,
+        "ambiguity_reserve_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
+        "effective_tracked_ceiling_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
+        "tracked_spend_nano_usd": tracked,
+        "effective_remaining_nano_usd": remaining,
+        "owner_authorized_cap_usd_exact": exact_usd(MASTER_COST_CAP_NANO_USD),
+        "ambiguity_reserve_usd_exact": exact_usd(AMBIGUOUS_H002_RESERVED_NANO_USD),
+        "effective_tracked_ceiling_usd_exact": exact_usd(
+            RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
+        ),
+        "tracked_spend_usd_exact": exact_usd(tracked),
+        "effective_remaining_usd_exact": exact_usd(remaining),
+    }
 
 
 def _first_batch(results: Mapping[str, object], key: str) -> list[object]:
@@ -1517,11 +1800,20 @@ def _validate_generation_pair(
     )
     if outcome.get("operation_evidence") != current_evidence:
         raise V3EvaluationError(f"{item_id} generation usage evidence changed")
-    _require_operation_evidence(
-        current_evidence,
-        completed_response_required=(status != "technical_failure" or provider_response_observed),
-        label=f"{item_id} generation",
+    reserved_h002 = (
+        status == "technical_failure"
+        and not provider_response_observed
+        and current_evidence.get("event_count") == 0
+        and _reserved_h002_zero_event_is_valid(cohort.paths, item_id=item_id)
     )
+    if not reserved_h002:
+        _require_operation_evidence(
+            current_evidence,
+            completed_response_required=(
+                status != "technical_failure" or provider_response_observed
+            ),
+            label=f"{item_id} generation",
+        )
     if status == "technical_failure" and outcome.get("delivered_answer_status") != "essential_fallback":
         raise V3EvaluationError(f"{item_id} technical generation did not bind its fallback")
     if status != "generated":
@@ -2353,12 +2645,33 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
         }
     ledger = UsageLedger(cohort.paths.ledger)
     usage = ledger.summary(recent_limit=0) if cohort.paths.ledger.exists() else None
+    budget = master_budget_state(cohort.paths.ledger)
+    accounted_worst_case_nano = (
+        int(budget["tracked_spend_nano_usd"])
+        + int(budget["ambiguity_reserve_nano_usd"])
+    )
+    continuation = read_json_object(cohort.paths.ambiguity_continuation)
     return {
         "schema": V3_PUBLIC_SUMMARY_SCHEMA,
         "evaluation_id": EVALUATION_ID,
         "classification": COHORT_CLASSIFICATION,
         "product_commit": PRODUCT_COMMIT,
         "harness_commit": cohort.manifest["system_under_test"]["harness_commit"],
+        "ambiguity_continuation": {
+            "schema": continuation["schema"],
+            "original_harness_commit": continuation["original_harness_commit"],
+            "recovery_harness_commit": continuation["recovery_harness_commit"],
+            "item_id": continuation["h002_ambiguous_attempt"]["item_id"],
+            "provider_boundary_attempt_count": continuation[
+                "h002_ambiguous_attempt"
+            ]["provider_boundary_attempt_count"],
+            "provider_response_observed": False,
+            "usage_event_count": 0,
+            "retried": False,
+            "continued_from_item_id": continuation["continuation_boundary"][
+                "next_item_id"
+            ],
+        },
         "item_count": len(generations),
         "phase_completeness": {
             "generation_outcomes": len(generations),
@@ -2377,6 +2690,10 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
             "disposition_counts": dict(dispositions),
             "failure_code_counts": dict(failure_codes),
             "fallback_count": statuses["essential_fallback"],
+            "delivered_essential_fallback_count": sum(
+                value.get("delivered_answer_status") == "essential_fallback"
+                for value in generations
+            ),
             "attempt_count": sum(int(value["attempt_count"]) for value in generations),
             "automatic_retries": 0,
             "query_embedding_provider_operations": 0,
@@ -2441,7 +2758,32 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
         },
         "cost": {
             "maximum_total_usd": float(MASTER_COST_CAP_USD),
+            "owner_authorized_cap_nano_usd": budget[
+                "owner_authorized_cap_nano_usd"
+            ],
+            "owner_authorized_cap_usd_exact": budget[
+                "owner_authorized_cap_usd_exact"
+            ],
+            "ambiguous_h002_projected_worst_case_reserved_nano_usd": budget[
+                "ambiguity_reserve_nano_usd"
+            ],
+            "ambiguous_h002_projected_worst_case_reserved_usd_exact": budget[
+                "ambiguity_reserve_usd_exact"
+            ],
+            "effective_tracked_ceiling_nano_usd": budget[
+                "effective_tracked_ceiling_nano_usd"
+            ],
+            "effective_tracked_ceiling_usd_exact": budget[
+                "effective_tracked_ceiling_usd_exact"
+            ],
+            "recorded_tracked_spend_nano_usd": budget["tracked_spend_nano_usd"],
+            "recorded_tracked_spend_usd_exact": budget["tracked_spend_usd_exact"],
             "recorded_total_usd": usage["all_time_usd"] if usage else 0.0,
+            "recorded_plus_h002_reserve_nano_usd": accounted_worst_case_nano,
+            "recorded_plus_h002_reserve_usd_exact": (
+                f"{Decimal(accounted_worst_case_nano) / Decimal(1_000_000_000):.9f}"
+            ),
+            "h002_actual_cost": "unknown_no_response_or_usage_observation",
             "unpriced_events": usage["unpriced_events"] if usage else 0,
             "operations": usage["operations"] if usage else [],
             "shared_with_development_and_social_phases": True,
@@ -2451,6 +2793,7 @@ def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
             "Cached query vectors eliminate query-embedding calls; reported authoring-boundary wall time is neither provider-only nor end-to-end latency.",
             "Semantic gold-claim coverage is an exploratory uncalibrated judge estimate, not owner-adjudicated formal scoring.",
             "Canonical model names are mutable provider snapshots; requested and returned IDs are retained per item.",
+            "H002 reached the provider boundary once but produced no response or usage observation; it was not retried, its exact projected worst-case cost was reserved, and the cohort continued at H003 under a separately hash-bound harness.",
         ],
     }
 
@@ -2463,12 +2806,14 @@ def write_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
 
 
 __all__ = [
+    "AMBIGUOUS_H002_RESERVED_NANO_USD",
     "COHORT_CLASSIFICATION",
     "EVALUATION_ID",
     "MASTER_COST_CAP_NANO_USD",
     "MASTER_COST_CAP_USD",
     "MASTER_REQUEST_ID",
     "PRODUCT_COMMIT",
+    "RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD",
     "PreparedV3Cohort",
     "ProviderCapturingClient",
     "V3EvaluationError",
@@ -2480,8 +2825,10 @@ __all__ = [
     "freeze_decomposition_instrument",
     "generate_professional_item",
     "master_usage_scope",
+    "master_budget_state",
     "prepare_v3_cohort",
     "preflight_all_cached_items",
+    "reconcile_generation_ambiguity",
     "require_complete_decomposition",
     "require_complete_generation",
     "require_instrument_freeze",
@@ -2490,5 +2837,7 @@ __all__ = [
     "run_exploratory_rubric_phase",
     "run_generation_phase",
     "run_held_out_decomposition_phase",
+    "validate_ambiguity_continuation",
+    "validate_master_ledger",
     "write_public_summary",
 ]

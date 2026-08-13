@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import retrieval
+import retrieval_authored_v3_evaluation as v3
 
 from archivist_modes import ArchivistMode
 from authored_response import (
@@ -15,8 +18,10 @@ from authored_response import (
 )
 from costs import TokenUsage, UsageLedger, current_usage_context
 from retrieval_authored_v3_evaluation import (
+    AMBIGUOUS_H002_RESERVED_NANO_USD,
     MASTER_COST_CAP_USD,
     MASTER_REQUEST_ID,
+    RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
     ProviderCapturingClient,
     V3EvaluationError,
     V3Paths,
@@ -26,6 +31,8 @@ from retrieval_authored_v3_evaluation import (
     default_paths,
     generate_professional_item,
     master_usage_scope,
+    master_budget_state,
+    reconcile_generation_ambiguity,
     retrieve_with_cached_embedding,
 )
 
@@ -276,6 +283,10 @@ def test_master_scope_reuses_one_request_id_and_one_ledger(tmp_path):
     with master_usage_scope(paths, maximum_usd=Decimal("7.00"), turn_id="G001:decomposition"):
         context = current_usage_context()
         assert context.request_id == MASTER_REQUEST_ID
+        assert (
+            context.request_cost_ceiling_nano_usd
+            == RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
+        )
         UsageLedger().record(
             response_id="response-one",
             operation="eval_claim_decomposition_v2",
@@ -325,3 +336,238 @@ def test_started_provider_attempt_without_usage_is_ambiguous_and_stops():
             completed_response_required=False,
             label="H001 generation",
         )
+
+
+def test_recovery_budget_reserves_exact_h002_worst_case_without_creating_ledger(
+    tmp_path,
+):
+    ledger = tmp_path / "absent.sqlite3"
+
+    state = master_budget_state(ledger)
+
+    assert not ledger.exists()
+    assert state == {
+        "owner_authorized_cap_nano_usd": 7_000_000_000,
+        "ambiguity_reserve_nano_usd": AMBIGUOUS_H002_RESERVED_NANO_USD,
+        "effective_tracked_ceiling_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
+        "tracked_spend_nano_usd": 0,
+        "effective_remaining_nano_usd": RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
+        "owner_authorized_cap_usd_exact": "7.000000000",
+        "ambiguity_reserve_usd_exact": "0.399575000",
+        "effective_tracked_ceiling_usd_exact": "6.600425000",
+        "tracked_spend_usd_exact": "0.000000000",
+        "effective_remaining_usd_exact": "6.600425000",
+    }
+
+
+def _write_synthetic_reserved_h002(monkeypatch, paths: V3Paths) -> None:
+    manifest = {"schema": "original-manifest", "sealed": True}
+    intent = {
+        "schema": "intent",
+        "item_id": "H002",
+        "attempt_count": 1,
+    }
+    outcome = {
+        "schema": "outcome",
+        "item_id": "H002",
+        "provider_attempt_count": 1,
+        "status": "technical_failure",
+        "delivered_answer_status": "essential_fallback",
+        "provider": {"response_id": None},
+    }
+    values = (
+        (
+            paths.cohort_manifest,
+            manifest,
+            "EXPECTED_ORIGINAL_COHORT_MANIFEST_FILE_SHA256",
+            "EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256",
+        ),
+        (
+            paths.root / "items" / "H002" / "generation-intent.json",
+            intent,
+            "EXPECTED_H002_GENERATION_INTENT_FILE_SHA256",
+            "EXPECTED_H002_GENERATION_INTENT_CANONICAL_SHA256",
+        ),
+        (
+            paths.root / "items" / "H002" / "generation.json",
+            outcome,
+            "EXPECTED_H002_GENERATION_OUTCOME_FILE_SHA256",
+            "EXPECTED_H002_GENERATION_OUTCOME_CANONICAL_SHA256",
+        ),
+    )
+    for path, value, file_constant, canonical_constant in values:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        monkeypatch.setattr(v3, file_constant, hashlib.sha256(path.read_bytes()).hexdigest())
+        monkeypatch.setattr(v3, canonical_constant, v3.canonical_json_sha256(value))
+
+
+def test_reconcile_seals_only_exact_h002_zero_event_and_no_h003(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    _write_synthetic_reserved_h002(monkeypatch, paths)
+    recovery_commit = "1" * 40
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: recovery_commit)
+
+    continuation = reconcile_generation_ambiguity(
+        SimpleNamespace(paths=paths),
+        base_dir=tmp_path,
+    )
+
+    assert continuation["original_harness_commit"] == v3.ORIGINAL_HARNESS_COMMIT
+    assert continuation["recovery_harness_commit"] == recovery_commit
+    assert continuation["preservation"]["h002_retried"] is False
+    assert continuation["h002_ambiguous_attempt"]["usage_event_count"] == 0
+    assert continuation["continuation_boundary"] == {
+        "next_item_id": "H003",
+        "h003_generation_intent_existed_at_reconciliation": False,
+        "h003_generation_outcome_existed_at_reconciliation": False,
+        "h003_usage_event_count_at_reconciliation": 0,
+    }
+    assert continuation["cost_reservation"]["effective_tracked_ceiling_nano_usd"] == (
+        6_600_425_000
+    )
+
+
+def test_reconcile_rejects_any_h003_attempt_artifact(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    _write_synthetic_reserved_h002(monkeypatch, paths)
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "2" * 40)
+    h003_intent = paths.root / "items" / "H003" / "generation-intent.json"
+    h003_intent.parent.mkdir(parents=True, exist_ok=True)
+    h003_intent.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(V3EvaluationError, match="H003 was already attempted"):
+        reconcile_generation_ambiguity(
+            SimpleNamespace(paths=paths),
+            base_dir=tmp_path,
+        )
+
+
+def test_reserved_zero_event_exception_is_h002_only(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    observed: list[tuple[Path, str]] = []
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "3" * 40)
+    monkeypatch.setattr(
+        v3,
+        "validate_ambiguity_continuation",
+        lambda value, *, recovery_commit: observed.append((value.root, recovery_commit)),
+    )
+
+    assert v3._reserved_h002_zero_event_is_valid(paths, item_id="H002") is True
+    assert v3._reserved_h002_zero_event_is_valid(paths, item_id="H003") is False
+    assert observed == [(paths.root, "3" * 40)]
+
+
+def test_original_manifest_may_differ_only_by_bound_recovery_commit(monkeypatch):
+    original = {
+        "schema": "manifest",
+        "system_under_test": {"harness_commit": v3.ORIGINAL_HARNESS_COMMIT},
+        "working_tree": {
+            "working_tree": "clean",
+            "git_commit": v3.ORIGINAL_HARNESS_COMMIT,
+            "dirty_fingerprint": None,
+        },
+        "sealed_identity": "unchanged",
+    }
+    current = json.loads(json.dumps(original))
+    current["system_under_test"]["harness_commit"] = "4" * 40
+    current["working_tree"]["git_commit"] = "4" * 40
+    monkeypatch.setattr(
+        v3,
+        "EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256",
+        v3.canonical_json_sha256(original),
+    )
+
+    v3._validate_original_manifest_identity(original, current)
+
+    current["sealed_identity"] = "changed"
+    with pytest.raises(V3EvaluationError, match="changed more than"):
+        v3._validate_original_manifest_identity(original, current)
+
+
+def test_manifest_loader_requires_valid_continuation_when_head_differs(
+    monkeypatch,
+    tmp_path,
+):
+    paths = _paths(tmp_path / "run")
+    original = {
+        "schema": "manifest",
+        "system_under_test": {"harness_commit": v3.ORIGINAL_HARNESS_COMMIT},
+        "working_tree": {
+            "working_tree": "clean",
+            "git_commit": v3.ORIGINAL_HARNESS_COMMIT,
+            "dirty_fingerprint": None,
+        },
+    }
+    current = json.loads(json.dumps(original))
+    current["system_under_test"]["harness_commit"] = "5" * 40
+    current["working_tree"]["git_commit"] = "5" * 40
+    paths.cohort_manifest.parent.mkdir(parents=True, exist_ok=True)
+    paths.cohort_manifest.write_text(
+        json.dumps(original, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3,
+        "EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256",
+        v3.canonical_json_sha256(original),
+    )
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "5" * 40)
+    monkeypatch.setattr(
+        v3,
+        "validate_ambiguity_continuation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            V3EvaluationError("invalid continuation")
+        ),
+    )
+
+    with pytest.raises(V3EvaluationError, match="invalid continuation"):
+        v3._select_cohort_manifest(
+            paths=paths,
+            built_manifest=current,
+            base_dir=tmp_path,
+            reconcile_ambiguity=False,
+        )
+
+
+def test_manifest_loader_accepts_original_after_continuation_validation(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    original = {
+        "schema": "manifest",
+        "system_under_test": {"harness_commit": v3.ORIGINAL_HARNESS_COMMIT},
+        "working_tree": {
+            "working_tree": "clean",
+            "git_commit": v3.ORIGINAL_HARNESS_COMMIT,
+            "dirty_fingerprint": None,
+        },
+    }
+    current = json.loads(json.dumps(original))
+    current["system_under_test"]["harness_commit"] = "6" * 40
+    current["working_tree"]["git_commit"] = "6" * 40
+    paths.cohort_manifest.parent.mkdir(parents=True, exist_ok=True)
+    paths.cohort_manifest.write_text(
+        json.dumps(original, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3,
+        "EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256",
+        v3.canonical_json_sha256(original),
+    )
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "6" * 40)
+    observed: list[str] = []
+    monkeypatch.setattr(
+        v3,
+        "validate_ambiguity_continuation",
+        lambda _paths, *, recovery_commit: observed.append(recovery_commit),
+    )
+
+    selected = v3._select_cohort_manifest(
+        paths=paths,
+        built_manifest=current,
+        base_dir=tmp_path,
+        reconcile_ambiguity=False,
+    )
+
+    assert selected == original
+    assert observed == ["6" * 40]

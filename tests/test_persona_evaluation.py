@@ -14,11 +14,15 @@ from character_conversation import (
 )
 from costs import TokenUsage, UsageLedger, current_usage_context
 from persona_evaluation import (
+    AMBIGUITY_RESERVE_NANO_USD,
     DEFAULT_RUN_ROOT,
     DEFAULT_USAGE_DB,
     MASTER_COST_CEILING_NANO_USD,
+    MASTER_COST_CEILING_USD,
     MASTER_PROJECT_ID,
     MASTER_REQUEST_ID,
+    OWNER_AUTHORIZED_COST_CAP_NANO_USD,
+    OWNER_AUTHORIZED_COST_CAP_USD,
     PERSONA_CONVERSATION_ID,
     PERSONA_EVALUATION_CASES,
     PersonaEvaluationError,
@@ -28,10 +32,12 @@ from persona_evaluation import (
     run_evaluation,
 )
 from retrieval_authored_v3_evaluation import (
+    AMBIGUOUS_H002_RESERVED_NANO_USD,
     EVALUATION_ID,
     MASTER_COST_CAP_NANO_USD,
     MASTER_COST_CAP_USD,
     MASTER_REQUEST_ID as V3_MASTER_REQUEST_ID,
+    RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD,
     default_paths,
 )
 
@@ -137,7 +143,13 @@ def test_manifest_is_provider_free_and_covers_current_generated_registry(tmp_pat
     assert manifest["verbosity"] == "low"
     assert manifest["max_output_tokens"] == 576
     assert manifest["master_request_id"] == MASTER_REQUEST_ID
-    assert manifest["master_cost_ceiling_nano_usd"] == 7_000_000_000
+    assert manifest["owner_authorized_cap_nano_usd"] == 7_000_000_000
+    assert manifest["ambiguity_reserve_nano_usd"] == 399_575_000
+    assert manifest["effective_tracked_ceiling_nano_usd"] == 6_600_425_000
+    assert manifest["effective_tracked_ceiling_usd_exact"] == "6.600425000"
+    assert manifest["projected_cohort_cost_nano_usd"] == sum(
+        item["projected_cost_nano_usd"] for item in manifest["items"]
+    )
     assert manifest["input_boundary"] == {
         "question_and_character_instructions_only": True,
         "history": False,
@@ -159,7 +171,11 @@ def test_defaults_share_adapter_root_ledger_request_and_cap():
     assert DEFAULT_USAGE_DB == shared.ledger
     assert MASTER_REQUEST_ID == V3_MASTER_REQUEST_ID
     assert MASTER_REQUEST_ID == f"{EVALUATION_ID}-master"
-    assert MASTER_COST_CEILING_NANO_USD == MASTER_COST_CAP_NANO_USD
+    assert OWNER_AUTHORIZED_COST_CAP_NANO_USD == MASTER_COST_CAP_NANO_USD
+    assert OWNER_AUTHORIZED_COST_CAP_USD == MASTER_COST_CAP_USD
+    assert AMBIGUITY_RESERVE_NANO_USD == AMBIGUOUS_H002_RESERVED_NANO_USD
+    assert MASTER_COST_CEILING_NANO_USD == RECOVERY_EFFECTIVE_TRACKED_CAP_NANO_USD
+    assert MASTER_COST_CEILING_USD == Decimal("6.600425")
     assert MASTER_COST_CAP_USD == Decimal("7.00")
 
 
@@ -192,7 +208,7 @@ def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
     )
     original_usage_db = os.environ.get("ARCHIVIST_USAGE_DB")
     ledger = UsageLedger(usage_db)
-    original_settings = ledger.update_settings(
+    ledger.update_settings(
         monthly_budget_usd=None,
         warning_threshold_percent=73,
         hard_limit_enabled=False,
@@ -220,11 +236,29 @@ def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
     assert report["all_persona_replies_unique"] is True
     assert report["cohort_cost_nano_usd"] > 0
     assert report["cohort_cost_nano_usd"] < MASTER_COST_CEILING_NANO_USD
+    assert report["owner_authorized_cap_nano_usd"] == 7_000_000_000
+    assert report["owner_authorized_cap_usd_exact"] == "7.000000000"
+    assert report["ambiguity_reserve_nano_usd"] == 399_575_000
+    assert report["ambiguity_reserve_usd_exact"] == "0.399575000"
+    assert report["effective_tracked_ceiling_nano_usd"] == 6_600_425_000
+    assert report["effective_tracked_ceiling_usd_exact"] == "6.600425000"
+    assert report["effective_remaining_nano_usd_at_report"] == (
+        MASTER_COST_CEILING_NANO_USD
+        - report["master_ledger_cost_nano_usd_at_report"]
+    )
+    assert Decimal(report["effective_remaining_usd_exact_at_report"]) == (
+        Decimal(report["effective_remaining_nano_usd_at_report"])
+        / Decimal(1_000_000_000)
+    )
     assert len(report["pairwise_token_jaccard"]) == 6
     assert all(mode["own_signature_hits"] for mode in report["modes"])
     assert all(mode["follow_up_to_manuscript"] for mode in report["modes"])
     assert ledger.request_usage_cost_state(MASTER_REQUEST_ID)["event_count"] == 4
-    assert ledger.get_settings() == original_settings
+    assert ledger.get_settings() == {
+        "monthly_budget_usd": 6.600425,
+        "warning_threshold_percent": 80,
+        "hard_limit_enabled": True,
+    }
     assert os.environ.get("ARCHIVIST_USAGE_DB") == original_usage_db
     assert len(list((run_root / "attempts").glob("*/intent.json"))) == 4
     assert len(list((run_root / "attempts").glob("*/outcome.json"))) == 4
@@ -335,11 +369,89 @@ def test_shared_master_cap_blocks_before_intent_or_client(tmp_path):
         request_id=MASTER_REQUEST_ID,
     )
 
-    with pytest.raises(PersonaEvaluationError, match="insufficient capacity"):
+    with pytest.raises(PersonaEvaluationError, match="recovery effective ceiling"):
         run_evaluation(
             authorized=True,
             maximum_usd=Decimal("7.00"),
             client_factory=lambda: pytest.fail("cap failure constructed a client"),
+            run_root=run_root,
+            usage_db=usage_db,
+            evaluation_root=evaluation_root,
+        )
+    assert not (run_root / "attempts").exists()
+
+
+def test_h002_reserve_blocks_projection_that_would_fit_under_owner_cap(tmp_path):
+    evaluation_root, run_root, usage_db = _paths(tmp_path)
+    manifest = prepare_evaluation(
+        run_root=run_root,
+        usage_db=usage_db,
+        evaluation_root=evaluation_root,
+    )
+    projected = int(manifest["projected_cohort_cost_nano_usd"])
+    # Sol output is 30,000 nano-USD/token. Choose prior spend so all four
+    # projections fit beneath $7, but not beneath the H002-reserved ceiling.
+    output_tokens = (MASTER_COST_CEILING_NANO_USD - projected) // 30_000 + 1
+    UsageLedger(usage_db).record(
+        response_id="synthetic-prior-reserve-edge",
+        operation="answer_generation",
+        requested_model="gpt-5.6-sol",
+        actual_model="gpt-5.6-sol",
+        usage=TokenUsage(output_tokens=output_tokens, total_tokens=output_tokens),
+        project_id=MASTER_PROJECT_ID,
+        conversation_id="retrieval-authored-v3-other-evaluation",
+        turn_id="prior-reserve-edge",
+        request_id=MASTER_REQUEST_ID,
+    )
+    state = UsageLedger(usage_db).request_usage_cost_state(MASTER_REQUEST_ID)
+    assert int(state["estimated_cost_nano_usd"]) + projected > (
+        MASTER_COST_CEILING_NANO_USD
+    )
+    assert int(state["estimated_cost_nano_usd"]) + projected < (
+        OWNER_AUTHORIZED_COST_CAP_NANO_USD
+    )
+
+    with pytest.raises(PersonaEvaluationError, match="effective tracked ceiling"):
+        run_evaluation(
+            authorized=True,
+            maximum_usd=Decimal("7.00"),
+            client_factory=lambda: pytest.fail("reserve failure constructed a client"),
+            run_root=run_root,
+            usage_db=usage_db,
+            evaluation_root=evaluation_root,
+        )
+    assert not (run_root / "attempts").exists()
+
+
+@pytest.mark.parametrize("failure_kind", ("foreign", "unpriced"))
+def test_master_ledger_rejects_foreign_or_unpriced_state_before_client(
+    tmp_path,
+    failure_kind,
+):
+    evaluation_root, run_root, usage_db = _paths(tmp_path)
+    prepare_evaluation(
+        run_root=run_root,
+        usage_db=usage_db,
+        evaluation_root=evaluation_root,
+    )
+    UsageLedger(usage_db).record(
+        response_id=f"synthetic-{failure_kind}",
+        operation="answer_generation",
+        requested_model=("unknown-persona-model" if failure_kind == "unpriced" else "gpt-5.6-sol"),
+        actual_model=("unknown-persona-model" if failure_kind == "unpriced" else "gpt-5.6-sol"),
+        usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+        project_id=MASTER_PROJECT_ID,
+        conversation_id=PERSONA_CONVERSATION_ID,
+        turn_id=f"prior-{failure_kind}",
+        request_id=("another-request" if failure_kind == "foreign" else MASTER_REQUEST_ID),
+    )
+
+    message = "another request scope" if failure_kind == "foreign" else "unpriced usage"
+    with pytest.raises(PersonaEvaluationError, match=message):
+        run_evaluation(
+            authorized=True,
+            maximum_usd=Decimal("7.00"),
+            client_factory=lambda: pytest.fail("invalid ledger built a client"),
             run_root=run_root,
             usage_db=usage_db,
             evaluation_root=evaluation_root,

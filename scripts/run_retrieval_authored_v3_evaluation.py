@@ -23,6 +23,7 @@ from retrieval_authored_v3_evaluation import (  # noqa: E402
     freeze_decomposition_instrument,
     preflight_all_cached_items,
     prepare_v3_cohort,
+    reconcile_generation_ambiguity,
     run_development_decomposition_phase,
     run_exploratory_rubric_phase,
     run_generation_phase,
@@ -51,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "preflight",
+            "reconcile-ambiguity",
             "dev-decompose",
             "freeze",
             "generate",
@@ -122,6 +124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             paths=paths,
             require_clean=True,
             persist_manifest=args.command != "preflight",
+            reconcile_ambiguity=args.command == "reconcile-ambiguity",
         )
         if args.command == "preflight":
             readiness = preflight_all_cached_items(cohort)
@@ -145,6 +148,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{readiness['items_ready_for_one_authoring_call']}/"
                 f"{readiness['item_count']} items; minimum dossier units "
                 f"{readiness['minimum_dossier_units']}"
+            )
+            return 0
+        if args.command == "reconcile-ambiguity":
+            value = reconcile_generation_ambiguity(cohort, base_dir=BASE_DIR)
+            reservation = value["cost_reservation"]
+            print("SEALED H002 ZERO-EVENT AMBIGUITY CONTINUATION")
+            print("H002 will not be retried; continuation begins with H003.")
+            print(
+                "Reserved nano-USD: "
+                f"{reservation['ambiguous_h002_projected_worst_case_reserved_nano_usd']}"
+            )
+            print(
+                "Effective tracked ceiling nano-USD: "
+                f"{reservation['effective_tracked_ceiling_nano_usd']}"
             )
             return 0
         if args.command == "dev-decompose":

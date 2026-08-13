@@ -41,19 +41,27 @@ evaluation:
 - ledger: `usage.sqlite3` beneath that root
 - request ID: `retrieval-authored-v3-professional-2026-08-13-master`
 - project ID: `archivist-v3-evaluation`
-- cumulative request ceiling: 7,000,000,000 nano-USD
+- owner-authorized cumulative cap: 7,000,000,000 nano-USD (`$7.00`)
+- H002 ambiguity reserve: 399,575,000 nano-USD
+- effective tracked ceiling: 6,600,425,000 nano-USD (`$6.600425`)
 
-The runtime scope enables budget enforcement, disallows over-budget execution, and passes the same
-request-level ceiling to every item. It does not alter ledger budget settings.
+The reserve treats the unledgered but potentially billable H002 attempt conservatively. The CLI
+still requires the owner's exact `$7.00` authorization; the reserve is not a smaller authorization
+and does not create another allowance. Before any persona call, the harness validates that the
+shared ledger contains only the master request and no unpriced event. It then requires the full
+untouched four-call projection to fit within the adapter-reported effective remainder. Every call
+uses 6,600,425,000 nano-USD as its request ceiling, and the shared ledger's monthly hard budget is
+set to the same effective ceiling. The manifest, authorization artifact, attempt intents, and final
+report distinguish the owner cap, ambiguity reserve, effective ceiling, and tracked remainder.
 
 ## Fail-closed artifacts and resume
 
 The run writes a sealed intent before constructing a client or attempting an item. A valid outcome
 must match exactly one priced `answer_generation` event in the shared ledger for that item's turn
 ID. Completed outcomes are skipped on resume. An intent without a provable outcome, a mismatched
-ledger event count, unpriced usage, a changed manifest, or insufficient capacity beneath the
-shared ceiling stops the cohort without replaying the item. Existing artifacts are never
-overwritten.
+ledger event count, foreign request scope, unpriced usage, a changed manifest, or insufficient
+capacity beneath the reserve-adjusted ceiling stops the cohort without replaying the item.
+Existing artifacts are never overwritten.
 
 Private, gitignored outcome artifacts retain the response needed for local audit. The final report
 contains no verbatim response prose. Apart from mode IDs, it retains only hashes, counts, and

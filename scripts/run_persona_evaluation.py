@@ -46,14 +46,18 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Acknowledge four fixed no-retry Sol calls sharing the retrieval-authored-v3 "
-            "$7 master ledger cap."
+            "$7 owner authorization; the adapter's active ambiguity reserve lowers the "
+            "enforced tracked ceiling."
         ),
     )
     run.add_argument(
         "--max-cost-usd",
         type=Decimal,
         required=True,
-        help="Must be exactly 7.00; this is the shared master cap, not a new allowance.",
+        help=(
+            "Must be exactly 7.00; this is the owner's shared maximum, not a new allowance. "
+            "Any adapter-reported ambiguity reserve is enforced beneath it."
+        ),
     )
 
     report = subparsers.add_parser(
