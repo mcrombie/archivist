@@ -817,6 +817,40 @@ def test_reserved_zero_event_exception_is_chain_derived(monkeypatch, tmp_path):
     assert v3._reserved_zero_event_is_valid(paths, item_id="H004") is False
 
 
+def test_reserved_zero_event_terminal_closure_uses_descendant_validation_only(
+    monkeypatch,
+    tmp_path,
+):
+    paths = _paths(tmp_path / "run")
+    observed: list[tuple[Path, str]] = []
+    monkeypatch.setattr(
+        v3,
+        "validate_terminal_closure_continuation",
+        lambda _paths, *, base_dir, closure_commit: observed.append(
+            (base_dir, closure_commit)
+        ),
+    )
+    monkeypatch.setattr(
+        v3,
+        "validate_ambiguity_continuation",
+        lambda *_args, **_kwargs: pytest.fail("terminal closure used exact binding"),
+    )
+    monkeypatch.setattr(
+        v3,
+        "_ambiguity_chain_state",
+        lambda _paths: {"reservations": [{"turn_id": "H014:decomposition"}]},
+    )
+
+    assert v3._reserved_zero_event_is_valid(
+        paths,
+        item_id="H014",
+        phase="decomposition",
+        terminal_closure_base_dir=tmp_path,
+        terminal_closure_commit="c" * 40,
+    )
+    assert observed == [(tmp_path, "c" * 40)]
+
+
 def test_decomposition_resume_skips_only_declared_zero_event(monkeypatch, tmp_path):
     paths = _paths(tmp_path / "run")
     item_id = "H001"
@@ -1095,7 +1129,12 @@ def test_diagnostic_inventory_uses_sealed_noncontiguous_cohort_ids(tmp_path):
 def test_diagnostic_terminal_state_requires_reconciled_h014(monkeypatch, tmp_path):
     paths = _paths(tmp_path / "run")
     cohort = SimpleNamespace(paths=paths)
-    monkeypatch.setattr(v3, "require_complete_generation", lambda _cohort: None)
+    observed_generation_context: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        v3,
+        "require_complete_generation",
+        lambda _cohort, **kwargs: observed_generation_context.append(kwargs),
+    )
     monkeypatch.setattr(v3, "require_instrument_freeze", lambda _paths: None)
     monkeypatch.setattr(v3, "_git_commit", lambda _base: "9" * 40)
     monkeypatch.setattr(
@@ -1110,6 +1149,12 @@ def test_diagnostic_terminal_state_requires_reconciled_h014(monkeypatch, tmp_pat
 
     with pytest.raises(V3EvaluationError, match="requires the sealed H014"):
         v3._validate_diagnostic_terminal_state(cohort, base_dir=tmp_path)
+    assert observed_generation_context == [
+        {
+            "terminal_closure_base_dir": tmp_path,
+            "terminal_closure_commit": "9" * 40,
+        }
+    ]
 
 
 def _manifest_pair_for_continuation_test(monkeypatch, paths: V3Paths):

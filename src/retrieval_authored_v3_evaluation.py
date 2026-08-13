@@ -1531,9 +1531,20 @@ def _reserved_zero_event_is_valid(
     *,
     item_id: str,
     phase: str = "generation",
+    terminal_closure_base_dir: Path | None = None,
+    terminal_closure_commit: str | None = None,
 ) -> bool:
-    recovery_commit = _git_commit(Path(__file__).resolve().parent.parent)
-    validate_ambiguity_continuation(paths, recovery_commit=recovery_commit)
+    if terminal_closure_base_dir is not None or terminal_closure_commit is not None:
+        if terminal_closure_base_dir is None or terminal_closure_commit is None:
+            raise V3EvaluationError("terminal closure validation context is incomplete")
+        validate_terminal_closure_continuation(
+            paths,
+            base_dir=terminal_closure_base_dir,
+            closure_commit=terminal_closure_commit,
+        )
+    else:
+        recovery_commit = _git_commit(Path(__file__).resolve().parent.parent)
+        validate_ambiguity_continuation(paths, recovery_commit=recovery_commit)
     state = _ambiguity_chain_state(paths)
     turn_id = f"{item_id}:{phase}"
     return turn_id in {
@@ -3262,6 +3273,8 @@ def _validate_generation_pair(
     *,
     item: Mapping[str, object],
     intent: Mapping[str, object],
+    terminal_closure_base_dir: Path | None = None,
+    terminal_closure_commit: str | None = None,
 ) -> Mapping[str, object]:
     item_id = _required_string(item, "id")
     root = _item_dir(cohort.paths, item_id)
@@ -3309,7 +3322,12 @@ def _validate_generation_pair(
         status == "technical_failure"
         and not provider_response_observed
         and current_evidence.get("event_count") == 0
-        and _reserved_zero_event_is_valid(cohort.paths, item_id=item_id)
+        and _reserved_zero_event_is_valid(
+            cohort.paths,
+            item_id=item_id,
+            terminal_closure_base_dir=terminal_closure_base_dir,
+            terminal_closure_commit=terminal_closure_commit,
+        )
     )
     if not reserved_h002:
         _require_operation_evidence(
@@ -3338,7 +3356,12 @@ def _validate_generation_pair(
     return outcome
 
 
-def require_complete_generation(cohort: PreparedV3Cohort) -> None:
+def require_complete_generation(
+    cohort: PreparedV3Cohort,
+    *,
+    terminal_closure_base_dir: Path | None = None,
+    terminal_closure_commit: str | None = None,
+) -> None:
     missing = [
         _required_string(item, "id")
         for item in cohort.items
@@ -3352,7 +3375,13 @@ def require_complete_generation(cohort: PreparedV3Cohort) -> None:
             **_generation_intent(item, cohort.manifest),
             "instrument_freeze_sha256": freeze_sha256,
         }
-        _validate_generation_pair(cohort, item=item, intent=intent)
+        _validate_generation_pair(
+            cohort,
+            item=item,
+            intent=intent,
+            terminal_closure_base_dir=terminal_closure_base_dir,
+            terminal_closure_commit=terminal_closure_commit,
+        )
 
 
 def _dev_answer(path: Path) -> str:
@@ -3461,6 +3490,8 @@ def _validate_decomposition_pair(
     item_id: str,
     intent: Mapping[str, object],
     development: bool,
+    terminal_closure_base_dir: Path | None = None,
+    terminal_closure_commit: str | None = None,
 ) -> Mapping[str, object]:
     intent_path, outcome_path = _decomposition_paths(
         paths,
@@ -3503,6 +3534,8 @@ def _validate_decomposition_pair(
             paths,
             item_id=item_id,
             phase="decomposition",
+            terminal_closure_base_dir=terminal_closure_base_dir,
+            terminal_closure_commit=terminal_closure_commit,
         )
     )
     if not reserved_zero_event:
@@ -4129,13 +4162,18 @@ def _validate_diagnostic_terminal_state(
     *,
     base_dir: Path,
 ) -> dict[str, object]:
-    require_complete_generation(cohort)
-    require_instrument_freeze(cohort.paths)
+    closure_commit = _git_commit(base_dir)
     validate_terminal_closure_continuation(
         cohort.paths,
         base_dir=base_dir,
-        closure_commit=_git_commit(base_dir),
+        closure_commit=closure_commit,
     )
+    require_complete_generation(
+        cohort,
+        terminal_closure_base_dir=base_dir,
+        terminal_closure_commit=closure_commit,
+    )
+    require_instrument_freeze(cohort.paths)
     chain = _ambiguity_chain_state(cohort.paths)
     reservations = chain["reservations"]
     if (
@@ -4165,6 +4203,8 @@ def _validate_diagnostic_terminal_state(
                 item_id=item_id,
                 intent=intent,
                 development=False,
+                terminal_closure_base_dir=base_dir,
+                terminal_closure_commit=closure_commit,
             )
             present_decompositions.append(item_id)
         rubric_intent = _item_dir(cohort.paths, item_id) / "rubric-intent.json"
