@@ -122,7 +122,7 @@ After restart:
 2. `GET /api/health` returns `200` with `{"status":"ready"}`.
 3. `GET /api/version` reports schema `archivist.public_runtime_identity/4`, a non-null
    `deployment_commit` equal to the exact commit deployed by Render, one `process_epoch`,
-   `answer_policy_version=retrieval-authored-v3`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
+   `answer_policy_version=retrieval-authored-v4`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
    `embedding_model=text-embedding-3-small`, `generated_prose_model=gpt-5.6-sol`, the corpus-
    manifest SHA-256, the frozen-candidate identity,
    `public-rag-request-ceiling-v1`, and `2000000000` nano-USD (`$2.00`) as the public RAG request
@@ -141,12 +141,19 @@ After restart:
 
 Do not connect Cromblog until all eleven checks pass on the deployed URL.
 
+Current manuscript generation keeps the same Sol model, strict `/1` Structured Outputs,
+1,800-token ceiling, shared client, and no-retry rule. Its shared provider allowance is 35 seconds:
+embedding is capped at eight seconds and authoring at thirty. Internal text-free diagnostics
+distinguish timeout, transport failure, provider exception or refusal, structured-output rejection,
+and local contract/render validation; the reader still receives only the generic Essential-
+fallback notice.
+
 Also confirm without sending another request that the composer summary says **Settings**, the
 active **Perspective** appears above the input, and any facet or appearance override changes the
 active top-right and Settings-panel label to exactly **Custom** while retaining the base preset in
 its explanatory copy.
 
-The post-v3 behavior check is separately costed and separately authorized: one generated-mode
+The post-v4 behavior check is separately costed and separately authorized: one generated-mode
 personal question should return an uncited in-character reply with a manuscript-leading question
 and record exactly one `answer_generation` event, with no embedding event or source payload. The
 character call has a 12-second timeout, low reasoning, low verbosity, and a 576-token output
@@ -255,7 +262,7 @@ Before promoting this transport, run a live smoke through `https://archivist.mcr
 This smoke checks deployment behavior that the offline suite cannot establish, including Render
 proxy buffering and stream cleanup. It requires fresh authorization because current Essential
 retrieval sends the question to the embedding provider and generated modes also send the dossier
-to Sol. No such live smoke has run for `retrieval-authored-v3` or
+to Sol. No such live smoke has run for `retrieval-authored-v4` or
 `character-conversation-v2`; this runbook makes no latency,
 quality, or model-performance claim.
 
@@ -318,7 +325,7 @@ provider operation before send, and requires strict request-scoped usage.
 
 For a newly prepared current-policy manifest, each successful Essential request must record exactly
 one `query_embedding` event and no authored-response event. The manifest binds runtime identity
-schema 4, `retrieval-authored-v3`, `hybrid_bm25_rrf`, and `text-embedding-3-small`. This is a future
+schema 4, `retrieval-authored-v4`, `hybrid_bm25_rrf`, and `text-embedding-3-small`. This is a future
 cohort contract only; it does not reinterpret or alter the sealed production-performance-v1
 manifest, identity, usage ledger, or report.
 

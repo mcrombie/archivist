@@ -1,6 +1,6 @@
 # Answer Delivery Modes
 
-Archivist offers two delivery contracts over the same `retrieval-authored-v3` answer pipeline.
+Archivist offers two delivery contracts over the same `retrieval-authored-v4` answer pipeline.
 Delivery changes when eligible material crosses the server boundary; it does not select another
 corpus, retrieval policy, evidence scope, or interpretive setting. The browser exposes no V26/V27
 policy or latency selector.
@@ -28,7 +28,7 @@ dossier-unit IDs; local code verifies that those IDs exist and maps them to `[So
 runs may contain only voice, metaphor, reactions, and fictional character business. The model does
 not write citation labels. Unknown IDs, forged labels, malformed structure, links, HTML, or
 extended manuscript copying fail closed to the direct Essential answer without a retry.
-The v3 policy keeps authored input/output schemas `archivist.authored_response_input/1` and
+The v4 policy keeps authored input/output schemas `archivist.authored_response_input/1` and
 `archivist.retrieval_authored_answer/1` and renderer `retrieval-authored-renderer-v1`.
 
 This is a structural provenance boundary, not a semantic judge. Local support-ID resolution does
@@ -104,18 +104,21 @@ Current Essential uses one priced embedding operation. A generated manuscript tu
 operations total: the same embedding request plus one authored-response request. There is no
 planner, judge, repair, or automatic retry call in this current path. Provider usage is recorded by
 operation and remains inside the ordinary public budget and per-request ceiling. The provider
-operations share one 25-second provider deadline. Retrieval receives at most eight seconds; the
-authored response receives at most twenty seconds of the time that remains. If less than one second
+operations share one 35-second provider deadline. Retrieval receives at most eight seconds; the
+authored response receives at most thirty seconds of the time that remains. If less than one second
 remains after retrieval and local dossier construction, Archivist skips authoring and returns the
 direct Essential evidence. These are fail-fast implementation bounds, not an end-to-end latency
-guarantee.
+guarantee. Text-free internal diagnostics distinguish request timeout, transport failure, generic
+provider exception, provider refusal, structured-output rejection, and local contract-validation
+failure. The reader-facing Essential-fallback notice remains generic.
 
 A character-social turn has one provider operation total: the compact Sol answer-generation call.
 It does not enter the embedding/retrieval deadline path and never starts a second provider call.
 Its 576-token ceiling and low verbosity are latency-oriented design choices, not measured speed.
 
 These choices are latency hypotheses, not measurements. No live smoke, paid latency cohort, or
-quality cohort has run for `retrieval-authored-v3` or `character-conversation-v2`. The earlier Edwin Sandys timings measured the
+quality cohort has run for `retrieval-authored-v4` or `character-conversation-v2`. The terminal v3
+run is a timeout diagnostic—30 authored generations and seven fallbacks—not v4 evidence. The earlier Edwin Sandys timings measured the
 superseded `application-compiled-v1` cue selector and cannot be attributed to this design.
 
 ## Public NDJSON protocol

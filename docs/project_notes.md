@@ -38,7 +38,7 @@ preceding 488-vector store and its manifest remain recoverable under
 
 ## Current retrieval-authored release
 
-Current built-in RAG uses `retrieval-authored-v3`. High-confidence follow-up resolution is local.
+Current built-in RAG uses `retrieval-authored-v4`. High-confidence follow-up resolution is local.
 Every historical/manuscript RAG turn makes one `text-embedding-3-small` query request, then uses the shared dense/BM25
 reciprocal-rank-fusion retriever and context finalizer. A deterministic builder packages four to
 eight source-bound units in retrieval order, targeting about 2,500 estimated evidence tokens under
@@ -52,8 +52,11 @@ one no-retry `gpt-5.6-sol` authored-response call with low
 reasoning, medium verbosity, and a 1,800 output-token ceiling. The model may synthesize, paraphrase,
 choose useful length, and write in character. It returns typed grounded/persona runs and one to
 three follow-up questions. Grounded runs name opaque dossier-unit IDs; local code verifies those
-IDs and maps them to `[Source N]`. Provider or structural failure falls back to Essential without
-retry. ID resolution is not proof of semantic entailment.
+IDs and maps them to `[Source N]`. The strict `/1` schema, 1,800-token ceiling, one shared client,
+and zero retries remain unchanged. The provider allowance is 35 seconds, with embedding capped at
+eight seconds and authoring at thirty. Timeout, transport failure, provider exception/refusal,
+structured-output rejection, or local contract-validation failure falls back to Essential without
+retry and receives a text-free internal code. ID resolution is not proof of semantic entailment.
 
 Before that path, `is_character_conversation_question(question, mode)` recognizes a narrow set of
 direct social/personal turns in every registered generated mode.
@@ -69,14 +72,15 @@ eligibility covers Professional, Princess, Baron, and Ruthless Red Realist now a
 modes automatically; Essential is excluded.
 
 The current source reports this boundary through `archivist.public_runtime_identity/4`, including
-`answer_policy_version=retrieval-authored-v3`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
+`answer_policy_version=retrieval-authored-v4`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
 `embedding_model=text-embedding-3-small`, and `generated_prose_model=gpt-5.6-sol`. Frozen V26 and
 the V27 experiment remain explicit development API compatibility policies; neither is selectable
 in the reader UI. Results from their historical cohorts, and the narrow smoke for superseded
 `application-compiled-v1`, do not measure the current product. Manual deployment and live identity
 parity for this redesign remain unverified.
 `retrieval-authored-v1` lacked the narrow character-conversation branch; `retrieval-authored-v2`
-hard-coded that branch for Princess and Baron. Both are preserved as historical/manual development
+hard-coded that branch for Princess and Baron; v3 generalized it but used the shorter authoring
+boundary. All three are preserved as historical/manual development
 candidates rather than exposed as API policies.
 
 ## Historical snapshot: candidate hold before the completed gold lock
@@ -107,7 +111,7 @@ or retrieval call.
 
 This interactive authored-response configuration is not a formal evaluation result or a
 retrospective pin for V26. Model identities, settings, prompt hashes, and dossier identity for a
-future `retrieval-authored-v3` measurement belong in that separately declared cohort's run
+future `retrieval-authored-v4` measurement belong in that separately declared cohort's run
 identity.
 
 ## Current UI scope
@@ -122,8 +126,10 @@ offered by the current UI or public API. Their provenance records remain in
 
 Essential renders locally compiled direct evidence. In the other four modes the one optional
 model call authors reader-visible prose over the rich dossier, including one to three follow-up
-questions. Local code maps support IDs to citations. A provider or structural-validation failure
-returns the Essential evidence rather than replaying the call.
+questions. Local code maps support IDs to citations. A timeout, transport failure, provider
+exception/refusal, structured-output rejection, or local contract-validation failure returns the
+Essential evidence rather than replaying the call; the internal class is text-free and the reader
+notice remains generic.
 
 Eligible personal questions in any registered generated mode use the separate character-conversation route and
 therefore return no source panel or citations. Their deterministic failure fallback stays in

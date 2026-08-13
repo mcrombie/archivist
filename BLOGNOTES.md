@@ -7,7 +7,7 @@ anything that still requires measurement.
 ## Current checkpoint — 2026-08-13
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
-  built-in RAG default is now `retrieval-authored-v3` over 481 retrieval-eligible manuscript
+  built-in RAG default is now `retrieval-authored-v4` over 481 retrieval-eligible manuscript
   chunks: local high-confidence follow-up resolution, one query-embedding request, shared
   dense/BM25 reciprocal-rank fusion, and a rich four-to-eight-unit evidence dossier targeting about
   2,500 estimated evidence tokens under a hard 4,500-token evidence ceiling. Public runtime
@@ -27,14 +27,17 @@ anything that still requires measurement.
   cited evidence, but its hybrid retrieval still makes one embedding request; Essential plus Full
   Context is rejected. Each other mode adds one no-retry low-reasoning, medium-verbosity Sol call
   with a 1,800 output-token ceiling. It authors free prose over the rich dossier and one to three
-  in-character follow-up questions. Retrieval and authoring share one 25-second provider deadline;
-  retrieval receives at most eight seconds and authoring at most twenty seconds of the remaining
-  time, after which the direct-evidence fallback wins rather than starting a late prose call. Local
+  in-character follow-up questions. Retrieval and authoring share one 35-second provider deadline;
+  retrieval receives at most eight seconds and authoring at most thirty seconds of the remaining
+  time. Sol, strict `/1` Structured Outputs, the 1,800-token ceiling, one shared client, and zero
+  retries are unchanged. Local
   code validates opaque support IDs and maps them to citations. When an accepted generated-mode
   turn uses that fallback, the reader now sees a nonfatal notice that the requested mode could not
   be completed and Essential evidence was returned; ordinary Essential and successfully authored
   turns do not show it. It is headed **Essential fallback** and names the requested mode in its
-  fixed message. The notice does not retry the call or expose internal provider details. Local
+  fixed message. The notice does not retry the call or expose internal provider details. Internal
+  text-free diagnostics distinguish request timeout, transport failure, provider exception or
+  refusal, structured-output rejection, and local contract-validation failure. Local
   support-ID validation does not prove semantic entailment. Lens, voice, and worldview affect generated
   framing and prose. Five mode-linked appearances are selectable; dormant
   mode definitions/assets are compatibility-only. The separate full-context-v2 experiment remains
@@ -75,6 +78,20 @@ anything that still requires measurement.
   decomposition attempts produced ten usable decompositions and 27 technical measurement failures
   (26 `exact_span_mismatch`, one `incomplete_response`). No answer or attempted decomposition was
   retried or repaired. The 27 failures belong to the ruler, not to 27 candidate answers.
+- **V3 timeout diagnostic:** the later retrieval-authored-v3 Professional cohort is terminally
+  closed rather than resumed as a quality cohort. It made exactly one generation attempt for each
+  of 37 items: 30 authored and seven Essential fallbacks. It stopped after 14 held-out
+  decomposition attempts, ran zero rubric and persona calls, and recorded `$1.591521500`.
+  Reconciliation and terminal closure were provider-free. These are v3 observations, not v4
+  quality or latency claims.
+- **V4 measurement adapter:** the isolated offline adapter binds product commit `536acc8`, a new
+  root/ledger/request scope, and the already validated cached embeddings for all 37 questions.
+  H001–H010 form a once-only mechanical sentinel; a continuation begins at H011 and cannot replay
+  the prefix. Each provider boundary seals its request hash and exact worst-case projection first;
+  a zero-event ambiguity automatically consumes that reserve without replay. Decomposition retains
+  the frozen text-anchor-v2 instrument but receives a 60-second evaluation-only timeout and
+  explicit latency. The four generated modes run in a separate social suite. No v4 live call has
+  run; every paid command still needs fresh explicit authorization and the exact matching cap.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
@@ -108,12 +125,12 @@ anything that still requires measurement.
   `obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. This is reassuring for
   infrastructure observability but not for product reliability: the public response-contract
   completion rate was 29/33, or 87.9%.
-- **Next product step:** preserve the descriptive and production cohorts unchanged, then obtain
+- **Next product step:** preserve the descriptive, production, and v3 diagnostic cohorts unchanged, then obtain
   separate authorization for any live
   smoke or measurement. The narrow Edwin Sandys smoke made exactly three no-retry calls against the
   superseded closed-cue selector in 8.357, 6.839, and 5.162 seconds, for 6,292 tokens and
   `$0.060071250`; it does not measure this new path. Ad hoc current-policy turns diagnosed the
-  provider-schema mismatch described above, but no declared post-repair or post-v3 live smoke,
+  provider-schema mismatch described above, but no declared v4 live smoke,
   latency cohort, or quality cohort has run, so the new default and its character-social branch
   carry no speed, quality, or reliability claim.
   Ruthless Red Realist reuses the Ember & Ink appearance and applies a cold strategic focus on
@@ -123,10 +140,10 @@ anything that still requires measurement.
   Frozen V26 remains callable and immutable; V27 compact remains unpromoted historical evidence.
   If stronger claim-derived scoring is still useful, decomposition redesign remains a later,
   separate cohort; semantic calibration remains optional supplemental work.
-- **Current v3 offline verification:** repository-wide Ruff passed; 1,298 Python tests passed with
-  one intentional skip; both frontend delivery and mode suites passed; and the production frontend
-  build succeeded. No offline check made a provider call or substitutes for a live latency or
-  answer-quality measurement.
+- **Current v4 offline verification:** focused product, public-contract, historical-manifest, and
+  frontend delivery checks pass; the closed v3 report still validates. No offline check made a
+  provider call or substitutes for a live latency or answer-quality measurement. The earlier full
+  v3 gate remains historical evidence for that version.
 - **Previous v2 offline verification:** repository-wide Ruff passed; 1,258 Python tests passed with
   one intentional skip; both frontend delivery and mode suites passed; and the production frontend
   build succeeded. No offline check made a provider call or substitutes for a live latency or
@@ -134,6 +151,35 @@ anything that still requires measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-13 — Close the timeout diagnostic before changing the clock
+
+- The v3 Professional run completed its 37 once-only generation attempts but returned seven
+  Essential fallbacks. Those failures clustered at the approximately twenty-second authoring
+  boundary; local retrieval averaged roughly 1.23 seconds and was not the bottleneck.
+- The owner stopped the run after H014 decomposition. The harness reconciled H014 without replay,
+  wrote a terminal diagnostic closure, and verified its report without another provider call. The
+  preserved cohort contains 30 authored generations, seven fallbacks, 14 decomposition attempts,
+  zero rubric/persona calls, and `$1.591521500` tracked spend.
+- The important sequencing lesson was to close the old cohort before editing product identity.
+  Otherwise a harmless timeout change could have made the historical report appear to describe a
+  different system.
+
+## 2026-08-13 — Open v4 with a longer boundary and better failure evidence
+
+- `retrieval-authored-v4` changes only the operational boundary and diagnostics of manuscript
+  authoring: the shared provider allowance is 35 seconds and authoring is capped at thirty, while
+  embedding remains capped at eight. Sol settings, strict `/1` Pydantic Structured Outputs, the
+  1,800-token ceiling, one shared client, prompts, dossier, and zero-retry rule are unchanged.
+- Internal text-free diagnostics now distinguish request timeout, transport failure, generic
+  provider exception, provider refusal, structured-output rejection, and local contract/render
+  validation. The reader still sees one generic Essential-fallback notice, not exception details.
+- The v4 evaluator is a new cohort rather than a continuation. It reuses validated cached
+  embeddings; binds H001–H010 as a once-only mechanical prefix; begins the remainder at H011;
+  pre-seals exact request hashes and worst-case cost; reserves zero-event ambiguity automatically
+  without replay; gives decomposition 60 seconds; and keeps the four-mode social suite separate.
+  No live call or quality result exists yet. Fresh explicit authorization and an exact cap remain
+  mandatory.
 
 ## 2026-08-13 — Define the persona test before spending
 
@@ -151,8 +197,10 @@ known at the time they were written and should not be silently rewritten into pr
   questions, mode-signature hits, reply uniqueness, and pairwise token overlap. Those character
   fields are transparent development diagnostics, not a semantic quality judge and not gold/RAG
   evidence.
-- No provider call or paid evaluation ran while implementing and testing this harness. Therefore
-  there is no post-v3 persona reliability, latency, cost, or distinctness result yet.
+- No provider call or paid evaluation ran while implementing and testing this harness. V3 closed
+  before its persona phase, and the legacy paid runner now fails closed before client construction;
+  therefore there is no v3 persona reliability, latency, cost, or distinctness result. V4 owns the
+  separately authorized current social suite.
 - **Fey Fir-Green Folklorist** is an approved possible future persona name, but remains deliberately
   dormant: it is not registered, selectable, generated, or included in this fixed cohort.
 

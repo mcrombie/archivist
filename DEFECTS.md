@@ -63,6 +63,29 @@ record of why that temporary contract existed.
 
 ---
 
+## [2026-08-13] The v3 authoring deadline collapsed slow calls into opaque fallbacks
+Phase/Brief: Retrieval-authored v3 diagnostic cohort and v4 operational boundary
+Symptom: seven of 37 once-only Professional generation attempts returned Essential fallback. The
+failures clustered around the twenty-second authoring boundary and produced no response metadata or
+usage event. Internal diagnostics flattened timeout and unrelated provider/validation failures into
+broad codes, while the evaluation harness required a new committed recovery declaration after each
+zero-event ambiguity.
+Cause: **operational-policy and specification gap.** The 25-second shared allowance left authoring
+at most twenty seconds even though successful v3 latency reached roughly that boundary. The product
+and cohort protocol had not separately defined stable text-free timeout, transport, provider,
+structured-output, and local-validation dispositions or a prospective automatic ambiguity reserve.
+Resolution and verification: v3 was terminally closed as a diagnostic after all 37 generation
+attempts, 14 decomposition attempts, zero rubric/persona calls, and `$1.591521500` tracked spend;
+its H014 reconciliation and closure made zero provider calls. `retrieval-authored-v4` raises the
+shared allowance to 35 seconds and authoring cap to thirty while retaining the eight-second
+embedding cap, same Sol configuration, strict `/1` schema, 1,800-token ceiling, shared client, and
+zero retries. Current diagnostics distinguish `request_timeout`, `transport_failure`,
+`provider_exception`, `refusal`, `structured_output_rejected`, and
+`local_contract_validation_failed`; reader-facing fallback remains generic. The v4 adapter seals
+request identity and exact worst-case cost before each boundary and reserves a zero-event ambiguity
+without replay. Focused offline tests and the closed v3 report pass. No v4 live call has run, so
+this resolution establishes no latency or reliability improvement.
+
 ## [2026-08-13] Character-conversation routing hard-coded two personalities instead of the generated-mode contract
 Phase/Brief: Retrieval-authored generated-mode conversation and Ruthless Red Realist
 Symptom: after the first personal-conversation repair, asking Professional a basic social question

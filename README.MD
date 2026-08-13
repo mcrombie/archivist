@@ -6,7 +6,7 @@ Big History of Virginia*. It searches the complete substantive manuscript, answe
 
 Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
 
-The source tree described below implements `retrieval-authored-v3`. Production deploys are manual;
+The source tree described below implements `retrieval-authored-v4`. Production deploys are manual;
 the live service must report runtime identity schema 4 before it can be described as running this
 policy. That live parity has not yet been verified.
 
@@ -16,7 +16,7 @@ chunks, internal traces, or arbitrary file paths.
 
 ## Current product
 
-The built-in RAG product now defaults to `retrieval-authored-v3` over **481
+The built-in RAG product now defaults to `retrieval-authored-v4` over **481
 retrieval-eligible chunks**. Archivist resolves high-confidence ordinary follow-ups locally, makes
 one `text-embedding-3-small` query-embedding request, and uses the shared dense/BM25
 reciprocal-rank-fusion retriever and context finalizer. It packages four to eight evidence units,
@@ -50,8 +50,9 @@ Baleful Black Baron, and Ruthless Red Realist -- adds exactly one
 no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
 output-token ceiling. The model receives the question, locally resolved turn, and rich dossier; it
 may freely synthesize, paraphrase, choose useful length, and write in the selected character.
-Generated modes end with one to three in-character follow-up questions. A provider failure or
-refusal, or a structurally invalid authored response, falls back to direct Essential evidence
+Generated modes end with one to three in-character follow-up questions. A timeout, transport or
+provider exception, provider refusal, structured-output rejection, or local contract-validation
+failure is recorded with a text-free diagnostic code and falls back to direct Essential evidence
 without retry. The browser keeps that cited evidence usable but displays a visible, nonfatal notice
 headed **Essential fallback**: “Archivist could not complete the {Mode label} AI response, so it
 returned Essential's direct manuscript evidence instead.” A valid Princess in-character refusal
@@ -76,7 +77,7 @@ reply in the same character instead of unrelated Essential evidence. Essential, 
 questions, manuscript questions, and mixed social-plus-historical questions continue through
 their normal grounded path; this is not a general-purpose chatbot route.
 
-The v3 authored-response policy retains input/output schemas
+The v4 authored-response policy retains input/output schemas
 `archivist.authored_response_input/1` and `archivist.retrieval_authored_answer/1` plus renderer
 `retrieval-authored-renderer-v1`. Character conversation likewise retains schemas
 `archivist.character_conversation_input/1` and `archivist.character_conversation_answer/1` plus
@@ -202,8 +203,8 @@ published to the internet.
 
 ### Explicit legacy development policies
 
-Omitting `rag_policy_version` uses `retrieval-authored-v3`. The superseded
-`retrieval-authored-v1` and `retrieval-authored-v2` candidates remain historical/manual evidence
+Omitting `rag_policy_version` uses `retrieval-authored-v4`. The superseded
+`retrieval-authored-v1`, `retrieval-authored-v2`, and `retrieval-authored-v3` candidates remain historical/manual evidence
 rather than selectable API policies. A local development API caller may still explicitly request `evidence-planned-v26` or
 `evidence-planned-v27` for compatibility and
 historical investigation. The browser no longer exposes that selector, and the public request
@@ -255,13 +256,13 @@ correlates a public request with its text-free server record; successful answer 
 pipeline-stage timings, returned token usage, and estimated API cost; and safe failure records keep
 the HTTP outcome without storing the question, answer, manuscript passage, prompt, or source text.
 The current source version endpoint reports `archivist.public_runtime_identity/4`, binding a
-running process to Render's `RENDER_GIT_COMMIT`, `retrieval-authored-v3`, hybrid BM25/RRF retrieval,
+running process to Render's `RENDER_GIT_COMMIT`, `retrieval-authored-v4`, hybrid BM25/RRF retrieval,
 `text-embedding-3-small`, the generated-prose model, the corpus manifest, the frozen V26 candidate
 identity, and the versioned public request-cost contract. On Render, its automatic commit identity
 is authoritative. Manual deployment and live identity parity for this redesign remain unverified.
-Current generated turns share a 25-second provider deadline across retrieval and authoring: the
+Current generated turns share a 35-second provider deadline across retrieval and authoring: the
 embedding operation receives at most eight seconds and the single prose call receives at most
-twenty seconds of the remaining allowance. This is a fail-fast implementation boundary, not a
+thirty seconds of the remaining allowance. This is an implementation boundary, not a
 measured latency claim or an SLA.
 
 The predeclared production cohort is now **complete** against deployed wrapper commit
@@ -294,9 +295,17 @@ or latency guarantee. This sealed production-performance v1 cohort exercised fro
 either later product policy. Its identities, results, and interpretation are unchanged. The narrow
 Edwin Sandys smoke subsequently exercised the superseded `application-compiled-v1` cue selector:
 three no-retry calls passed in 8.357, 6.839, and 5.162 seconds for `$0.060071250`. It does not
-measure `retrieval-authored-v1`, `retrieval-authored-v2`, or `retrieval-authored-v3`. No paid or live test has run for the
+measure `retrieval-authored-v1`, `retrieval-authored-v2`, `retrieval-authored-v3`, or
+`retrieval-authored-v4`. No paid or live test has run for the
 current policy, so there is no
 current latency, quality, or reliability improvement claim.
+
+The later `retrieval-authored-v3` Professional run is terminally preserved as a **timeout-
+diagnostic cohort**, not a completed quality cohort. It attempted all 37 generations once: 30
+authored responses and seven visible Essential fallbacks. The owner stopped it after 14 held-out
+decomposition attempts; no rubric or conversational-persona phase ran. Its ledger records
+`$1.591521500`. Provider-free reconciliation and terminal closure made zero model calls. These
+numbers diagnose v3's twenty-second authoring boundary and must not be promoted as v4 evidence.
 
 Provider-using public Complete-RAG paths retain a server-owned, versioned **$2.00 per-request
 maximum**. The service checks that maximum against the monthly budget, projects each provider
@@ -559,12 +568,16 @@ commit in a detached worktree rather than the later documentation-only head.
 
 This is a complete **descriptive baseline**, not yet a full semantic answer-quality scorecard.
 Faithfulness, abstention, gold-claim recall, and related semantic measures remain pending by design.
-The current product replaces the briefly shipped closed cue selector with
-`retrieval-authored-v3`, while keeping `retrieval-authored-v1`, `retrieval-authored-v2`, frozen V26, the superseded selector
+The current product is `retrieval-authored-v4`, while keeping `retrieval-authored-v1`,
+`retrieval-authored-v2`, `retrieval-authored-v3`, frozen V26, the superseded selector
 smoke, and all completed
 measurements unchanged. The new default has not had a paid latency or quality cohort, so no speed,
-quality, or reliability improvement is claimed. The next measurement-instrument work is still to diagnose and redesign canonical
-decomposition without changing or rerunning the held-out baseline; an optional
+quality, or reliability improvement is claimed. Its offline v4 evaluation adapter is implemented,
+but it has made no live call. A future run requires fresh explicit authorization and a matching
+cumulative cap, reuses the validated 37-question embedding cache, attempts H001-H010 exactly once
+as a mechanical sentinel before H011-H037, automatically reserves exact worst-case cost for a
+zero-event ambiguity without replay, gives decomposition a 60-second evaluation-only timeout, and
+runs the four generated modes in a separate conversational suite. An optional
 calibration/semantic supplement remains lower priority.
 
 ## Documentation map
@@ -578,6 +591,8 @@ calibration/semantic supplement remains lower priority.
 - [`docs/full_context_answer_strategy_design.md`](docs/full_context_answer_strategy_design.md) —
   disabled full-context experiment.
 - [`docs/answer_delivery.md`](docs/answer_delivery.md) — Complete and Progressive delivery rules.
+- [`docs/retrieval_authored_v4_evaluation.md`](docs/retrieval_authored_v4_evaluation.md) — isolated
+  v4 cohort identity, once-only sequence, ambiguity accounting, and authorization interlocks.
 - [`docs/latency_optimization.md`](docs/latency_optimization.md) — historical, unpromoted V27
   compact-response experiment and its superseded promotion protocol.
 - [`docs/public_demo_design.md`](docs/public_demo_design.md) — public exposure and citation design.

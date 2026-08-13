@@ -1,5 +1,12 @@
 # Conversational persona evaluation
 
+> Historical v3 plan: this suite never made a provider call before the v3 cohort was terminally
+> closed. The current v4 adapter owns a separate four-mode, twelve-case social phase documented in
+> [retrieval_authored_v4_evaluation.md](retrieval_authored_v4_evaluation.md). Do not run the v3
+> commands below or charge them to the closed v3 scope. The legacy paid runner now detects the
+> shared root's `diagnostic-closure.json` and stops before authorization artifacts, provider-client
+> construction, or any call.
+
 `persona-conversation-evaluation-v1` is a separate, non-gold development cohort for Archivist's
 compact `character-conversation-v2` route. It does not measure retrieval, grounding, factual
 answer quality, or the held-out manuscript benchmark.

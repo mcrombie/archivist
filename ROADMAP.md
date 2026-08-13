@@ -19,7 +19,7 @@ must not be conflated.
 
 ## Current checkpoint — 2026-08-13
 
-The built-in retrieval product now defaults to `retrieval-authored-v3`. High-confidence follow-up
+The built-in retrieval product now defaults to `retrieval-authored-v4`. High-confidence follow-up
 resolution is local. One `text-embedding-3-small` request supplies dense query scores; the shared
 dense/BM25 reciprocal-rank-fusion retriever and context finalizer then package four to eight
 source-bound units, targeting about 2,500 estimated evidence tokens under a hard 4,500-token
@@ -43,8 +43,11 @@ providerless: it uses the shared query-embedding request. Each of the other four
 one no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
 output-token ceiling. That model writes free, question-responsive prose over the rich dossier and
 ends with one to three in-character follow-up questions. Grounded runs name opaque dossier-unit
-IDs; local code validates and maps those IDs to `[Source N]`. Any provider or structural-contract
-failure falls back to direct cited evidence. Advanced lens, voice, and worldview settings affect
+IDs; local code validates and maps those IDs to `[Source N]`. The strict `/1` schema, 1,800-token
+ceiling, one-call rule, and zero retries are unchanged. Retrieval and authoring share 35 seconds:
+embedding is capped at eight seconds and authoring at thirty. Timeout, transport failure, provider
+exception/refusal, structured-output rejection, and local contract-validation failure receive
+distinct text-free diagnostics while the reader sees the same generic Essential fallback. Advanced lens, voice, and worldview settings affect
 the generated prose. Dormant mode
 definitions and assets are compatibility-only, not current UI/API choices.
 
@@ -69,7 +72,7 @@ bound Render's authoritative `RENDER_GIT_COMMIT`, one unchanged process epoch, t
 RAG identities, and the versioned `$2.00` public Complete-RAG request ceiling before any measured
 question was sent. That production-performance v1 identity and every result below remain unchanged.
 The next source release's public runtime identity schema is
-`archivist.public_runtime_identity/4`; it separately binds `retrieval-authored-v3`, hybrid
+`archivist.public_runtime_identity/4`; it separately binds `retrieval-authored-v4`, hybrid
 BM25/RRF retrieval, `text-embedding-3-small`, and the generated-prose model while retaining the
 frozen V26 identity. Manual deployment and live identity parity have not yet been verified.
 
@@ -84,6 +87,12 @@ The four failures were localized after successful planning and evidence selectio
 generation-contract boundary: two `missing_unit_requirement_id` cases, one
 `obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. None was a budget,
 transport, deployment-identity, or instrumentation failure.
+
+The separate `retrieval-authored-v3` Professional run is now terminally closed as a timeout
+diagnostic, not a quality cohort. It attempted 37 generations once, producing 30 authored answers
+and seven Essential fallbacks; stopped after 14 held-out decomposition attempts; ran zero rubric
+or persona calls; and recorded `$1.591521500`. Its final reconciliation and closure were
+provider-free. V4 was opened afterward, so none of those results measures v4.
 
 ### Last measured development checkpoint
 
@@ -214,8 +223,9 @@ After formal lock:
 | **8A. Production observability and latency evidence** | **Complete for the first observed cohort** | Preserve the text-free public artifacts and private audit root. The 33-attempt run produced 29 latency-eligible successes, four request failures, zero instrumentation failures, 54.393-second server p50, 113.801-second server p95, and `$4.90594694` estimated cost. Treat these as one observed warm cohort, not an SLA. |
 | **8B. V27 compact generation representation** | **Historical experiment; unpromoted and superseded** | Preserve the offline experiment and its proposed A/B in `docs/latency_optimization.md`. No paid candidate call ran, its old UI selector is gone, and it is not the current product path. |
 | **8C. Application-compiled answer path** | **Historical product iteration; superseded** | Preserve the closed-cue implementation history and its narrow three-call smoke. Its three 32-word cards overcorrected for structural safety and produced answers that were often too thin or off-target. Do not use its smoke as evidence about the current policy. |
-| **8D. Retrieval-authored answer path** | **Current v3 default implemented offline; live behavior unmeasured** | Preserve v1 and v2 as historical/manual behavior. In v3, manuscript turns retain one shared hybrid embedding/retrieval pass, the 4–8-unit rich dossier, one no-retry low-reasoning/medium-verbosity Sol prose call in every registered generated mode, local support-ID citation mapping, required follow-up questions, and direct-evidence fallback. Essential has no prose call but still has one embedding event. Narrow social turns in every registered generated mode instead use one compact no-retry Sol call with no retrieval or evidence and deterministic in-character local fallback. Ruthless Red Realist is the fifth selectable mode and uses Ember & Ink. A new cohort is required before any latency, quality, or reliability improvement claim. |
-| **8E. Conversational persona evaluation** | **Offline harness complete; live cohort not started** | Preserve this as a separate, non-gold development suite. Ask all four generated modes the identical fixed “How are you?” prompt through `character-conversation-v2`, with one no-retry Sol call per untouched item and no embedding, retrieval, manuscript, or gold input. Share the v3 master request ID, ledger, and cumulative `$7.00` ceiling rather than creating a persona allowance. Report status, latency, cost, manuscript-leading follow-ups, and transparent character-distinctness diagnostics. No provider call or result claim exists yet. |
+| **8D. Retrieval-authored answer path** | **Current v4 default implemented offline; live behavior unmeasured** | Preserve v1–v3 as historical behavior. V4 retains the hybrid retrieval, rich dossier, strict authored schema, one no-retry Sol call, local citations, required follow-ups, and generic direct-evidence fallback. It raises the shared provider boundary to 35 seconds and authoring cap to thirty, and adds granular text-free failure diagnostics. Essential still uses one embedding and no prose call. A new cohort is required before any v4 latency, quality, or reliability claim. |
+| **8E. Retrieval-authored v4 evaluation** | **Offline adapter complete; no live call** | Follow [`docs/retrieval_authored_v4_evaluation.md`](docs/retrieval_authored_v4_evaluation.md). Reuse the validated cached embeddings for all 37 questions. Attempt H001–H010 exactly once as a mechanical sentinel, then begin the remaining run at H011 without repeating the prefix. Persist intent and exact worst-case projection before every boundary; automatically reserve a zero-event ambiguity without replay. Decompose only after generation with the frozen text-anchor-v2 instrument and a 60-second evaluation-only timeout, then rubric. Every paid command needs fresh explicit authorization and the exact cumulative cap. |
+| **8F. Conversational persona evaluation** | **Integrated v4 suite; live cohort not started** | Run Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist as a separate four-mode social suite. Report status, latency, cost, manuscript-leading follow-ups, and transparent character-distinctness diagnostics. No provider call or result claim exists yet. |
 
 ## Next sequence
 
@@ -316,17 +326,31 @@ top of the list.
     call and supports no post-change latency, quality, or reliability claim. Repository-wide Ruff,
     1,298 Python tests with one intentional skip, both frontend suites, and the production frontend
     build pass offline.
-17. **Next, after deployment identity verification and fresh authorization — open
+17. **Completed — close v3 as a timeout diagnostic.** Preserve all 37 one-attempt generation
+    outcomes (30 authored, seven Essential fallbacks), 14 decomposition attempts, zero rubric or
+    persona calls, and `$1.591521500` recorded spend. H014 was reconciled without replay; terminal
+    closure made zero provider calls. Never resume this cohort as if it were a quality run.
+18. **Completed for offline implementation — open `retrieval-authored-v4` and its adapter.** The
+    product keeps Sol, strict `/1` Structured Outputs, the 1,800-token ceiling, the shared client,
+    and zero retries. It raises the total provider boundary to 35 seconds and authoring cap to
+    thirty seconds, and records granular text-free failure classes behind the unchanged generic
+    reader fallback. The isolated adapter binds product commit `536acc8`, the validated cached
+    embeddings, once-only H001–H010 prefix, automatic exact ambiguity reserve, 60-second
+    decomposition timeout, and separate four-mode social suite. No live call or quality result
+    belongs to this step.
+19. **Next, only after fresh explicit authorization and an exact cumulative cap — run v4.** Prepare
+    the separate cohort, run H001–H010 once as a mechanical sentinel, and—only if identity,
+    one-call, trace, citation, and cap invariants hold—start the remaining generation at H011.
+    Sentinel answer quality, latency, and cost are report-only, not promotion vetoes. Decompose only
+    after all 37 generation dispositions, then rubric, then the separate Professional/Princess/
+    Baron/Red Realist social suite. A zero-event boundary consumes its exact projected reserve and
+    is never replayed.
+20. **Later, after deployment identity verification and fresh authorization — open
     production-performance v2.** Preserve v1's
     54.393/113.801-second p50/p95 and all four failures unchanged. A v2 report must state that it
     measures a different answer policy and must remain an observed cohort comparison unless the
     required repeat/noise protocol supports a stronger claim.
-18. **Then — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
-    of 37 outputs violated exact-span validation, then prospectively declare and test a revised
-    instrument without changing or rerunning this baseline. The eight substantively decomposed
-    releases are enough to preserve limited mechanical measurements, not enough to support strong
-    claim-derived conclusions.
-19. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+21. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
     subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
     technical failures are preserved, measure judge and decomposition agreement, and publish a
     hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
@@ -382,7 +406,11 @@ Current contract:
 - Essential is direct cited evidence with no prose-generation call in current RAG; it still uses
   the shared query-embedding provider call. Essential plus Full Context is rejected.
 - The other four modes author free prose over the same rich dossier and end with one to three
-  in-character follow-up questions. A failed call falls back to direct evidence without retry.
+  in-character follow-up questions. They retain one strict no-retry Sol call and 1,800 output-token
+  ceiling. The shared provider boundary is 35 seconds: embedding is capped at eight seconds and
+  authoring at thirty. A failed call falls back to direct evidence without retry; text-free
+  diagnostics distinguish timeout, transport, provider exception/refusal, structured-output
+  rejection, and local validation while reader copy remains generic.
 - Narrow social questions in every registered generated mode bypass retrieval and use one compact
   character call with deterministic in-character local fallback; they contain no manuscript claims
   or citations and end by leading the user back to the book. Essential is excluded, and future

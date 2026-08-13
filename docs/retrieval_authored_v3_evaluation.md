@@ -1,8 +1,10 @@
 # Retrieval-authored v3 evaluation
 
-This is a new descriptive cohort for the committed `retrieval-authored-v3` Professional reader.
-It reuses the unchanged 37-question locked benchmark after the earlier V26 evaluation, so it is a
-reused locked benchmark—not a pristine blind holdout and not a formal before/after claim.
+This is the terminal historical timeout-diagnostic cohort for the committed
+`retrieval-authored-v3` Professional reader. It reuses the unchanged 37-question locked benchmark
+after the earlier V26 evaluation, so it is a reused locked benchmark—not a pristine blind holdout
+and not a formal before/after claim. Do not resume it or use it as evidence about current
+`retrieval-authored-v4`.
 
 The product under test is commit `4e9d6ed01a7ed1d92f2124aefc07c3259675f1ad`. The separately
 committed harness identity is recorded in the private cohort manifest. Frozen V26 answers,
@@ -24,11 +26,15 @@ decompositions, ledgers, gold annotations, and production artifacts are read-onl
 8. Produce a public-safe summary after every required outcome exists.
 
 The owner stopped this run after H014 decomposition. It is therefore retained as a timeout-
-diagnostic cohort, not resumed as a quality cohort. Generation is complete; decomposition ends
-after H014; rubric and persona scoring never started. Once the H014 zero-event turn is reconciled,
-`close-diagnostic` writes an answer-free partial summary and an immutable closure artifact. The
-closure permanently blocks all later paid phases, freezes, and ambiguity reconciliations for this
-run root. It performs zero provider operations and does not retry H014.
+diagnostic cohort, not resumed as a quality cohort. Generation completed with 37 once-only
+attempts: 30 authored answers and seven Essential fallbacks. Decomposition ended after 14
+attempts; rubric and persona scoring never started. Tracked spend was `$1.591521500`. H014
+reconciliation and `close-diagnostic` performed zero provider operations, did not retry H014, and
+wrote an answer-free partial summary plus immutable closure artifact. The closure permanently
+blocks all later paid phases, freezes, and ambiguity reconciliations for this run root.
+The separate legacy persona runner shares that v3 root and ledger; it now detects the closure
+artifact and fails before provider-client construction. The v4 adapter's isolated social phase is
+the only current evaluator for Professional, Princess, Baron, and Red Realist conversation.
 
 All paid phases share one ignored `usage.sqlite3`, one request ID, and the owner's cumulative
 `$7.00` authorization. Generation turns H002, H003, H021, H025, H026, H027, and H031, followed by

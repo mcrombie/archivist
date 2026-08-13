@@ -12,17 +12,19 @@ The corpus is also the moat. Rigorous evaluation depends on knowing the source m
 
 ## Current priorities and answer surfaces
 
-The source tree now implements `retrieval-authored-v3`; the highest-leverage unfinished product
-work is separately authorized measurement of that new default
-without altering the completed V26 records. Recent ad hoc manual turns exposed and diagnosed a
+The source tree now implements `retrieval-authored-v4`; the highest-leverage unfinished product
+work is a separately authorized measurement of that new default without altering the completed
+V26 records or the terminal v3 timeout-diagnostic cohort. Recent ad hoc manual turns exposed and diagnosed a
 provider-schema defect and a missing personal-conversation contract, but they are not a declared
 smoke, latency cohort, or quality cohort and do not prove either repair in live behavior. The
 earlier authorized
 three-mode Edwin Sandys smoke measured the now-superseded `application-compiled-v1` cue selector;
 its 8.357, 6.839, and 5.162-second calls and `$0.060071250` estimated cost are historical
 compatibility evidence only and are not evidence about the current authored-response path. The highest-leverage unfinished
-measurement work remains diagnosing the decomposition instrument and, in a separately declared cohort,
-rebuilding the claim-derived scoring path described in `EVAL_CONTRACT.md` and `ROADMAP.md`. The
+measurement work is now encoded in a v4-specific adapter but has made no live call. It must first
+exercise a fixed ten-question Professional prefix once, then run the remaining 27 only if the
+predeclared mechanical gates pass; claim decomposition and the four-mode social suite remain
+separate phases. The
 completed baselines and production cohort must stay unchanged. The objective is not "the answers
 look good." Retrieval, faithfulness, citation, abstention, release reliability, latency, and spend
 must be measured, bounded, reproducible, and have their failures written down. A system with
@@ -66,8 +68,13 @@ selection: two `missing_unit_requirement_id`, one `obligation_role_mismatch`, an
 `unsupported_requirement_has_unit`. Never retry, replace, or overwrite this cohort. Repair those
 relationships with synthetic cases, then use a separately versioned cohort for any comparison.
 
-The next measurement priority is to diagnose and redesign the decomposition instrument on a new,
-explicitly separate measurement cohort. Its 27/37 technical-failure rate sharply limits how far
+The v3 Professional cohort is terminally closed as a timeout diagnostic rather than a quality
+cohort. It attempted all 37 generations exactly once: 30 authored responses and seven Essential
+fallbacks. It stopped after 14 held-out decomposition attempts, ran zero rubric calls, and recorded
+`$1.591521500`; its provider-free closure made zero calls. Never resume, retry, or overwrite it.
+
+The next measurement priority is to measure v4 with the redesigned decomposition instrument in a
+new, explicitly separate measurement cohort. The V26 instrument's 27/37 technical-failure rate sharply limits how far
 the current claim-derived metrics can be interpreted. Never change, repair, or rerun this completed
 baseline to improve those denominators, and never treat the 27 instrument failures as empty claim
 sets or candidate-answer failures. A later low-priority calibration or semantic supplement may add
@@ -80,9 +87,9 @@ appearance and interpretive modes are implemented and public; they are no longer
 Index Assistant Mode remains deferred and requires its own measurement before repair or promotion.
 Do not mistake a shipped reader feature for completion of the evaluation.
 
-Archivist currently documents six answer-policy families, including superseded product paths:
+Archivist currently documents seven answer-policy families, including superseded product paths:
 
-- **`retrieval-authored-v3`.** This is the default for current built-in RAG. For manuscript and
+- **`retrieval-authored-v4`.** This is the default for current built-in RAG. For manuscript and
   historical questions, Archivist retains the v1 evidence path: it resolves
   high-confidence ordinary follow-ups locally, makes one `text-embedding-3-small` query-embedding
   request, and runs the shared dense/BM25 reciprocal-rank-fusion retrieval and context finalizer.
@@ -93,18 +100,20 @@ Archivist currently documents six answer-policy families, including superseded p
   request. Every registered generated mode -- currently Professional, Pretty Pink Princess,
   Baleful Black Baron, and Ruthless Red Realist -- adds exactly one
   no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
-  output-token ceiling. The embedding and authoring operations share one 25-second provider
-  deadline: retrieval receives at most eight seconds and authoring receives at most twenty seconds
+  output-token ceiling. The embedding and authoring operations share one 35-second provider
+  deadline: retrieval receives at most eight seconds and authoring receives at most thirty seconds
   of whatever time remains; exhausted headroom returns direct Essential evidence rather than
   starting another call. The model may freely synthesize and choose useful length. It returns typed
   grounded and persona runs plus one to three in-character follow-up questions. The provider-visible
   input/output schemas remain `archivist.authored_response_input/1` and
   `archivist.retrieval_authored_answer/1`; rendering remains `retrieval-authored-renderer-v1`.
-  The v3 policy identity records changed routing and mode behavior, not those wire shapes. The
+  The v4 policy identity records the longer authoring deadline and granular diagnostics, not changed
+  wire shapes. The
   schema exposes grounded and persona runs as mutually exclusive object variants: every grounded
   run requires at least one opaque dossier-unit ID, while persona runs cannot carry support IDs.
-  Local code validates grounded IDs and maps them to `[Source N]`. Provider,
-  provider-level refusal, or structural-validation failure falls back to direct Essential evidence without a
+  Local code validates grounded IDs and maps them to `[Source N]`. Timeout, transport failure,
+  provider exception or refusal, structured-output rejection, or local contract-validation failure
+  is recorded with a text-free diagnostic code and falls back to direct Essential evidence without a
   retry. An accepted generated-mode fallback remains a successful cited answer, but the browser
   must identify it with the nonfatal **Essential fallback** notice: “Archivist could not complete
   the {Mode label} AI response, so it returned Essential's direct manuscript evidence instead.”
@@ -127,6 +136,12 @@ Archivist currently documents six answer-policy families, including superseded p
   `archivist.character_conversation_answer/1`, and its renderer remains
   `character-conversation-renderer-v1`; `character-conversation-v2` records the generalized routing
   contract rather than a changed wire shape.
+- **`retrieval-authored-v3`.** This is the immediately preceding generated-mode policy. It used the
+  same Sol prompt, strict `/1` schemas, 1,800-token ceiling, single client, and no-retry contract,
+  but shared a 25-second provider deadline and capped authoring at twenty seconds. Its terminal
+  diagnostic cohort observed 30 authored responses and seven Essential fallbacks across 37
+  one-attempt generations; decomposition stopped after 14 attempts and rubric/persona scoring did
+  not begin. Those observations remain v3 evidence and are not v4 performance claims.
 - **`retrieval-authored-v2`.** This is the immediately preceding character-conversation candidate.
   It preserved the v1 historical/manuscript path and added `character-conversation-v1` only for
   Pretty Pink Princess and Baleful Black Baron. Professional still sent a personal question through
@@ -238,7 +253,7 @@ by a public upload-anything surface.**
 
 ## The citation contract
 
-**In the historical/manuscript branch of `retrieval-authored-v3`, the generated modes own their
+**In the historical/manuscript branch of `retrieval-authored-v4`, the generated modes own their
 prose and local code owns citation resolution.** The model may synthesize and paraphrase the
 dossier rather than copy fixed excerpts.
 It must classify each output run as grounded or persona material and attach existing opaque
@@ -250,7 +265,7 @@ mechanically assigned `[Source N]` citations. This proves that the referenced do
 it does **not** mechanically prove that each sentence is semantically entailed by those units or
 that the model classified every sentence correctly. Never describe local ID resolution as a
 faithfulness or semantic-entailment judge. Essential displays locally compiled direct evidence
-from the same retrieval result. The v3 character-social branch is deliberately outside this
+from the same retrieval result. The v4 character-social branch is deliberately outside this
 citation contract: it receives no evidence and may emit only fictional persona conversation plus
 manuscript-leading questions, not uncited historical claims. Explicit v1/V26/V27 retrieval-backed
 generation retains its historical model-facing
@@ -491,7 +506,7 @@ These are decided. A brief may note a consequence, but may not reopen the questi
 - **Optimize for this manuscript; keep the plumbing corpus-agnostic.**
 - **Answer Mode reaches done without Index Mode.**
 - **Frozen V26 Essential is the neutral evaluated retrieval baseline.** Current RAG
-  `retrieval-authored-v3` Essential is the direct-evidence product default and omits prose
+  `retrieval-authored-v4` Essential is the direct-evidence product default and omits prose
   generation, but its shared hybrid retrieval makes one embedding call. It has no paid quality or
   performance cohort. Reader-mode or new-policy results do not become evidence for the frozen
   baseline without their own declared cohorts and checks.

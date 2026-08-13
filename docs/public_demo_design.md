@@ -25,7 +25,7 @@ The design is now represented in code:
 - Cromblog discovers that address through `NEXT_PUBLIC_ARCHIVIST_URL` without hard-coding hosting
   details into either repository; and
 - the browser defaults new visitors to Professional while the omitted-mode API resolves to
-  Essential; current RAG identifies itself as `retrieval-authored-v3` through public runtime
+  Essential; current RAG identifies itself as `retrieval-authored-v4` through public runtime
   identity schema `archivist.public_runtime_identity/4`.
 
 The public smoke performed on July 27 used four paid turns: a focused opening question, a
@@ -34,8 +34,8 @@ The three answerable turns succeeded; the absent fact produced `insufficient_evi
 latencies were 32.63, 16.27, 51.21, and 3.86 seconds. The isolated ledger estimated `$0.27691761`
 for the complete smoke.
 
-Those deployment observations predate `retrieval-authored-v1`, `retrieval-authored-v2`, and
-`retrieval-authored-v3`. The current source boundary and
+Those deployment observations predate `retrieval-authored-v1`, `retrieval-authored-v2`,
+`retrieval-authored-v3`, and `retrieval-authored-v4`. The current source boundary and
 runtime identity are documented below, but manual deployment, a live identity check, and any live
 model behavior remain unverified for the redesign. Historical smoke timings are not current-policy
 latency evidence.
@@ -79,8 +79,11 @@ Red Realist -- adds exactly one no-retry `gpt-5.6-sol` authored-
 response call with low reasoning, medium verbosity, and a 1,800 output-token ceiling. That call may
 synthesize and paraphrase the dossier, adapt useful length, write in character, and end with one to
 three follow-up questions. Local code maps valid support IDs to citations. Unknown IDs, forged
-citations, malformed structure, or provider/client failure produce the direct Essential evidence
-without retry.
+citations, or authored-call failure produce the direct Essential evidence without retry. Current manuscript authoring retains strict `/1` Structured Outputs and the
+1,800-token ceiling under a 35-second shared provider allowance: embedding is capped at eight
+seconds and authoring at thirty. Text-free diagnostics distinguish timeout, transport failure,
+provider exception/refusal, structured-output rejection, and local contract/render validation;
+the public fallback message remains generic.
 See `docs/archivist_modes.md` for the current registry and preserved historical provenance.
 
 The public server applies one narrow exception before retrieval. A conservatively classified
@@ -114,7 +117,7 @@ Completed turns keep their resolved preset and Custom provenance.
 
 The RAG index is not the printed index at the back of the book. The private runtime retains the
 481 retrieval-eligible manuscript chunks and the frozen Chroma collection used by explicit legacy
-policies. Current `retrieval-authored-v3` historical/manuscript RAG embeds the question, runs shared hybrid retrieval, and
+policies. Current `retrieval-authored-v4` historical/manuscript RAG embeds the question, runs shared hybrid retrieval, and
 packages only four to eight finalized units under its evidence-token ceiling. Essential sends no
 question or evidence to a prose-generation model. A generated mode sends the question, resolved
 turn, and rich dossier to its one authored-response call; it never sends the 594-page book.

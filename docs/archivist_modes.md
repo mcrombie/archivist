@@ -14,7 +14,7 @@ An Archivist mode is a versioned preset that joins three reader-visible choices:
 
 It does **not** change the evidence corpus. Historical assertions and numbered citations in every
 mode remain grounded in the retrieval-eligible text of *Cradle of the Empire*. The current
-`retrieval-authored-v3` historical/manuscript path makes one query-embedding request, runs shared dense/BM25 reciprocal-
+`retrieval-authored-v4` historical/manuscript path makes one query-embedding request, runs shared dense/BM25 reciprocal-
 rank fusion, and compiles a rich source-bound dossier before any generated prose call.
 
 The application recognizes three different source roles:
@@ -53,8 +53,10 @@ one to three in-character follow-up questions. Grounded prose names opaque dossi
 persona prose carries no evidence ID. The provider-visible schema makes these mutually exclusive
 object variants: grounded requires one to eight IDs, and persona permits none. Application code
 verifies grounded IDs and maps them to `[Source N]`.
-Invalid output or provider/client failure falls back to the same direct Essential evidence without
-retry. The browser visibly identifies that nonfatal fallback so the reader does not mistake direct
+The shared provider allowance is 35 seconds, with embedding capped at eight seconds and authoring
+at thirty. Timeout, transport failure, provider exception/refusal, structured-output rejection, or
+local contract-validation failure falls back to the same direct Essential evidence without retry.
+Internal diagnostics distinguish those classes without exposing exception text. The browser visibly identifies that nonfatal fallback so the reader does not mistake direct
 evidence for an answer authored in the selected generated mode; ordinary Essential answers and
 successful generated answers show no fallback notice. The notice is headed **Essential fallback**
 and says, “Archivist could not complete the {Mode label} AI response, so it returned Essential's
@@ -116,6 +118,10 @@ The following profile records preserve earlier design and provenance work. Mythi
 Cromb Coo Coo, Tidal Archivist, Illuminated Codex, and Cosmic Almanac are not current
 selectable modes, and their matching appearances are not current selectable appearances. Retaining
 their IDs and assets does not authorize the browser or public API to expose them.
+
+**Fey Fir-Green Folklorist** is the selected name for a possible future Forest Folio persona. It
+remains dormant: no mode contract, prompt, registry entry, public selector, or evaluation cohort is
+authorized by recording the name.
 
 ### Mythical Forest Folio profile (historical)
 
@@ -330,7 +336,8 @@ entailment. Failures fall closed to Essential without retry.
 ## Evaluation gates
 
 Frozen V26 evaluation results remain historical results for that explicit candidate. They are not
-results for `retrieval-authored-v1`, `retrieval-authored-v2`, or `retrieval-authored-v3`, and the current product must be measured in a separately
+results for `retrieval-authored-v1`, `retrieval-authored-v2`, `retrieval-authored-v3`, or
+`retrieval-authored-v4`, and the current product must be measured in a separately
 declared cohort. Professional becoming the public frontend default does not turn an Essential
 evaluation into evidence about an interpretive mode.
 
@@ -345,7 +352,8 @@ Offline tests must establish:
    support-ID list only for grounded runs, and requires one to three follow-up questions;
 5. unknown support IDs, forged citations, malformed structures, and extended copying fail closed;
 6. local rendering maps support IDs to citations without claiming semantic entailment;
-7. provider/client failure returns the direct Essential evidence without replay;
+7. each v4 timeout, transport, provider, refusal, structured-output, or local-validation failure
+   receives its stable text-free code and returns direct Essential evidence without replay;
 8. only five mode IDs and five appearances are selectable, while dormant definitions remain hidden;
 9. no V26/V27 selector appears in the UI, while explicit development API compatibility remains;
 10. advanced overrides and retries preserve the resolved per-turn settings; and
@@ -361,5 +369,6 @@ Baron calls and one of three observed Princess calls completed at the API but re
 run with no support ID and therefore fell back locally. Those observations diagnose the old schema;
 they do not prove the repair or the new social route. The narrowly authorized three-mode compatibility smoke belongs to
 superseded `application-compiled-v1`, not to this authored-response policy. Any formal evaluation of
-`retrieval-authored-v3` belongs to a new, explicitly declared cohort; v1, v2, and the frozen V26 record remain
-unchanged.
+`retrieval-authored-v3` belongs to its terminal timeout-diagnostic cohort. V4 belongs to a new,
+explicitly declared cohort; v1–v3 and the frozen V26 record remain unchanged. No live v4 call has
+run.

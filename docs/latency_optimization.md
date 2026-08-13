@@ -9,7 +9,8 @@ V27 compact completed its offline representation gate but never received the pai
 and was never promoted. It was first superseded by `application-compiled-v1`, whose three bounded
 32-word cards and closed cue selector were then themselves superseded by
 `retrieval-authored-v1`, followed by the narrow two-character `retrieval-authored-v2` candidate;
-both are now preserved as historical/manual predecessors to `retrieval-authored-v3`. The cue-selector boundary overcorrected for structural control and hurt
+both are now preserved as historical/manual predecessors to `retrieval-authored-v3`, which is in
+turn the predecessor to current `retrieval-authored-v4`. The cue-selector boundary overcorrected for structural control and hurt
 question relevance and answer substance; its narrow Edwin Sandys smoke remains historical evidence
 for that exact policy only.
 
@@ -21,12 +22,14 @@ call, but is no longer providerless. Every registered generated mode -- currentl
 Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- adds exactly one no-retry
 `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity,
 and a 1,800 output-token ceiling. The model writes free prose and one to three in-character follow-
-up questions. Retrieval and authoring share a 25-second provider deadline: the embedding operation
-gets at most eight seconds and the prose call gets at most twenty seconds of the remaining time.
+up questions. Current v4 retrieval and authoring share a 35-second provider deadline: the embedding operation
+gets at most eight seconds and the prose call gets at most thirty seconds of the remaining time.
 Local code maps valid opaque support IDs to citations and falls back to Essential on
-provider or structural failure; it does not prove semantic entailment.
+timeout, transport, provider exception/refusal, structured-output rejection, or local contract-
+validation failure; the stable internal code remains text-free and does not prove semantic
+entailment.
 
-V3 retains that entire path for historical and manuscript questions. Its only new latency-oriented
+V3 retained that path for historical and manuscript questions. Its only new latency-oriented
 branch is `character-conversation-v2`: a conservatively recognized personal/social turn in any
 registered generated mode bypasses embedding and retrieval, sends no manuscript or
 dossier, and makes exactly one no-retry Sol call with low reasoning, low verbosity, a 12-second
@@ -38,10 +41,11 @@ questions and not evidence that v2 is faster.
 
 The former V26/V27 browser selector has been removed. Both policies remain callable only through an
 explicit local development `rag_policy_version` for compatibility and historical investigation;
-omitting that field selects `retrieval-authored-v3`, and the public API does not accept it. Frozen
+omitting that field selects `retrieval-authored-v4`, and the public API does not accept it. Frozen
 V26 remains immutable. Production-performance v1 remains unchanged. No live/provider test, paid
-latency cohort, or quality cohort has run for `retrieval-authored-v3` or its character-conversation
-branch, so this document supports no
+latency cohort, or quality cohort has run for `retrieval-authored-v4` or its character-conversation
+branch. V3's 37-item run closed as a timeout diagnostic with 30 authored responses and seven
+fallbacks; it is not evidence about v4. This document therefore supports no
 claim that the current path is faster, better, or more reliable.
 
 The remainder of this document preserves the V27 hypothesis, offline measurements, and proposed
