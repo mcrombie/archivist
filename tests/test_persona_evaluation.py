@@ -621,6 +621,29 @@ def test_live_run_requires_exact_authorization_without_constructing_client(
     assert not (run_root / "attempts").exists()
 
 
+def test_terminal_v3_closure_blocks_paid_persona_before_client_construction(tmp_path):
+    evaluation_root, run_root, usage_db = _paths(tmp_path)
+    prepare_evaluation(
+        run_root=run_root,
+        usage_db=usage_db,
+        evaluation_root=evaluation_root,
+    )
+    (evaluation_root / "diagnostic-closure.json").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(PersonaEvaluationError, match="terminally closed"):
+        run_evaluation(
+            authorized=True,
+            maximum_usd=Decimal("7.00"),
+            client_factory=lambda: pytest.fail("closed cohort built a provider client"),
+            run_root=run_root,
+            usage_db=usage_db,
+            evaluation_root=evaluation_root,
+        )
+
+    assert not (run_root / "authorization.json").exists()
+    assert not (run_root / "attempts").exists()
+
+
 def test_manifest_tamper_is_rejected_without_provider_work(tmp_path):
     evaluation_root, run_root, usage_db = _paths(tmp_path)
     prepare_evaluation(

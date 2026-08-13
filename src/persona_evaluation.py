@@ -257,6 +257,15 @@ def _validate_paths(
     return selected_run, selected_usage, selected_root
 
 
+def _require_shared_v3_cohort_open(evaluation_root: Path) -> None:
+    """Prevent the legacy paid persona route from outliving its v3 cohort."""
+
+    if (evaluation_root / "diagnostic-closure.json").exists():
+        raise PersonaEvaluationError(
+            "retrieval-authored-v3 is terminally closed; paid persona evaluation is disabled"
+        )
+
+
 def _provider_request(case: PersonaEvaluationCase) -> dict[str, object]:
     return {
         "instructions": build_character_conversation_instructions(case.mode),
@@ -961,11 +970,12 @@ def run_evaluation(
         )
     if not isinstance(maximum_usd, Decimal) or not maximum_usd.is_finite():
         raise PersonaEvaluationError("--max-cost-usd must be a finite decimal")
-    selected_run, selected_usage, _selected_root = _validate_paths(
+    selected_run, selected_usage, selected_root = _validate_paths(
         run_root=run_root,
         usage_db=usage_db,
         evaluation_root=evaluation_root,
     )
+    _require_shared_v3_cohort_open(selected_root)
     manifest = load_prepared_manifest(
         run_root=selected_run,
         usage_db=selected_usage,
