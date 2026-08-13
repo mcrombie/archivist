@@ -4024,8 +4024,27 @@ def _phase_pair_inventory(
     }
 
 
+def _sealed_cohort_item_ids(paths: V3Paths) -> list[str]:
+    manifest = read_json_object(paths.cohort_manifest)
+    items = manifest.get("items")
+    if not isinstance(items, list):
+        raise V3EvaluationError("sealed cohort manifest has no item identities")
+    item_ids = [
+        _required_string(value, "id")
+        for value in items
+        if isinstance(value, Mapping)
+    ]
+    if (
+        len(item_ids) != EXPECTED_ITEM_COUNT
+        or len(item_ids) != len(set(item_ids))
+        or len(item_ids) != len(items)
+    ):
+        raise V3EvaluationError("sealed cohort manifest item identities changed")
+    return item_ids
+
+
 def _diagnostic_artifact_inventory(paths: V3Paths) -> dict[str, object]:
-    generation_ids = [f"H{ordinal:03d}" for ordinal in range(1, EXPECTED_ITEM_COUNT + 1)]
+    generation_ids = _sealed_cohort_item_ids(paths)
     development_ids = [f"G{ordinal:03d}" for ordinal in range(1, 11)]
     ambiguity_files = {
         paths.ambiguity_continuation.name: sha256_file(paths.ambiguity_continuation),

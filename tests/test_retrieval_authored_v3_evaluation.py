@@ -991,12 +991,19 @@ def test_manifest_loader_accepts_original_after_continuation_validation(monkeypa
 
 def _write_diagnostic_inventory(paths: V3Paths) -> None:
     paths.root.mkdir(parents=True, exist_ok=True)
-    paths.cohort_manifest.write_text("{}\n", encoding="utf-8")
+    item_ids = [
+        f"H{ordinal:03d}"
+        for ordinal in range(1, 39)
+        if ordinal != 20
+    ]
+    paths.cohort_manifest.write_text(
+        json.dumps({"items": [{"id": item_id} for item_id in item_ids]}) + "\n",
+        encoding="utf-8",
+    )
     paths.instrument_freeze.write_text("{}\n", encoding="utf-8")
     paths.ledger.write_bytes(b"sealed-ledger")
     paths.ambiguity_continuation.write_text("{}\n", encoding="utf-8")
-    for ordinal in range(1, 38):
-        item_id = f"H{ordinal:03d}"
+    for item_id in item_ids:
         root = paths.root / "items" / item_id
         root.mkdir(parents=True, exist_ok=True)
         (root / "generation-intent.json").write_text("{}\n", encoding="utf-8")
@@ -1067,11 +1074,22 @@ def test_diagnostic_closure_detects_mutation_of_sealed_artifact(monkeypatch, tmp
     )
     monkeypatch.setattr(v3, "_git_commit", lambda _base: "8" * 40)
     v3.close_diagnostic_cohort(cohort, base_dir=tmp_path)
-    generation = paths.root / "items" / "H037" / "generation.json"
+    generation = paths.root / "items" / "H038" / "generation.json"
     generation.write_text('{"changed":true}\n', encoding="utf-8")
 
     with pytest.raises(V3EvaluationError, match="diagnostic closure identity changed"):
         v3.validate_diagnostic_closure(paths)
+
+
+def test_diagnostic_inventory_uses_sealed_noncontiguous_cohort_ids(tmp_path):
+    paths = _paths(tmp_path / "run")
+    _write_diagnostic_inventory(paths)
+
+    inventory = v3._diagnostic_artifact_inventory(paths)
+
+    assert inventory["generation"]["item_count"] == 37
+    assert "H038" in inventory["generation"]["item_ids"]
+    assert "H020" not in inventory["generation"]["item_ids"]
 
 
 def test_diagnostic_terminal_state_requires_reconciled_h014(monkeypatch, tmp_path):
