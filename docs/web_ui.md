@@ -41,8 +41,9 @@ The web API needs:
   without sending a request or adding synthetic turns to conversation history.
 - Transitions into a full-width, multi-turn conversation after the first submission.
 - Keeps earlier questions, answers, and their manuscript sources in the transcript.
-- Uses recent completed turns to resolve follow-up references locally, then ranks fresh manuscript
-  evidence with local BM25 for each current RAG answer.
+- Uses recent completed turns to resolve high-confidence follow-up references locally, then makes
+  one query-embedding request and ranks fresh manuscript evidence with shared dense/BM25
+  reciprocal-rank fusion for each current RAG answer.
 - Keeps the composer available at the bottom of the conversation and supports Enter to send or
   Shift+Enter for a new line.
 - Uses compact numbered citations in the answer while preserving the full reference in accessible
@@ -51,33 +52,76 @@ The web API needs:
   turn they support.
 - Provides retry and copy-answer controls, plus a clearly labeled Start new conversation action
   in both the conversation header and the top-of-page introduction.
-- Places Answer delivery inside a collapsed **Advanced delivery settings** disclosure under
-  Reading options. **Complete answer** is the recommended strict default. **Progressive
-  response** is experimental: after fixed operational progress, it reveals locally compiled
-  immutable evidence cards while the final arrangement remains provisional. A roughly
-  three-second heartbeat keeps an elapsed-work indicator active. Essential needs no provider call;
-  in a generated mode the cards can appear while the one no-retry selector call chooses card order
-  and local cue IDs. The canonical answer, sources, copy action, and conversation history appear
-  only after final validation; interruption or late failure discards the working view. It exposes
-  neither model reasoning nor model-authored prose and adds no provider call. See
+- Labels the collapsed composer control **Settings** and places Answer delivery inside its
+  **Advanced delivery settings** disclosure. **Complete answer** is the recommended strict default. **Progressive
+  response** is experimental. A roughly three-second heartbeat keeps an elapsed-work indicator
+  active. Essential may reveal locally compiled direct evidence before its terminal result.
+  Generated prose is not streamed as a checked claim because local support-ID validation is not a
+  semantic-entailment proof; generated modes show stages and heartbeats until the complete answer
+  or Essential fallback is ready. The canonical answer, sources, copy action, and conversation
+  history appear only after final validation; interruption or late failure discards the working
+  view. It exposes neither model reasoning nor raw tokens and adds no provider call. See
   [Answer delivery modes](answer_delivery.md).
-- Offers exactly four reader-facing Archivist modes: Professional, Essential, Pretty Pink
-  Princess, and Baleful Black Baron. Professional is the new-visitor default. Essential returns
-  the direct evidence compiled by the application with zero provider calls. Each generated mode
-  makes exactly one no-retry, low-reasoning `gpt-5.6-sol` call that may select only exact evidence
-  placeholders and IDs from its application-owned cue catalog. Local code supplies every displayed
-  factual and editorial word and every citation; a failed call falls back to Essential.
+- Offers exactly five reader-facing Archivist modes: Professional, Essential, Pretty Pink
+  Princess, Baleful Black Baron, and Ruthless Red Realist. Professional is the new-visitor default. Essential returns
+  direct cited evidence with no prose-generation call, but the shared hybrid retrieval uses one
+  embedding request. Each generated mode adds exactly one no-retry, low-reasoning, medium-verbosity
+  `gpt-5.6-sol` call over a rich four-to-eight-unit dossier. It authors free prose and one to three
+  in-character follow-up questions. Local code maps valid support IDs to citations; a failed call
+  falls back to Essential without retry. An accepted fallback remains readable and cited, but a
+  visible nonfatal notice above the answer tells the reader that the requested generated mode could
+  not be completed and Essential was returned instead. The notice is absent from ordinary
+  Essential turns and successful generated answers. Its heading is **Essential fallback** and its
+  message is “Archivist could not complete the {Mode label} AI response, so it returned Essential's
+  direct manuscript evidence instead.”
+- Routes only narrowly classified social or personal questions in every registered generated mode
+  through `character-conversation-v2` before retrieval. Professional, Pretty Pink Princess,
+  Baleful Black Baron, and Ruthless Red Realist are covered now; Essential is excluded and future
+  generated modes inherit the route through registration. That route makes exactly one
+  compact, no-retry, low-reasoning/low-verbosity `gpt-5.6-sol` call with a 12-second timeout and a 576-token ceiling and
+  sends no embedding, manuscript text, retrieved evidence, dossier, citation, or conversation
+  history. It accepts only a fictional character reply plus one to three questions that explicitly
+  lead into the manuscript or *Cradle of the Empire*. Failure returns deterministic local dialogue
+  in the same character, not Essential. Historical, manuscript, mixed, and Essential
+  turns stay on their normal grounded route.
 - Keeps Evidence scope separate from interpretation. Retrieved passages and experimental Full book
   select what manuscript context the answer receives; neither choice selects a personality.
 - Moves the independent Historiographical lens, Voice, and Worldview selectors into an Advanced
-  interpretive settings disclosure. Its appearance override offers only the four appearances that
+  interpretive settings disclosure. Its appearance override offers only the five appearances that
   match the current modes. Dormant mode IDs, appearance definitions, and assets remain in the code
   for compatibility but are not selectable. Custom values apply to future turns, retries retain
   the settings that originally produced the turn, and Reset to mode restores the active preset.
-- Generated modes use the resolved interpretive settings to constrain selection from a closed,
-  mode-specific cue catalog. The model cannot return free prose, and local validation rejects raw
-  text, unknown cue IDs, cross-mode cues, or a card arrangement that does not use every evidence
-  card exactly once.
+- Shows a live **Perspective** explanation above the text field so the reader sees the selected
+  interpretive bias before asking. Preset copy names the Professional, Essential, Princess,
+  Baron, or Ruthless Red Realist viewpoint. Any facet or appearance override makes both the top-right active label and the
+  Settings-panel mode label exactly **Custom**. Facet-custom copy still names its base preset and
+  chosen lens, voice, and worldview because the base character/influence remains active;
+  appearance-only copy says the underlying perspective is unchanged. Completed-turn badges retain
+  “{Preset} · Custom” for provenance.
+
+The preset Perspective copy is fixed and reader-facing:
+
+- Professional: “Measured and diplomatic, with a present-minded focus on human agency,
+  institutions, and material consequences.”
+- Essential: “No added interpretive persona: direct, cited evidence from the manuscript without a
+  prose-generation rewrite.”
+- Pretty Pink Princess: “Hopeful and triumphalist, favoring achievement and charm while avoiding
+  subjects she finds too bleak or frightening.”
+- Baleful Black Baron: “Tragic and severe, emphasizing coercion, loss, ruin, and human suffering.”
+- Ruthless Red Realist: “Cold-blooded strategic calculation centered on power, leverage,
+  incentives, tradeoffs, and statecraft; loosely inspired by Machiavelli and Kissinger without
+  impersonating either.”
+
+Facet overrides use “Based on {Preset}, whose character remains active, using {lens} framing, a
+{voice} voice, and {worldview}”; when appearance also differs, they append “Appearance is also
+customized.” Appearance-only overrides say “The appearance is customized; the
+underlying {Preset} perspective is unchanged,” followed by the preset copy. The settings panel
+summarizes Custom as “Based on {Preset}. Advanced settings override this preset for future
+answers.”
+- Generated modes use the resolved interpretive settings to shape authored prose. The structured
+  contract separates grounded from persona runs and requires existing support IDs for historical
+  prose. Local validation rejects unknown IDs, forged citations, links, HTML, malformed structure,
+  and extended copying. It does not claim to prove semantic entailment.
 - Exposes no V26/V27 latency or RAG-policy selector. Explicit V26/V27 compatibility remains a
   development API concern, not a reader control.
 - Shows a locally persisted API-cost estimate for each answer, conversation, UTC month, and all

@@ -6,16 +6,23 @@ Big History of Virginia*. It searches the complete substantive manuscript, answe
 
 Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
 
+The source tree described below implements `retrieval-authored-v3`. Production deploys are manual;
+the live service must report runtime identity schema 4 before it can be described as running this
+policy. That live parity has not yet been verified.
+
 Archivist is not a manuscript-upload service, a general-purpose chatbot, or an unrestricted source
 browser. The public application never exposes its private manuscript, vector store, full retrieved
 chunks, internal traces, or arbitrary file paths.
 
 ## Current product
 
-The built-in RAG product now defaults to `application-compiled-v1` over **481
-retrieval-eligible chunks**. Archivist resolves ordinary follow-ups and plans locally, ranks the
-eligible manuscript with deterministic BM25, and compiles at most three immutable, bounded
-evidence cards. The chunks cover the Introduction, geological formation, Prologue,
+The built-in RAG product now defaults to `retrieval-authored-v3` over **481
+retrieval-eligible chunks**. Archivist resolves high-confidence ordinary follow-ups locally, makes
+one `text-embedding-3-small` query-embedding request, and uses the shared dense/BM25
+reciprocal-rank-fusion retriever and context finalizer. It packages four to eight evidence units,
+targeting about 2,500 estimated evidence tokens with a hard 4,500-token evidence ceiling. Whole
+chunks are preferred; only complete paragraph ranges may be used when the hard ceiling requires
+shortening. The chunks cover the Introduction, geological formation, Prologue,
 Chapters 1–20, Epilogue, Afterword, and Appendices A–D. Front matter, the table of contents,
 acknowledgments, illustration notes, bibliography, printed index, and credits are excluded from
 retrieval.
@@ -23,11 +30,11 @@ retrieval.
 The reader experience includes:
 
 - a one-page, multi-turn conversation with contextual follow-up resolution;
-- local follow-up resolution and planning, BM25 ranking, bounded evidence-card compilation, and
+- local follow-up resolution, hybrid dense/BM25 retrieval, rich evidence-dossier compilation, and
   inline source citations;
-- **4 reader-selectable modes**: Professional, Essential, Pretty Pink Princess, and Baleful Black
-  Baron;
-- **4 mode-linked visual appearances**; dormant appearance assets are hidden compatibility data;
+- **5 reader-selectable modes**: Professional, Essential, Pretty Pink Princess, Baleful Black
+  Baron, and Ruthless Red Realist;
+- **5 mode-linked visual appearances**; dormant appearance assets are hidden compatibility data;
 - Professional as the new-visitor default and Essential as the neutral evidence-first baseline for
   API, CLI, and evaluation callers that omit a mode;
 - **Complete answer** as the fail-closed default delivery mode;
@@ -36,27 +43,69 @@ The reader experience includes:
 - typeset-PDF page locators and tightly bounded excerpts in the public demo; and
 - local cost estimates and budget controls for development.
 
-In current RAG, Essential returns the compiled evidence cards directly with application-owned
-`[Source N]` citations and makes **zero OpenAI or other provider calls**. Professional, Pretty Pink
-Princess, and Baleful Black Baron each make exactly one `gpt-5.6-sol` low-reasoning selection call
-over closed card IDs/text and application-owned typed editorial cue IDs, with no retry. The model
-chooses card order and cue IDs only. Local code supplies every displayed factual and editorial word,
-label, and citation. Each cue belongs to one distinct mode catalog, and cross-mode cues fail local
-validation. An invalid, refused, failed, or unavailable call falls back to the same direct evidence.
+In current RAG, Essential returns direct cited manuscript evidence and makes **no
+prose-generation call**. It is not providerless: the shared hybrid search still makes one query-
+embedding request. Every registered generated mode -- currently Professional, Pretty Pink Princess,
+Baleful Black Baron, and Ruthless Red Realist -- adds exactly one
+no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
+output-token ceiling. The model receives the question, locally resolved turn, and rich dossier; it
+may freely synthesize, paraphrase, choose useful length, and write in the selected character.
+Generated modes end with one to three in-character follow-up questions. A provider failure or
+refusal, or a structurally invalid authored response, falls back to direct Essential evidence
+without retry. The browser keeps that cited evidence usable but displays a visible, nonfatal notice
+headed **Essential fallback**: “Archivist could not complete the {Mode label} AI response, so it
+returned Essential's direct manuscript evidence instead.” A valid Princess in-character refusal
+remains a generated answer.
 
-Advanced lens, voice, and worldview settings guide card order and local cue selection only. They do
-not apply to Essential and never change retrieval, card text, displayed-word ownership, or citations. Historical mode
+Advanced lens, voice, and worldview settings guide framing and prose in generated modes. They do
+not apply to Essential and never change retrieval or the underlying dossier. Historical mode
 definitions and assets remain only so stored and server compatibility data continue to resolve;
 they are not selectable through the current UI or API.
 
+Every registered generated mode also recognizes a deliberately narrow set of direct social and
+personal questions such as “How are you?” before retrieval begins. This includes Professional,
+Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist now and automatically includes
+future modes when they register generated-mode instructions. Essential remains outside the route.
+A matching turn uses `character-conversation-v2`: exactly one no-retry `gpt-5.6-sol` call with low reasoning, low
+verbosity, a 12-second timeout, and at most 576 output tokens. It sends only the question and selected-character
+instructions—not an embedding, manuscript passage, retrieval result, dossier, or conversation
+history. The reply is fictional character conversation, carries no citations or historical facts,
+and ends with one to three in-character questions that explicitly lead back to the manuscript or
+*Cradle of the Empire*. Invalid output, refusal, or provider failure returns a deterministic local
+reply in the same character instead of unrelated Essential evidence. Essential, historical
+questions, manuscript questions, and mixed social-plus-historical questions continue through
+their normal grounded path; this is not a general-purpose chatbot route.
+
+The v3 authored-response policy retains input/output schemas
+`archivist.authored_response_input/1` and `archivist.retrieval_authored_answer/1` plus renderer
+`retrieval-authored-renderer-v1`. Character conversation likewise retains schemas
+`archivist.character_conversation_input/1` and `archivist.character_conversation_answer/1` plus
+renderer `character-conversation-renderer-v1`; its v2 policy name records registry-generalized
+routing rather than a changed wire shape.
+
+Ruthless Red Realist uses the existing Ember & Ink appearance and the wire ID `ember_and_ink`.
+It reads history through power, leverage, incentives, bargaining positions, credible commitments,
+tradeoffs, institutional capacity, and statecraft. Its high-level realist inspiration is loosely
+associated with Machiavelli and Henry Kissinger, but no outside work was ingested and the mode may
+not impersonate, imitate, quote, or attribute claims to either person. Historical claims still
+come only from Archivist's retrieved manuscript dossier.
+
+The composer explains the active **Perspective** above the text field. Its collapsed control is
+labeled **Settings**. Changing any advanced facet or appearance makes the active top and Settings
+labels exactly **Custom**. The perspective explanation still names the underlying preset because
+its character/influence remains active. An appearance-only override explicitly says the underlying
+perspective is unchanged. Completed-turn badges retain the preset plus Custom so their provenance
+remains legible.
+
 Progressive response is not chain-of-thought and does not make a second answer-model call. It may
-improve perceived responsiveness, but planning and retrieval still occur before prose can be
-released. Any provisional text is discarded if the final response fails validation. Complete
-answer remains the reference behavior.
+show locally compiled direct evidence in Essential, but generated prose remains terminal because
+support-ID validation is not semantic-entailment proof. Stages and heartbeats keep the generated
+request legible while the one authored-response call runs. Any provisional evidence is discarded
+if the final response fails validation. Complete answer remains the reference behavior.
 
 An experimental `full-context-v2` strategy also exists behind server-side feature flags and
 remains disabled on the public deployment. Because Full Context is generative, API requests that
-combine it with zero-provider Essential are rejected. Frozen `evidence-planned-v26` remains immutable and
+combine it with Essential are rejected. Frozen `evidence-planned-v26` remains immutable and
 callable only when a developer explicitly requests that policy. The unpromoted V27 compact policy
 is retained as a historical development experiment. Its old reader-facing selector has been
 removed; neither V26 nor V27 is the current product default.
@@ -73,22 +122,28 @@ deterministic preparation, manifest, and edition locators
 private Chroma index (481 eligible text-embedding-3-small vectors)
         |
         v
-local follow-up resolution and question planning
+local high-confidence follow-up resolution
+        |
+        +--> narrow social turn in any registered generated mode: no retrieval or manuscript evidence
+        |        one compact no-retry gpt-5.6-sol character call (12-second timeout)
+        |        deterministic in-character local fallback on failure
+        |        manuscript-leading questions, no citations or historical claims
         |
         v
-deterministic BM25 ranking and up to 3 bounded evidence cards
+one text-embedding-3-small query call + dense/BM25 reciprocal-rank fusion
         |
         v
-application-owned factual text, editorial cue text, labels, and [Source N] citations
+4-8 source-bound dossier units (~2,500 target / 4,500 hard evidence tokens)
         |
-        +--> Essential RAG: direct evidence, zero provider calls
+        +--> Essential RAG: direct cited evidence, no prose-generation call
         |
-        `--> three generated modes: one no-retry gpt-5.6-sol call
-                     selects card order + typed local editorial cue IDs
+        `--> four generated modes: one no-retry gpt-5.6-sol call
+                     authors free prose + 1-3 follow-up questions
+                     grounded runs name opaque dossier-unit IDs
                      (failure falls back to direct evidence)
         |
         v
-public quotation, citation, and exposure validation
+local support-ID -> [Source N] mapping + public exposure validation
         |
         +--> development: private diagnostics and full source inspection
         |
@@ -98,9 +153,11 @@ public quotation, citation, and exposure validation
 FastAPI service + React/Vite conversation interface
 ```
 
-Only the three generated-prose modes use `gpt-5.6-sol`, with low reasoning and explicit settings;
-follow-up resolution, planning, BM25 ranking, evidence compilation, Essential rendering, and
-citations are local. For formal evaluation, Archivist prefers immutable dated snapshots, but
+Only the four generated-prose modes use `gpt-5.6-sol`, with low reasoning, medium verbosity, and
+an explicit output ceiling. Follow-up resolution, BM25/RRF fusion, dossier compilation, Essential
+rendering, and citation mapping are local; dense retrieval requires the one embedding request.
+Local support-ID validation proves that cited dossier units exist, but it does not prove semantic
+entailment or faithfulness. For formal evaluation, Archivist prefers immutable dated snapshots, but
 OpenAI's current catalog exposes only the canonical current-snapshot IDs `gpt-5.6-sol` and
 `gpt-5.6-terra`, not dated variants. The first answer-quality cohort therefore binds the committed
 provider-catalog observation, exact requested and provider-returned IDs, role-specific settings,
@@ -115,7 +172,7 @@ Requirements:
 - Python 3.13;
 - Node.js and npm;
 - `uv`;
-- an OpenAI API key for the three generated-prose modes (Essential does not require one); and
+- an OpenAI API key for current RAG retrieval and the four generated-prose modes; and
 - the private runtime corpus already present under `output/` and `chroma_db/`.
 
 Install dependencies and build the frontend:
@@ -145,8 +202,10 @@ published to the internet.
 
 ### Explicit legacy development policies
 
-Omitting `rag_policy_version` uses `application-compiled-v1`. A local development API caller may
-still explicitly request `evidence-planned-v26` or `evidence-planned-v27` for compatibility and
+Omitting `rag_policy_version` uses `retrieval-authored-v3`. The superseded
+`retrieval-authored-v1` and `retrieval-authored-v2` candidates remain historical/manual evidence
+rather than selectable API policies. A local development API caller may still explicitly request `evidence-planned-v26` or
+`evidence-planned-v27` for compatibility and
 historical investigation. The browser no longer exposes that selector, and the public request
 contract accepts neither field. V26 remains the immutable evaluated candidate; V27 compact was
 never promoted. See [`docs/latency_optimization.md`](docs/latency_optimization.md).
@@ -195,10 +254,15 @@ Archivist now has a privacy-safe production-measurement path: one random request
 correlates a public request with its text-free server record; successful answer runs retain
 pipeline-stage timings, returned token usage, and estimated API cost; and safe failure records keep
 the HTTP outcome without storing the question, answer, manuscript passage, prompt, or source text.
-The public version endpoint now reports `archivist.public_runtime_identity/3`, binding a running
-process to Render's `RENDER_GIT_COMMIT`, `application-compiled-v1`, local BM25 retrieval, the
-generated-prose model, the corpus manifest, the frozen V26 candidate identity, and the versioned
-public request-cost contract. On Render, its automatic commit identity is authoritative.
+The current source version endpoint reports `archivist.public_runtime_identity/4`, binding a
+running process to Render's `RENDER_GIT_COMMIT`, `retrieval-authored-v3`, hybrid BM25/RRF retrieval,
+`text-embedding-3-small`, the generated-prose model, the corpus manifest, the frozen V26 candidate
+identity, and the versioned public request-cost contract. On Render, its automatic commit identity
+is authoritative. Manual deployment and live identity parity for this redesign remain unverified.
+Current generated turns share a 25-second provider deadline across retrieval and authoring: the
+embedding operation receives at most eight seconds and the single prose call receives at most
+twenty seconds of the remaining allowance. This is a fail-fast implementation boundary, not a
+measured latency claim or an SLA.
 
 The predeclared production cohort is now **complete** against deployed wrapper commit
 `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. It attempted exactly 33 answerable held-out items with
@@ -227,19 +291,19 @@ text-free. The summary file SHA-256 is
 artifact hash is `e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30`.
 These numbers describe one observed warm production cohort, not an SLA, uptime study, load test,
 or latency guarantee. This sealed production-performance v1 cohort exercised frozen V26 before
-`application-compiled-v1` became the product default. Its identities, results, and interpretation
-are unchanged, and no paid performance comparison has yet been run for the new default. After exact
-payload/provider authorization, a narrow Edwin Sandys compatibility smoke made one no-retry call
-for each generated mode. All three passed the closed cue contract in 8.357, 6.839, and 5.162
-seconds; the isolated ledger records 6,292 tokens, three priced events, zero unpriced events, and
-`$0.060071250` estimated cost. One question is not a performance cohort, so it supports no general
-speed, quality, or reliability claim.
+either later product policy. Its identities, results, and interpretation are unchanged. The narrow
+Edwin Sandys smoke subsequently exercised the superseded `application-compiled-v1` cue selector:
+three no-retry calls passed in 8.357, 6.839, and 5.162 seconds for `$0.060071250`. It does not
+measure `retrieval-authored-v1`, `retrieval-authored-v2`, or `retrieval-authored-v3`. No paid or live test has run for the
+current policy, so there is no
+current latency, quality, or reliability improvement claim.
 
 Provider-using public Complete-RAG paths retain a server-owned, versioned **$2.00 per-request
 maximum**. The service checks that maximum against the monthly budget, projects each provider
-operation before sending it, and requires strict usage accounting. Current Essential RAG is
-providerless: it does not reserve `$2.00`, and a future production cohort for it requires zero
-provider events and zero provider spend. Historical production-performance v1 retains its original
+operation before sending it, and requires strict usage accounting. Current Essential RAG makes one
+query-embedding request and is therefore subject to provider usage, budget, and request-cost
+controls even though it makes no prose-generation call. A future current-policy Essential cohort
+expects exactly that embedding event. Historical production-performance v1 retains its original
 deployed ceiling and accounting contract. An ambiguous provider transport outcome is never
 replayed or treated as free: it consumes the full maximum in conservative authorization accounting,
 and exact cohort spend remains unavailable unless every attempt has request-scoped usage. Existing
@@ -272,7 +336,7 @@ npm run test:modes
 npm run build
 ```
 
-**Verification snapshot — August 7, 2026:** repository-wide Ruff passed; **784 Python tests passed
+**Verification snapshot — August 13, 2026:** repository-wide Ruff passed; **1,298 Python tests passed
 and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
 built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
@@ -495,10 +559,11 @@ commit in a detached worktree rather than the later documentation-only head.
 
 This is a complete **descriptive baseline**, not yet a full semantic answer-quality scorecard.
 Faithfulness, abstention, gold-claim recall, and related semantic measures remain pending by design.
-The current product replaces that provider-authored factual contract with
-`application-compiled-v1`, while keeping frozen V26 and all completed measurements unchanged. The
-new default has not had a paid latency or quality cohort, so no speed or reliability improvement is
-claimed. The next measurement-instrument work is still to diagnose and redesign canonical
+The current product replaces the briefly shipped closed cue selector with
+`retrieval-authored-v3`, while keeping `retrieval-authored-v1`, `retrieval-authored-v2`, frozen V26, the superseded selector
+smoke, and all completed
+measurements unchanged. The new default has not had a paid latency or quality cohort, so no speed,
+quality, or reliability improvement is claimed. The next measurement-instrument work is still to diagnose and redesign canonical
 decomposition without changing or rerunning the held-out baseline; an optional
 calibration/semantic supplement remains lower priority.
 

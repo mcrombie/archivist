@@ -38,8 +38,11 @@ from answer_progress import (
     ProviderStreamMilestoneCallback,
     emit_progress,
 )
+from authored_response import authored_response_prompt_metadata
+from character_conversation import character_conversation_prompt_metadata
 from archivist_modes import (
     ArchivistMode,
+    application_compiled_modes,
     archivist_mode_metadata,
     settings_for_archivist_mode,
 )
@@ -87,8 +90,6 @@ from public_sources import (
     load_locator_index,
     public_source_payload,
 )
-from prose_renderer import evidence_prose_prompt_metadata
-
 from web_project import (
     BASE_DIR,
     answer_project_question_result,
@@ -150,14 +151,7 @@ class DevelopmentRagPolicyVersion(StrEnum):
     V27_COMPACT = COMPACT_RAG_POLICY_VERSION
 
 
-_APPLICATION_COMPILED_MODES = frozenset(
-    {
-        ArchivistMode.PROFESSIONAL,
-        ArchivistMode.ESSENTIAL,
-        ArchivistMode.PRETTY_PINK_PRINCESS,
-        ArchivistMode.BALEFUL_BLACK_BARON,
-    }
-)
+_APPLICATION_COMPILED_MODES = application_compiled_modes()
 
 
 class QuestionRequest(BaseModel):
@@ -230,7 +224,7 @@ class QuestionRequest(BaseModel):
             and self.answer_strategy is AnswerStrategy.FULL_CONTEXT
         ):
             raise ValueError(
-                "Essential is a zero-provider direct-evidence mode and requires Retrieved passages"
+                "Essential is a direct-evidence RAG mode and requires Retrieved passages"
             )
         if (
             self.archivist_mode is ArchivistMode.ESSENTIAL
@@ -326,7 +320,7 @@ class PublicQuestionRequest(BaseModel):
             and self.answer_strategy is AnswerStrategy.FULL_CONTEXT
         ):
             raise ValueError(
-                "Essential is a zero-provider direct-evidence mode and requires Retrieved passages"
+                "Essential is a direct-evidence RAG mode and requires Retrieved passages"
             )
         if self.archivist_mode is ArchivistMode.ESSENTIAL and (
             self.historiographical_lens is not HistoriographicalLens.EVIDENCE_FIRST
@@ -354,24 +348,6 @@ def _uses_application_compiled_answer(
     )
 
 
-def _uses_providerless_application_compiler(
-    *,
-    archivist_mode: ArchivistMode,
-    answer_strategy: AnswerStrategy,
-    legacy_perspective: bool = False,
-    rag_policy_version: DevelopmentRagPolicyVersion | None = None,
-) -> bool:
-    return (
-        _uses_application_compiled_answer(
-            archivist_mode=archivist_mode,
-            answer_strategy=answer_strategy,
-            legacy_perspective=legacy_perspective,
-            rag_policy_version=rag_policy_version,
-        )
-        and archivist_mode is ArchivistMode.ESSENTIAL
-    )
-
-
 def _answer_mode_metadata(
     *,
     archivist_mode: ArchivistMode,
@@ -379,18 +355,58 @@ def _answer_mode_metadata(
     voice: AnswerVoice,
     worldview: Worldview,
     application_compiled: bool,
+    answer_status: str | None = None,
 ) -> dict[str, object]:
-    """Bind response metadata to the exact prose instructions actually in use."""
+    """Bind compatibility metadata to the exact authored prompt in use."""
 
     metadata = dict(archivist_mode_metadata(archivist_mode))
-    if application_compiled and archivist_mode is not ArchivistMode.ESSENTIAL:
+    if application_compiled and answer_status in {
+        "character_conversation",
+        "character_conversation_fallback",
+    }:
+        character_metadata = character_conversation_prompt_metadata(archivist_mode)
         metadata.update(
-            evidence_prose_prompt_metadata(
-                archivist_mode,
-                historiographical_lens=historiographical_lens,
-                voice=voice,
-                worldview=worldview,
-            )
+            {
+                "prose_renderer_version": character_metadata[
+                    "character_conversation_renderer_version"
+                ],
+                "prose_renderer_prompt_sha256": character_metadata[
+                    "character_conversation_prompt_sha256"
+                ],
+                "prose_renderer_mode_instruction_sha256": character_metadata[
+                    "character_conversation_mode_instruction_sha256"
+                ],
+                # The compact social prompt uses its own fictional-character
+                # brief and does not claim that the historical influence file
+                # was included in this call.
+                "prose_renderer_influence_prompt_sha256": None,
+            }
+        )
+    elif application_compiled and archivist_mode is not ArchivistMode.ESSENTIAL:
+        authored_metadata = authored_response_prompt_metadata(
+            archivist_mode,
+            historiographical_lens=historiographical_lens,
+            voice=voice,
+            worldview=worldview,
+        )
+        metadata.update(
+            {
+                # Preserve the established API field names while fingerprinting
+                # the actual one-call authored-response prompt, not the retired
+                # cue renderer.
+                "prose_renderer_version": authored_metadata[
+                    "authored_response_renderer_version"
+                ],
+                "prose_renderer_prompt_sha256": authored_metadata[
+                    "authored_response_prompt_sha256"
+                ],
+                "prose_renderer_mode_instruction_sha256": authored_metadata[
+                    "authored_response_mode_instruction_sha256"
+                ],
+                "prose_renderer_influence_prompt_sha256": authored_metadata[
+                    "authored_response_influence_prompt_sha256"
+                ],
+            }
         )
     else:
         metadata.update(
@@ -590,13 +606,6 @@ def _development_question_preflight(
 ) -> UsageLedger:
     _require_full_context_available(EXPOSURE_SETTINGS, request.answer_strategy)
     ledger = UsageLedger()
-    if project_id == "current" and _uses_providerless_application_compiler(
-        archivist_mode=request.archivist_mode,
-        answer_strategy=request.answer_strategy,
-        legacy_perspective=request.perspective is not None,
-        rag_policy_version=request.rag_policy_version,
-    ):
-        return ledger
     budget = ledger.budget_state()
     if budget["hard_limit_enabled"] and budget["exceeded"] and not request.allow_over_budget:
         raise HTTPException(
@@ -628,15 +637,6 @@ def _run_development_question(
         legacy_perspective=request.perspective is not None,
         rag_policy_version=request.rag_policy_version,
     )
-    providerless_application_compiler = (
-        project_id == "current"
-        and _uses_providerless_application_compiler(
-            archivist_mode=request.archivist_mode,
-            answer_strategy=request.answer_strategy,
-            legacy_perspective=request.perspective is not None,
-            rag_policy_version=request.rag_policy_version,
-        )
-    )
     ledger = _development_question_preflight(request, project_id=project_id)
 
     try:
@@ -644,7 +644,7 @@ def _run_development_question(
             project_id=project_id,
             conversation_id=request.conversation_id,
             turn_id=request.turn_id,
-            enforce_budget=not providerless_application_compiler,
+            enforce_budget=True,
             allow_over_budget=request.allow_over_budget,
         ):
             answer_kwargs: dict[str, object] = {
@@ -700,6 +700,7 @@ def _run_development_question(
             voice=request.voice,
             worldview=request.worldview,
             application_compiled=application_compiled,
+            answer_status=answer_result.status,
         )
         return {
             "answer": answer,
@@ -1134,6 +1135,7 @@ def _progressive_answer_response(
                 if result.get("answer_status") in {
                     "generation_contract_failed",
                     "corpus_integrity_failed",
+                    "retrieval_unavailable",
                 }:
                     timing.mark_terminal("error")
                     stream_outcome = "error"
@@ -1485,11 +1487,6 @@ def _preflight_public_progressive_question(
                 "request_id": request_id,
             },
         )
-    if _uses_providerless_application_compiler(
-        archivist_mode=request.archivist_mode,
-        answer_strategy=request.answer_strategy,
-    ):
-        return
     try:
         ledger = UsageLedger()
         _configure_public_budget(ledger, settings)
@@ -1531,10 +1528,6 @@ def _run_public_question(
     request_id = request_id or _PUBLIC_REQUEST_ID.get() or uuid4().hex
     ledger = UsageLedger()
     application_compiled = _uses_application_compiled_answer(
-        archivist_mode=request.archivist_mode,
-        answer_strategy=request.answer_strategy,
-    )
-    providerless_application_compiler = _uses_providerless_application_compiler(
         archivist_mode=request.archivist_mode,
         answer_strategy=request.answer_strategy,
     )
@@ -1594,32 +1587,25 @@ def _run_public_question(
             },
         )
     try:
-        if not providerless_application_compiler:
-            _configure_public_budget(ledger, settings)
-            budget = ledger.budget_state()
-            if budget["exceeded"]:
-                raise CostLimitExceeded(budget)
+        _configure_public_budget(ledger, settings)
+        budget = ledger.budget_state()
+        if budget["exceeded"]:
+            raise CostLimitExceeded(budget)
 
         with usage_scope(
             project_id="current",
             conversation_id=request.conversation_id,
             turn_id=request.turn_id,
             request_id=request_id,
-            enforce_budget=not providerless_application_compiler,
+            enforce_budget=True,
             allow_over_budget=False,
             request_cost_ceiling_nano_usd=(
                 PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD
-                if (
-                    request.answer_strategy is AnswerStrategy.RAG
-                    and not providerless_application_compiler
-                )
+                if request.answer_strategy is AnswerStrategy.RAG
                 else None
             ),
         ):
-            if (
-                request.answer_strategy is AnswerStrategy.RAG
-                and not providerless_application_compiler
-            ):
+            if request.answer_strategy is AnswerStrategy.RAG:
                 # Reserve a whole conservative request before Answer Mode can
                 # construct a provider client or issue its first operation.
                 enforce_projected_usage_budget(
@@ -1655,6 +1641,7 @@ def _run_public_question(
             if answer_result.status in {
                 "generation_contract_failed",
                 "corpus_integrity_failed",
+                "retrieval_unavailable",
             }:
                 raise PublicSourceError("answer did not pass the public release gate")
             audit_chunks = _public_verbatim_audit_chunks(
@@ -1679,6 +1666,7 @@ def _run_public_question(
             voice=request.voice,
             worldview=request.worldview,
             application_compiled=application_compiled,
+            answer_status=answer_result.status,
         )
         return {
             "answer": answer_result.answer,

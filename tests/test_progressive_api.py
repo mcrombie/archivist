@@ -552,8 +552,13 @@ def test_public_progressive_endpoint_keeps_safe_terminal_shape(monkeypatch):
         assert forbidden not in serialized
 
 
+@pytest.mark.parametrize(
+    "terminal_status",
+    ("generation_contract_failed", "retrieval_unavailable"),
+)
 def test_late_global_failure_retracts_provisional_claims_with_terminal_error(
     monkeypatch,
+    terminal_status,
 ):
     answer = "A locally checked but globally incomplete claim. [Source 1]"
     chunks = (
@@ -588,7 +593,7 @@ def test_late_global_failure_retracts_provisional_claims_with_terminal_error(
         return SimpleNamespace(
             answer=answer,
             final_chunks=list(chunks),
-            status="generation_contract_failed",
+            status=terminal_status,
             evidence_decision="direct_answer",
             diagnostics={},
             resolved_question="Resolved synthetic question?",

@@ -30,6 +30,7 @@ from answer_progress import (
 )
 from archivist_modes import (
     ArchivistMode,
+    application_compiled_modes,
     archivist_mode_metadata,
     resolve_archivist_mode_settings,
 )
@@ -40,12 +41,38 @@ from costs import (
     tracked_responses_parse,
 )
 from filters import should_skip_document
+from authored_response import (
+    AUTHORED_RESPONSE_POLICY_VERSION,
+    AUTHORED_RESPONSE_RENDERER_VERSION,
+    AUTHORED_RESPONSE_SETTINGS,
+    AuthoredDisposition,
+    AuthoredFailureCode,
+    AuthoredResponse,
+    AuthoredResponseResult,
+    AuthoredResponseStatus,
+    authored_response_prompt_metadata,
+    generate_authored_response,
+)
+from character_conversation import (
+    CHARACTER_CONVERSATION_POLICY_VERSION,
+    CHARACTER_CONVERSATION_RENDERER_VERSION,
+    CHARACTER_CONVERSATION_SETTINGS,
+    CharacterConversationFailureCode,
+    CharacterConversationStatus,
+    character_conversation_prompt_metadata,
+    deterministic_character_conversation_fallback,
+    generate_character_conversation,
+    is_character_conversation_question,
+)
 from evidence_compiler import (
-    APPLICATION_COMPILED_POLICY_VERSION,
-    EvidencePacket,
     compile_evidence_packet,
-    render_evidence_card_claim,
     render_direct_evidence_answer,
+    render_evidence_card_claim,
+)
+from evidence_dossier import (
+    RetrievalDossier,
+    build_retrieval_dossier,
+    resolve_local_followup_question,
 )
 from importers import (
     SUPPORTED_DOCUMENT_SUFFIXES,
@@ -65,15 +92,6 @@ from perspectives import (
 )
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
 from query_planning import ResolvedTurn, build_question_plan
-from prose_renderer import (
-    EVIDENCE_PROSE_RENDERER_VERSION,
-    READER_PROSE_SETTINGS,
-    EvidenceProseResponse,
-    ProseFailureCode,
-    ProseRenderStatus,
-    build_evidence_prose_instructions,
-    generate_evidence_prose,
-)
 from full_context_pipeline import run_full_context_answer
 from rag_pipeline import (
     AnswerModeResult,
@@ -88,7 +106,7 @@ from retrieval import (
     finalize_context_chunks,
     finalize_index_context,
     find_exact_match_chunks,
-    lexical_candidates,
+    plan_context_chunks,
     retrieve_from_collection,
     retrieve_semantic_from_collection,
 )
@@ -114,19 +132,12 @@ MAX_CONTEXT_ANSWER_CHARS = 3_000
 MAX_RESOLVED_QUERY_CHARS = 4_000
 MAX_RESOLVED_TURN_OUTPUT_TOKENS = 2_000
 
-APPLICATION_COMPILED_MODES = frozenset(
-    {
-        ArchivistMode.ESSENTIAL,
-        ArchivistMode.PROFESSIONAL,
-        ArchivistMode.PRETTY_PINK_PRINCESS,
-        ArchivistMode.BALEFUL_BLACK_BARON,
-    }
-)
-_LOCAL_FOLLOWUP_PATTERN = re.compile(
-    r"\b(?:he|her|hers|him|his|it|its|she|that|their|them|they|this)\b|"
-    r"^\s*(?:and\b|how about\b|what about\b|what happened next\b)",
-    flags=re.IGNORECASE,
-)
+APPLICATION_COMPILED_MODES = application_compiled_modes()
+AUTHORED_TOTAL_PROVIDER_DEADLINE_SECONDS = 25.0
+AUTHORED_EMBEDDING_TIMEOUT_SECONDS = 8.0
+AUTHORED_AUTHORING_TIMEOUT_SECONDS = 20.0
+AUTHORED_MIN_AUTHORING_TIMEOUT_SECONDS = 1.0
+CHARACTER_CONVERSATION_TIMEOUT_SECONDS = 12.0
 
 CONVERSATION_QUERY_INSTRUCTIONS = """\
 Resolve the current message into the supplied ResolvedTurn schema for a manuscript archive.
@@ -152,6 +163,23 @@ def utc_now() -> str:
 
 def _elapsed_ms(start_ns: int) -> float:
     return round(max(0, perf_counter_ns() - start_ns) / 1_000_000, 3)
+
+
+def _provider_client_with_timeout(client: object, timeout_seconds: float) -> object:
+    """Derive a no-retry timeout view without constructing another SDK client."""
+
+    with_options = getattr(client, "with_options", None)
+    if callable(with_options):
+        try:
+            return with_options(max_retries=0, timeout=float(timeout_seconds))
+        except TypeError:
+            # Lightweight test doubles may implement only the retry argument.
+            pass
+    return without_automatic_retries(client)
+
+
+def _remaining_provider_deadline_seconds(deadline_ns: int) -> float:
+    return max(0.0, (deadline_ns - perf_counter_ns()) / 1_000_000_000)
 
 
 def _with_stage_timings(
@@ -715,9 +743,7 @@ def resolve_application_compiled_turn(
         if str(turn.get("question") or "").strip()
     )
     trusted_user_texts = tuple(dict.fromkeys((*prior_questions, question)))
-    standalone_question = question
-    if prior_questions and _LOCAL_FOLLOWUP_PATTERN.search(question):
-        standalone_question = f"{prior_questions[-1]} Follow-up question: {question}"
+    standalone_question = resolve_local_followup_question(question, bounded_history)
     return ResolvedTurn(
         standalone_question=_truncate_conversation_text(
             standalone_question,
@@ -837,7 +863,7 @@ def _resolved_answer_style(
     return selected_mode, lens, selected_voice, selected_worldview
 
 
-def _application_compiled_generation_trace(
+def _retrieval_authored_generation_trace(
     *,
     mode: ArchivistMode,
     generation_called: bool,
@@ -846,11 +872,16 @@ def _application_compiled_generation_trace(
     voice: AnswerVoice | None = None,
     worldview: Worldview | None = None,
     fallback_code: str | None = None,
+    content_outcome: str | None = None,
 ) -> dict[str, object]:
     if not generation_called:
         failed_before_call = fallback_code is not None
         return {
-            "status": "fallback_to_direct_evidence" if failed_before_call else "not_called",
+            "status": (
+                "retrieval_failed"
+                if fallback_code == "retrieval_failure"
+                else ("fallback_to_direct_evidence" if failed_before_call else "not_called")
+            ),
             "validation_result": (
                 "invalid"
                 if failed_before_call
@@ -865,7 +896,7 @@ def _application_compiled_generation_trace(
             "repair_applied": False,
             "repair_codes": [],
             "prompt_version": "not-applicable",
-            "normalizer_version": APPLICATION_COMPILED_POLICY_VERSION,
+            "normalizer_version": AUTHORED_RESPONSE_POLICY_VERSION,
             "instructions_sha256": "not-applicable",
             "schema_sha256": "not-applicable",
             "generator_model": "not-applicable",
@@ -875,7 +906,7 @@ def _application_compiled_generation_trace(
             "fallback_code": fallback_code,
         }
 
-    instructions = build_evidence_prose_instructions(
+    metadata = authored_response_prompt_metadata(
         mode,
         historiographical_lens=historiographical_lens,
         voice=voice,
@@ -883,7 +914,7 @@ def _application_compiled_generation_trace(
     )
     schema_sha256 = hashlib.sha256(
         json.dumps(
-            EvidenceProseResponse.model_json_schema(),
+            AuthoredResponse.model_json_schema(),
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -892,25 +923,70 @@ def _application_compiled_generation_trace(
         "status": "generated" if generation_valid else "fallback_to_direct_evidence",
         "validation_result": "valid" if generation_valid else "invalid",
         "error_code": (None if generation_valid else (fallback_code or "invalid_response")),
-        "content_outcome": "valid_partial" if generation_valid else None,
+        "content_outcome": content_outcome if generation_valid else None,
         "repair_applied": False,
         "repair_codes": [],
-        "prompt_version": EVIDENCE_PROSE_RENDERER_VERSION,
-        "normalizer_version": APPLICATION_COMPILED_POLICY_VERSION,
-        "instructions_sha256": hashlib.sha256(instructions.encode("utf-8")).hexdigest(),
+        "prompt_version": AUTHORED_RESPONSE_RENDERER_VERSION,
+        "normalizer_version": AUTHORED_RESPONSE_POLICY_VERSION,
+        "instructions_sha256": metadata["authored_response_prompt_sha256"],
         "schema_sha256": schema_sha256,
-        "generator_model": READER_PROSE_SETTINGS.model,
-        "generator_reasoning_effort": READER_PROSE_SETTINGS.reasoning_effort,
-        "generator_verbosity": READER_PROSE_SETTINGS.verbosity,
+        "generator_model": AUTHORED_RESPONSE_SETTINGS.model,
+        "generator_reasoning_effort": AUTHORED_RESPONSE_SETTINGS.reasoning_effort,
+        "generator_verbosity": AUTHORED_RESPONSE_SETTINGS.verbosity,
         "structured_generation_called": True,
+        "fallback_code": fallback_code,
+    }
+
+
+def _character_conversation_generation_trace(
+    *,
+    mode: ArchivistMode,
+    generation_called: bool,
+    response_valid: bool,
+    fallback_code: str | None = None,
+) -> dict[str, object]:
+    """Bind the compact social-turn prompt without pretending retrieval ran."""
+
+    metadata = character_conversation_prompt_metadata(mode)
+    return {
+        "status": "generated" if fallback_code is None else "local_character_fallback",
+        # Both branches return an application-validated character reply. A
+        # provider/schema failure is preserved as fallback_code, but must not
+        # falsely mark the deterministic local response itself invalid.
+        "validation_result": "valid" if response_valid else "invalid",
+        "error_code": None if response_valid else (fallback_code or "invalid_response"),
+        "content_outcome": "valid_complete" if response_valid else None,
+        "repair_applied": False,
+        "repair_codes": [],
+        "prompt_version": CHARACTER_CONVERSATION_RENDERER_VERSION,
+        "normalizer_version": CHARACTER_CONVERSATION_POLICY_VERSION,
+        "instructions_sha256": metadata["character_conversation_prompt_sha256"],
+        "schema_sha256": metadata["character_conversation_schema_sha256"],
+        "generator_model": (
+            CHARACTER_CONVERSATION_SETTINGS.model if generation_called else "not-applicable"
+        ),
+        "generator_reasoning_effort": (
+            CHARACTER_CONVERSATION_SETTINGS.reasoning_effort
+            if generation_called
+            else "not-applicable"
+        ),
+        "generator_verbosity": (
+            CHARACTER_CONVERSATION_SETTINGS.verbosity
+            if generation_called
+            else "not-applicable"
+        ),
+        "structured_generation_called": generation_called,
         "fallback_code": fallback_code,
     }
 
 
 def _run_application_compiled_answer(
     *,
+    original_question: str,
     resolved_turn: ResolvedTurn,
+    collection_handle: object,
     chunks: list[dict[str, Any]],
+    corpus_trace: Mapping[str, object],
     client_factory: Callable[[], object],
     n_results: int,
     archivist_mode: ArchivistMode,
@@ -921,7 +997,7 @@ def _run_application_compiled_answer(
     progress_callback: ProgressCallback | None,
     checked_claim_callback: CheckedClaimCallback | None,
 ) -> AnswerModeResult:
-    """Compile the factual spine locally, then optionally ask for prose once."""
+    """Retrieve a rich dossier, then answer directly or author prose once."""
 
     pipeline_started_ns = perf_counter_ns()
     timings: dict[str, float] = {}
@@ -937,135 +1013,311 @@ def _run_application_compiled_answer(
             plan=plan,
             evidence_decision="indeterminate",
             diagnostics={
-                "rag_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+                "rag_policy_version": AUTHORED_RESPONSE_POLICY_VERSION,
                 "planner": {"status": "not_called"},
-                "generation": _application_compiled_generation_trace(
+                "generation": _retrieval_authored_generation_trace(
                     mode=archivist_mode,
                     generation_called=False,
                     generation_valid=False,
                 ),
                 "stage_timings_ms": {"pipeline_total": _elapsed_ms(pipeline_started_ns)},
             },
-            answer_strategy_version=APPLICATION_COMPILED_POLICY_VERSION,
+            answer_strategy_version=AUTHORED_RESPONSE_POLICY_VERSION,
+        )
+
+    if is_character_conversation_question(original_question, archivist_mode):
+        # This is a deliberately narrow non-evidentiary route. A direct social
+        # question should not pay for or disclose irrelevant manuscript retrieval,
+        # and its answer must not masquerade as a corpus-grounded result.
+        emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
+        generation_started_ns = perf_counter_ns()
+        generation_called = False
+        try:
+            provider_client = without_automatic_retries(client_factory())
+            authoring_client = _provider_client_with_timeout(
+                provider_client,
+                CHARACTER_CONVERSATION_TIMEOUT_SECONDS,
+            )
+            generation_called = True
+            character = generate_character_conversation(
+                authoring_client,
+                question=original_question,
+                mode=archivist_mode,
+            )
+        except CostLimitExceeded:
+            raise
+        except Exception:
+            character = deterministic_character_conversation_fallback(
+                archivist_mode,
+                CharacterConversationFailureCode.PROVIDER_FAILURE,
+            )
+        timings["answer_generation"] = _elapsed_ms(generation_started_ns)
+        generated = character.status is CharacterConversationStatus.GENERATED
+        failure_code = (
+            character.failure_code.value if character.failure_code is not None else None
+        )
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
+        timings["answer_validation"] = 0.0
+        timings["pipeline_total"] = _elapsed_ms(pipeline_started_ns)
+        return AnswerModeResult(
+            answer=character.answer,
+            final_chunks=[],
+            status=(
+                "character_conversation"
+                if generated
+                else "character_conversation_fallback"
+            ),
+            plan=plan,
+            evidence_decision="indeterminate",
+            diagnostics={
+                "rag_policy_version": AUTHORED_RESPONSE_POLICY_VERSION,
+                "planner": {"status": "not_called"},
+                "generation": _character_conversation_generation_trace(
+                    mode=archivist_mode,
+                    generation_called=generation_called,
+                    response_valid=True,
+                    fallback_code=failure_code,
+                ),
+                "response_route": CHARACTER_CONVERSATION_POLICY_VERSION,
+                "stage_timings_ms": timings,
+            },
+            answer_strategy_version=AUTHORED_RESPONSE_POLICY_VERSION,
         )
 
     emit_progress(progress_callback, AnswerProgressStage.RETRIEVING_SOURCES)
     retrieval_started_ns = perf_counter_ns()
-    eligible_chunks = [
-        chunk for chunk in chunks if not should_skip_document(str(chunk.get("document") or ""))
-    ]
-    ranked, lexical_diagnostics = lexical_candidates(
-        resolved_turn.standalone_question,
-        eligible_chunks,
-        limit=max(12, min(20, n_results * 3)),
+    provider_client = without_automatic_retries(client_factory())
+    provider_deadline_ns = perf_counter_ns() + int(
+        AUTHORED_TOTAL_PROVIDER_DEADLINE_SECONDS * 1_000_000_000
     )
-    retrieved_chunks = [dict(candidate["chunk"]) for candidate in ranked]
+    embedding_client = _provider_client_with_timeout(
+        provider_client,
+        min(
+            AUTHORED_EMBEDDING_TIMEOUT_SECONDS,
+            AUTHORED_TOTAL_PROVIDER_DEADLINE_SECONDS,
+        ),
+    )
+    try:
+        retrieval_results = retrieve_from_collection(
+            resolved_turn.standalone_question,
+            collection_handle,
+            chunks,
+            n_results=n_results,
+            embedding_client=embedding_client,
+            corpus=corpus_trace,
+        )
+    except CostLimitExceeded:
+        raise
+    except Exception:
+        timings["retrieval"] = _elapsed_ms(retrieval_started_ns)
+        timings["pipeline_total"] = _elapsed_ms(pipeline_started_ns)
+        return AnswerModeResult(
+            answer=(
+                "Archivist could not complete the evidence search for this question. "
+                "Please try again."
+            ),
+            final_chunks=[],
+            status="retrieval_unavailable",
+            plan=plan,
+            evidence_decision="indeterminate",
+            diagnostics={
+                "rag_policy_version": AUTHORED_RESPONSE_POLICY_VERSION,
+                "planner": {"status": "not_called"},
+                "generation": _retrieval_authored_generation_trace(
+                    mode=archivist_mode,
+                    generation_called=False,
+                    generation_valid=False,
+                    fallback_code="retrieval_failure",
+                ),
+                "stage_timings_ms": timings,
+            },
+            answer_strategy_version=AUTHORED_RESPONSE_POLICY_VERSION,
+        )
+    retrieval_outcome = plan_context_chunks(retrieval_results, chunks=chunks)
     timings["retrieval"] = _elapsed_ms(retrieval_started_ns)
 
     emit_progress(progress_callback, AnswerProgressStage.CHECKING_EVIDENCE)
     compilation_started_ns = perf_counter_ns()
-    packet: EvidencePacket = compile_evidence_packet(
+    dossier: RetrievalDossier = build_retrieval_dossier(
         resolved_turn.standalone_question,
-        retrieved_chunks,
+        retrieval_outcome.final_chunks,
+        retrieval_query=resolved_turn.standalone_question,
+    )
+    finalized_by_id = {
+        str(chunk.get("chunk_id") or ""): dict(chunk)
+        for chunk in retrieval_outcome.final_chunks
+    }
+    dossier_chunks: list[dict[str, Any]] = []
+    for unit in dossier.units:
+        chunk = dict(finalized_by_id[unit.chunk_id])
+        chunk["text"] = unit.text
+        chunk["paragraph_start"] = unit.source.paragraph_start
+        chunk["paragraph_end"] = unit.source.paragraph_end
+        dossier_chunks.append(chunk)
+    packet = compile_evidence_packet(
+        resolved_turn.standalone_question,
+        dossier_chunks,
     )
     direct = render_direct_evidence_answer(packet)
     timings["evidence_gate"] = _elapsed_ms(compilation_started_ns)
     compiler_diagnostics = {
-        **packet.diagnostics,
+        **dossier.diagnostics,
+        "direct_evidence": packet.diagnostics,
         "retrieval": {
-            **lexical_diagnostics,
-            "ranked_chunk_count": len(retrieved_chunks),
-            "retrieval_kind": "local_bm25",
+            "retrieval_kind": "hybrid_bm25_rrf",
+            "finalized_chunk_count": len(retrieval_outcome.final_chunks),
+            "dossier_chunk_count": len(dossier_chunks),
         },
     }
 
     emit_progress(progress_callback, AnswerProgressStage.PREPARING_CONTEXT)
-    for card in packet.cards:
-        emit_checked_claim(
-            checked_claim_callback,
-            CheckedClaimCandidate(
-                paragraph=card.source_number,
-                text=render_evidence_card_claim(card),
-                source_chunks=packet.source_chunks,
-                audit_chunks=packet.source_chunks,
-            ),
-        )
 
-    if not packet.cards:
-        generation = _application_compiled_generation_trace(
+    if not dossier.units:
+        generation = _retrieval_authored_generation_trace(
             mode=archivist_mode,
             generation_called=False,
             generation_valid=False,
         )
         answer = direct.answer
-        status = direct.status
+        status = "retrieval_authored_direct"
+        evidence_decision = "indeterminate"
     elif archivist_mode is ArchivistMode.ESSENTIAL:
-        generation = _application_compiled_generation_trace(
+        # Progressive delivery treats these locally assembled excerpts as
+        # checked answer content, so announce the assembly phase before any
+        # claim frame. No prose-generation provider call is made.
+        emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
+        for card in packet.cards:
+            emit_checked_claim(
+                checked_claim_callback,
+                CheckedClaimCandidate(
+                    paragraph=card.source_number,
+                    text=render_evidence_card_claim(card),
+                    source_chunks=packet.source_chunks,
+                    audit_chunks=packet.source_chunks,
+                ),
+            )
+        generation = _retrieval_authored_generation_trace(
             mode=archivist_mode,
             generation_called=False,
             generation_valid=True,
         )
         answer = direct.answer
-        status = direct.status
+        status = "retrieval_authored_direct"
+        evidence_decision = "direct_answer" if packet.cards else "indeterminate"
     else:
         emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
         generation_started_ns = perf_counter_ns()
-        try:
-            client = client_factory()
-        except Exception:
-            timings["answer_generation"] = _elapsed_ms(generation_started_ns)
-            fallback_code = ProseFailureCode.PROVIDER_FAILURE.value
-            generation = _application_compiled_generation_trace(
+        remaining_provider_seconds = _remaining_provider_deadline_seconds(
+            provider_deadline_ns
+        )
+        generation_attempted = (
+            remaining_provider_seconds >= AUTHORED_MIN_AUTHORING_TIMEOUT_SECONDS
+        )
+        if not generation_attempted:
+            authored = AuthoredResponseResult(
+                status=AuthoredResponseStatus.FALLBACK_REQUIRED,
                 mode=archivist_mode,
-                generation_called=False,
-                generation_valid=False,
-                fallback_code=fallback_code,
+                answer=None,
+                disposition=None,
+                paragraphs=(),
+                follow_up_questions=(),
+                used_unit_ids=(),
+                used_source_numbers=(),
+                failure_code=AuthoredFailureCode.PROVIDER_FAILURE,
             )
-            answer = direct.answer
-            status = "application_compiled_fallback"
         else:
-            prose = generate_evidence_prose(
-                client,
-                question=resolved_turn.standalone_question,
-                cards=packet.cards,
-                mode=archivist_mode,
-                historiographical_lens=historiographical_lens,
-                voice=voice,
-                worldview=worldview,
-            )
-            timings["answer_generation"] = _elapsed_ms(generation_started_ns)
-            generated = prose.status is ProseRenderStatus.GENERATED and prose.answer is not None
-            generation = _application_compiled_generation_trace(
-                mode=archivist_mode,
-                generation_called=True,
-                generation_valid=generated,
-                historiographical_lens=historiographical_lens,
-                voice=voice,
-                worldview=worldview,
-                fallback_code=(
-                    prose.failure_code.value if prose.failure_code is not None else None
+            authoring_client = _provider_client_with_timeout(
+                provider_client,
+                min(
+                    AUTHORED_AUTHORING_TIMEOUT_SECONDS,
+                    remaining_provider_seconds,
                 ),
             )
-            answer = prose.answer if generated else direct.answer
-            status = "application_compiled_prose" if generated else "application_compiled_fallback"
+            try:
+                authored = generate_authored_response(
+                    authoring_client,
+                    question=original_question,
+                    resolved_turn=resolved_turn,
+                    dossier=dossier,
+                    mode=archivist_mode,
+                    historiographical_lens=historiographical_lens,
+                    voice=voice,
+                    worldview=worldview,
+                )
+            except CostLimitExceeded:
+                raise
+            except Exception:
+                authored = AuthoredResponseResult(
+                    status=AuthoredResponseStatus.FALLBACK_REQUIRED,
+                    mode=archivist_mode,
+                    answer=None,
+                    disposition=None,
+                    paragraphs=(),
+                    follow_up_questions=(),
+                    used_unit_ids=(),
+                    used_source_numbers=(),
+                    failure_code=AuthoredFailureCode.PROVIDER_FAILURE,
+                )
+        timings["answer_generation"] = _elapsed_ms(generation_started_ns)
+        generated = (
+            authored.status is AuthoredResponseStatus.GENERATED
+            and authored.answer is not None
+        )
+        authored_content_outcome = {
+            AuthoredDisposition.ANSWERED: "valid_complete",
+            AuthoredDisposition.PARTIAL: "valid_partial",
+            AuthoredDisposition.INSUFFICIENT: "insufficient_evidence",
+        }.get(authored.disposition)
+        generation = _retrieval_authored_generation_trace(
+            mode=archivist_mode,
+            generation_called=generation_attempted,
+            generation_valid=generated,
+            historiographical_lens=historiographical_lens,
+            voice=voice,
+            worldview=worldview,
+            fallback_code=(
+                authored.failure_code.value if authored.failure_code is not None else None
+            ),
+            content_outcome=authored_content_outcome,
+        )
+        answer = authored.answer if generated else direct.answer
+        status = "retrieval_authored" if generated else "retrieval_authored_fallback"
+        evidence_decision = (
+            {
+                AuthoredDisposition.ANSWERED: "direct_answer",
+                AuthoredDisposition.PARTIAL: "partial_answer",
+                # These are model-authored dispositions after retrieval, not
+                # evidence-gate certifications that the corpus lacks an answer.
+                AuthoredDisposition.INSUFFICIENT: "indeterminate",
+                AuthoredDisposition.PERSONA_REFUSAL: "indeterminate",
+            }.get(authored.disposition, "indeterminate")
+            if generated
+            else ("direct_answer" if packet.cards else "indeterminate")
+        )
+
+    returned_chunks = (
+        dossier_chunks
+        if status == "retrieval_authored"
+        else list(packet.source_chunks)
+    )
 
     emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
     timings["answer_validation"] = 0.0
     timings["pipeline_total"] = _elapsed_ms(pipeline_started_ns)
     return AnswerModeResult(
         answer=answer,
-        final_chunks=list(packet.source_chunks),
+        final_chunks=returned_chunks,
         status=status,
         plan=plan,
-        evidence_decision=("direct_answer" if packet.cards else "clean_abstention"),
+        evidence_decision=evidence_decision,
         diagnostics={
-            "rag_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+            "rag_policy_version": AUTHORED_RESPONSE_POLICY_VERSION,
             "planner": {"status": "not_called"},
             "generation": generation,
             "evidence_compiler": compiler_diagnostics,
             "stage_timings_ms": timings,
         },
-        answer_strategy_version=APPLICATION_COMPILED_POLICY_VERSION,
+        answer_strategy_version=AUTHORED_RESPONSE_POLICY_VERSION,
     )
 
 
@@ -1252,8 +1504,11 @@ def answer_project_question_result(
     conversation_resolution_ms = _elapsed_ms(resolution_started_ns)
     if application_compiled:
         result = _run_application_compiled_answer(
+            original_question=question,
             resolved_turn=turn,
+            collection_handle=collection,
             chunks=chunks,
+            corpus_trace=corpus_trace,
             client_factory=openai_client,
             n_results=n_results,
             archivist_mode=selected_mode,

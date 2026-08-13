@@ -1,28 +1,48 @@
 # Latency optimization: compact provider contract
 
-Status: **historical experiment; unpromoted and superseded by `application-compiled-v1`**
+Status: **historical experiment; unpromoted and superseded by later product policies**
 Date opened: **2026-08-12**
 
 ## Current disposition — 2026-08-12
 
 V27 compact completed its offline representation gate but never received the paid comparison below
-and was never promoted. The current built-in RAG default is now `application-compiled-v1`: local
-follow-up resolution and planning, deterministic BM25 ranking, and at most three immutable bounded
-evidence cards. Essential returns those cards directly with application-owned citations and zero
-provider calls in current RAG; Essential plus Full Context is rejected. Professional, Pretty Pink
-Princess, and Baleful Black Baron each use exactly one no-retry low-reasoning `gpt-5.6-sol`
-selection call over card IDs/text. The model chooses only card order and typed mode-bound cue IDs;
-local code owns every displayed word and citation, with direct-evidence fallback.
+and was never promoted. It was first superseded by `application-compiled-v1`, whose three bounded
+32-word cards and closed cue selector were then themselves superseded by
+`retrieval-authored-v1`, followed by the narrow two-character `retrieval-authored-v2` candidate;
+both are now preserved as historical/manual predecessors to `retrieval-authored-v3`. The cue-selector boundary overcorrected for structural control and hurt
+question relevance and answer substance; its narrow Edwin Sandys smoke remains historical evidence
+for that exact policy only.
+
+The current path makes one `text-embedding-3-small` query request and uses the shared dense/BM25
+reciprocal-rank-fusion retriever and context finalizer. A deterministic dossier packages four to
+eight whole chunks or complete paragraph ranges, targeting about 2,500 estimated evidence tokens
+under a hard 4,500-token ceiling. Essential returns direct cited evidence without a prose-generation
+call, but is no longer providerless. Every registered generated mode -- currently Professional,
+Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- adds exactly one no-retry
+`gpt-5.6-sol` authored-response call with low reasoning, medium verbosity,
+and a 1,800 output-token ceiling. The model writes free prose and one to three in-character follow-
+up questions. Retrieval and authoring share a 25-second provider deadline: the embedding operation
+gets at most eight seconds and the prose call gets at most twenty seconds of the remaining time.
+Local code maps valid opaque support IDs to citations and falls back to Essential on
+provider or structural failure; it does not prove semantic entailment.
+
+V3 retains that entire path for historical and manuscript questions. Its only new latency-oriented
+branch is `character-conversation-v2`: a conservatively recognized personal/social turn in any
+registered generated mode bypasses embedding and retrieval, sends no manuscript or
+dossier, and makes exactly one no-retry Sol call with low reasoning, low verbosity, a 12-second
+timeout, and a 576-token ceiling. It requires manuscript-leading questions and uses deterministic local in-character
+fallback on failure. Professional, Princess, Baron, and Ruthless Red Realist are covered now;
+Essential is excluded, and a future generated mode inherits the route through registration. This
+is a narrow product-intent route, not a shortcut for simple historical
+questions and not evidence that v2 is faster.
 
 The former V26/V27 browser selector has been removed. Both policies remain callable only through an
 explicit local development `rag_policy_version` for compatibility and historical investigation;
-omitting that field selects `application-compiled-v1`, and the public API does not accept it. Frozen
-V26 remains immutable. Production-performance v1 remains unchanged. After exact payload/provider
-authorization, a bounded Edwin Sandys smoke made one no-retry call in each generated mode. All three
-passed the closed cue contract in 8.357, 6.839, and 5.162 seconds; the isolated ledger records 6,292
-tokens, three priced events, zero unpriced events, and `$0.060071250` estimated cost. This is a
-single-question compatibility smoke, not a latency cohort, so this document supports no general
-claim that the new path is faster or more reliable.
+omitting that field selects `retrieval-authored-v3`, and the public API does not accept it. Frozen
+V26 remains immutable. Production-performance v1 remains unchanged. No live/provider test, paid
+latency cohort, or quality cohort has run for `retrieval-authored-v3` or its character-conversation
+branch, so this document supports no
+claim that the current path is faster, better, or more reliable.
 
 The remainder of this document preserves the V27 hypothesis, offline measurements, and proposed
 protocol as historical design evidence. Its promotion instructions are no longer the active product

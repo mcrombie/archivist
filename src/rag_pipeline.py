@@ -96,6 +96,7 @@ from evidence_policy import (
     split_compound_named_anchor,
     tokenize_anchor,
 )
+from authored_response import AUTHORED_RESPONSE_POLICY_VERSION
 from evidence_compiler import APPLICATION_COMPILED_POLICY_VERSION
 from filters import should_skip_document
 from full_context_coverage import FullContextValidationErrorCode
@@ -814,7 +815,7 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     valid_error_codes = (
         {code.value for code in CoverageValidationErrorCode}
         | {code.value for code in FullContextValidationErrorCode}
-        | {"provider_failure", "invalid_response", "refusal"}
+        | {"provider_failure", "invalid_response", "refusal", "retrieval_failure"}
     )
     valid_results = {value.value for value in DiagnosticValidationResult}
     valid_content_outcomes = {value.value for value in ContentOutcome}
@@ -892,16 +893,20 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
             "generator_reasoning_effort": GENERATOR_SETTINGS.reasoning_effort,
             "generator_verbosity": GENERATOR_SETTINGS.verbosity,
         }
-    elif strategy_cohort["answer_strategy_version"] == APPLICATION_COMPILED_POLICY_VERSION:
+    elif strategy_cohort["answer_strategy_version"] in {
+        APPLICATION_COMPILED_POLICY_VERSION,
+        AUTHORED_RESPONSE_POLICY_VERSION,
+    }:
+        active_product_policy = strategy_cohort["answer_strategy_version"]
         cohort = {
             **strategy_cohort,
-            "rag_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+            "rag_policy_version": active_product_policy,
             "query_planner_prompt_version": NOT_APPLICABLE_COHORT_VALUE,
             "coverage_prompt_version": str(
                 generation.get("prompt_version") or NOT_APPLICABLE_COHORT_VALUE
             ),
             "normalizer_version": str(
-                generation.get("normalizer_version") or APPLICATION_COMPILED_POLICY_VERSION
+                generation.get("normalizer_version") or active_product_policy
             ),
             "coverage_instructions_sha256": str(
                 generation.get("instructions_sha256") or NOT_APPLICABLE_COHORT_VALUE

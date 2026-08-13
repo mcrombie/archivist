@@ -13,9 +13,10 @@ from typing import Mapping
 from uuid import uuid4
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-PUBLIC_RUNTIME_IDENTITY_SCHEMA = "archivist.public_runtime_identity/3"
+PUBLIC_RUNTIME_IDENTITY_SCHEMA = "archivist.public_runtime_identity/4"
 PUBLIC_REQUEST_OBSERVATION_SCHEMA = "archivist.public_request_observation/1"
-PUBLIC_EVIDENCE_RETRIEVAL_KIND = "local_bm25"
+PUBLIC_EVIDENCE_RETRIEVAL_KIND = "hybrid_bm25_rrf"
+PUBLIC_EMBEDDING_MODEL = "text-embedding-3-small"
 PROCESS_EPOCH = uuid4().hex
 
 _COMMIT_PATTERN = re.compile(r"^[a-f0-9]{40}$")
@@ -86,8 +87,10 @@ def public_runtime_identity(
         PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
         PUBLIC_RAG_REQUEST_COST_CEILING_VERSION,
     )
-    from evidence_compiler import APPLICATION_COMPILED_POLICY_VERSION
-    from prose_renderer import READER_PROSE_SETTINGS
+    from authored_response import (
+        AUTHORED_RESPONSE_POLICY_VERSION,
+        AUTHORED_RESPONSE_SETTINGS,
+    )
 
     manifest_path = corpus_manifest_path or BASE_DIR / "fixtures" / "corpus_manifest.json"
     gold_provenance_path = provenance_path or BASE_DIR / "fixtures" / "gold_set.provenance.json"
@@ -115,9 +118,10 @@ def public_runtime_identity(
         "schema": PUBLIC_RUNTIME_IDENTITY_SCHEMA,
         "deployment_commit": validated_deployment_commit(environment),
         "process_epoch": PROCESS_EPOCH,
-        "answer_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+        "answer_policy_version": AUTHORED_RESPONSE_POLICY_VERSION,
         "evidence_retrieval_kind": PUBLIC_EVIDENCE_RETRIEVAL_KIND,
-        "generated_prose_model": READER_PROSE_SETTINGS.model,
+        "embedding_model": PUBLIC_EMBEDDING_MODEL,
+        "generated_prose_model": AUTHORED_RESPONSE_SETTINGS.model,
         "corpus_manifest_sha256": manifest_sha256,
         "frozen_candidate_commit": candidate_commit,
         "frozen_candidate_rag_policy": candidate_policy,
@@ -198,6 +202,7 @@ def observation_log_payload(observation: PublicRequestObservation) -> dict[str, 
 
 __all__ = [
     "PROCESS_EPOCH",
+    "PUBLIC_EMBEDDING_MODEL",
     "PUBLIC_EVIDENCE_RETRIEVAL_KIND",
     "PUBLIC_REQUEST_OBSERVATION_SCHEMA",
     "PUBLIC_RUNTIME_IDENTITY_SCHEMA",

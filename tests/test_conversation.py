@@ -263,10 +263,13 @@ def test_hidden_legacy_and_full_context_modes_do_not_select_application_compiler
     )
 
 
-def test_essential_compiler_skips_local_budget_preflight(monkeypatch):
-    class NoBudgetLedger:
+def test_essential_compiler_uses_local_budget_preflight(monkeypatch):
+    budget_checks: list[bool] = []
+
+    class BudgetLedger:
         def budget_state(self):
-            raise AssertionError("providerless compiler must not read the budget")
+            budget_checks.append(True)
+            return {"hard_limit_enabled": False, "exceeded": False}
 
         def record_answer_run_diagnostics(self, **_kwargs):
             return None
@@ -286,7 +289,7 @@ def test_essential_compiler_skips_local_budget_preflight(monkeypatch):
             resolved_question="What happened?",
         )
 
-    monkeypatch.setattr(web_api, "UsageLedger", NoBudgetLedger)
+    monkeypatch.setattr(web_api, "UsageLedger", BudgetLedger)
     monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
     monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
 
@@ -294,6 +297,7 @@ def test_essential_compiler_skips_local_budget_preflight(monkeypatch):
 
     assert response["answer_status"] == "application_compiled"
     assert captured["application_compiled"] is True
+    assert budget_checks == [True]
 
 
 def test_v27_current_rag_forwards_exact_candidate_policy(monkeypatch):

@@ -36,25 +36,48 @@ non-reader collections were preserved with identical records and metadata. The i
 preceding 488-vector store and its manifest remain recoverable under
 `runtime/corpus-staging/introduction-scope-20260723/replaced-active/`.
 
-## Current application-compiled release
+## Current retrieval-authored release
 
-Current built-in RAG uses `application-compiled-v1`. Follow-up resolution and BM25 ranking are
-local. Application code compiles at most three bounded immutable evidence cards, including their
-mechanical `[Source N]` citations. Essential returns that direct evidence with zero provider
-calls.
+Current built-in RAG uses `retrieval-authored-v3`. High-confidence follow-up resolution is local.
+Every historical/manuscript RAG turn makes one `text-embedding-3-small` query request, then uses the shared dense/BM25
+reciprocal-rank-fusion retriever and context finalizer. A deterministic builder packages four to
+eight source-bound units in retrieval order, targeting about 2,500 estimated evidence tokens under
+a hard 4,500-token evidence ceiling. It preserves whole chunks whenever possible and otherwise
+uses only a range of complete paragraphs.
 
-Professional, Pretty Pink Princess, and Baleful Black Baron each make exactly one no-retry
-`gpt-5.6-sol` call with low reasoning. The response may contain only exact evidence-card
-placeholders and typed IDs from that mode's closed editorial cue catalog. The application—not the
-model—supplies every factual sentence, editorial sentence, label, and citation. Raw prose,
-unknown or cross-mode cues, missing or duplicated cards, and provider/client failure all fail
-closed to the direct Essential answer.
+Essential returns direct cited evidence without a prose-generation call, but it is not
+providerless because it uses the embedding request. Every registered generated mode -- currently
+Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- adds exactly
+one no-retry `gpt-5.6-sol` authored-response call with low
+reasoning, medium verbosity, and a 1,800 output-token ceiling. The model may synthesize, paraphrase,
+choose useful length, and write in character. It returns typed grounded/persona runs and one to
+three follow-up questions. Grounded runs name opaque dossier-unit IDs; local code verifies those
+IDs and maps them to `[Source N]`. Provider or structural failure falls back to Essential without
+retry. ID resolution is not proof of semantic entailment.
 
-The public runtime reports this boundary through `archivist.public_runtime_identity/3`, including
-`answer_policy_version=application-compiled-v1`, `evidence_retrieval_kind=local_bm25`, and
-`generated_prose_model=gpt-5.6-sol`. Frozen V26 and the V27 experiment remain explicit development
-API compatibility policies; neither is selectable in the reader UI. Results from their historical
-cohorts do not measure the current application-compiled product.
+Before that path, `is_character_conversation_question(question, mode)` recognizes a narrow set of
+direct social/personal turns in every registered generated mode.
+`character-conversation-v2` sends just the question, selected character, and instructions to one
+no-retry `gpt-5.6-sol` `answer_generation` call with low reasoning, low verbosity, a 12-second
+timeout, and a 576-token
+ceiling. It sends no conversation history, embedding, manuscript text, retrieval result, dossier,
+source metadata, or citation. Its `character_reply` is fictional persona material and must end
+with one to three explicit manuscript-leading questions. Provider failure, refusal, or invalid
+output uses deterministic local dialogue for that character instead of Essential. Mixed,
+historical, manuscript, Essential, and uncertain turns stay on the grounded path. Registry-derived
+eligibility covers Professional, Princess, Baron, and Ruthless Red Realist now and future generated
+modes automatically; Essential is excluded.
+
+The current source reports this boundary through `archivist.public_runtime_identity/4`, including
+`answer_policy_version=retrieval-authored-v3`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
+`embedding_model=text-embedding-3-small`, and `generated_prose_model=gpt-5.6-sol`. Frozen V26 and
+the V27 experiment remain explicit development API compatibility policies; neither is selectable
+in the reader UI. Results from their historical cohorts, and the narrow smoke for superseded
+`application-compiled-v1`, do not measure the current product. Manual deployment and live identity
+parity for this redesign remain unverified.
+`retrieval-authored-v1` lacked the narrow character-conversation branch; `retrieval-authored-v2`
+hard-coded that branch for Princess and Baron. Both are preserved as historical/manual development
+candidates rather than exposed as API policies.
 
 ## Historical snapshot: candidate hold before the completed gold lock
 
@@ -75,44 +98,54 @@ snapshot is not the current product architecture or current next-step list.
 
 ## Current provider configuration
 
-Essential current RAG has no provider configuration because it makes zero provider calls. The
-three generated modes use `gpt-5.6-sol` with explicit low reasoning and low verbosity for one
-no-retry arrangement call. It selects card placeholders and local cue IDs; it does not generate
-reader-visible prose. The current local follow-up resolver is provider-free.
+Current historical/manuscript RAG uses `text-embedding-3-small` for exactly one query-embedding request in every mode.
+The four generated modes add `gpt-5.6-sol` with explicit low reasoning, medium verbosity, a 1,800
+output-token ceiling, and no automatic retry. Essential omits that prose-generation call. The
+current high-confidence follow-up resolver, fusion, and dossier builder are local. Narrow
+Social turns in any registered generated mode instead make one compact Sol call and no embedding
+or retrieval call.
 
-This interactive selector configuration is not a formal evaluation result or a retrospective pin
-for V26. Model identity and settings for a future `application-compiled-v1` measurement belong in
-that separately declared cohort's run identity.
+This interactive authored-response configuration is not a formal evaluation result or a
+retrospective pin for V26. Model identities, settings, prompt hashes, and dossier identity for a
+future `retrieval-authored-v3` measurement belong in that separately declared cohort's run
+identity.
 
 ## Current UI scope
 
 The reader-facing interface is being treated separately from retrieval quality. It supports a
-multi-turn transcript, local contextual follow-up resolution, and exactly four selectable modes:
-Professional, Essential, Pretty Pink Princess, and Baleful Black Baron. Professional is the
-new-visitor frontend default. Only their four matching appearances are selectable. Historical
+multi-turn transcript, local contextual follow-up resolution, and exactly five selectable modes:
+Professional, Essential, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist.
+Professional is the new-visitor frontend default. Only their five matching appearances are selectable. Historical
 mode IDs, profiles, definitions, and visual assets remain dormant for compatibility; they are not
 offered by the current UI or public API. Their provenance records remain in
 `docs/archivist_modes.md`.
 
-Essential renders the locally compiled evidence directly. In the other three modes the one
-optional model call selects card order and typed application-owned cue IDs. The interface never
-displays model-authored prose: exact evidence text, interpretations, character asides, labels, and
-citations are all substituted locally. A selector failure returns the Essential evidence rather
-than replaying the call.
+Essential renders locally compiled direct evidence. In the other four modes the one optional
+model call authors reader-visible prose over the rich dossier, including one to three follow-up
+questions. Local code maps support IDs to citations. A provider or structural-validation failure
+returns the Essential evidence rather than replaying the call.
 
-Evidence scope remains a separate control. The independent Historiographical lens, Voice, and
+Eligible personal questions in any registered generated mode use the separate character-conversation route and
+therefore return no source panel or citations. Their deterministic failure fallback stays in
+character and still leads into the manuscript; it does not display the Essential-fallback notice.
+
+The composer displays a **Perspective** note above the input and labels its collapsed disclosure
+**Settings**. Evidence scope remains separate from interpretation. The independent Historiographical lens, Voice, and
 Worldview selectors now sit under Advanced interpretive settings, together with an explicitly
 appearance-only selector limited to the same four appearances. A custom value applies to future
 turns, while each completed turn and retry retains its resolved mode and facets. The selected
-settings constrain which local cues the generated-mode selector may choose; they never authorize
-free prose. No V26/V27 policy or latency selector appears in the UI.
+settings shape generated framing and prose but cannot widen the dossier or make an influence source
+historical evidence. No V26/V27 policy or latency selector appears in the UI.
+Any advanced facet or appearance override makes the active top-right and Settings-panel label
+exactly **Custom**. The explanation names the base preset because its character/influence remains
+active. An appearance-only override says explicitly that the underlying perspective is unchanged;
+completed-turn badges retain “{Preset} · Custom” for provenance.
 
 Complete answer is the recommended fail-closed delivery default. Progressive response is an
-experimental Advanced setting: it releases the locally compiled immutable evidence cards while
-the final arrangement remains provisional, then replaces that working view with the canonical
-answer. Essential uses no provider; generated modes use the same one selector call as Complete
-answer, not an additional call. It is not chain-of-thought and is not the formal evaluation
-presentation.
+experimental Advanced setting. Essential may release locally compiled direct evidence before the
+terminal result. Generated prose remains terminal because support-ID validation is structural, not
+a semantic proof. Generated modes use the same one authored-response call as Complete answer, not
+an additional call. It is not chain-of-thought and is not the formal evaluation presentation.
 
 ## Public demo and edition locators
 

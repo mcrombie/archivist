@@ -223,7 +223,9 @@ def test_request_id_correlates_usage_totals_without_changing_legacy_scope(ledger
     totals = ledger.request_usage_totals(request_id)
     assert totals["event_count"] == 1
     assert totals["total_tokens"] == 14
+    assert totals["operation_event_counts"] == {"answer": 1}
     assert ledger.request_usage_totals("0" * 32)["event_count"] == 0
+    assert ledger.request_usage_totals("0" * 32)["operation_event_counts"] == {}
 
 
 def test_answer_run_diagnostics_migration_marks_historical_planner_state_unknown(
@@ -1569,7 +1571,7 @@ def test_question_api_persists_explicit_legacy_cohort(monkeypatch, ledger_path):
     assert persisted["cohort"] == cohort
 
 
-def test_question_api_essential_bypasses_budget_but_professional_hard_stops(
+def test_question_api_all_current_rag_modes_enforce_provider_budget(
     monkeypatch,
     ledger_path,
 ):
@@ -1605,8 +1607,10 @@ def test_question_api_essential_bypasses_budget_but_professional_hard_stops(
     monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
 
     essential = web_api.QuestionRequest(question="Question?")
-    assert web_api.question("current", essential)["answer"] == "Allowed answer."
-    assert contexts[-1].enforce_budget is False
+    with pytest.raises(HTTPException) as exc_info:
+        web_api.question("current", essential)
+    assert exc_info.value.status_code == 402
+    assert exc_info.value.detail["code"] == "cost_limit_exceeded"
 
     blocked = web_api.QuestionRequest(
         question="Question?",
@@ -1624,6 +1628,14 @@ def test_question_api_essential_bypasses_budget_but_professional_hard_stops(
         allow_over_budget=True,
     )
     assert web_api.question("current", allowed)["answer"] == "Allowed answer."
+    assert contexts[-1].enforce_budget is True
+    assert contexts[-1].allow_over_budget is True
+
+    allowed_essential = web_api.QuestionRequest(
+        question="Question?",
+        allow_over_budget=True,
+    )
+    assert web_api.question("current", allowed_essential)["answer"] == "Allowed answer."
     assert contexts[-1].enforce_budget is True
     assert contexts[-1].allow_over_budget is True
 

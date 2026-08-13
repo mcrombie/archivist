@@ -294,6 +294,7 @@ def test_public_version_is_closed_text_free_and_bound_to_frozen_candidate(monkey
         "process_epoch",
         "answer_policy_version",
         "evidence_retrieval_kind",
+        "embedding_model",
         "generated_prose_model",
         "corpus_manifest_sha256",
         "frozen_candidate_commit",
@@ -301,11 +302,12 @@ def test_public_version_is_closed_text_free_and_bound_to_frozen_candidate(monkey
         "public_rag_request_cost_ceiling_version",
         "public_rag_request_cost_ceiling_nano_usd",
     }
-    assert payload["schema"] == "archivist.public_runtime_identity/3"
+    assert payload["schema"] == "archivist.public_runtime_identity/4"
     assert payload["deployment_commit"] == "b" * 40
     assert payload["process_epoch"] == web_api.PROCESS_EPOCH
-    assert payload["answer_policy_version"] == "application-compiled-v1"
-    assert payload["evidence_retrieval_kind"] == "local_bm25"
+    assert payload["answer_policy_version"] == "retrieval-authored-v3"
+    assert payload["evidence_retrieval_kind"] == "hybrid_bm25_rrf"
+    assert payload["embedding_model"] == "text-embedding-3-small"
     assert payload["generated_prose_model"] == "gpt-5.6-sol"
     assert payload["public_rag_request_cost_ceiling_version"] == "public-rag-request-ceiling-v1"
     assert payload["public_rag_request_cost_ceiling_nano_usd"] == 2_000_000_000
@@ -356,16 +358,21 @@ def test_public_rag_reserves_full_request_before_answer_pipeline(monkeypatch):
     assert observed == [(2_000_000_000, request_id)]
 
 
-def test_public_essential_compiler_skips_budget_and_request_reservation(monkeypatch):
+def test_public_essential_compiler_uses_budget_and_request_reservation(monkeypatch):
     chunks = synthetic_chunks(1)
     captured: dict[str, object] = {}
+    reservations: list[int] = []
 
-    class NoBudgetLedger:
+    class BudgetLedger:
         def get_settings(self):
-            raise AssertionError("providerless compiler must not configure a public budget")
+            return {
+                "monthly_budget_usd": 5.0,
+                "warning_threshold_percent": 80,
+                "hard_limit_enabled": True,
+            }
 
         def budget_state(self):
-            raise AssertionError("providerless compiler must not read a public budget")
+            return {"exceeded": False}
 
         def record_answer_run_diagnostics(self, **_kwargs):
             return None
@@ -378,11 +385,11 @@ def test_public_essential_compiler_skips_budget_and_request_reservation(monkeypa
             status="application_compiled",
         )
 
-    monkeypatch.setattr(web_api, "UsageLedger", NoBudgetLedger)
+    monkeypatch.setattr(web_api, "UsageLedger", BudgetLedger)
     monkeypatch.setattr(
         web_api,
         "enforce_projected_usage_budget",
-        lambda *_args, **_kwargs: pytest.fail("providerless compiler must not reserve $2"),
+        lambda projected, _ledger: reservations.append(projected),
     )
     monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
     monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
@@ -394,19 +401,33 @@ def test_public_essential_compiler_skips_budget_and_request_reservation(monkeypa
 
     assert response["answer_status"] == "application_compiled"
     assert captured["application_compiled"] is True
+    assert reservations == [2_000_000_000]
 
 
-def test_public_progressive_preflight_skips_budget_for_essential_compiler(monkeypatch):
-    monkeypatch.setattr(
-        web_api,
-        "UsageLedger",
-        lambda: (_ for _ in ()).throw(AssertionError("budget preflight must not start")),
-    )
+def test_public_progressive_preflight_checks_budget_for_essential_compiler(monkeypatch):
+    observed: list[str] = []
+
+    class BudgetLedger:
+        def get_settings(self):
+            observed.append("settings")
+            return {
+                "monthly_budget_usd": 5.0,
+                "warning_threshold_percent": 80,
+                "hard_limit_enabled": True,
+            }
+
+        def budget_state(self):
+            observed.append("budget")
+            return {"exceeded": False}
+
+    monkeypatch.setattr(web_api, "UsageLedger", BudgetLedger)
 
     web_api._preflight_public_progressive_question(
         web_api.PublicQuestionRequest(question="What happened?"),
         public_settings(),
     )
+
+    assert observed == ["settings", "budget"]
 
 
 def test_public_complete_validation_error_is_correlated_and_persisted(monkeypatch):
@@ -493,6 +514,24 @@ def test_public_request_rejects_temporarily_hidden_modes(mode):
         web_api.PublicQuestionRequest(question="What happened?", archivist_mode=mode)
 
 
+@pytest.mark.parametrize(
+    "mode",
+    (
+        "essential",
+        "professional",
+        "pretty_pink_princess",
+        "baleful_black_baron",
+        "ember_and_ink",
+    ),
+)
+def test_public_request_accepts_current_modes(mode):
+    assert (
+        web_api.PublicQuestionRequest(question="What happened?", archivist_mode=mode)
+        .archivist_mode.value
+        == mode
+    )
+
+
 def test_public_essential_rejects_prose_only_overrides():
     with pytest.raises(ValidationError, match="does not use prose settings"):
         web_api.PublicQuestionRequest(
@@ -504,7 +543,7 @@ def test_public_essential_rejects_prose_only_overrides():
 
 @pytest.mark.parametrize("request_model", (web_api.QuestionRequest, web_api.PublicQuestionRequest))
 def test_essential_rejects_generative_full_context_scope(request_model):
-    with pytest.raises(ValidationError, match="zero-provider direct-evidence mode"):
+    with pytest.raises(ValidationError, match="direct-evidence RAG mode"):
         request_model(
             question="What happened?",
             archivist_mode="essential",
@@ -622,6 +661,96 @@ def test_public_question_response_omits_internal_diagnostics_and_costs(monkeypat
         "costs",
         "budget",
     }.intersection(all_keys(response))
+
+
+def test_public_character_conversation_releases_without_manuscript_sources(monkeypatch):
+    class FakeLedger:
+        def get_settings(self):
+            return {
+                "monthly_budget_usd": 5.0,
+                "warning_threshold_percent": 80,
+                "hard_limit_enabled": True,
+            }
+
+        def budget_state(self):
+            return {"exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+    answer = (
+        "My imaginary palace is wonderfully busy today.\n\n"
+        "Would you like to meet someone from the manuscript?"
+    )
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer=answer,
+            final_chunks=[],
+            status="character_conversation",
+            answer_strategy="rag",
+            answer_strategy_version="retrieval-authored-v3",
+            evidence_decision="indeterminate",
+        ),
+    )
+
+    response = web_api._run_public_question(
+        web_api.PublicQuestionRequest(
+            question="How are you?",
+            archivist_mode="pretty_pink_princess",
+        ),
+        public_settings(),
+    )
+
+    assert response["answer"] == answer
+    assert response["answer_status"] == "character_conversation"
+    assert response["sources"] == []
+    assert response["source_schema"] == "archivist.public_sources/1"
+    assert response["prose_renderer_version"] == "character-conversation-renderer-v1"
+
+
+@pytest.mark.parametrize(
+    "status",
+    ("generation_contract_failed", "corpus_integrity_failed", "retrieval_unavailable"),
+)
+def test_public_question_withholds_fail_closed_answer_statuses(monkeypatch, status):
+    class FakeLedger:
+        def get_settings(self):
+            return {
+                "monthly_budget_usd": 5.0,
+                "warning_threshold_percent": 80,
+                "hard_limit_enabled": True,
+            }
+
+        def budget_state(self):
+            return {"exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer="This internal failure message must not be released.",
+            final_chunks=[],
+            status=status,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        web_api._run_public_question(
+            web_api.PublicQuestionRequest(question="What happened?"),
+            public_settings(),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["code"] == "public_answer_unavailable"
 
 
 def test_public_answer_overlap_guard_detects_long_reproduction():

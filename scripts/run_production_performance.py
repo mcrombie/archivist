@@ -41,8 +41,10 @@ from production_performance import (  # noqa: E402
     build_runtime_session,
     load_prepared_manifest,
     manifest_is_providerless_essential,
+    manifest_is_query_embedding_essential,
     normalize_usage_totals,
     parse_server_timing,
+    project_usage_totals_for_manifest,
     public_report_markdown,
     read_json,
     request_payload,
@@ -205,8 +207,9 @@ def _validate_authorization_binding(
     if (
         manifest.get("schema") != "archivist.production_performance_manifest/1"
         and not manifest_is_providerless_essential(manifest)
+        and not manifest_is_query_embedding_essential(manifest)
     ):
-        raise ProductionPerformanceError("prepared v2 provider contract is invalid")
+        raise ProductionPerformanceError("prepared provider contract is invalid")
     expected_next = cost_contract.get("max_next_attempt_cost_usd")
     expected_nano = cost_contract.get(
         "max_next_attempt_cost_nano_usd",
@@ -228,8 +231,9 @@ def _validate_authorization_binding(
     if (
         manifest.get("schema") != "archivist.production_performance_manifest/1"
         and not providerless
+        and not manifest_is_query_embedding_essential(manifest)
     ):
-        raise ProductionPerformanceError("prepared v2 provider contract is invalid")
+        raise ProductionPerformanceError("prepared provider contract is invalid")
     if (
         not isinstance(maximum, (int, float))
         or isinstance(maximum, bool)
@@ -272,8 +276,9 @@ def _authorization(
     if (
         manifest.get("schema") != "archivist.production_performance_manifest/1"
         and not providerless
+        and not manifest_is_query_embedding_essential(manifest)
     ):
-        raise ProductionPerformanceError("prepared v2 provider contract is invalid")
+        raise ProductionPerformanceError("prepared provider contract is invalid")
     if not math.isfinite(maximum) or (maximum != 0 if providerless else maximum <= 0):
         expectation = "exactly zero" if providerless else "a finite positive number"
         raise ProductionPerformanceError(f"--max-cost-usd must be {expectation}")
@@ -410,6 +415,8 @@ def _establish_session(
 def _scoped_usage(
     ledger: UsageLedger,
     outcomes: Sequence[Mapping[str, object]],
+    *,
+    manifest: Mapping[str, object],
 ) -> tuple[float, int, int]:
     cost = 0.0
     events = 0
@@ -434,7 +441,11 @@ def _scoped_usage(
         if totals["unpriced_event_count"]:
             raise ProductionPerformanceError("cohort contains an unpriced usage event")
         persisted = outcome.get("usage_totals")
-        if persisted != totals:
+        comparable_totals = project_usage_totals_for_manifest(
+            totals,
+            manifest=manifest,
+        )
+        if persisted != comparable_totals:
             raise ProductionPerformanceError("request-scoped usage changed after it was sealed")
         cost += float(totals["estimated_cost_usd"])
         events += int(totals["event_count"])
@@ -445,6 +456,7 @@ def _authorization_accounted_usage(
     ledger: UsageLedger,
     outcomes: Sequence[Mapping[str, object]],
     *,
+    manifest: Mapping[str, object],
     authorization: Mapping[str, object],
 ) -> tuple[float, float, int, int]:
     """Return recorded and conservative cap-accounted cohort usage.
@@ -454,7 +466,11 @@ def _authorization_accounted_usage(
     application's enforced per-request maximum in authorization accounting.
     """
 
-    recorded, events, unavailable = _scoped_usage(ledger, outcomes)
+    recorded, events, unavailable = _scoped_usage(
+        ledger,
+        outcomes,
+        manifest=manifest,
+    )
     maximum_next = authorization.get("max_next_attempt_cost_usd")
     maximum_next_nano = authorization.get("max_next_attempt_cost_nano_usd")
     maximum = authorization.get("max_cost_usd")
@@ -941,6 +957,7 @@ def run(
         _authorization_accounted_usage(
             ledger,
             outcomes,
+            manifest=manifest,
             authorization=authorization,
         )
         print("All 33 planned attempts are already sealed; no network request was made.")
@@ -967,6 +984,7 @@ def run(
             spend, accounted, _event_count, unavailable = _authorization_accounted_usage(
                 ledger,
                 list(by_ordinal.values()),
+                manifest=manifest,
                 authorization=authorization,
             )
             _require_next_attempt_capacity(
@@ -988,6 +1006,7 @@ def run(
                 _authorization_accounted_usage(
                     ledger,
                     list(by_ordinal.values()),
+                    manifest=manifest,
                     authorization=authorization,
                 )
             )
@@ -1062,6 +1081,7 @@ def report(args: argparse.Namespace) -> int:
     _authorization_accounted_usage(
         ledger,
         outcomes,
+        manifest=manifest,
         authorization=authorization,
     )
     private, public = aggregate_summaries(

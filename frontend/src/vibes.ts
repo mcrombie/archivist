@@ -21,7 +21,8 @@ const SELECTABLE_VIBE_IDS = new Set<VibeId>([
   "professional",
   "minimal",
   "princess",
-  "baron"
+  "baron",
+  "ember"
 ]);
 
 // Retain dormant appearance definitions and CSS for later modes, but do not present a visual

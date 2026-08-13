@@ -75,10 +75,26 @@ const requestArguments = [
   }
 ];
 
+const oversizedHistory = [
+  {
+    question: `Old question ${"q".repeat(1_700)}`,
+    answer: `Old answer ${"a".repeat(12_500)}`,
+    archivist_mode: "essential"
+  },
+  {
+    question: `Latest question ${"r".repeat(1_700)}`,
+    answer: `Latest answer ${"b".repeat(12_500)}`,
+    archivist_mode: "professional"
+  }
+];
+
 try {
   const delivery = await server.ssrLoadModule("/src/delivery.ts");
   const api = await server.ssrLoadModule("/src/api.ts");
 
+  assert.equal(api.answerPolicyLabel("retrieval-authored-v3"), "Retrieval-authored v3");
+  assert.equal(api.answerPolicyLabel("retrieval-authored-v2"), "Retrieval-authored v2");
+  assert.equal(api.answerPolicyLabel("retrieval-authored-v1"), "Retrieval-authored v1");
   assert.equal(api.answerPolicyLabel("application-compiled-v1"), "Application-compiled v1");
   assert.equal(api.answerPolicyLabel("evidence-planned-v26"), "Evidence-planned v26");
   assert.equal(api.answerPolicyLabel("future-policy"), "Answer policy · future-policy");
@@ -87,7 +103,7 @@ try {
   const completeRequestBodies = [];
   const completeResult = {
     ...canonicalResult,
-    answer_strategy_version: "application-compiled-v1"
+    answer_strategy_version: "retrieval-authored-v2"
   };
   globalThis.fetch = async (url, init) => {
     completeRequestBodies.push({ url, body: JSON.parse(init.body) });
@@ -104,7 +120,7 @@ try {
   );
   assert.equal(
     localComplete.answer_strategy_version,
-    "application-compiled-v1",
+    "retrieval-authored-v2",
     "the complete-answer client should preserve the policy identity reported by the server"
   );
   await api.askQuestion(
@@ -119,16 +135,150 @@ try {
     false,
     "public complete-answer requests must never carry a developer RAG policy selector"
   );
+  await api.askQuestion(
+    ...requestArguments.slice(0, 4),
+    oversizedHistory,
+    requestArguments[5]
+  );
+  assert.deepEqual(
+    completeRequestBodies[2].body.history,
+    oversizedHistory,
+    "development complete-answer requests should preserve their supplied history"
+  );
+  await api.askQuestion(
+    ...requestArguments.slice(0, 4),
+    oversizedHistory,
+    {
+      ...requestArguments[5],
+      publicDemo: true
+    }
+  );
+  assert.deepEqual(
+    completeRequestBodies[3].body.history,
+    [{
+      ...oversizedHistory[1],
+      question: oversizedHistory[1].question.slice(0, 1_500),
+      answer: oversizedHistory[1].answer.slice(0, 1_000)
+    }],
+    "public complete-answer requests should send only a bounded latest turn"
+  );
 
   const chatCss = readFileSync(new URL("../src/chat.css", import.meta.url), "utf8");
   const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const vibeControlSource = readFileSync(new URL("../src/VibeControl.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(
     appSource,
     /V27 compact|Experimental latency settings/,
     "the retired compact-latency experiment must not appear in the reader UI"
   );
-  assert.match(appSource, /Essential returns the compiled evidence directly/);
-  assert.match(appSource, /Lens, voice, and\s+worldview are prose settings/);
+  assert.match(appSource, /Essential returns compiled, cited evidence directly without a\s+prose-generation rewrite/);
+  assert.match(appSource, /Lens, voice, and worldview are prose settings/);
+  assert.match(
+    appSource,
+    /Choose a generated mode to use them/,
+    "Essential's settings explanation should remain accurate as character modes are added"
+  );
+  assert.match(appSource, /Direct-evidence turns may also show locally checked manuscript\s+claims/);
+  assert.match(
+    appSource,
+    /<strong>Settings<\/strong>/,
+    "the composer disclosure should use the single visible title Settings"
+  );
+  assert.doesNotMatch(
+    appSource,
+    /<small>Reading options<\/small>/,
+    "the retired Reading options title should not remain in the composer"
+  );
+  assert.match(
+    appSource,
+    /const activeModeLabel = customMode \? "Custom" : selectedMode\.label/,
+    "active customized controls should identify the mode as Custom"
+  );
+  assert.match(
+    appSource,
+    /type ChatTurn = \{[\s\S]*?archivistMode: ArchivistModeId;[\s\S]*?appearance: VibeId;/,
+    "each turn should retain the appearance selected when its request began"
+  );
+  assert.match(
+    appSource,
+    /const nextTurn: ChatTurn = \{[\s\S]*?archivistMode: archivistModeId,[\s\S]*?appearance,[\s\S]*?facets: \{ \.\.\.facets \}/,
+    "new request snapshots should capture appearance alongside mode and facets"
+  );
+  assert.match(
+    appSource,
+    /archivistModeSummary\(\s*turn\.archivistMode,\s*turn\.facets,\s*turn\.appearance\s*\)/,
+    "completed-turn badges should use the request's appearance snapshot"
+  );
+  assert.match(
+    appSource,
+    /whose character remains active/,
+    "a Custom perspective should still disclose its underlying character influence"
+  );
+  assert.match(
+    appSource,
+    /className="chat-perspective-note"[\s\S]*?aria-live="polite"[\s\S]*?<strong>\{activeModeLabel\}<\/strong>[\s\S]*?<p>\{perspectiveCopy\}<\/p>/,
+    "both composers should visibly disclose their current perspective"
+  );
+  assert.match(
+    appSource,
+    /aria-describedby=\{`\$\{perspectiveId\} \$\{groundingId\}`\}/,
+    "the question field should expose perspective and grounding context to assistive technology"
+  );
+  assert.match(
+    vibeControlSource,
+    /const displayLabel = custom \? "Custom" : current\.shortLabel/,
+    "the top-right control should show exactly Custom for an overridden preset"
+  );
+  assert.match(
+    vibeControlSource,
+    /aria-label=\{`Archivist mode: \$\{displayLabel\}\. Choose a mode\.`\}/,
+    "the icon-only mobile mode control should retain an accessible name"
+  );
+  assert.match(
+    appSource,
+    /question:\s*questionForConversationHistory\(turn\)\.slice\(0, 4_000\)/,
+    "conversation history should carry the server-resolved standalone question forward"
+  );
+  assert.match(
+    appSource,
+    /question:\s*questionForConversationHistory\(candidate\)\.slice\(0, 4_000\)/,
+    "retry history should carry the server-resolved standalone question forward"
+  );
+  assert.match(
+    appSource,
+    /const fallbackNotice = authoredFallbackNotice\(turn\.answerStatus, turn\.archivistMode\)/,
+    "completed turns should derive fallback disclosure from the server-reported answer status"
+  );
+  assert.match(
+    appSource,
+    /className="turn-fallback-notice"[\s\S]*?role="status"[\s\S]*?fallbackNotice\.message/,
+    "a generated-mode fallback should be exposed as a visible nonfatal status above the answer"
+  );
+  assert.match(
+    chatCss,
+    /\.turn-fallback-notice\s*\{[^}]*display:\s*grid;[^}]*border:/s,
+    "the fallback notice should have a visible theme-aware treatment"
+  );
+  assert.match(
+    chatCss,
+    /\.chat-perspective-note\s*\{[^}]*display:\s*grid;[^}]*border-left:/s,
+    "the perspective disclosure should have a visible theme-aware treatment"
+  );
+  assert.match(
+    chatCss,
+    /\.chat-composer\.is-docked\s+\.chat-perspective-note\s*\{[^}]*grid-column:\s*1\s*\/\s*-1\s*;/s,
+    "the docked perspective disclosure should span the input and control columns"
+  );
+  assert.match(
+    chatCss,
+    /\.chat-composer\.is-docked\s+\.chat-answer-settings-disclosure\s*>\s*\.chat-answer-settings-panel\s*\{[^}]*position:\s*fixed;[^}]*bottom:\s*calc\(var\(--chat-dock-height\)\s*\+\s*8px\)\s*;/s,
+    "the docked settings panel should open above the complete perspective-aware composer"
+  );
+  assert.match(
+    chatCss,
+    /\.vibe-trigger\.is-custom\s*>\s*span\s*\{[^}]*display:\s*grid\s*;/s,
+    "Custom should remain visible in the compact mobile mode control"
+  );
   const settingsPanelRules = [
     ...chatCss.matchAll(
       /\.chat-answer-settings-disclosure\s*>\s*\.chat-answer-settings-panel\s*\{([^}]*)\}/g
@@ -258,7 +408,7 @@ try {
   const checkedClaimTwo = "A second checked claim names a ship. [Source 2].";
   const framedResult = {
     ...canonicalResult,
-    answer_strategy_version: "application-compiled-v1",
+    answer_strategy_version: "retrieval-authored-v2",
     answer: [
       "A subjective preface remains withheld while claims stream.",
       checkedClaimOne,
@@ -302,7 +452,7 @@ try {
   );
   assert.equal(
     completed.answer_strategy_version,
-    "application-compiled-v1",
+    "retrieval-authored-v2",
     "a progressive completion should preserve the policy identity reported in its terminal result"
   );
   assert.deepEqual(checkedClaims, [
@@ -312,11 +462,86 @@ try {
   assert.equal(api.progressiveCheckedClaimsText(checkedClaims), `${checkedClaimOne}\n\n${checkedClaimTwo}`);
   assert.deepEqual(stages, [
     { stage: "accepted", message: "Starting your request." },
-    { stage: "generating_answer", message: "Drafting a source-grounded answer." },
-    { stage: "validating_answer", message: "Validating grounding and citations." }
+    { stage: "generating_answer", message: "Drafting an answer from retrieved evidence." },
+    {
+      stage: "validating_answer",
+      message: "Checking response structure and citation references."
+    }
   ]);
   assert.deepEqual(heartbeats, [{ count: 1 }]);
   assert.deepEqual(claimCallbackOrder, ["start:1", "end:1", "start:2", "end:2"]);
+
+  const compactedProgressiveRequests = [];
+  globalThis.fetch = async (url, init) => {
+    compactedProgressiveRequests.push({ url, body: JSON.parse(init.body) });
+    const publicRequest = compactedProgressiveRequests.length === 2;
+    const frames = [
+      JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Accepted." }),
+      JSON.stringify({ schema, type: "stage", sequence: 1, stage: "generating_answer", message: "Generating." }),
+      JSON.stringify({ schema, type: "stage", sequence: 2, stage: "validating_answer", message: "Validating." })
+    ];
+    if (publicRequest) {
+      frames.push(JSON.stringify({ schema, type: "stage", sequence: 3, stage: "checking_release", message: "Checking." }));
+    }
+    frames.push(JSON.stringify({
+      schema,
+      type: "complete",
+      sequence: publicRequest ? 4 : 3,
+      result: completeResult
+    }));
+    return responseForLines(frames);
+  };
+  await api.askQuestionProgressively(
+    ...requestArguments.slice(0, 4),
+    oversizedHistory,
+    requestArguments[5]
+  );
+  await api.askQuestionProgressively(
+    ...requestArguments.slice(0, 4),
+    oversizedHistory,
+    {
+      ...requestArguments[5],
+      publicDemo: true
+    }
+  );
+  assert.deepEqual(
+    compactedProgressiveRequests[0].body.history,
+    oversizedHistory,
+    "development progressive requests should preserve their supplied history"
+  );
+  assert.deepEqual(
+    compactedProgressiveRequests[1].body.history,
+    [{
+      ...oversizedHistory[1],
+      question: oversizedHistory[1].question.slice(0, 1_500),
+      answer: oversizedHistory[1].answer.slice(0, 1_000)
+    }],
+    "public progressive requests should send only a bounded latest turn"
+  );
+
+  const zeroClaimAuthoredResult = {
+    ...canonicalResult,
+    answer_strategy_version: "retrieval-authored-v2",
+    answer: "A substantive authored answer grounded in retrieved evidence. [Source 1]\n\nWhat part of this history would you like to explore next?"
+  };
+  let zeroClaimCallbackCount = 0;
+  globalThis.fetch = async () => responseForLines([
+    JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Request accepted." }),
+    JSON.stringify({ schema, type: "stage", sequence: 1, stage: "generating_answer", message: "Generating." }),
+    JSON.stringify({ schema, type: "stage", sequence: 2, stage: "validating_answer", message: "Validated." }),
+    JSON.stringify({ schema, type: "complete", sequence: 3, result: zeroClaimAuthoredResult })
+  ]);
+  assert.deepEqual(
+    await api.askQuestionProgressively(...requestArguments.slice(0, 5), {
+      ...requestArguments[5],
+      onCheckedClaim: () => {
+        zeroClaimCallbackCount += 1;
+      }
+    }),
+    zeroClaimAuthoredResult,
+    "an authored progressive response should complete without provisional checked-claim frames"
+  );
+  assert.equal(zeroClaimCallbackCount, 0);
 
   const reorderedGeneratedResult = {
     ...framedResult,
@@ -511,6 +736,21 @@ try {
     Object.hasOwn(publicProgressiveRequest.body, "rag_policy_version"),
     false,
     "public progressive requests must never carry a developer RAG policy selector"
+  );
+
+  globalThis.fetch = async () => responseForLines([
+    JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Request accepted." }),
+    JSON.stringify({ schema, type: "stage", sequence: 1, stage: "generating_answer", message: "Generating." }),
+    JSON.stringify({ schema, type: "stage", sequence: 2, stage: "checking_release", message: "Release check." }),
+    JSON.stringify({ schema, type: "complete", sequence: 3, result: zeroClaimAuthoredResult })
+  ]);
+  assert.deepEqual(
+    await api.askQuestionProgressively(
+      ...requestArguments.slice(0, 5),
+      { ...requestArguments[5], publicDemo: true }
+    ),
+    zeroClaimAuthoredResult,
+    "a public authored response should also complete without provisional checked-claim frames"
   );
 
   globalThis.fetch = async () => responseForLines([

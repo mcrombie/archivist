@@ -73,7 +73,9 @@ import {
 } from "./delivery";
 import { VibeControl } from "./VibeControl";
 import {
+  archivistModeSummary,
   archivistMode,
+  authoredFallbackNotice,
   modeDefaultFacets,
   modeHasOverrides,
   persistAppearance,
@@ -285,15 +287,26 @@ function answerFacetSummary(facets: AnswerFacets) {
   ].join(" · ");
 }
 
-function archivistModeSummary(
+function currentPerspectiveCopy(
   modeId: ArchivistModeId,
   facets: AnswerFacets,
-  appearance?: VibeId
+  interpretiveOverrides: boolean,
+  appearanceOverride: boolean
 ) {
-  const label = archivistMode(modeId).label;
-  const appearanceOverride = appearance !== undefined
-    && appearance !== archivistMode(modeId).appearance;
-  return modeHasOverrides(modeId, facets) || appearanceOverride ? `${label} · Custom` : label;
+  const mode = archivistMode(modeId);
+  if (interpretiveOverrides) {
+    const lens = facetOption(LENS_OPTIONS, facets.historiographicalLens).label.toLowerCase();
+    const voice = facetOption(VOICE_OPTIONS, facets.voice).label.toLowerCase();
+    const worldviewOption = facetOption(WORLDVIEW_OPTIONS, facets.worldview);
+    const worldview = worldviewOption.value === "none"
+      ? "no added worldview"
+      : `a ${worldviewOption.label.toLowerCase()} worldview`;
+    return `Based on ${mode.label}, whose character remains active, using ${lens} framing, a ${voice} voice, and ${worldview}.${appearanceOverride ? " Appearance is also customized." : ""}`;
+  }
+  if (appearanceOverride) {
+    return `The appearance is customized; the underlying ${mode.label} perspective is unchanged. ${mode.perspective}`;
+  }
+  return mode.perspective;
 }
 
 function hasInterpretiveFrame(facets: AnswerFacets) {
@@ -850,6 +863,7 @@ type ChatTurn = {
   id: string;
   question: string;
   archivistMode: ArchivistModeId;
+  appearance: VibeId;
   facets: AnswerFacets;
   // What was requested, and what the server reports actually ran. They differ if
   // a request is rejected, so the badge reads the second one.
@@ -894,6 +908,10 @@ function splitInterpretiveAnswer(turn: ChatTurn) {
 
 function answerForConversationHistory(turn: ChatTurn) {
   return splitInterpretiveAnswer(turn)?.evidence ?? turn.answer;
+}
+
+function questionForConversationHistory(turn: ChatTurn) {
+  return turn.resolvedQuery?.trim() || turn.question;
 }
 
 function createClientId(prefix: "turn" | "conversation") {
@@ -1791,7 +1809,7 @@ function QuestionMode({
       .filter((turn) => turn.status === "complete")
       .slice(-6)
       .map((turn) => ({
-        question: turn.question.slice(0, 4_000),
+        question: questionForConversationHistory(turn).slice(0, 4_000),
         answer: answerForConversationHistory(turn).slice(0, 12_000),
         archivist_mode: turn.archivistMode
       }));
@@ -1801,6 +1819,7 @@ function QuestionMode({
       id: turnId,
       question: trimmedQuestion,
       archivistMode: archivistModeId,
+      appearance,
       facets: { ...facets },
       requestedStrategy: answerStrategy,
       requestedDelivery: responseDelivery,
@@ -1840,7 +1859,7 @@ function QuestionMode({
       .filter((candidate) => candidate.status === "complete")
       .slice(-6)
       .map((candidate) => ({
-        question: candidate.question.slice(0, 4_000),
+        question: questionForConversationHistory(candidate).slice(0, 4_000),
         answer: answerForConversationHistory(candidate).slice(0, 12_000),
         archivist_mode: candidate.archivistMode
       }));
@@ -2196,6 +2215,7 @@ function ConversationComposer({
 }) {
   const settingsDisclosureRef = useRef<HTMLDetailsElement>(null);
   const questionId = `archivist-question-${location}`;
+  const perspectiveId = `archivist-perspective-${location}`;
   const lensId = `archivist-lens-${location}`;
   const voiceId = `archivist-voice-${location}`;
   const worldviewId = `archivist-worldview-${location}`;
@@ -2209,6 +2229,13 @@ function ConversationComposer({
   const interpretiveOverrides = modeHasOverrides(archivistModeId, facets);
   const appearanceOverride = appearance !== selectedMode.appearance;
   const customMode = interpretiveOverrides || appearanceOverride;
+  const activeModeLabel = customMode ? "Custom" : selectedMode.label;
+  const perspectiveCopy = currentPerspectiveCopy(
+    archivistModeId,
+    facets,
+    interpretiveOverrides,
+    appearanceOverride
+  );
   const evidenceScopeSettings = (
     <fieldset className="chat-evidence-scope" aria-describedby={scopeDescriptionId}>
       <legend>Evidence scope</legend>
@@ -2228,7 +2255,7 @@ function ConversationComposer({
           />
           <span>
             <strong>Retrieved passages</strong>
-            <small>Fast and inexpensive. Retrieves the most relevant passages.</small>
+            <small>Fast and inexpensive. Builds a rich packet from the most relevant passages.</small>
           </span>
         </label>
         <label
@@ -2259,9 +2286,9 @@ function ConversationComposer({
     <fieldset className="chat-answer-delivery" aria-describedby={deliveryDescriptionId}>
       <legend>Answer delivery</legend>
       <p id={deliveryDescriptionId}>
-        Choose whether Archivist presents the final answer all at once or first shows
-        locally checked manuscript claims while the complete answer is still being assembled.
-        This does not change the evidence or interpretation.
+        Choose whether Archivist presents the final answer all at once or shows live progress
+        while it is assembled. Direct-evidence turns may also show locally checked manuscript
+        claims. This does not change the evidence or interpretation.
       </p>
       <div className="chat-answer-delivery-options">
         <label>
@@ -2275,7 +2302,7 @@ function ConversationComposer({
           />
           <span>
             <span><strong>Complete answer</strong><i>Recommended</i></span>
-            <small>Wait for every check, then show the verified answer at once.</small>
+            <small>Wait for every check, then show the final answer at once.</small>
           </span>
         </label>
         <label>
@@ -2289,7 +2316,7 @@ function ConversationComposer({
           />
           <span>
             <span><strong>Progressive response</strong><i>Experimental</i></span>
-            <small>Show checked partial claims, then replace them with the final answer.</small>
+            <small>Show live progress and, when available, checked claims before the final answer.</small>
           </span>
         </label>
       </div>
@@ -2375,6 +2402,16 @@ function ConversationComposer({
         onSubmit(event);
       }}
     >
+      <div
+        className="chat-perspective-note"
+        id={perspectiveId}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <span>Perspective</span>
+        <strong>{activeModeLabel}</strong>
+        <p>{perspectiveCopy}</p>
+      </div>
       <label className="chat-question-field" htmlFor={questionId}>
         <span>{location === "landing" ? "Begin the conversation" : "Your next question"}</span>
         <textarea
@@ -2383,7 +2420,7 @@ function ConversationComposer({
           rows={location === "landing" ? 2 : 1}
           required
           maxLength={4_000}
-          aria-describedby={groundingId}
+          aria-describedby={`${perspectiveId} ${groundingId}`}
           value={question}
           onChange={(event) => onQuestionChange(event.target.value)}
           onKeyDown={(event) => {
@@ -2400,19 +2437,22 @@ function ConversationComposer({
 
       <div className="chat-composer-options">
         <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
-          <summary aria-label={`Reading options: ${archivistModeSummary(archivistModeId, facets, appearance)}; ${responseDelivery === "progressive" ? "Progressive response, experimental" : "Complete answer"}`}>
+          <summary aria-label={`Settings. Current mode: ${activeModeLabel}; ${responseDelivery === "progressive" ? "Progressive response, experimental" : "Complete answer"}`}>
             <SlidersHorizontal size={16} aria-hidden="true" />
             <span>
-              <small>Reading options</small>
-              <strong>{archivistModeSummary(archivistModeId, facets, appearance)}</strong>
+              <strong>Settings</strong>
             </span>
             <ChevronDown size={14} aria-hidden="true" />
           </summary>
           <div className="chat-answer-settings-panel">
             <div className="chat-mode-context">
               <span>Current mode</span>
-              <strong>{archivistModeSummary(archivistModeId, facets, appearance)}</strong>
-              <p>{selectedMode.disclosure}</p>
+              <strong>{activeModeLabel}</strong>
+              <p>
+                {customMode
+                  ? `Based on ${selectedMode.label}. Advanced settings override this preset for future answers.`
+                  : selectedMode.disclosure}
+              </p>
             </div>
             {evidenceScopeSettings}
             {deliverySettings ? (
@@ -2450,9 +2490,9 @@ function ConversationComposer({
                   <div className="chat-mode-context">
                     <strong>Direct cited evidence</strong>
                     <p>
-                      Essential returns the compiled evidence directly. Lens, voice, and
-                      worldview are prose settings, so they do not apply in this mode. Choose
-                      Professional, Pretty Pink Princess, or Baleful Black Baron to use them.
+                      Essential returns compiled, cited evidence directly without a
+                      prose-generation rewrite. Lens, voice, and worldview are prose settings,
+                      so they do not apply in this mode. Choose a generated mode to use them.
                     </p>
                   </div>
                 ) : answerSettings}
@@ -2567,7 +2607,11 @@ function ConversationTurn({
         0
       );
   const facetSummary = answerFacetSummary(turn.facets);
-  const modeSummary = archivistModeSummary(turn.archivistMode, turn.facets);
+  const modeSummary = archivistModeSummary(
+    turn.archivistMode,
+    turn.facets,
+    turn.appearance
+  );
   const customMode = modeHasOverrides(turn.archivistMode, turn.facets);
   const progressiveHasClaims = turn.progressiveClaims.length > 0;
   const progressiveFinalizing = progressiveHasClaims
@@ -2578,6 +2622,7 @@ function ConversationTurn({
   );
   const progressiveClaimGroups = groupedProgressiveClaims(turn.progressiveClaims);
   const progressiveDisclosureId = `turn-${turn.id}-progressive-disclosure`;
+  const fallbackNotice = authoredFallbackNotice(turn.answerStatus, turn.archivistMode);
 
   return (
     <article
@@ -2705,8 +2750,9 @@ function ConversationTurn({
                 </div>
               ) : (
                 <p className="progressive-waiting-copy" id={progressiveDisclosureId}>
-                  Archivist is still preparing the answer. No answer text has been released; checked
-                  manuscript claims will appear here before the final assembly.
+                  Archivist is still preparing the answer. No answer text has been released. The
+                  final answer will replace this status; direct-evidence turns may show checked
+                  manuscript claims first.
                 </p>
               )}
             </div>
@@ -2763,7 +2809,22 @@ function ConversationTurn({
 
         {turn.status === "complete" ? (
           <div className="archivist-response">
-            <span className="sr-only" role="status">Archivist's answer is ready.</span>
+            {fallbackNotice ? (
+              <div
+                className="turn-fallback-notice"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <AlertCircle size={18} aria-hidden="true" />
+                <div>
+                  <strong>{fallbackNotice.heading}</strong>
+                  <p>{fallbackNotice.message}</p>
+                </div>
+              </div>
+            ) : (
+              <span className="sr-only" role="status">Archivist's answer is ready.</span>
+            )}
             <div className="assistant-paper">
               <OutputBlock
                 title="Archivist's answer"

@@ -1259,7 +1259,24 @@ class UsageLedger:
         """Return all token and estimated-cost totals correlated to a request."""
 
         with closing(self._connect()) as connection:
-            return self._totals(connection, request_id=request_id)
+            totals = self._totals(connection, request_id=request_id)
+            operation_rows = connection.execute(
+                """
+                SELECT operation, COUNT(*) AS event_count
+                FROM usage_events
+                WHERE request_id = ?
+                GROUP BY operation
+                ORDER BY operation ASC
+                """,
+                (request_id,),
+            ).fetchall()
+        return {
+            **totals,
+            "operation_event_counts": {
+                str(row["operation"]): int(row["event_count"])
+                for row in operation_rows
+            },
+        }
 
     def request_usage_cost_state(self, request_id: str) -> dict[str, int]:
         """Return the exact request cost/accounting state used by strict admission."""

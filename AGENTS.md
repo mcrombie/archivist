@@ -12,11 +12,15 @@ The corpus is also the moat. Rigorous evaluation depends on knowing the source m
 
 ## Current priorities and answer surfaces
 
-The highest-leverage unfinished product work is measuring the new `application-compiled-v1`
-default in a separately declared cohort without altering the completed V26 records. One authorized
-three-mode Edwin Sandys smoke has run, but no performance or quality cohort has yet run for that
-default. Its three no-retry calls all passed the closed cue contract in 8.357, 6.839, and 5.162
-seconds for `$0.060071250` estimated cost; this single question is compatibility evidence only. The highest-leverage unfinished
+The source tree now implements `retrieval-authored-v3`; the highest-leverage unfinished product
+work is separately authorized measurement of that new default
+without altering the completed V26 records. Recent ad hoc manual turns exposed and diagnosed a
+provider-schema defect and a missing personal-conversation contract, but they are not a declared
+smoke, latency cohort, or quality cohort and do not prove either repair in live behavior. The
+earlier authorized
+three-mode Edwin Sandys smoke measured the now-superseded `application-compiled-v1` cue selector;
+its 8.357, 6.839, and 5.162-second calls and `$0.060071250` estimated cost are historical
+compatibility evidence only and are not evidence about the current authored-response path. The highest-leverage unfinished
 measurement work remains diagnosing the decomposition instrument and, in a separately declared cohort,
 rebuilding the claim-derived scoring path described in `EVAL_CONTRACT.md` and `ROADMAP.md`. The
 completed baselines and production cohort must stay unchanged. The objective is not "the answers
@@ -76,18 +80,66 @@ appearance and interpretive modes are implemented and public; they are no longer
 Index Assistant Mode remains deferred and requires its own measurement before repair or promotion.
 Do not mistake a shipped reader feature for completion of the evaluation.
 
-Archivist currently has three answer-policy families:
+Archivist currently documents six answer-policy families, including superseded product paths:
 
-- **`application-compiled-v1`.** This is the default for current built-in RAG. Archivist resolves
-  ordinary follow-ups and plans locally, BM25 ranks, and application code compiles at most three
-  bounded immutable evidence cards. Essential RAG makes zero provider calls and returns direct
-  cited evidence. Professional, Pretty Pink Princess, and Baleful Black Baron each make exactly one
-  no-retry low-reasoning `gpt-5.6-sol` selection call over closed card IDs/text and application-owned
-  typed editorial cue IDs. The model chooses card order and cue IDs only. Local code supplies every
-  displayed factual and editorial word, label, and citation. Cue catalogs are distinct and
-  mode-bound; cross-mode cues fail validation. Failures fall back to direct evidence. Lens, voice,
-  and worldview guide order and cue selection only. These four modes and linked appearances are the
-  only current UI/API choices; dormant definitions and assets are compatibility-only.
+- **`retrieval-authored-v3`.** This is the default for current built-in RAG. For manuscript and
+  historical questions, Archivist retains the v1 evidence path: it resolves
+  high-confidence ordinary follow-ups locally, makes one `text-embedding-3-small` query-embedding
+  request, and runs the shared dense/BM25 reciprocal-rank-fusion retrieval and context finalizer.
+  It packages four to eight finalized units in retrieval order, targeting about 2,500 estimated
+  evidence tokens with a hard 4,500-token evidence ceiling. Whole chunks are preferred; only a
+  range of complete paragraphs may be used when the hard ceiling requires shortening. Essential
+  makes no prose-generation call, but it is not providerless because it uses the shared embedding
+  request. Every registered generated mode -- currently Professional, Pretty Pink Princess,
+  Baleful Black Baron, and Ruthless Red Realist -- adds exactly one
+  no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
+  output-token ceiling. The embedding and authoring operations share one 25-second provider
+  deadline: retrieval receives at most eight seconds and authoring receives at most twenty seconds
+  of whatever time remains; exhausted headroom returns direct Essential evidence rather than
+  starting another call. The model may freely synthesize and choose useful length. It returns typed
+  grounded and persona runs plus one to three in-character follow-up questions. The provider-visible
+  input/output schemas remain `archivist.authored_response_input/1` and
+  `archivist.retrieval_authored_answer/1`; rendering remains `retrieval-authored-renderer-v1`.
+  The v3 policy identity records changed routing and mode behavior, not those wire shapes. The
+  schema exposes grounded and persona runs as mutually exclusive object variants: every grounded
+  run requires at least one opaque dossier-unit ID, while persona runs cannot carry support IDs.
+  Local code validates grounded IDs and maps them to `[Source N]`. Provider,
+  provider-level refusal, or structural-validation failure falls back to direct Essential evidence without a
+  retry. An accepted generated-mode fallback remains a successful cited answer, but the browser
+  must identify it with the nonfatal **Essential fallback** notice: “Archivist could not complete
+  the {Mode label} AI response, so it returned Essential's direct manuscript evidence instead.”
+  Ordinary Essential and successfully authored answers show no such notice. These five modes and
+  linked appearances are the only current UI/API choices; dormant
+  definitions and assets are compatibility-only.
+  Before any manuscript retrieval, a narrow local router may recognize a social or personal
+  question in any registered generated mode. This registry-derived rule includes Professional,
+  Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist now and automatically covers
+  a future mode when it registers both authored-response and character-conversation instructions.
+  Essential has no generated-mode contract and is excluded. The branch sends only the
+  conversational question and character instructions to exactly one compact, no-retry
+  `gpt-5.6-sol` call with a 12-second timeout. It sends no manuscript text, retrieved evidence, dossier, or embedding
+  request; it returns no manuscript citation and must end with one or more in-character questions
+  that lead the reader back into *Cradle of the Empire*. A provider, refusal, or structural failure
+  on this branch returns deterministic application-owned dialogue for the selected character,
+  never Essential evidence. It must not become a general factual-chat route: historical,
+  manuscript, or mixed factual questions continue through retrieval and the grounded dossier.
+  Its input/output schemas remain `archivist.character_conversation_input/1` and
+  `archivist.character_conversation_answer/1`, and its renderer remains
+  `character-conversation-renderer-v1`; `character-conversation-v2` records the generalized routing
+  contract rather than a changed wire shape.
+- **`retrieval-authored-v2`.** This is the immediately preceding character-conversation candidate.
+  It preserved the v1 historical/manuscript path and added `character-conversation-v1` only for
+  Pretty Pink Princess and Baleful Black Baron. Professional still sent a personal question through
+  retrieval, and future generated modes would have required another hard-coded route edit. Its
+  offline checks and ad hoc observations remain attached to v2; they are not v3 evidence.
+- **`retrieval-authored-v1`.** This is the immediately preceding authored-response candidate. Its
+  historical/manuscript design remains preserved as historical/manual candidate evidence, but it
+  has no pre-retrieval character-social branch and is not the default or a selectable API policy. Its
+  ad hoc manual observations and offline checks remain attached to v1; they are not v2 latency,
+  quality, or reliability evidence.
+- **`application-compiled-v1`.** This is the superseded 2026-08-12 cue-selector design. Preserve
+  its narrow smoke and documentation as historical evidence, but do not describe its three
+  32-word cards, zero-provider Essential path, or locally authored cue prose as current behavior.
 - **`evidence-planned-v26` and V27 compatibility policies.** Frozen V26 remains immutable, callable
   only by an explicit development/evaluation policy, and continues to identify its completed
   cohorts. V27 compact remains an unpromoted historical experiment. Its former reader-facing
@@ -111,7 +163,7 @@ In decreasing order of fixedness. Changes to a lower number are more expensive a
 
    Sections settle on their own clocks. §§1–5 — run identity, the corpus contract, the gold-set schema, retrieval recall, citation accuracy — are settleable at the desk and are locked. §6 faithfulness and §7 abstention are drafted but **not yet settled**, because judge agreement and threshold placement can only be answered by a later calibration exercise. That work begins only after all 37 baseline answers and canonical decompositions are preserved, and its pending state cannot delay the baseline. The sections lock once calibration has answered what only runs can answer. There is no category of formal metric that stays permanently adjustable.
 
-2. **The system under test.** The current Essential application-compiled path, any generated-prose
+2. **The system under test.** The current Essential retrieval-authored path, any generated-prose
    mode and its model configuration, the frozen V26 candidate when reproducing its cohort, and any
    separately declared experimental arm. Freely changeable — that is the point — but every
    behavioral change either opens a new run cohort or is a defect, and which one it is must be
@@ -167,9 +219,9 @@ If you find yourself wanting to improve retrieval before it has been measured, t
 
 There is exactly **one** implementation of each retrieval primitive — BM25 ranking, distance
 filtering, neighbour expansion, context finalization, and context building. The
-application-compiled path uses the shared BM25 ranker; explicit V26/V27 policies use their existing
-shared retrieval core. A mode-specific variation is a parameter on a shared function, never a
-second copy of it.
+retrieval-authored path uses the shared dense retriever, BM25 ranker, reciprocal-rank fusion, and
+context finalizer; explicit V26/V27 policies use their existing shared retrieval core. A
+mode-specific variation is a parameter on a shared function, never a second copy of it.
 
 Prior to Brief 1 there were three partial copies (`retrieval.py`, `web_project.py`, `query.py`). The
 duplication was drift, not design, and it will re-form the moment a mode asks for "just a small
@@ -186,11 +238,22 @@ by a public upload-anything surface.**
 
 ## The citation contract
 
-**In `application-compiled-v1`, local code owns every displayed word and `[Source N]`.** The model
-may return only immutable evidence-card placeholders and typed IDs from the selected mode's closed,
-application-owned editorial cue catalog. Local validation substitutes exact card text, cue text,
-labels, and mechanically assigned citations. A valid card or cue ID never authorizes model-written
-prose, and a cue from another mode is invalid. Explicit V26/V27 retrieval-backed generation retains its historical model-facing
+**In the historical/manuscript branch of `retrieval-authored-v3`, the generated modes own their
+prose and local code owns citation resolution.** The model may synthesize and paraphrase the
+dossier rather than copy fixed excerpts.
+It must classify each output run as grounded or persona material and attach existing opaque
+evidence-unit IDs to every grounded run. This is also a provider-visible, mutually exclusive schema
+choice rather than a rule introduced only after parsing: the grounded variant requires a nonempty
+support-ID list and the persona variant permits no support IDs. Local validation rejects unknown IDs, forged citation
+labels, links, HTML, malformed structure, and extended manuscript copying, then maps valid IDs to
+mechanically assigned `[Source N]` citations. This proves that the referenced dossier units exist;
+it does **not** mechanically prove that each sentence is semantically entailed by those units or
+that the model classified every sentence correctly. Never describe local ID resolution as a
+faithfulness or semantic-entailment judge. Essential displays locally compiled direct evidence
+from the same retrieval result. The v3 character-social branch is deliberately outside this
+citation contract: it receives no evidence and may emit only fictional persona conversation plus
+manuscript-leading questions, not uncited historical claims. Explicit v1/V26/V27 retrieval-backed
+generation retains its historical model-facing
 `[Source N]` contract. The separately versioned `full-context-v2` experiment instead returns stable
 chunk IDs in its structured claim payload; local validation resolves those IDs against the exact
 supplied corpus and mechanically renders the same compact `[Source N]` presentation. The UI never
@@ -366,7 +429,8 @@ Use the entry format at the top of that file.
 | Lint & format | **ruff** | |
 | Vector store | **ChromaDB, persistent; HNSW `l2`** | The corpus manifest pins the store contract. |
 | Embeddings | **`text-embedding-3-small`** | Current, not deprecated, and re-embedding is expensive — no reason to move. |
-| Interactive arrangement selection | **`gpt-5.6-sol`, low reasoning, exactly one no-retry call** | Applies only to Professional, Pretty Pink Princess, and Baleful Black Baron in current RAG. It selects card order and local cue IDs; Essential RAG makes no provider call. |
+| Interactive authored response | **`gpt-5.6-sol`, low reasoning, medium verbosity, at most 1,800 output tokens, exactly one no-retry call** | Applies to every registered generated mode after one shared query-embedding call: currently Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist. It writes the answer and follow-up questions over the rich dossier. Essential omits this prose call but still uses the embedding provider. |
+| Character conversation | **`gpt-5.6-sol`, low reasoning, low verbosity, 12-second timeout, at most 576 output tokens, exactly one no-retry call** | Applies to narrowly classified social/personal turns in every registered generated mode, including future modes added through that registry. Essential is excluded. It receives no manuscript or evidence, writes no historical claims or citations, and falls back locally in the selected character. |
 | Formal generation/judging | **Dated snapshots when exposed; otherwise catalog-bound canonical IDs** | Bind the catalog observation plus requested/returned IDs, report the limitation, and keep generator and judge independent. |
 
 ### Distance contract
@@ -427,14 +491,16 @@ These are decided. A brief may note a consequence, but may not reopen the questi
 - **Optimize for this manuscript; keep the plumbing corpus-agnostic.**
 - **Answer Mode reaches done without Index Mode.**
 - **Frozen V26 Essential is the neutral evaluated retrieval baseline.** Current RAG
-  `application-compiled-v1` Essential is the zero-provider product default but has no paid quality
-  or performance cohort. Reader-mode or new-policy results do not become evidence for the frozen
+  `retrieval-authored-v3` Essential is the direct-evidence product default and omits prose
+  generation, but its shared hybrid retrieval makes one embedding call. It has no paid quality or
+  performance cohort. Reader-mode or new-policy results do not become evidence for the frozen
   baseline without their own declared cohorts and checks.
 - **`full-context-v2` remains a disabled, separately versioned experiment.** It is not a silent
   fallback, retrieval improvement, or substitute evaluation arm. Its generative scope is
   incompatible with Essential and the API rejects that combination.
-- **`[Source N]` is the common reader-facing citation contract.** Application-compiled answers
-  assign it locally; explicit V26/V27 generation retains its historical model-facing form;
+- **`[Source N]` is the common reader-facing citation contract for evidence-bearing answers.**
+  Retrieval-authored answers map model-returned opaque support IDs to it locally; the narrow
+  character-social route has no evidence or citations; explicit v1/V26/V27 generation retains its historical model-facing form;
   `full-context-v2` uses validated stable chunk IDs internally and remaps them locally.
   Human-readable labels remain presentation.
 - **The generic multi-project stack is deferred**, not deleted. Do not extend it incidentally while

@@ -80,6 +80,9 @@ export type AppConfig = {
 export type AnswerStrategy = "rag" | "full_context";
 
 export function answerPolicyLabel(version: string | null | undefined) {
+  if (version === "retrieval-authored-v3") return "Retrieval-authored v3";
+  if (version === "retrieval-authored-v2") return "Retrieval-authored v2";
+  if (version === "retrieval-authored-v1") return "Retrieval-authored v1";
   if (version === "application-compiled-v1") return "Application-compiled v1";
   if (version === "evidence-planned-v26") return "Evidence-planned v26";
   if (version === "full-context-v2") return "Full-context v2";
@@ -123,8 +126,8 @@ export const PROGRESSIVE_STAGE_COPY = {
   retrieving_sources: "Retrieving manuscript evidence.",
   checking_evidence: "Checking evidence sufficiency.",
   preparing_context: "Preparing source context.",
-  generating_answer: "Drafting a source-grounded answer.",
-  validating_answer: "Validating grounding and citations.",
+  generating_answer: "Drafting an answer from retrieved evidence.",
+  validating_answer: "Checking response structure and citation references.",
   checking_release: "Applying public release safeguards."
 } satisfies Readonly<Record<ProgressiveAnswerStage, string>>;
 
@@ -261,12 +264,12 @@ export type AnswerFacets = {
 export type ArchivistModeId =
   | "professional"
   | "essential"
-  | "forest"
-  | "cromb_coo_coo"
   | "pretty_pink_princess"
   | "baleful_black_baron"
-  | "tidal_archivist"
   | "ember_and_ink"
+  | "forest"
+  | "cromb_coo_coo"
+  | "tidal_archivist"
   | "illuminated_codex"
   | "cosmic_almanac";
 
@@ -401,6 +404,22 @@ type QuestionOptions = {
   signal?: AbortSignal;
 };
 
+const PUBLIC_HISTORY_TURN_LIMIT = 1;
+const PUBLIC_HISTORY_QUESTION_CHARACTERS = 1_500;
+const PUBLIC_HISTORY_ANSWER_CHARACTERS = 1_000;
+
+function requestHistory(
+  history: ConversationHistoryTurn[],
+  publicDemo: boolean | undefined
+) {
+  if (!publicDemo) return history;
+  return history.slice(-PUBLIC_HISTORY_TURN_LIMIT).map((turn) => ({
+    ...turn,
+    question: turn.question.slice(0, PUBLIC_HISTORY_QUESTION_CHARACTERS),
+    answer: turn.answer.slice(0, PUBLIC_HISTORY_ANSWER_CHARACTERS)
+  }));
+}
+
 function questionRequestBody(
   question: string,
   nResults: number,
@@ -413,7 +432,7 @@ function questionRequestBody(
     historiographical_lens: facets.historiographicalLens,
     voice: facets.voice,
     worldview: facets.worldview,
-    history,
+    history: requestHistory(history, options.publicDemo),
     conversation_id: options.conversationId,
     turn_id: options.turnId,
     archivist_mode: options.archivistMode,

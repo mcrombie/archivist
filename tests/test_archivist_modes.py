@@ -5,16 +5,20 @@ from pydantic import ValidationError
 
 import web_api
 import web_project
+from authored_response import authored_response_prompt_metadata
+from character_conversation import character_conversation_prompt_metadata
 from archivist_modes import (
     ARCHIVIST_MODES,
     INFLUENCE_PROFILES,
     ArchivistMode,
+    application_compiled_modes,
     archivist_mode_metadata,
     build_archivist_mode_prompt_block,
+    generated_mode_definition,
     resolve_archivist_mode_settings,
+    supported_generated_modes,
 )
 from perspectives import AnswerVoice, HistoriographicalLens, Worldview
-from prose_renderer import evidence_prose_prompt_metadata
 from prompts import build_answer_prompt, build_interpretive_answer_prompt
 
 
@@ -57,6 +61,25 @@ def test_mode_registry_is_allowlisted_and_versioned():
     }
     assert all(definition.version for definition in ARCHIVIST_MODES.values())
     assert all(profile.version for profile in INFLUENCE_PROFILES.values())
+
+
+def test_generated_mode_capability_drives_authored_social_and_selectable_modes():
+    expected = {
+        ArchivistMode.PROFESSIONAL,
+        ArchivistMode.PRETTY_PINK_PRINCESS,
+        ArchivistMode.BALEFUL_BLACK_BARON,
+        ArchivistMode.EMBER_AND_INK,
+    }
+    assert set(supported_generated_modes()) == expected
+    assert application_compiled_modes() == expected | {ArchivistMode.ESSENTIAL}
+    for mode in expected:
+        capability = generated_mode_definition(mode)
+        assert capability.authored_response_instructions
+        assert capability.character_conversation_instructions
+        assert capability.local_character_reply
+        assert capability.local_character_follow_up_questions
+    with pytest.raises(ValueError, match="not generated"):
+        generated_mode_definition(ArchivistMode.ESSENTIAL)
 
 
 def test_omitted_mode_is_essential_and_preserves_the_prompt_byte_for_byte():
@@ -160,6 +183,7 @@ def test_registered_mode_resolves_defaults(mode, lens, voice, worldview):
         "essential",
         "pretty_pink_princess",
         "baleful_black_baron",
+        "ember_and_ink",
     ),
 )
 def test_current_request_contract_accepts_compiled_modes(mode):
@@ -179,7 +203,6 @@ def test_current_request_contract_accepts_compiled_modes(mode):
         "forest",
         "cromb_coo_coo",
         "tidal_archivist",
-        "ember_and_ink",
         "illuminated_codex",
         "cosmic_almanac",
     ),
@@ -302,16 +325,16 @@ def test_tidal_archivist_is_maritime_not_dunsany_or_literary_evidence():
     assert "grounded exclusively in *Cradle of the Empire*" in normalized
 
 
-def test_ember_and_ink_is_realist_statecraft_without_kissinger_text_or_imitation():
+def test_ember_and_ink_is_ruthless_realist_without_impersonation_or_outside_facts():
     block = build_archivist_mode_prompt_block(archivist_mode="ember_and_ink")
     normalized = " ".join(block.split())
 
-    assert "Kissinger" not in block
-    assert "restrained realist statecraft frame" in normalized
+    assert "Ruthless Red Realist's cold-blooded strategic frame" in normalized
     assert "interests, power, bargaining leverage" in normalized
     assert "declared principle from operating incentive" in normalized
-    assert "Do not quote, paraphrase, imitate, or claim to channel" in normalized
-    assert "No copyrighted statecraft work is a source" in normalized
+    assert "Niccolò Machiavelli and Henry Kissinger" in normalized
+    assert "must not impersonate, imitate, quote, paraphrase, channel" in normalized
+    assert "No outside statecraft work is a source" in normalized
     assert "no outside work may supply historical claims" in normalized
     assert "grounded exclusively in *Cradle of the Empire*" in normalized
 
@@ -429,7 +452,7 @@ def test_cromb_coo_coo_profile_freezes_private_provenance_outside_the_prompt():
             assert value not in prompt
 
 
-def test_named_literary_and_statecraft_references_stay_in_metadata_only():
+def test_named_influences_preserve_text_free_provenance_boundaries():
     tidal_metadata = archivist_mode_metadata("tidal_archivist")
     tidal_prompt = build_archivist_mode_prompt_block(archivist_mode="tidal_archivist")
     tidal_provenance = tidal_metadata["influence_provenance"][0]
@@ -448,6 +471,7 @@ def test_named_literary_and_statecraft_references_stay_in_metadata_only():
 
     ember_metadata = archivist_mode_metadata("ember_and_ink")
     ember_prompt = build_archivist_mode_prompt_block(archivist_mode="ember_and_ink")
+    ember_normalized = " ".join(ember_prompt.split())
     ember_provenance = ember_metadata["influence_provenance"][0]
 
     assert ember_metadata["influence_profile_id"] == "realist_statecraft"
@@ -455,8 +479,9 @@ def test_named_literary_and_statecraft_references_stay_in_metadata_only():
         "conceptual-profile:realist-statecraft:no-text-ingested"
     )
     assert ember_provenance["source_sha256"] is None
-    assert "No Henry Kissinger work was ingested" in ember_provenance["rights_note"]
-    assert "Henry Kissinger" not in ember_prompt
+    assert "No work by Niccolò Machiavelli or Henry Kissinger" in ember_provenance["rights_note"]
+    assert "must not impersonate" in ember_normalized
+    assert "No outside statecraft work is a source" in ember_normalized
 
 
 def test_modes_do_not_change_retrieval_inputs(monkeypatch):
@@ -571,19 +596,52 @@ def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):
     assert response["influence_provenance"][0]["source_identifier"] == (
         "project-gutenberg:28555"
     )
-    renderer_metadata = evidence_prose_prompt_metadata(
+    renderer_metadata = authored_response_prompt_metadata(
         ArchivistMode.PROFESSIONAL,
         historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
         voice=AnswerVoice.PLAINSPOKEN,
         worldview=Worldview.SECULAR_HUMANIST,
     )
-    assert response["prose_renderer_version"] == "evidence-prose-renderer-v3"
+    assert response["prose_renderer_version"] == "retrieval-authored-renderer-v1"
     assert response["prose_renderer_prompt_sha256"] == renderer_metadata[
-        "prose_renderer_prompt_sha256"
+        "authored_response_prompt_sha256"
     ]
     assert response["prose_renderer_mode_instruction_sha256"] == renderer_metadata[
-        "prose_renderer_mode_instruction_sha256"
+        "authored_response_mode_instruction_sha256"
+    ]
+    assert response["prose_renderer_influence_prompt_sha256"] == renderer_metadata[
+        "authored_response_influence_prompt_sha256"
     ]
     assert response["prose_renderer_influence_prompt_sha256"] == response[
         "influence_prompt_sha256"
     ]
+
+
+@pytest.mark.parametrize(
+    "mode",
+    (
+        ArchivistMode.PRETTY_PINK_PRINCESS,
+        ArchivistMode.BALEFUL_BLACK_BARON,
+    ),
+)
+def test_character_conversation_metadata_fingerprints_the_compact_social_prompt(mode):
+    metadata = web_api._answer_mode_metadata(
+        archivist_mode=mode,
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.SCHOLARLY,
+        worldview=Worldview.NONE,
+        application_compiled=True,
+        answer_status="character_conversation",
+    )
+    expected = character_conversation_prompt_metadata(mode)
+
+    assert metadata["prose_renderer_version"] == (
+        expected["character_conversation_renderer_version"]
+    )
+    assert metadata["prose_renderer_prompt_sha256"] == (
+        expected["character_conversation_prompt_sha256"]
+    )
+    assert metadata["prose_renderer_mode_instruction_sha256"] == (
+        expected["character_conversation_mode_instruction_sha256"]
+    )
+    assert metadata["prose_renderer_influence_prompt_sha256"] is None

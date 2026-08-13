@@ -120,10 +120,11 @@ After restart:
 
 1. `GET /api/live` returns `200` with `{"status":"live"}`.
 2. `GET /api/health` returns `200` with `{"status":"ready"}`.
-3. `GET /api/version` reports schema `archivist.public_runtime_identity/3`, a non-null
+3. `GET /api/version` reports schema `archivist.public_runtime_identity/4`, a non-null
    `deployment_commit` equal to the exact commit deployed by Render, one `process_epoch`,
-   `answer_policy_version=application-compiled-v1`, `evidence_retrieval_kind=local_bm25`,
-   `generated_prose_model=gpt-5.6-sol`, the corpus-manifest SHA-256, the frozen-candidate identity,
+   `answer_policy_version=retrieval-authored-v3`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
+   `embedding_model=text-embedding-3-small`, `generated_prose_model=gpt-5.6-sol`, the corpus-
+   manifest SHA-256, the frozen-candidate identity,
    `public-rag-request-ceiling-v1`, and `2000000000` nano-USD (`$2.00`) as the public RAG request
    ceiling. A missing or malformed `RENDER_GIT_COMMIT` is not acceptable for a measurement release;
    Render's value is authoritative and cannot be masked by the local/test override.
@@ -139,6 +140,18 @@ After restart:
 11. Repeated requests eventually return `429` and a `Retry-After` header.
 
 Do not connect Cromblog until all eleven checks pass on the deployed URL.
+
+Also confirm without sending another request that the composer summary says **Settings**, the
+active **Perspective** appears above the input, and any facet or appearance override changes the
+active top-right and Settings-panel label to exactly **Custom** while retaining the base preset in
+its explanatory copy.
+
+The post-v3 behavior check is separately costed and separately authorized: one generated-mode
+personal question should return an uncited in-character reply with a manuscript-leading question
+and record exactly one `answer_generation` event, with no embedding event or source payload. The
+character call has a 12-second timeout, low reasoning, low verbosity, and a 576-token output
+ceiling. This paid check is not authorized merely by following this runbook, and no such live check
+has yet run.
 
 ## Connect Cromblog
 
@@ -192,14 +205,20 @@ renders even though no `run_diagnostics` object is returned.
 ## Progressive-response release check
 
 The optional Progressive response uses a same-origin NDJSON `POST` at
-`/api/projects/current/question/progressive`. It does not add a generation call and never exposes
-raw tokens or private reasoning. After fixed operational progress, the current application
-compiler may emit exact citation-rendered evidence cards as `checked_claim` objects after the
-public edition-locator and rolling quotation checks pass. Those cards are immutable but their
-final arrangement remains provisional. Essential makes zero provider calls. Professional, Pretty
-Pink Princess, and Baleful Black Baron use the same one no-retry selector call as Complete answer;
-the call chooses only exact card placeholders and application-owned cue IDs. Complete answer
-remains the strict default. The protocol and invariants are specified in
+`/api/projects/current/question/progressive`. It adds no provider call and never exposes raw tokens
+or private reasoning. Essential may emit exact citation-rendered direct evidence as
+`checked_claim` objects after the public edition-locator and rolling quotation checks pass.
+Generated modes do not stream their model-authored prose as checked claims: local support-ID
+validation is structural, not semantic-entailment proof. They show stages and heartbeats until the
+complete authored answer or direct-evidence fallback is ready. Historical/manuscript turns in
+every current mode make the shared query-embedding request; every registered generated mode --
+Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- adds the same
+one no-retry authored-response call as Complete answer. A narrowly classified personal turn in any
+registered generated mode instead makes one compact, no-retry character
+call with no embedding, retrieval, manuscript, sources, or citations. Provider/refusal/validation
+failure uses deterministic local character dialogue rather than Essential. Complete answer remains
+the strict default.
+The protocol and invariants are specified in
 [Answer delivery modes](answer_delivery.md).
 
 The public rate/concurrency slot belongs to the full stream lifetime, not merely to the time needed
@@ -211,16 +230,17 @@ Before promoting this transport, run a live smoke through `https://archivist.mcr
 
 1. Confirm Complete answer is still selected on a new browser session and an ordinary question
    retains the existing behavior.
-2. Select Progressive response and submit a question. Fixed operational progress must appear
-   first, the elapsed-work indicator must continue updating on roughly three-second heartbeats,
-   and at least one exact locally compiled evidence card should appear before the terminal result.
+2. Select Progressive response and submit an Essential question. Fixed operational progress must
+   appear first, the elapsed-work indicator must continue updating on roughly three-second
+   heartbeats, and at least one exact locally compiled evidence excerpt should appear before the
+   terminal result when the evidence compiler emits one. Repeat in a generated mode and confirm no
+   model-authored prose appears in a `checked_claim` frame.
 3. In the browser network panel, confirm the progressive response is
    `application/x-ndjson` with schema `archivist.answer_stream/2`, monotonically sequenced frames,
    and exactly one terminal frame. It must contain no chain-of-thought, private diagnostics,
-   unbounded source text, raw token delta, selector payload, or incomplete evidence card.
-4. Confirm the working evidence is visibly marked not final, then is replaced—not duplicated—by
-   the authoritative answer with citations and edition-qualified public sources. Every card must
-   remain byte-identical even when a generated mode reorders it around local editorial cues.
+   unbounded source text, raw token delta, authored-response payload, or incomplete evidence card.
+4. Confirm Essential working evidence is visibly marked not final, then is replaced—not
+   duplicated—by the authoritative answer with citations and edition-qualified public sources.
 5. Interrupt one accepted stream. Confirm there is no automatic retry and no partial answer is
    retained as a completed conversation turn.
 6. While a public stream is held open, confirm a competing request is refused by the configured
@@ -233,8 +253,11 @@ Before promoting this transport, run a live smoke through `https://archivist.mcr
    milestone names only—never question, source, manuscript, prompt, answer, or error text.
 
 This smoke checks deployment behavior that the offline suite cannot establish, including Render
-proxy buffering and stream cleanup. Progressive response can expose compiled evidence before
-optional arrangement completes, but this runbook makes no latency or model-performance claim.
+proxy buffering and stream cleanup. It requires fresh authorization because current Essential
+retrieval sends the question to the embedding provider and generated modes also send the dossier
+to Sol. No such live smoke has run for `retrieval-authored-v3` or
+`character-conversation-v2`; this runbook makes no latency,
+quality, or model-performance claim.
 
 ## Production-performance cohort
 
@@ -292,6 +315,12 @@ replacement, or paid warm-up. It also binds `/api/version`'s `public-rag-request
 identity and requires the full server-enforced `$2.00` maximum beneath the owner cap before each
 next attempt. The server checks that maximum against the monthly budget before RAG, projects every
 provider operation before send, and requires strict request-scoped usage.
+
+For a newly prepared current-policy manifest, each successful Essential request must record exactly
+one `query_embedding` event and no authored-response event. The manifest binds runtime identity
+schema 4, `retrieval-authored-v3`, `hybrid_bm25_rrf`, and `text-embedding-3-small`. This is a future
+cohort contract only; it does not reinterpret or alter the sealed production-performance-v1
+manifest, identity, usage ledger, or report.
 
 Before creating an intent or POSTing, the runner rejects any prepared conversation/turn scope that
 already exists in the live ledger. A timeout or other ambiguous transport result is sealed without

@@ -56,8 +56,139 @@ catalog observation, requested/returned IDs, settings, response IDs, and limitat
 The 2026-08-07 requirement to stop after ten answers for scorer calibration was superseded
 prospectively by the 2026-08-09 event below: the full 37-answer/decomposition baseline now completes
 before calibration.
+The closed-cue resolution in the first 2026-08-12 entry was itself superseded later that day by
+`retrieval-authored-v1`: preserving only three 32-word evidence cards and local cue prose solved
+the laundering risk but overconstrained relevance and substance. The older entry remains the exact
+record of why that temporary contract existed.
 
 ---
+
+## [2026-08-13] Character-conversation routing hard-coded two personalities instead of the generated-mode contract
+Phase/Brief: Retrieval-authored generated-mode conversation and Ruthless Red Realist
+Symptom: after the first personal-conversation repair, asking Professional a basic social question
+such as “How are you?” still entered manuscript retrieval and could return Essential fallback.
+Adding another generated personality would have repeated the same failure unless its ID was added
+manually to the router.
+Cause: **spec gap in the brief and mode-specific routing.** The first repair described the desired
+behavior through the two character examples then present—Pretty Pink Princess and Baleful Black
+Baron—rather than defining social conversation as a capability of every registered generated mode.
+The route therefore encoded product IDs instead of deriving eligibility, instructions, and local
+fallback behavior from the generated-mode registry.
+Resolution and verification: `retrieval-authored-v3` and `character-conversation-v2` derive the
+narrow pre-retrieval route from `supported_generated_modes()`. Professional, Pretty Pink Princess,
+Baleful Black Baron, and Ruthless Red Realist are registered; Essential has no generated-mode
+contract and remains excluded. Each generated definition owns authored instructions, conversational
+instructions, and deterministic local fallback copy, so a future registered generated mode inherits
+the route without another router edit. The compact route retains one no-retry Sol call, the
+12-second timeout, 576-token ceiling, no manuscript/retrieval/history payload, no citations or
+historical claims, and selected-character local fallback. The `/1` input and output schemas and
+`character-conversation-renderer-v1` remain unchanged because their shapes did not change. The new
+Ruthless Red Realist uses wire ID `ember_and_ink`, the existing Ember & Ink appearance, and a
+text-free realist-statecraft profile; its high-level Machiavelli/Kissinger inspiration permits no
+ingested outside facts, impersonation, imitation, quotation, or attributed doctrine. Offline
+contract tests encode registry-derived coverage, Essential exclusion, payload minimization, and
+mode-specific fallbacks. No provider call, paid smoke, deployment, latency cohort, quality cohort,
+or live verification ran, so this entry makes no post-change performance claim. Repository-wide
+Ruff, 1,298 Python tests with one intentional skip, both frontend suites, and the production
+frontend build pass offline. V2 and all frozen cohorts remain unchanged historical records.
+
+## [2026-08-13] Character modes had no valid persona-only contract for personal questions
+Phase/Brief: Retrieval-authored character conversation
+Symptom: asking Pretty Pink Princess a basic personal question such as “How are you?” produced an
+Essential fallback saying that no concise manuscript excerpt answered the question. The selected
+character therefore disappeared precisely when the user addressed her as a character.
+Cause: **spec gap in the brief.** The authored-response contract defined grounded historical
+answers, partial answers, insufficient evidence, and a narrow Princess refusal, but no ordinary
+persona-only success. `answered` and `partial` required at least one grounded run, while direct
+Essential evidence was the universal failure fallback. The design had not distinguished a fictional
+social turn from an unsupported factual request. Widening the dossier author to general chat would
+also have risked uncited factual drift and wasted an embedding/manuscript retrieval on a question
+that required neither.
+Resolution and verification: `retrieval-authored-v2` adds a narrow pre-retrieval route only for
+Pretty Pink Princess and Baleful Black Baron. The conservative local classifier rejects historical,
+manuscript, mixed, long, and uncertain questions. An eligible turn uses
+`character-conversation-v1`: one no-retry `gpt-5.6-sol` answer-generation call with low reasoning,
+low verbosity, a 12-second timeout, and a 576-token ceiling. It sends no history, embedding, manuscript, retrieved
+evidence, dossier, source metadata, or citation. Its `character_reply` output contains fictional
+persona conversation and one to three explicit manuscript-leading questions; provider failure,
+refusal, or invalid output returns deterministic local dialogue in the same character rather than
+Essential. Historical/manuscript questions retain the v1 hybrid/dossier path. Focused offline
+contract tests cover routing, near misses, payload minimization, one-call/no-retry behavior,
+validation, and all local fallbacks. No live/provider test, deployment, paid latency cohort, or
+quality cohort has run, so this resolution makes no post-change performance claim. V1 and every
+frozen cohort remain unchanged historical records.
+
+## [2026-08-13] Provider schema permitted grounded prose that the local support contract rejected
+Phase/Brief: Retrieval-authored response reliability
+Symptom: three of three observed Baleful Black Baron calls and one of three observed Pretty Pink
+Princess calls completed at the API, returned substantial structured output, and were then rejected
+locally. In each rejected response, a run labeled `grounded` carried an empty support-ID list, so the
+reader received the fail-closed Essential fallback despite a completed, billed authoring call.
+Cause: provider/local schema mismatch. The root response schema allowed `support_unit_ids` to be
+empty or defaulted for every run, while a Pydantic post-parse validator required at least one ID for
+`grounded` and no IDs for `persona`. The provider therefore could satisfy the schema it received and
+still fail Archivist's stronger local rule. The more frequent interleaving of factual and character
+prose made the mismatch especially visible in the Baron, but this was not a timeout, refusal, safety
+failure, or absent API response.
+Resolution and verification: grounded and persona runs are now mutually exclusive provider-visible
+object variants. The grounded variant requires one to eight support IDs; the persona variant cannot
+carry any. Local unknown-ID, citation, markup, copying, and rendering checks remain unchanged, as do
+the valid wire/render meaning, exactly-one-call/no-retry behavior, and direct-Essential fallback.
+Because `retrieval-authored-v1` remained an uncommitted, manually exercised candidate with no formal
+cohort, its policy, input/output schema, and renderer identifiers remain version 1; diagnostics bind
+the concrete schema hash. Focused strict-schema and local-validation tests verify the repair;
+repository-wide Ruff, 1,189 Python tests with one intentional skip, both frontend suites, and the
+production frontend build pass offline. No new provider call was made, so live reliability after
+the repair remains unproven.
+
+## [2026-08-13] Silent generated-mode fallback was visually misattributed to the selected persona
+Phase/Brief: Retrieval-authored reader fallback disclosure
+Symptom: a failed Baleful Black Baron or Pretty Pink Princess authoring call returned useful direct
+Essential evidence inside the still-selected themed interface, but the answer supplied no visible
+indication that persona generation had failed. A reader could reasonably attribute the terse
+direct-evidence response to the selected character or conclude that the mode had behaved poorly.
+Cause: presentation-contract gap. The server already distinguished an accepted
+`retrieval_authored_fallback` result from both an authored success and an ordinary Essential turn,
+but the frontend rendered every accepted terminal answer without disclosing that distinction.
+Resolution and verification: generated-mode fallback remains fail-closed, cited, and nonfatal; it
+does not retry or make another provider call. The browser now uses the existing safe result status
+to display a fixed notice above the answer explaining that the requested generated mode could not
+be completed and Archivist returned Essential instead. It is headed **Essential fallback** and
+says, “Archivist could not complete the {Mode label} AI response, so it returned Essential's direct
+manuscript evidence instead.” The notice exposes no exception text, prompt, manuscript passage, or
+private diagnostic. Frontend contract coverage distinguishes
+fallback from successful generated output and ordinary Essential output. This is a presentation
+repair and does not alter retrieval, model input, citations, provider-call count, or the completed
+evaluation cohorts.
+
+## [2026-08-12] The closed cue contract made safe structure substitute for a useful answer
+Phase/Brief: Retrieval-authored answer redesign
+Symptom: manually reviewed answers often repeated three short retrieved excerpts or attached a
+generic local editorial sentence without answering the user's precise question in enough depth.
+The output could be mechanically valid while still feeling simplistic, thin, or unrelated when
+the three excerpts had missed an important aspect of the question.
+Cause: design overcorrection. `application-compiled-v1` reduced the model to arranging at most
+three 32-word cards and selecting closed cue IDs. That prevented the model from laundering new
+factual prose behind a valid card ID, but it also prevented it from synthesizing the broader
+retrieval, adapting useful length, or using its language ability to explain relationships.
+Resolution and verification: `retrieval-authored-v1` keeps retrieval and citation mechanics local
+without keeping prose local. One shared query-embedding call feeds dense/BM25 reciprocal-rank
+fusion and the common context finalizer. A deterministic builder packages four to eight whole
+chunks or complete paragraph ranges, targeting about 2,500 estimated evidence tokens under a hard
+4,500-token evidence limit. Essential skips prose generation but still uses the embedding call.
+Each generated mode gets exactly one no-retry low-reasoning, medium-verbosity `gpt-5.6-sol` call,
+with at most 1,800 output tokens, to author free prose and one to three follow-up questions. The
+embedding and authoring operations now share a 25-second provider deadline instead of each owning
+an independent 30-second timeout; authoring is skipped in favor of direct evidence when its
+remaining allowance is exhausted. Local
+validation maps existing opaque support IDs to `[Source N]`, rejects malformed output, and falls
+back to Essential; it does not claim to prove semantic entailment. Focused offline dossier,
+renderer, pipeline, identity, and public-contract checks own the mechanical verification. No live
+provider call or paid latency/quality test has run, so this resolution closes the implementation
+defect but establishes no speed, quality, or reliability result. Frozen V26, V27, production-
+performance v1, and the earlier cue-selector smoke are unchanged. The complete offline gate passed
+repository-wide Ruff, 1,186 Python tests with one intentional skip, both frontend suites, and the
+production frontend build.
 
 ## [2026-08-12] A valid card ID could have laundered invented factual prose
 Phase/Brief: Application-compiled answer and prose-rendering contract

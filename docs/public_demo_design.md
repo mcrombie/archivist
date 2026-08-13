@@ -25,14 +25,20 @@ The design is now represented in code:
 - Cromblog discovers that address through `NEXT_PUBLIC_ARCHIVIST_URL` without hard-coding hosting
   details into either repository; and
 - the browser defaults new visitors to Professional while the omitted-mode API resolves to
-  Essential; current RAG identifies itself as `application-compiled-v1` through public runtime
-  identity schema `archivist.public_runtime_identity/3`.
+  Essential; current RAG identifies itself as `retrieval-authored-v3` through public runtime
+  identity schema `archivist.public_runtime_identity/4`.
 
 The public smoke performed on July 27 used four paid turns: a focused opening question, a
 context-dependent follow-up, a broad tobacco/labor question, and a deliberate absence question.
 The three answerable turns succeeded; the absent fact produced `insufficient_evidence`. Measured
 latencies were 32.63, 16.27, 51.21, and 3.86 seconds. The isolated ledger estimated `$0.27691761`
 for the complete smoke.
+
+Those deployment observations predate `retrieval-authored-v1`, `retrieval-authored-v2`, and
+`retrieval-authored-v3`. The current source boundary and
+runtime identity are documented below, but manual deployment, a live identity check, and any live
+model behavior remain unverified for the redesign. Historical smoke timings are not current-policy
+latency evidence.
 
 ## Product decision
 
@@ -60,35 +66,60 @@ claim-local excerpts.
 
 ## Reader modes and public disclosure
 
-Reader modes do not widen the public evidence boundary. Exactly four modes are selectable:
-Professional, Essential, Pretty Pink Princess, and Baleful Black Baron. Their four matching
+Reader modes do not widen the public evidence boundary. Exactly five modes are selectable:
+Professional, Essential, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist. Their five matching
 appearances are the only selectable appearances. Dormant IDs, reviewed historical profiles, and
 visual assets remain in the repository for compatibility but are not public choices.
 
-Current RAG ranks with local BM25 and application code compiles bounded immutable evidence cards.
-Essential returns those cards directly and makes zero provider calls. Professional, Pretty Pink
-Princess, and Baleful Black Baron each make exactly one no-retry `gpt-5.6-sol` call with low
-reasoning. That call selects only exact evidence-card placeholders and typed IDs from the selected
-mode's closed, application-owned cue catalog. Local code supplies every displayed factual word,
-editorial word, label, and citation. Raw prose, unknown or cross-mode cues, malformed card use, or
-provider/client failure cannot enter the answer and instead produce the direct Essential evidence.
+Current historical/manuscript RAG makes one `text-embedding-3-small` query request, combines dense and BM25 ranks with
+reciprocal-rank fusion, and packages four to eight source-bound dossier units. Essential returns
+direct cited evidence and makes no prose-generation call, but is not providerless. Every registered
+generated mode -- currently Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless
+Red Realist -- adds exactly one no-retry `gpt-5.6-sol` authored-
+response call with low reasoning, medium verbosity, and a 1,800 output-token ceiling. That call may
+synthesize and paraphrase the dossier, adapt useful length, write in character, and end with one to
+three follow-up questions. Local code maps valid support IDs to citations. Unknown IDs, forged
+citations, malformed structure, or provider/client failure produce the direct Essential evidence
+without retry.
 See `docs/archivist_modes.md` for the current registry and preserved historical provenance.
+
+The public server applies one narrow exception before retrieval. A conservatively classified
+social or personal question in any registered generated mode uses
+`character-conversation-v2`: one compact, no-retry, low-reasoning/low-verbosity `gpt-5.6-sol`
+answer-generation call with a 12-second timeout and a 576-token output ceiling. Its payload contains only the question,
+selected character, and instructions—no embedding, history, manuscript, retrieved evidence,
+dossier, source metadata, or citation. The reply is explicitly fictional persona conversation and
+must end with one to three questions that name the manuscript or *Cradle of the Empire*. A refused,
+invalid, or failed call returns deterministic local dialogue in the same character and never
+retrieves or substitutes Essential. Historical, manuscript, mixed, Essential, and uncertain turns
+retain the ordinary grounded path. Professional, Princess, Baron, and Ruthless Red Realist are
+covered now; future generated modes inherit the route through registration and Essential remains
+excluded. This exception cannot widen public source
+disclosure because it receives and returns no source material.
 
 The public request contract accepts only allowlisted mode IDs and resolved facet values. It does
 not accept prompt text, source paths, arbitrary influence identifiers, or raw influence excerpts.
-The response records mode, compiler, and selector metadata for reproducibility. Advanced overrides
+The response records mode, dossier, and authored-response metadata for reproducibility. Advanced overrides
 are reader-visible and apply only to future turns; completed answers retain their resolved
 settings. The UI has no V26/V27 selector. Those policies remain accessible only through explicit
 development API compatibility requests.
+
+The composer labels its collapsed disclosure **Settings** and presents a **Perspective** note above
+the input. Presets explain their interpretive bias directly. Any facet or appearance override makes
+the active top-right and Settings-panel label exactly **Custom** while the explanation still names
+the underlying preset; changing appearance alone explicitly does not change that perspective.
+Completed turns keep their resolved preset and Custom provenance.
 
 ## What an index means here
 
 The RAG index is not the printed index at the back of the book. The private runtime retains the
 481 retrieval-eligible manuscript chunks and the frozen Chroma collection used by explicit legacy
-policies. Current `application-compiled-v1` RAG ranks those private chunks with local BM25 and
-compiles only the selected bounded evidence cards. Essential sends no question or evidence to an
-answer model. A generated mode sends only the question, selected cards, and closed selector
-contract to its one optional arrangement call; it never sends the 594-page book.
+policies. Current `retrieval-authored-v3` historical/manuscript RAG embeds the question, runs shared hybrid retrieval, and
+packages only four to eight finalized units under its evidence-token ceiling. Essential sends no
+question or evidence to a prose-generation model. A generated mode sends the question, resolved
+turn, and rich dossier to its one authored-response call; it never sends the 594-page book.
+An eligible character-social turn bypasses that index entirely and sends neither a query embedding
+nor manuscript evidence to its compact character call.
 
 The printed Index, front matter, table of contents, acknowledgments, illustration notes,
 bibliography, and illustration credits remain outside the answer corpus. The complete substantive
@@ -180,10 +211,11 @@ two verified profiles exist.
 
 ## Public citation and quotation contract
 
-In current RAG, `[Source N]` is application-owned. The evidence compiler assigns it mechanically,
-and the optional selector can reference only the exact evidence-card placeholder; it cannot write
-or renumber citations. Edition mapping remains a local presentation step, so adding or changing a
-locator profile cannot change retrieval results or the immutable evidence text. Explicit V26/V27
+In current RAG, `[Source N]` is application-owned. Dossier units receive source numbers locally;
+generated grounded runs name opaque unit IDs, and local code maps valid IDs to those numbers. The
+model cannot write or renumber citation labels. This proves that support IDs resolve, not that the
+prose is semantically entailed. Edition mapping remains a local presentation step, so adding or
+changing a locator profile cannot change retrieval results. Explicit V26/V27
 compatibility policies retain their historical model-facing citation contract.
 
 Every cited public source receives:
@@ -207,9 +239,9 @@ Every cited source can still show its edition locator even when it does not rece
 three excerpt slots. These figures are implementation defaults to validate with disclosure tests,
 not a licensing claim.
 
-The current evidence compiler enforces bounded excerpt cards before answer assembly. Public output
-checks and source-payload limits remain separate safeguards; a selector response cannot introduce
-additional manuscript prose because local rendering accepts no free text.
+The dossier hard-bounds model-facing evidence before answer assembly. Public output checks and
+source-payload limits remain separate safeguards; generated prose may paraphrase the dossier but
+cannot cause the source panel to disclose additional manuscript text.
 
 ## Public API boundary
 

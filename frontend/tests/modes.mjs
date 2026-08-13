@@ -65,6 +65,15 @@ try {
         voice: "romantic",
         worldview: "none"
       }
+    },
+    ember_and_ink: {
+      label: "Ruthless Red Realist",
+      appearance: "ember",
+      defaultFacets: {
+        historiographicalLens: "evidence_first",
+        voice: "plainspoken",
+        worldview: "enlightenment_rationalist"
+      }
     }
   };
   const expectedModeIds = Object.keys(expectedModes);
@@ -72,7 +81,6 @@ try {
     "forest",
     "cromb_coo_coo",
     "tidal_archivist",
-    "ember_and_ink",
     "illuminated_codex",
     "cosmic_almanac"
   ];
@@ -80,7 +88,7 @@ try {
   assert.deepEqual(
     modes.ARCHIVIST_MODES.map((mode) => mode.id),
     expectedModeIds,
-    "the mode picker should expose exactly the four supported answer experiences"
+    "the mode picker should expose exactly the five supported answer experiences"
   );
   assert.equal(
     new Set(modes.ARCHIVIST_MODES.map((mode) => mode.id)).size,
@@ -109,19 +117,40 @@ try {
   const essential = modes.archivistMode("essential");
   const essentialCopy = `${essential.description} ${essential.disclosure}`;
   assert.match(essentialCopy, /direct.*evidence/i, "Essential should promise direct evidence");
-  assert.match(essentialCopy, /no prose-model/i, "Essential should disclose that no prose model writes its answer");
+  assert.match(essentialCopy, /no prose-generation rewrite/i, "Essential should disclose that no prose model rewrites its evidence");
   assert.doesNotMatch(essentialCopy, /(?:no|without) (?:external )?API/i, "Essential should not imply that retrieval and embeddings make no API calls");
 
   const generatedCharacters = {
     professional: /Professional.*(?:measured|diplomatic|present-minded)/i,
     pretty_pink_princess: /(?:hopeful|charming).*Princess|Princess.*(?:hopeful|charming)/i,
-    baleful_black_baron: /(?:brooding|condemnatory).*Baron|Baron.*(?:brooding|condemnatory)/i
+    baleful_black_baron: /(?:brooding|condemnatory).*Baron|Baron.*(?:brooding|condemnatory)/i,
+    ember_and_ink: /Ruthless Red Realist.*calculating|ruthless strategic realist.*calculation/i
   };
   for (const [modeId, characterPattern] of Object.entries(generatedCharacters)) {
     const mode = modes.archivistMode(modeId);
-    assert.match(mode.disclosure, /single AI prose writer/i, `${mode.label} should disclose its single prose writer`);
+    assert.match(mode.disclosure, /rich packet of retrieved manuscript evidence/i, `${mode.label} should disclose its rich evidence input`);
+    assert.match(mode.disclosure, /one AI response call/i, `${mode.label} should disclose its single authored response call`);
+    assert.match(mode.disclosure, /one to three follow-up questions/i, `${mode.label} should promise in-character follow-up questions`);
     assert.match(`${mode.description} ${mode.disclosure}`, characterPattern, `${mode.label} should describe its distinct character`);
   }
+  const perspectivePatterns = {
+    professional: /measured.*diplomatic.*human agency/i,
+    essential: /no added interpretive persona.*direct.*cited evidence/i,
+    pretty_pink_princess: /hopeful.*triumphalist.*bleak or frightening/i,
+    baleful_black_baron: /tragic.*severe.*coercion.*human suffering/i,
+    ember_and_ink: /cold-blooded strategic calculation.*power.*leverage.*incentives.*tradeoffs.*statecraft.*Machiavelli.*Kissinger.*without impersonating either/i
+  };
+  for (const [modeId, perspectivePattern] of Object.entries(perspectivePatterns)) {
+    const mode = modes.archivistMode(modeId);
+    assert.match(
+      mode.perspective,
+      perspectivePattern,
+      `${mode.label} should disclose its interpretive bias beside the question field`
+    );
+  }
+  const princessCopy = `${modes.archivistMode("pretty_pink_princess").description} ${modes.archivistMode("pretty_pink_princess").disclosure}`;
+  assert.match(princessCopy, /songs/i, "the Princess should disclose her distinctive song-like tangents");
+  assert.match(princessCopy, /decline.*bleak|bleak.*decline/i, "the Princess should disclose her bleak-material boundary");
 
   const copiedFacets = modes.modeDefaultFacets("essential");
   assert.notEqual(copiedFacets, essential.defaultFacets, "callers should receive a copy of preset facets");
@@ -133,10 +162,57 @@ try {
     true,
     "each facet dimension should participate in override detection"
   );
+  assert.equal(
+    modes.archivistModeSummary("professional", modes.modeDefaultFacets("professional"), "professional"),
+    "Professional",
+    "a preset appearance and preset facets should retain the preset label"
+  );
+  assert.equal(
+    modes.archivistModeSummary("professional", modes.modeDefaultFacets("professional"), "princess"),
+    "Professional · Custom",
+    "an appearance-only override should mark the snapshotted turn as Custom"
+  );
+  assert.equal(
+    modes.archivistModeSummary(
+      "professional",
+      { ...modes.modeDefaultFacets("professional"), voice: "romantic" },
+      "professional"
+    ),
+    "Professional · Custom",
+    "an interpretive-facet override should continue to mark the turn as Custom"
+  );
+
+  for (const modeId of ["professional", "pretty_pink_princess", "baleful_black_baron", "ember_and_ink"]) {
+    const fallback = modes.authoredFallbackNotice("retrieval_authored_fallback", modeId);
+    assert.equal(fallback.heading, "Essential fallback");
+    assert.match(fallback.message, new RegExp(modes.archivistMode(modeId).label));
+    assert.match(fallback.message, /Essential's direct manuscript evidence instead/);
+  }
+  assert.equal(
+    modes.authoredFallbackNotice("retrieval_authored_fallback", "essential"),
+    null,
+    "an Essential response must not claim that it fell back from a generated mode"
+  );
+  assert.equal(
+    modes.authoredFallbackNotice("retrieval_authored", "baleful_black_baron"),
+    null,
+    "a successful generated response must not show a fallback notice"
+  );
+  assert.equal(
+    modes.authoredFallbackNotice("character_conversation_fallback", "pretty_pink_princess"),
+    null,
+    "a local in-character social fallback must not be mislabeled as Essential evidence"
+  );
+  assert.equal(
+    modes.authoredFallbackNotice("character_conversation_fallback", "ember_and_ink"),
+    null,
+    "the Realist's local in-character social fallback must not be mislabeled as Essential evidence"
+  );
 
   const expectedVibes = [
     ["professional", "Professional"],
     ["minimal", "Essential"],
+    ["ember", "Ember & Ink"],
     ["princess", "Pretty Pink Princess"],
     ["baron", "Baleful Black Baron"]
   ];
@@ -151,7 +227,7 @@ try {
     "every selectable mode should map to a selectable appearance"
   );
   for (const [vibeId] of expectedVibes) assert.equal(vibes.isVibeId(vibeId), true);
-  for (const vibeId of ["forest", "cromb", "whimsical", "codex", "ember", "ocean", "rose"]) {
+  for (const vibeId of ["forest", "cromb", "whimsical", "codex", "ocean", "rose"]) {
     assert.equal(vibes.isVibeId(vibeId), false, `${vibeId} should not be restored from storage as a selectable appearance`);
   }
 
@@ -169,6 +245,14 @@ try {
   modes.persistAppearance("baron");
   assert.equal(storage.value(modes.ARCHIVIST_MODE_STORAGE_KEY), "baleful_black_baron");
   assert.equal(storage.value(vibes.VIBE_STORAGE_KEY), "baron");
+
+  const realistStorage = memoryStorage({
+    [modes.ARCHIVIST_MODE_STORAGE_KEY]: "ember_and_ink",
+    [vibes.VIBE_STORAGE_KEY]: "ember"
+  });
+  globalThis.window = { localStorage: realistStorage };
+  assert.equal(modes.storedArchivistMode(), "ember_and_ink", "the new preset should restore from storage");
+  assert.equal(modes.storedAppearance("ember_and_ink"), "ember", "the Ember & Ink appearance should restore with the Realist");
 
   globalThis.window = {
     localStorage: memoryStorage({

@@ -4,13 +4,15 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-12
+## Current checkpoint — 2026-08-13
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
-  built-in RAG default is now `application-compiled-v1` over 481 retrieval-eligible manuscript
-  chunks: local follow-up resolution and planning, deterministic BM25, no more than three bounded
-  immutable evidence cards, and application-owned factual text and citations. Public runtime
-  identity is `archivist.public_runtime_identity/3`. Render deploys remain manual. The earlier
+  built-in RAG default is now `retrieval-authored-v3` over 481 retrieval-eligible manuscript
+  chunks: local high-confidence follow-up resolution, one query-embedding request, shared
+  dense/BM25 reciprocal-rank fusion, and a rich four-to-eight-unit evidence dossier targeting about
+  2,500 estimated evidence tokens under a hard 4,500-token evidence ceiling. Public runtime
+  source identity is `archivist.public_runtime_identity/4`. Render deploys remain manual, and live
+  parity for this redesign has not been verified. The earlier
   production cohort bound deployed wrapper commit
   `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`, one process epoch, policy, model, corpus manifest,
   and the versioned `$2.00` Complete-RAG request ceiling before sending any measured question.
@@ -20,15 +22,50 @@ anything that still requires measurement.
   `$4.90594694` production-cohort spend, leaving `$5.09405306` beneath the new ceiling before any
   later public usage. The separate `$2.00` conservative per-request maximum is unchanged.
 - **Reader experience:** Complete answer is the default. Progressive response is an experimental
-  advanced setting. Four modes are reader-selectable: Professional, Essential, Pretty Pink
-  Princess, and Baleful Black Baron. Essential RAG makes no provider call and returns direct cited
-  cards; Essential plus Full Context is rejected. Each other mode makes one no-retry low-reasoning
-  Sol selection call. It may order cards and choose typed, mode-bound editorial cue IDs, while local
-  code owns every displayed factual and editorial word, label, and citation. Lens, voice, and
-  worldview affect cue selection only. Four mode-linked appearances are selectable; dormant
+  advanced setting. Five modes are reader-selectable: Professional, Essential, Pretty Pink
+  Princess, Baleful Black Baron, and Ruthless Red Realist. Essential RAG makes no prose-generation call and returns direct
+  cited evidence, but its hybrid retrieval still makes one embedding request; Essential plus Full
+  Context is rejected. Each other mode adds one no-retry low-reasoning, medium-verbosity Sol call
+  with a 1,800 output-token ceiling. It authors free prose over the rich dossier and one to three
+  in-character follow-up questions. Retrieval and authoring share one 25-second provider deadline;
+  retrieval receives at most eight seconds and authoring at most twenty seconds of the remaining
+  time, after which the direct-evidence fallback wins rather than starting a late prose call. Local
+  code validates opaque support IDs and maps them to citations. When an accepted generated-mode
+  turn uses that fallback, the reader now sees a nonfatal notice that the requested mode could not
+  be completed and Essential evidence was returned; ordinary Essential and successfully authored
+  turns do not show it. It is headed **Essential fallback** and names the requested mode in its
+  fixed message. The notice does not retry the call or expose internal provider details. Local
+  support-ID validation does not prove semantic entailment. Lens, voice, and worldview affect generated
+  framing and prose. Five mode-linked appearances are selectable; dormant
   mode definitions/assets are compatibility-only. The separate full-context-v2 experiment remains
   disabled on the public server. Frozen V26 and historical V27 remain explicit development
   policies, but their former browser selector has been removed.
+- **Character conversation and perspective clarity:** every registered generated mode now answers
+  a narrow set of direct social/personal questions before retrieval through
+  `character-conversation-v2`. Professional, Pretty Pink Princess, Baleful Black Baron, and
+  Ruthless Red Realist are covered now; a future mode inherits the route when it registers its
+  authored and conversational behavior. Essential remains excluded. The branch sends only the
+  question and character instructions to
+  one no-retry, low-reasoning/low-verbosity Sol call with a 12-second timeout and a 576-token
+  output ceiling. It sends no
+  embedding, history, manuscript text, retrieved evidence, dossier, source metadata, or citation;
+  its fictional reply must end with one to three questions explicitly leading into the manuscript
+  or *Cradle of the Empire*. Refusal, invalid output, or provider failure uses deterministic local
+  dialogue in the same character rather than Essential. Historical, manuscript, mixed,
+  Essential, and uncertain turns remain grounded. The composer now says
+  **Settings**, explains the active **Perspective** above the input, and labels every advanced
+  override exactly **Custom** while naming the underlying preset and distinguishing appearance
+  from interpretive bias.
+- **Generated-mode reliability repair:** inspection of recent completed responses found a precise
+  contract mismatch rather than a Baron-specific provider outage. Three of three observed Baron
+  calls and one of three observed Princess calls returned completed API output but included a
+  `grounded` run with an empty support-ID list. The provider-facing schema had allowed that empty
+  default even though local validation rejected it. Grounded and persona runs are now mutually
+  exclusive provider-visible variants: grounded requires one to eight dossier IDs, while persona
+  permits none. Valid payload and rendering semantics, one call with no retry, Essential fallback,
+  and all version-1 identifiers remain unchanged because this path is still an uncommitted,
+  manually exercised candidate with no formal cohort. The repair has focused offline coverage but
+  no post-repair provider call, so it is not yet live reliability evidence.
 - **Measurement:** the unchanged ten-question cohort is development evidence. The 37-item
   owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
   held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
@@ -71,18 +108,147 @@ anything that still requires measurement.
   `obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. This is reassuring for
   infrastructure observability but not for product reliability: the public response-contract
   completion rate was 29/33, or 87.9%.
-- **Next product step:** preserve the descriptive and production cohorts unchanged and obtain
-  a separately versioned measurement of `application-compiled-v1`. A narrow authorized Edwin
-  Sandys smoke subsequently made exactly three no-retry generated-mode calls: all three passed the
-  closed cue contract in 8.357, 6.839, and 5.162 seconds, for 6,292 tokens and `$0.060071250`
-  estimated cost. This single question is compatibility evidence, not a latency or reliability
-  cohort, so the new default still carries no general improvement claim.
+- **Next product step:** preserve the descriptive and production cohorts unchanged, then obtain
+  separate authorization for any live
+  smoke or measurement. The narrow Edwin Sandys smoke made exactly three no-retry calls against the
+  superseded closed-cue selector in 8.357, 6.839, and 5.162 seconds, for 6,292 tokens and
+  `$0.060071250`; it does not measure this new path. Ad hoc current-policy turns diagnosed the
+  provider-schema mismatch described above, but no declared post-repair or post-v3 live smoke,
+  latency cohort, or quality cohort has run, so the new default and its character-social branch
+  carry no speed, quality, or reliability claim.
+  Ruthless Red Realist reuses the Ember & Ink appearance and applies a cold strategic focus on
+  power, leverage, incentives, bargaining, tradeoffs, credible commitments, and institutional
+  capacity. Its Machiavelli/Kissinger inspiration is deliberately high-level: no outside text was
+  ingested and the mode neither impersonates nor attributes views to either person.
   Frozen V26 remains callable and immutable; V27 compact remains unpromoted historical evidence.
   If stronger claim-derived scoring is still useful, decomposition redesign remains a later,
   separate cohort; semantic calibration remains optional supplemental work.
+- **Current v3 offline verification:** repository-wide Ruff passed; 1,298 Python tests passed with
+  one intentional skip; both frontend delivery and mode suites passed; and the production frontend
+  build succeeded. No offline check made a provider call or substitutes for a live latency or
+  answer-quality measurement.
+- **Previous v2 offline verification:** repository-wide Ruff passed; 1,258 Python tests passed with
+  one intentional skip; both frontend delivery and mode suites passed; and the production frontend
+  build succeeded. No offline check made a provider call or substitutes for a live latency or
+  answer-quality measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-13 — Make social conversation a generated-mode capability
+
+- Professional still failed a basic “How are you?” turn after the first character-conversation
+  repair because route eligibility named Princess and Baron directly. That exposed the abstraction
+  error: social conversation belongs to the generated-mode contract, not to two particular IDs.
+- Opened `retrieval-authored-v3` and `character-conversation-v2`. Eligibility, prompt material, and
+  deterministic fallback copy now come from the same generated-mode registry used by manuscript
+  authoring. Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist all
+  receive the narrow pre-retrieval route; Essential remains direct evidence and is excluded. A
+  future registered generated mode inherits this behavior without another router edit.
+- Preserved the compact privacy and latency boundary: one no-retry Sol call, low reasoning, low
+  verbosity, a 12-second timeout, a 576-token ceiling, no embedding or retrieval, no manuscript or
+  history in the payload, no citations or historical claims, and deterministic selected-character
+  dialogue on failure. The input/output schemas remain `/1`; the renderer remains
+  `character-conversation-renderer-v1` because their wire and rendering shapes did not change.
+- Promoted the dormant `ember_and_ink` identity and appearance into the fifth selectable mode,
+  **Ruthless Red Realist**. It emphasizes cold-blooded calculation, power, leverage, incentives,
+  bargaining positions, credible commitments, tradeoffs, institutional capacity, and statecraft.
+  Its broad realist inspiration is loosely associated with Machiavelli and Henry Kissinger, but no
+  outside work was ingested and the prompt forbids impersonation, imitation, quotation, or
+  attributed doctrine. Manuscript claims remain dossier-grounded.
+- This was an offline implementation change. No provider call, paid smoke, deployment, latency
+  cohort, quality cohort, or live reliability check ran, so v3 carries no performance claim.
+
+Useful blog lesson: a persona feature should be registered as a capability. Hard-coding the first
+two colorful characters fixed their examples while leaving Professional—and every future mode—on
+the wrong path.
+
+## 2026-08-13 — Let the characters answer personal questions without searching the book
+
+- A user asking the Pretty Pink Princess “How are you?” reached a contract that required an
+  `answered` response to contain grounded manuscript prose. The model could not provide a pure
+  fictional persona answer under that shape, so a completed character attempt could collapse into
+  irrelevant Essential evidence. The missing persona-only success path was a specification gap,
+  not evidence that the manuscript lacked an answer.
+- Versioned the product as `retrieval-authored-v2` while preserving v1 as historical/manual
+  behavior. A conservative, full-question classifier now recognizes only a small allowlist of
+  direct social and personal turns in Princess and Baron modes. Historical words, compound
+  requests, long input, Professional, and Essential all fall through to normal RAG.
+- Added `character-conversation-v1`, with input schema
+  `archivist.character_conversation_input/1`, output schema
+  `archivist.character_conversation_answer/1`, renderer `character-conversation-renderer-v1`, and
+  disposition `character_reply`. It makes exactly one no-retry Sol `answer_generation` call with
+  low reasoning, low verbosity, a 12-second timeout, and a 576-token output ceiling. The payload contains no history,
+  embedding, manuscript passage, retrieved evidence, dossier, or citation.
+- Required every character reply to finish with one to three in-character questions explicitly
+  leading back to the manuscript or *Cradle of the Empire*. Failure codes remain mechanical
+  (`provider_failure`, `invalid_response`, or `refusal`), but the reader receives deterministic
+  application-owned dialogue in the selected character rather than an Essential substitution.
+- Renamed the composer disclosure **Settings** and placed an explicit **Perspective** explanation
+  above the text input. Any advanced override is labeled exactly **Custom** in the active controls;
+  its copy still discloses the base preset, while appearance-only customization says the bias is
+  unchanged. Completed turns preserve the base preset plus Custom for provenance.
+- This was implemented and checked offline without a provider call. No live smoke, deployment,
+  paid latency test, or quality cohort has run for v2, so the compact call and retrieval bypass are
+  design choices rather than measured performance claims.
+
+## 2026-08-13 — Put the real contract in the provider schema
+
+- A visible Black Baron fallback initially looked like an API failure. The API had actually
+  completed all three observed Baron calls; one of three observed Princess calls failed the same
+  way. Each rejected payload contained a `grounded` run with no support ID.
+- The model had obeyed the schema it received. That schema allowed the support list to be empty,
+  while a stronger local validator rejected empty support only after the paid response returned.
+  The defect was the disagreement between those two contracts, not the Baron's bleak subject matter.
+- Split the nested run type into mutually exclusive provider-visible variants. Grounded prose must
+  now carry one to eight dossier IDs; persona prose carries none. This keeps citation mapping local
+  without asking a second call to repair the first.
+- The valid wire/render contract and `retrieval-authored-v1` identifiers remain unchanged: this is
+  an offline repair to an uncommitted, manually exercised candidate, not a revision of a released
+  formal cohort. No post-repair provider call was made, so improved live completion is still a
+  hypothesis to test rather than a result.
+
+## 2026-08-12 — Give the model enough evidence and let it write again
+
+- Replaced the briefly shipped `application-compiled-v1` cue selector with
+  `retrieval-authored-v1`. The earlier boundary solved a real structural problem, but three
+  immutable excerpts of at most 32 words plus closed local cue prose overcorrected. It constrained
+  generated answers to whatever those tiny snippets happened to express, producing replies that
+  could be safe-looking yet thin, repetitive, or poorly matched to the actual question.
+- Kept the useful ownership boundary in a narrower form. Archivist still resolves simple
+  follow-ups, retrieves, chooses the evidence, packages source metadata, and renders citations.
+  One shared `text-embedding-3-small` query call now feeds dense/BM25 reciprocal-rank fusion and the
+  common context finalizer. A local dossier builder preserves four to eight whole chunks or
+  complete paragraph ranges, aiming for roughly 2,500 estimated evidence tokens and never crossing
+  the 4,500-token evidence cap.
+- Essential remains prose-free but not provider-free: it uses that one embedding request and then
+  returns direct cited manuscript evidence. Professional, Pretty Pink Princess, and Baleful Black
+  Baron add exactly one no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium
+  verbosity, and a 1,800 output-token ceiling. The model may now synthesize, paraphrase, vary useful
+  length, and express the selected character instead of arranging fixed local sentences.
+- The structured output exists to preserve citation mechanics without dictating prose. Historical
+  runs name opaque dossier-unit IDs; persona runs contain only voice, metaphor, and fictional
+  character business. Local code rejects unknown IDs and maps known IDs to `[Source N]`. That is a
+  structural provenance check, not proof that every sentence is entailed by the cited passage.
+- Every generated answer ends with one to three original, in-character questions that encourage
+  continued conversation. Provider failure or provider-level refusal, or local structural-
+  validation failure, returns the Essential answer from the same retrieval without a retry. A
+  valid Princess in-character refusal remains authored persona output.
+- Frozen V26, V27, production-performance v1, and the earlier three-call cue-selector smoke remain
+  unchanged as historical records. No provider call, live smoke, or paid latency/quality test was
+  made for this redesign. Offline implementation alone supports no claim that the answers are
+  faster, better, or more reliable.
+- Final offline hardening also replaced two independent 30-second provider timeouts with one
+  25-second shared provider deadline, preserved at least four dossier units when the hard budget
+  makes that breadth feasible, carried resolved subjects through chained follow-ups, bounded public
+  history beneath the request-size gate, and versioned future production measurement as v2 while
+  preserving exact v1 replay. Repository-wide Ruff, 1,186 Python tests with one intentional skip,
+  both frontend suites, and the production build passed without a provider call.
+
+Useful blog lesson: making the application an evidence compiler does not require making it the
+author. A tiny deterministic answer can be mechanically tidy and still fail the reader's question;
+the practical boundary is rich evidence and local citation resolution, with prose freedom measured
+honestly rather than eliminated.
 
 ## 2026-08-12 — Move factual authorship from the model into Archivist
 

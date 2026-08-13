@@ -17,12 +17,13 @@ and its first formal held-out answer-quality baseline are complete. The latter i
 mechanical baseline, not yet a complete semantic answer-quality scorecard, and those accomplishments
 must not be conflated.
 
-## Current checkpoint — 2026-08-12
+## Current checkpoint — 2026-08-13
 
-The built-in retrieval product now defaults to `application-compiled-v1`. Follow-up resolution and
-question planning are local, deterministic BM25 ranks the 481 eligible manuscript chunks, and the
-application compiles no more than three immutable, bounded evidence cards and owns every factual
-word and citation. Frozen `evidence-planned-v26` remains immutable and explicitly callable for
+The built-in retrieval product now defaults to `retrieval-authored-v3`. High-confidence follow-up
+resolution is local. One `text-embedding-3-small` request supplies dense query scores; the shared
+dense/BM25 reciprocal-rank-fusion retriever and context finalizer then package four to eight
+source-bound units, targeting about 2,500 estimated evidence tokens under a hard 4,500-token
+evidence ceiling. Frozen `evidence-planned-v26` remains immutable and explicitly callable for
 development/evaluation policy compatibility. V27 compact remains an unpromoted historical
 experiment whose reader-facing selector has been removed. The separately versioned
 `full-context-v2` experiment remains feature-gated and disabled on the public deployment.
@@ -31,19 +32,35 @@ The reader-facing application now implements:
 
 - a live, book-specific public demo with private server-side corpus storage and bounded source
   disclosure;
-- four reader-selectable modes: Professional, Essential, Pretty Pink Princess, and Baleful Black
-  Baron;
-- eleven appearance-only themes under Advanced controls;
+- five reader-selectable modes: Professional, Essential, Pretty Pink Princess, Baleful Black
+  Baron, and Ruthless Red Realist;
+- five mode-linked appearance choices under Advanced controls;
 - Complete answer as the recommended fail-closed default; and
 - Progressive response as an experimental checked-claim delivery option.
 
-Essential now returns the compiled evidence directly and makes zero OpenAI/provider calls in the
-current RAG path; Essential plus Full Context is rejected. Each of the other three modes makes
-exactly one no-retry `gpt-5.6-sol` low-reasoning call over closed card IDs and text. That model may
-only choose card order and typed, mode-bound editorial cue IDs. Local code owns every displayed
-factual and editorial word, label, and citation; any provider or contract failure falls back to
-direct cited evidence. Advanced lens, voice, and worldview settings affect cue selection only. Dormant mode
+Essential returns direct cited evidence and makes no prose-generation call, but it is not
+providerless: it uses the shared query-embedding request. Each of the other four modes adds exactly
+one no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
+output-token ceiling. That model writes free, question-responsive prose over the rich dossier and
+ends with one to three in-character follow-up questions. Grounded runs name opaque dossier-unit
+IDs; local code validates and maps those IDs to `[Source N]`. Any provider or structural-contract
+failure falls back to direct cited evidence. Advanced lens, voice, and worldview settings affect
+the generated prose. Dormant mode
 definitions and assets are compatibility-only, not current UI/API choices.
+
+Before retrieval, every registered generated mode recognizes only a narrow, conservatively
+classified set of social or personal questions. `character-conversation-v2` makes
+one no-retry `gpt-5.6-sol` call with low reasoning, low verbosity, a 12-second timeout, and a
+576-token ceiling; it sends
+the question and character instructions but no embedding, manuscript text, retrieved evidence,
+dossier, or history. The output is fictional persona conversation with one to three explicit
+manuscript-leading questions and no citations or historical facts. Failure uses deterministic
+in-character local dialogue, not Essential. Historical, manuscript, mixed, and Essential turns
+continue through the grounded path. The route derives eligibility and behavior from the generated-
+mode registry, so Professional and Ruthless Red Realist are covered now and future registered
+generated modes inherit it without route edits. The composer labels its disclosure
+**Settings**, shows the active perspective above the input, and labels any advanced override
+exactly **Custom** while disclosing its underlying preset and distinguishing appearance from bias.
 
 The public service is live at `https://archivist.mcrombie.com`, and the first fixed production-
 performance cohort is complete against deployed wrapper commit
@@ -51,9 +68,10 @@ performance cohort is complete against deployed wrapper commit
 bound Render's authoritative `RENDER_GIT_COMMIT`, one unchanged process epoch, the corpus and V26
 RAG identities, and the versioned `$2.00` public Complete-RAG request ceiling before any measured
 question was sent. That production-performance v1 identity and every result below remain unchanged.
-The current public runtime identity schema is `archivist.public_runtime_identity/3`; it separately
-binds `application-compiled-v1`, local BM25 retrieval, and the generated-prose model while retaining
-the frozen V26 identity.
+The next source release's public runtime identity schema is
+`archivist.public_runtime_identity/4`; it separately binds `retrieval-authored-v3`, hybrid
+BM25/RRF retrieval, `text-embedding-3-small`, and the generated-prose model while retaining the
+frozen V26 identity. Manual deployment and live identity parity have not yet been verified.
 
 The cohort attempted all 33 predeclared answerable items without retry or replacement. Twenty-nine
 were valid successful completions and four failed, for a 12.1212% all-attempt error rate; there
@@ -195,7 +213,8 @@ After formal lock:
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
 | **8A. Production observability and latency evidence** | **Complete for the first observed cohort** | Preserve the text-free public artifacts and private audit root. The 33-attempt run produced 29 latency-eligible successes, four request failures, zero instrumentation failures, 54.393-second server p50, 113.801-second server p95, and `$4.90594694` estimated cost. Treat these as one observed warm cohort, not an SLA. |
 | **8B. V27 compact generation representation** | **Historical experiment; unpromoted and superseded** | Preserve the offline experiment and its proposed A/B in `docs/latency_optimization.md`. No paid candidate call ran, its old UI selector is gone, and it is not the current product path. |
-| **8C. Application-compiled answer path** | **Current default implemented; paid performance unmeasured** | Preserve immutable evidence cards and application-owned facts, cue text, and citations. Essential RAG must remain zero-provider; the three prose modes must remain exactly one low-reasoning Sol selection call, no retry, with direct-evidence fallback. A new cohort is required before any latency, quality, or reliability improvement claim. |
+| **8C. Application-compiled answer path** | **Historical product iteration; superseded** | Preserve the closed-cue implementation history and its narrow three-call smoke. Its three 32-word cards overcorrected for structural safety and produced answers that were often too thin or off-target. Do not use its smoke as evidence about the current policy. |
+| **8D. Retrieval-authored answer path** | **Current v3 default implemented offline; live behavior unmeasured** | Preserve v1 and v2 as historical/manual behavior. In v3, manuscript turns retain one shared hybrid embedding/retrieval pass, the 4–8-unit rich dossier, one no-retry low-reasoning/medium-verbosity Sol prose call in every registered generated mode, local support-ID citation mapping, required follow-up questions, and direct-evidence fallback. Essential has no prose call but still has one embedding event. Narrow social turns in every registered generated mode instead use one compact no-retry Sol call with no retrieval or evidence and deterministic in-character local fallback. Ruthless Red Realist is the fifth selectable mode and uses Ember & Ink. A new cohort is required before any latency, quality, or reliability improvement claim. |
 
 ## Next sequence
 
@@ -248,31 +267,65 @@ top of the list.
     equivalence and serialization work remains useful negative/development evidence, but no paid
     comparison ran and it was never promoted. The old V26/V27 browser selector is removed. Both
     policies remain explicit development calls only; see `docs/latency_optimization.md`.
-12. **Completed for implementation — make `application-compiled-v1` the built-in RAG default.**
+12. **Completed historically — make `application-compiled-v1` the built-in RAG default.**
     Local planning and BM25 produce at most three bounded immutable cards. Essential renders them
     directly with zero provider calls. Professional, Pretty Pink Princess, and Baleful Black Baron
     each get one no-retry low-reasoning Sol selection call over card placeholders and typed
     mode-bound cue IDs; application code owns every displayed word and citation, and failures fall
     back to direct evidence. Runtime identity is now
-    version 3. Frozen V26 and production-performance v1 remain unchanged.
-13. **Completed for narrow compatibility — run the generated-mode smoke.** After exact
+    version 3. Frozen V26 and production-performance v1 remain unchanged. This design was then
+    superseded because three 32-word cards and closed local cues overcorrected for control and hurt
+    relevance and substance.
+13. **Completed for narrow historical compatibility — run the generated-mode smoke.** After exact
     payload/provider authorization, one Professional, one Princess, and one Baron call all passed
     the closed cue contract with no retries in 8.357/6.839/5.162 seconds, using 6,292 tokens and
     `$0.060071250` estimated cost. This single question is not a performance cohort. Before making a
     speed, quality, or reliability claim, bind the exact
     questions, deployment/commit, mode mix, runtime identity, denominators, no-retry rule, and cost
     ceiling in a separately versioned cohort. Do not use the informal local experience as a latency
-    result.
-14. **Next, after deployment identity verification — open production-performance v2.** Preserve v1's
+    result. It does not measure the later retrieval-authored policy.
+14. **Completed historically for offline implementation — replace the cue selector with
+    `retrieval-authored-v1`.** One shared hybrid query-embedding/retrieval pass now feeds a rich
+    four-to-eight-unit dossier. Essential skips prose generation; the other three modes each make
+    one no-retry low-reasoning/medium-verbosity Sol call that authors free prose and one to three
+    follow-up questions. Local code maps validated support IDs to citations and falls back to
+    Essential on failure. Runtime identity is version 4. Repository-wide Ruff, 1,189 Python tests
+    with one intentional skip, both frontend suites, and the production frontend build pass
+    offline. No live/provider test or measured latency or quality claim belongs to this
+    implementation step.
+15. **Completed for offline implementation — add the narrow character-conversation route as
+    `retrieval-authored-v2`.** Princess and Baron social/personal turns are recognized locally
+    before retrieval. `character-conversation-v1` sends only the question and character prompt to
+    one compact, no-retry Sol call with a 12-second timeout, forbids manuscript claims and citations, requires manuscript-
+    leading questions, and uses a deterministic in-character local fallback. Historical and
+    manuscript turns retain the v1 hybrid/dossier path. The UI now exposes the active perspective,
+    labels its disclosure Settings, and makes Custom state explicit without hiding its base mode.
+    This implementation made no live/provider call and supports no post-change latency, quality,
+    or reliability claim.
+16. **Completed for offline implementation — generalize generated-mode conversation and add
+    `retrieval-authored-v3`.** `character-conversation-v2` now derives eligibility, character
+    instructions, and deterministic fallback copy from the generated-mode registry. Professional,
+    Pretty Pink Princess, Baleful Black Baron, and the new Ruthless Red Realist therefore handle
+    the same narrow social turns without retrieval; Essential remains excluded. Ruthless Red
+    Realist uses the existing `ember_and_ink` appearance and a text-free realist-statecraft profile
+    centered on calculation, power, leverage, incentives, tradeoffs, and institutional capacity.
+    Its Machiavelli/Kissinger inspiration is high-level only: no outside work was ingested and no
+    impersonation, imitation, quotation, or attributed doctrine is permitted. Schemas remain `/1`
+    and the renderer remains `character-conversation-renderer-v1`. This step made no live/provider
+    call and supports no post-change latency, quality, or reliability claim. Repository-wide Ruff,
+    1,298 Python tests with one intentional skip, both frontend suites, and the production frontend
+    build pass offline.
+17. **Next, after deployment identity verification and fresh authorization — open
+    production-performance v2.** Preserve v1's
     54.393/113.801-second p50/p95 and all four failures unchanged. A v2 report must state that it
     measures a different answer policy and must remain an observed cohort comparison unless the
     required repeat/noise protocol supports a stronger claim.
-15. **Then — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
+18. **Then — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
     of 37 outputs violated exact-span validation, then prospectively declare and test a revised
     instrument without changing or rerunning this baseline. The eight substantively decomposed
     releases are enough to preserve limited mechanical measurements, not enough to support strong
     claim-derived conclusions.
-16. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+19. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
     subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
     technical failures are preserved, measure judge and decomposition agreement, and publish a
     hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
@@ -300,16 +353,22 @@ the unchanged policy/corpus identities. Timing an unidentified deployment or a n
 cohort would produce an operational number about a different system.
 
 The first production cohort identified its V26 answer-generation boundary as the site of all four
-request failures. The current application-compiled policy changes that ownership boundary rather
-than promoting V27: the application fixes evidence and citations before optional prose generation.
-That is a new system, not a retroactive repair to v1. Deployment and production-performance v2 may
-follow only after a fresh identity and authorization are fixed, and no improvement claim precedes
-that evidence.
+request failures. `application-compiled-v1` responded by moving all displayed prose into local
+cards and cue catalogs, but that three-by-32-word boundary overcorrected: structural control came at
+the cost of question relevance and substantive answers. `retrieval-authored-v1` deliberately
+reversed that choice, and v3 preserves its historical/manuscript path. Archivist now owns
+retrieval, dossier construction, support-ID validation,
+and citation mapping; the Sol model owns generated prose and useful length. This is another new
+system, not a retroactive repair to V26 or to the cue-selector smoke. The narrow v2
+Princess/Baron branch and the registry-generalized v3 route are likewise new systems rather than
+v1 measurements. Deployment and production-
+performance v2 may follow only after a fresh identity and authorization are fixed, and no
+improvement claim precedes that evidence.
 
 ## Reader experience workstream
 
 The visual and interpretive reader experience exists now; it is no longer a hypothetical second
-phase. Frozen V26 has a descriptive neutral baseline, but the current application-compiled policy
+phase. Frozen V26 has a descriptive neutral baseline, but the current retrieval-authored policy
 and its prose modes have no paid comparative evaluation.
 
 Current contract:
@@ -317,16 +376,27 @@ Current contract:
 - Professional is the new-reader default.
 - Essential is the direct, evidence-first product path; frozen V26 Essential remains the evaluated
   baseline.
-- Only Professional, Essential, Pretty Pink Princess, and Baleful Black Baron are selectable.
-- Essential is direct cited evidence with no provider call in current RAG; Essential plus Full
-  Context is rejected. The other three modes may choose card order and mode-bound editorial cue IDs
-  only after evidence has been compiled.
-- The selection model cannot author displayed text or citations; a failed call falls back to the
-  direct evidence without retry.
-- Fine-grained lens, voice, worldview, and appearance overrides remain Advanced controls.
+- Only Professional, Essential, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red
+  Realist are selectable.
+- Essential is direct cited evidence with no prose-generation call in current RAG; it still uses
+  the shared query-embedding provider call. Essential plus Full Context is rejected.
+- The other four modes author free prose over the same rich dossier and end with one to three
+  in-character follow-up questions. A failed call falls back to direct evidence without retry.
+- Narrow social questions in every registered generated mode bypass retrieval and use one compact
+  character call with deterministic in-character local fallback; they contain no manuscript claims
+  or citations and end by leading the user back to the book. Essential is excluded, and future
+  generated modes inherit the route through registration rather than another hard-coded mode list.
+- Ruthless Red Realist uses Ember & Ink and emphasizes cold-blooded calculation, power, leverage,
+  incentives, tradeoffs, and statecraft without impersonating Machiavelli or Henry Kissinger or
+  using either as a source of historical facts.
+- Local code maps valid support IDs to citations, but does not claim to prove semantic entailment.
+- The input displays its active Perspective; its disclosure is Settings. Fine-grained lens, voice,
+  worldview, and appearance overrides remain Advanced controls and label the active mode exactly
+  Custom while disclosing the base preset and whether only appearance changed.
 - Complete answer is the recommended default.
-- Progressive response is experimental and may show only locally checked complete factual claims;
-  it is not chain-of-thought and does not promise lower total latency.
+- Progressive response is experimental. It may show locally compiled direct evidence in Essential;
+  generated prose remains terminal because support-ID validation is structural rather than a
+  semantic proof. It is not chain-of-thought and does not promise lower total latency.
 - Full book is a separately versioned, high-cost evidence-scope experiment and remains disabled on
   the public deployment unless the owner deliberately enables its additional safety and budget
   controls.

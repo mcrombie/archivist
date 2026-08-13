@@ -27,6 +27,7 @@ export function VibeControl({
   const pickerId = useId();
   const controlRef = useRef<HTMLDivElement>(null);
   const current = archivistMode(mode);
+  const displayLabel = custom ? "Custom" : current.shortLabel;
 
   useEffect(() => {
     setDocumentAppearance(appearance);
@@ -59,7 +60,8 @@ export function VibeControl({
     <div ref={controlRef} className={`archivist-vibe-control${compact ? " is-compact" : ""}`}>
       <button
         type="button"
-        className="vibe-trigger"
+        className={`vibe-trigger${custom ? " is-custom" : ""}`}
+        aria-label={`Archivist mode: ${displayLabel}. Choose a mode.`}
         aria-expanded={open}
         aria-controls={pickerId}
         onClick={() => setOpen((value) => !value)}
@@ -67,7 +69,7 @@ export function VibeControl({
         <Palette size={16} aria-hidden="true" />
         <span>
           <small>Archivist mode</small>
-          <strong>{current.shortLabel}{custom ? " · Custom" : ""}</strong>
+          <strong>{displayLabel}</strong>
         </span>
         <ChevronDown size={15} aria-hidden="true" />
       </button>
@@ -78,8 +80,8 @@ export function VibeControl({
             <span>Reading style and appearance</span>
           </div>
           <p className="vibe-menu-note">
-            Modes guide framing and atmosphere. Historical claims and citations still come from
-            <cite> Cradle of the Empire</cite>.
+            Modes guide framing and atmosphere. Their retrieved evidence packet and citations
+            still come from <cite>Cradle of the Empire</cite>.
           </p>
           <div className="vibe-options" role="group" aria-label="Archivist mode">
             {ARCHIVIST_MODES.map((option) => (
