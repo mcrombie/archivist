@@ -110,6 +110,10 @@ V3_RUBRIC_INTENT_SCHEMA = "archivist.retrieval_authored_v3_rubric_intent/1"
 V3_RUBRIC_OUTCOME_SCHEMA = "archivist.retrieval_authored_v3_rubric_outcome/1"
 V3_INSTRUMENT_FREEZE_SCHEMA = "archivist.retrieval_authored_v3_instrument_freeze/1"
 V3_PUBLIC_SUMMARY_SCHEMA = "archivist.retrieval_authored_v3_public_summary/1"
+V3_DIAGNOSTIC_PARTIAL_SUMMARY_SCHEMA = (
+    "archivist.retrieval_authored_v3_diagnostic_partial_summary/1"
+)
+V3_DIAGNOSTIC_CLOSURE_SCHEMA = "archivist.retrieval_authored_v3_diagnostic_closure/1"
 V3_AMBIGUITY_CONTINUATION_SCHEMA = (
     "archivist.retrieval_authored_v3_ambiguity_continuation/1"
 )
@@ -490,6 +494,49 @@ AMBIGUITY_RECOVERY_DECLARATIONS: Mapping[str, Mapping[str, object]] = {
             "934860546994dfe27e96983456aa019f019e6f132ba8de42f14c419667cd5f9a"
         ),
     },
+    "H014:decomposition": {
+        "sequence": 10,
+        "turn_id": "H014:decomposition",
+        "phase": "decomposition",
+        "operation": "eval_claim_decomposition_v2",
+        "previous_recovery_harness_commit": (
+            "e5f40d296fb58925d586bc54e8bd19d1e42725db"
+        ),
+        "previous_continuation_file": (
+            "ambiguity-continuations/0009-H013-decomposition.json"
+        ),
+        "intent_file_sha256": (
+            "35e053871fa024940b023a95ac348915aeff6579816f8bb6d4b1beb8a1b075eb"
+        ),
+        "intent_canonical_sha256": (
+            "d14eeb34def00c2950625121ca4056ff7b3bbd46c3066566bc6d14f818de0bc2"
+        ),
+        "outcome_file_sha256": (
+            "008c18e4248298a3b1156331aabcc3e1330f4b10e0f6b8572fed71e6ff7c71b0"
+        ),
+        "outcome_canonical_sha256": (
+            "868eb65848ff800498ded2ebab71047e2195f8e00d305e18142e1c914ad36727"
+        ),
+        "previous_continuation_file_sha256": (
+            "3b102a33b6de74e13a614ae782e88a41a5054ca80230bc34971bab13355f4656"
+        ),
+        "provider_request_shape_sha256": (
+            "8696b68731d37e45c7cf3fe70fe847a7958ec73d814224508e7d6e76aa7749cd"
+        ),
+        "provider_request_serialized_bytes": 4_419,
+        "provider_request_token_overhead_upper_bound": 32_768,
+        "provider_input_token_upper_bound": 37_187,
+        "max_output_tokens": 4_000,
+        "projected_worst_case_reserved_nano_usd": 176_209_375,
+        "request_binding_sha256": (
+            "8957a11a89e812221c9413cb36a1a3f2d64c9393072fdffcffdeb9c0d34f69d0"
+        ),
+        "next_item_id": "H015",
+        "next_turn_id": "H015:decomposition",
+        "later_phase_turn_ids_sha256": (
+            "6c4b255d593cec211df15021ccb6e5c1a188a440ceafa3bd7b59276936a98080"
+        ),
+    },
 }
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
@@ -523,6 +570,9 @@ EXPECTED_H002_GENERATION_OUTCOME_CANONICAL_SHA256 = (
 EXPECTED_ITEM_COUNT = 37
 EXPECTED_COLLECTION_COUNT = 481
 N_RESULTS = 5
+DIAGNOSTIC_DECOMPOSITION_ITEM_IDS = tuple(
+    f"H{ordinal:03d}" for ordinal in range(1, 15)
+)
 
 
 class V3EvaluationError(RuntimeError):
@@ -565,6 +615,14 @@ class V3Paths:
     @property
     def ambiguity_entries(self) -> Path:
         return self.root / "ambiguity-continuations"
+
+    @property
+    def diagnostic_partial_summary(self) -> Path:
+        return self.root / "diagnostic-partial-summary.json"
+
+    @property
+    def diagnostic_closure(self) -> Path:
+        return self.root / "diagnostic-closure.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -681,6 +739,16 @@ def write_or_validate_json(path: Path, value: Mapping[str, object]) -> None:
             raise V3EvaluationError(f"existing artifact changed: {path}")
         return
     write_json_no_overwrite(path, value)
+
+
+def require_diagnostic_cohort_open(paths: V3Paths) -> None:
+    """Reject every later evaluation mutation after terminal diagnostic closure."""
+
+    if paths.diagnostic_closure.exists():
+        raise V3EvaluationError(
+            "v3 cohort is closed as an incomplete diagnostic; later evaluation phases "
+            "and ambiguity reconciliations are permanently disabled"
+        )
 
 
 def _git_commit(base_dir: Path) -> str:
@@ -1847,6 +1915,8 @@ def reconcile_provider_ambiguity(
 ) -> dict[str, object]:
     """Append one phase-aware hash-bound reserve without retrying that turn."""
 
+    require_diagnostic_cohort_open(cohort.paths)
+
     recovery_commit = _git_commit(base_dir)
     state = _ambiguity_chain_state(cohort.paths)
     previous_recovery_commit = str(state["tail_recovery_harness_commit"])
@@ -2250,6 +2320,7 @@ def master_usage_scope(
     maximum_usd: Decimal = MASTER_COST_CAP_USD,
     turn_id: str | None = None,
 ) -> Iterator[UsageLedger]:
+    require_diagnostic_cohort_open(paths)
     if maximum_usd <= 0 or maximum_usd > MASTER_COST_CAP_USD:
         raise V3EvaluationError("maximum cost must be positive and no greater than $7.00")
     ceiling_nano = int(maximum_usd * Decimal(1_000_000_000))
@@ -3057,6 +3128,7 @@ def run_generation_phase(
     client: object,
     maximum_usd: Decimal = MASTER_COST_CAP_USD,
 ) -> None:
+    require_diagnostic_cohort_open(cohort.paths)
     require_instrument_freeze(cohort.paths)
     freeze_sha256 = sha256_file(cohort.paths.instrument_freeze)
     for item in cohort.items:
@@ -3418,6 +3490,7 @@ def run_development_decomposition_phase(
     client: object,
     maximum_usd: Decimal = MASTER_COST_CAP_USD,
 ) -> None:
+    require_diagnostic_cohort_open(paths)
     from evaluation_decomposition_v2 import decompose_answer_claims_v2
 
     identity = dict(_decomposition_identity())
@@ -3486,6 +3559,7 @@ def run_development_decomposition_phase(
 
 
 def freeze_decomposition_instrument(paths: V3Paths) -> dict[str, object]:
+    require_diagnostic_cohort_open(paths)
     outcomes: list[dict[str, object]] = []
     for ordinal in range(1, 11):
         item_id = f"G{ordinal:03d}"
@@ -3561,6 +3635,7 @@ def run_held_out_decomposition_phase(
     client: object,
     maximum_usd: Decimal = MASTER_COST_CAP_USD,
 ) -> None:
+    require_diagnostic_cohort_open(cohort.paths)
     from evaluation_decomposition_v2 import decompose_answer_claims_v2
 
     require_instrument_freeze(cohort.paths)
@@ -3765,6 +3840,7 @@ def run_exploratory_rubric_phase(
     client: object,
     maximum_usd: Decimal = MASTER_COST_CAP_USD,
 ) -> None:
+    require_diagnostic_cohort_open(cohort.paths)
     from evaluation_decomposition_v2 import (
         aggregate_gold_claim_coverage,
         judge_item_rubric_v2,
@@ -3908,6 +3984,449 @@ def _percentile(values: Sequence[float], proportion: float) -> float | None:
     ordered = sorted(values)
     rank = max(0, min(len(ordered) - 1, math.ceil(proportion * len(ordered)) - 1))
     return ordered[rank]
+
+
+def _phase_pair_inventory(
+    paths: V3Paths,
+    *,
+    item_ids: Sequence[str],
+    phase: str,
+    development: bool = False,
+) -> dict[str, object]:
+    pairs: dict[str, object] = {}
+    for item_id in item_ids:
+        if phase == "generation":
+            parent = _item_dir(paths, item_id)
+            intent_path = parent / "generation-intent.json"
+            outcome_path = parent / "generation.json"
+        elif phase == "decomposition":
+            intent_path, outcome_path = _decomposition_paths(
+                paths,
+                item_id,
+                development=development,
+            )
+        elif phase == "rubric":
+            parent = _item_dir(paths, item_id)
+            intent_path = parent / "rubric-intent.json"
+            outcome_path = parent / "rubric.json"
+        else:
+            raise V3EvaluationError(f"unknown inventory phase: {phase}")
+        if not intent_path.is_file() or not outcome_path.is_file():
+            raise V3EvaluationError(f"{item_id} {phase} artifact pair is incomplete")
+        pairs[item_id] = {
+            "intent_file_sha256": sha256_file(intent_path),
+            "outcome_file_sha256": sha256_file(outcome_path),
+        }
+    return {
+        "item_count": len(pairs),
+        "item_ids": list(pairs),
+        "artifact_pair_map_sha256": canonical_json_sha256(pairs),
+    }
+
+
+def _diagnostic_artifact_inventory(paths: V3Paths) -> dict[str, object]:
+    generation_ids = [f"H{ordinal:03d}" for ordinal in range(1, EXPECTED_ITEM_COUNT + 1)]
+    development_ids = [f"G{ordinal:03d}" for ordinal in range(1, 11)]
+    ambiguity_files = {
+        paths.ambiguity_continuation.name: sha256_file(paths.ambiguity_continuation),
+        **{
+            f"{paths.ambiguity_entries.name}/{path.name}": sha256_file(path)
+            for path in _ambiguity_entry_files(paths)
+        },
+    }
+    return {
+        "cohort_manifest_file_sha256": sha256_file(paths.cohort_manifest),
+        "instrument_freeze_file_sha256": sha256_file(paths.instrument_freeze),
+        "usage_ledger_file_sha256": sha256_file(paths.ledger),
+        "development_decomposition": _phase_pair_inventory(
+            paths,
+            item_ids=development_ids,
+            phase="decomposition",
+            development=True,
+        ),
+        "generation": _phase_pair_inventory(
+            paths,
+            item_ids=generation_ids,
+            phase="generation",
+        ),
+        "held_out_decomposition": _phase_pair_inventory(
+            paths,
+            item_ids=DIAGNOSTIC_DECOMPOSITION_ITEM_IDS,
+            phase="decomposition",
+        ),
+        "rubric": {
+            "item_count": 0,
+            "item_ids": [],
+            "artifact_pair_map_sha256": canonical_json_sha256({}),
+        },
+        "ambiguity_continuations": {
+            "file_count": len(ambiguity_files),
+            "file_map_sha256": canonical_json_sha256(ambiguity_files),
+        },
+    }
+
+
+def _validate_diagnostic_terminal_state(
+    cohort: PreparedV3Cohort,
+    *,
+    base_dir: Path,
+) -> dict[str, object]:
+    require_complete_generation(cohort)
+    require_instrument_freeze(cohort.paths)
+    validate_ambiguity_continuation(
+        cohort.paths,
+        recovery_commit=_git_commit(base_dir),
+    )
+    chain = _ambiguity_chain_state(cohort.paths)
+    reservations = chain["reservations"]
+    if (
+        len(reservations) != 11
+        or reservations[-1]["turn_id"] != "H014:decomposition"
+        or chain["cumulative_reserved_nano_usd"] != 3_510_393_750
+    ):
+        raise V3EvaluationError(
+            "diagnostic closure requires the sealed H014 decomposition ambiguity reserve"
+        )
+
+    present_decompositions: list[str] = []
+    present_rubrics: list[str] = []
+    for item in cohort.items:
+        item_id = _required_string(item, "id")
+        decomp_intent, decomp_outcome = _decomposition_paths(
+            cohort.paths,
+            item_id,
+            development=False,
+        )
+        if decomp_intent.exists() != decomp_outcome.exists():
+            raise V3EvaluationError(f"{item_id} decomposition artifact pair is incomplete")
+        if decomp_outcome.exists():
+            intent = read_json_object(decomp_intent)
+            _validate_decomposition_pair(
+                cohort.paths,
+                item_id=item_id,
+                intent=intent,
+                development=False,
+            )
+            present_decompositions.append(item_id)
+        rubric_intent = _item_dir(cohort.paths, item_id) / "rubric-intent.json"
+        rubric_outcome = _item_dir(cohort.paths, item_id) / "rubric.json"
+        if rubric_intent.exists() != rubric_outcome.exists():
+            raise V3EvaluationError(f"{item_id} rubric artifact pair is incomplete")
+        if rubric_outcome.exists():
+            present_rubrics.append(item_id)
+    if tuple(present_decompositions) != DIAGNOSTIC_DECOMPOSITION_ITEM_IDS:
+        raise V3EvaluationError(
+            "diagnostic closure requires exactly H001-H014 decomposition outcomes"
+        )
+    if present_rubrics:
+        raise V3EvaluationError("diagnostic closure requires the rubric phase to be unstarted")
+    master_budget_state(cohort.paths.ledger)
+    return chain
+
+
+def _master_usage_event_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with sqlite3.connect(path) as connection:
+        return int(
+            connection.execute(
+                "SELECT COUNT(*) FROM usage_events WHERE request_id = ?",
+                (MASTER_REQUEST_ID,),
+            ).fetchone()[0]
+        )
+
+
+def build_diagnostic_partial_summary(
+    cohort: PreparedV3Cohort,
+    *,
+    base_dir: Path,
+) -> dict[str, object]:
+    """Build a public-safe terminal summary without pretending scoring completed."""
+
+    chain = _validate_diagnostic_terminal_state(cohort, base_dir=base_dir)
+    generations = [
+        read_json_object(_item_dir(cohort.paths, _required_string(item, "id")) / "generation.json")
+        for item in cohort.items
+    ]
+    decompositions = [
+        read_json_object(_item_dir(cohort.paths, item_id) / "decomposition.json")
+        for item_id in DIAGNOSTIC_DECOMPOSITION_ITEM_IDS
+    ]
+    latencies = [
+        float(value["timings_ms"]["authored_response_boundary"])
+        for value in generations
+    ]
+    statuses = Counter(str(value["status"]) for value in generations)
+    dispositions = Counter(
+        str(value.get("disposition") or "not_applicable_fallback")
+        for value in generations
+    )
+    failure_codes = Counter(
+        str(value["failure_code"])
+        for value in generations
+        if value.get("failure_code") is not None
+    )
+    citation_fields = (
+        "well_formed_group_count",
+        "source_reference_count",
+        "malformed_bracket_token_count",
+        "resolvable_group_count",
+        "resolvable_reference_count",
+        "out_of_range_reference_count",
+    )
+    citations = {
+        field: sum(int(value["citation_audit"][field]) for value in generations)
+        for field in citation_fields
+    }
+    retrieval: dict[str, object] = {}
+    for label in (*[f"primary_at_{k}" for k in K_VALUES], "finalized", "dossier", "cited"):
+        scored = []
+        for value in generations:
+            if label.startswith("primary_at_"):
+                k = label.removeprefix("primary_at_")
+                metrics = value["retrieval"]["primary_by_k"][k]["metrics"]
+            else:
+                metrics = value["retrieval"][label]["metrics"]
+            if metrics["recall"] is not None:
+                scored.append(metrics)
+        essential_total = sum(int(value["essential_claim_count"]) for value in scored)
+        retrieval[label] = {
+            "applicable_items": len(scored),
+            "macro_recall": (
+                sum(float(value["recall"]) for value in scored) / len(scored)
+                if scored
+                else None
+            ),
+            "hit_rate": (
+                sum(bool(value["hit"]) for value in scored) / len(scored)
+                if scored
+                else None
+            ),
+            "essential_claim_context_coverage": (
+                sum(int(value["covered_essential_claim_count"]) for value in scored)
+                / essential_total
+                if essential_total
+                else None
+            ),
+        }
+    retrieval["fallbacks"] = {
+        "raw_primary_fallback_item_count": sum(
+            bool(value["retrieval"]["fallbacks"]["raw_primary_fallback_used"])
+            for value in generations
+        ),
+        "fusion_pool_fallback_item_count": sum(
+            bool(value["retrieval"]["fallbacks"]["fusion_pool_fallback_used"])
+            for value in generations
+        ),
+    }
+
+    valid_claims = [
+        claim
+        for value in decompositions
+        if value.get("status") == "valid"
+        for claim in value.get("claims", [])
+        if isinstance(claim, Mapping)
+    ]
+    cited_claim_count = sum(bool(claim.get("cited_sources")) for claim in valid_claims)
+    decomp_statuses = Counter(str(value["status"]) for value in decompositions)
+    reserved_turn_ids = {
+        str(value["turn_id"])
+        for value in chain["reservations"]
+        if isinstance(value, Mapping)
+    }
+    zero_event_decomposition_count = sum(
+        f"{value['item_id']}:decomposition" in reserved_turn_ids
+        for value in decompositions
+    )
+    budget = master_budget_state(cohort.paths.ledger)
+    accounted_worst_case_nano = (
+        int(budget["tracked_spend_nano_usd"])
+        + int(budget["ambiguity_reserve_nano_usd"])
+    )
+    return {
+        "schema": V3_DIAGNOSTIC_PARTIAL_SUMMARY_SCHEMA,
+        "evaluation_id": EVALUATION_ID,
+        "classification": COHORT_CLASSIFICATION,
+        "terminal_status": "closed_incomplete_timeout_diagnostic",
+        "closure_reason": (
+            "The cohort was stopped after generation exposed a material timeout/fallback "
+            "failure mode; unfinished scoring is intentionally unavailable."
+        ),
+        "product_commit": PRODUCT_COMMIT,
+        "cohort_harness_commit": cohort.manifest["system_under_test"]["harness_commit"],
+        "phase_completeness": {
+            "generation_outcomes": len(generations),
+            "decomposition_outcomes": len(decompositions),
+            "rubric_outcomes": 0,
+            "expected_each": EXPECTED_ITEM_COUNT,
+            "all_required_phases_complete": False,
+            "next_unattempted_decomposition_item_id": "H015",
+        },
+        "generation": {
+            "status_counts": dict(statuses),
+            "disposition_counts": dict(dispositions),
+            "failure_code_counts": dict(failure_codes),
+            "fallback_count": statuses["essential_fallback"],
+            "success_count": statuses["generated"],
+            "attempt_count": sum(int(value["attempt_count"]) for value in generations),
+            "automatic_retries": 0,
+            "query_embedding_provider_operations": 0,
+        },
+        "authored_response_boundary_wall_time_ms": {
+            "count": len(latencies),
+            "mean": sum(latencies) / len(latencies) if latencies else None,
+            "median": median(latencies) if latencies else None,
+            "p95_nearest_rank": _percentile(latencies, 0.95),
+            "minimum": min(latencies) if latencies else None,
+            "maximum": max(latencies) if latencies else None,
+            "scope": (
+                "request construction plus provider wait, SDK structured parsing, and local "
+                "validation/rendering; retrieval excluded"
+            ),
+        },
+        "retrieval": retrieval,
+        "citation_syntax_and_local_resolvability": {
+            **citations,
+            "answer_scope": "all rendered answers, including Essential fallbacks",
+            "not_measured": "semantic entailment, source correctness, or faithfulness",
+        },
+        "citation_completeness": {
+            "cited_factual_claims": cited_claim_count,
+            "decomposed_factual_claims": len(valid_claims),
+            "rate": cited_claim_count / len(valid_claims) if valid_claims else None,
+            "scope": "only the nine schema-valid exact-text decompositions",
+        },
+        "cited_chunk_gold_location_overlap": {
+            "matches": sum(
+                int(value["cited_source_gold_location_matches"]) for value in generations
+            ),
+            "total": sum(
+                int(value["cited_source_gold_location_total"]) for value in generations
+            ),
+            "definition": (
+                "mechanical cited-chunk overlap with locked gold locations; not entailment"
+            ),
+        },
+        "decomposition": {
+            "attempt_count": len(decompositions),
+            "status_counts": dict(decomp_statuses),
+            "valid_count": decomp_statuses["valid"],
+            "technical_failure_count": decomp_statuses["technical_failure"],
+            "zero_event_technical_failure_count": zero_event_decomposition_count,
+            "provider_observed_validation_failure_count": (
+                decomp_statuses["technical_failure"] - zero_event_decomposition_count
+            ),
+            "unattempted_count": EXPECTED_ITEM_COUNT - len(decompositions),
+        },
+        "gold_claim_coverage": {
+            "measurement_status": "not_run",
+            "scored_item_count": 0,
+            "rate": None,
+            "reason": "rubric phase intentionally never started",
+        },
+        "social_behavior": {
+            "measurement_status": "not_run",
+            "case_count": 0,
+        },
+        "cost": {
+            "owner_authorized_cap_nano_usd": MASTER_COST_CAP_NANO_USD,
+            "recorded_tracked_spend_nano_usd": budget["tracked_spend_nano_usd"],
+            "recorded_tracked_spend_usd_exact": budget["tracked_spend_usd_exact"],
+            "ambiguity_reservation_count": budget["ambiguity_reservation_count"],
+            "cumulative_ambiguity_reserved_nano_usd": budget[
+                "ambiguity_reserve_nano_usd"
+            ],
+            "cumulative_ambiguity_reserved_usd_exact": budget[
+                "ambiguity_reserve_usd_exact"
+            ],
+            "recorded_plus_ambiguity_reserve_nano_usd": accounted_worst_case_nano,
+            "recorded_plus_ambiguity_reserve_usd_exact": (
+                f"{Decimal(accounted_worst_case_nano) / Decimal(1_000_000_000):.9f}"
+            ),
+            "recorded_provider_usage_event_count": _master_usage_event_count(
+                cohort.paths.ledger
+            ),
+            "unknown_actual_cost_turn_ids": sorted(reserved_turn_ids),
+        },
+        "privacy": {
+            "contains_questions": False,
+            "contains_answers": False,
+            "contains_manuscript_text": False,
+            "contains_provider_response_metadata": False,
+        },
+        "limitations": [
+            "The reused locked benchmark is not a pristine held-out cohort.",
+            "Gold-claim coverage and rubric faithfulness are unavailable because scoring did not run.",
+            "Reserved zero-event cost is conservative exposure, not confirmed provider billing.",
+            "This partial cohort diagnoses timeout behavior and is not a complete quality evaluation.",
+        ],
+    }
+
+
+def validate_diagnostic_closure(paths: V3Paths) -> dict[str, object]:
+    closure = read_json_object(paths.diagnostic_closure)
+    summary = read_json_object(paths.diagnostic_partial_summary)
+    if (
+        closure.get("schema") != V3_DIAGNOSTIC_CLOSURE_SCHEMA
+        or closure.get("evaluation_id") != EVALUATION_ID
+        or closure.get("terminal_status") != "closed_incomplete_timeout_diagnostic"
+        or closure.get("paid_phases_permanently_disabled") is not True
+        or closure.get("partial_summary_file_sha256")
+        != sha256_file(paths.diagnostic_partial_summary)
+        or closure.get("partial_summary_canonical_sha256")
+        != canonical_json_sha256(summary)
+        or closure.get("sealed_artifact_inventory")
+        != _diagnostic_artifact_inventory(paths)
+    ):
+        raise V3EvaluationError("diagnostic closure identity changed")
+    return closure
+
+
+def close_diagnostic_cohort(
+    cohort: PreparedV3Cohort,
+    *,
+    base_dir: Path,
+) -> dict[str, object]:
+    """Seal the stopped cohort without a retry or any provider operation."""
+
+    if cohort.paths.diagnostic_closure.exists():
+        validate_diagnostic_closure(cohort.paths)
+        return read_json_object(cohort.paths.diagnostic_partial_summary)
+    summary = build_diagnostic_partial_summary(cohort, base_dir=base_dir)
+    write_or_validate_json(cohort.paths.diagnostic_partial_summary, summary)
+    inventory = _diagnostic_artifact_inventory(cohort.paths)
+    closure = {
+        "schema": V3_DIAGNOSTIC_CLOSURE_SCHEMA,
+        "evaluation_id": EVALUATION_ID,
+        "terminal_status": "closed_incomplete_timeout_diagnostic",
+        "closure_reason_code": "material_authoring_timeout_fallback_rate",
+        "closed_at": datetime.now(UTC).isoformat(),
+        "closure_harness_commit": _git_commit(base_dir),
+        "partial_summary_file": cohort.paths.diagnostic_partial_summary.name,
+        "partial_summary_file_sha256": sha256_file(
+            cohort.paths.diagnostic_partial_summary
+        ),
+        "partial_summary_canonical_sha256": canonical_json_sha256(summary),
+        "sealed_artifact_inventory": inventory,
+        "paid_phases_permanently_disabled": True,
+        "provider_operations_during_closure": 0,
+        "retries_during_closure": 0,
+        "resume_turn_id": None,
+        "privacy": {
+            "contains_questions": False,
+            "contains_answers": False,
+            "contains_manuscript_text": False,
+            "contains_provider_response_metadata": False,
+        },
+    }
+    write_json_no_overwrite(cohort.paths.diagnostic_closure, closure)
+    validate_diagnostic_closure(cohort.paths)
+    return summary
+
+
+def read_closed_diagnostic_summary(paths: V3Paths) -> dict[str, object]:
+    validate_diagnostic_closure(paths)
+    return read_json_object(paths.diagnostic_partial_summary)
 
 
 def build_public_summary(cohort: PreparedV3Cohort) -> dict[str, object]:
@@ -4261,9 +4780,11 @@ __all__ = [
     "ProviderCapturingClient",
     "V3EvaluationError",
     "V3Paths",
+    "build_diagnostic_partial_summary",
     "build_public_summary",
     "build_v3_manifest",
     "canonical_json_sha256",
+    "close_diagnostic_cohort",
     "default_paths",
     "freeze_decomposition_instrument",
     "generate_professional_item",
@@ -4271,10 +4792,12 @@ __all__ = [
     "master_budget_state",
     "prepare_v3_cohort",
     "preflight_all_cached_items",
+    "read_closed_diagnostic_summary",
     "reconcile_generation_ambiguity",
     "reconcile_provider_ambiguity",
     "require_complete_decomposition",
     "require_complete_generation",
+    "require_diagnostic_cohort_open",
     "require_instrument_freeze",
     "retrieve_with_cached_embedding",
     "run_development_decomposition_phase",
@@ -4282,6 +4805,7 @@ __all__ = [
     "run_generation_phase",
     "run_held_out_decomposition_phase",
     "validate_ambiguity_continuation",
+    "validate_diagnostic_closure",
     "validate_master_ledger",
     "write_public_summary",
 ]

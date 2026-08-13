@@ -19,10 +19,12 @@ from retrieval_authored_v3_evaluation import (  # noqa: E402
     EVALUATION_ID,
     MASTER_COST_CAP_USD,
     V3EvaluationError,
+    close_diagnostic_cohort,
     default_paths,
     freeze_decomposition_instrument,
     preflight_all_cached_items,
     prepare_v3_cohort,
+    read_closed_diagnostic_summary,
     reconcile_provider_ambiguity,
     run_development_decomposition_phase,
     run_exploratory_rubric_phase,
@@ -58,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
             "generate",
             "decompose",
             "rubric",
+            "close-diagnostic",
             "report",
         ),
     )
@@ -113,12 +116,16 @@ def _client() -> object:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        cap = _paid_cap(args) if args.command in PAID_COMMANDS else None
         if args.run_root.resolve() != DEFAULT_ROOT.resolve():
             raise V3EvaluationError(
                 "the run-of-record CLI requires its declared private v3 evaluation root"
             )
         paths = default_paths(BASE_DIR, root=args.run_root)
+        if args.command in PAID_COMMANDS and paths.diagnostic_closure.exists():
+            raise V3EvaluationError(
+                "v3 cohort is closed as an incomplete diagnostic; paid phases are disabled"
+            )
+        cap = _paid_cap(args) if args.command in PAID_COMMANDS else None
         cohort = prepare_v3_cohort(
             base_dir=BASE_DIR,
             paths=paths,
@@ -202,10 +209,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_exploratory_rubric_phase(cohort, client=_client(), maximum_usd=cap)
             print("SEALED EXPLORATORY UNCALIBRATED RUBRIC OUTCOMES")
             return 0
-        summary = write_public_summary(cohort)
+        if args.command == "close-diagnostic":
+            summary = close_diagnostic_cohort(cohort, base_dir=BASE_DIR)
+            print("CLOSED RETRIEVAL-AUTHORED-V3 AS AN INCOMPLETE DIAGNOSTIC")
+            print("Provider operations during closure: 0")
+            print(
+                "Phase outcomes: generation "
+                f"{summary['phase_completeness']['generation_outcomes']}/37; "
+                "decomposition "
+                f"{summary['phase_completeness']['decomposition_outcomes']}/37; "
+                "rubric 0/37"
+            )
+            print("All later paid phases and ambiguity reconciliations are disabled.")
+            return 0
+        summary = (
+            read_closed_diagnostic_summary(paths)
+            if paths.diagnostic_closure.exists()
+            else write_public_summary(cohort)
+        )
         print("WROTE RETRIEVAL-AUTHORED-V3 PUBLIC-SAFE SUMMARY")
-        print(f"Items: {summary['item_count']}")
-        print(f"Recorded total cost: ${summary['cost']['recorded_total_usd']:.8f}")
+        print(
+            "Generation outcomes: "
+            f"{summary.get('item_count', summary['phase_completeness']['generation_outcomes'])}"
+        )
+        recorded = summary["cost"].get(
+            "recorded_total_usd",
+            summary["cost"].get("recorded_tracked_spend_usd_exact"),
+        )
+        print(f"Recorded total cost: ${recorded}")
         return 0
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"V3 EVALUATION FAILED: {exc}", file=sys.stderr)

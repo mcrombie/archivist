@@ -544,6 +544,34 @@ def test_h013_decomposition_recovery_declaration_is_externally_bound():
     assert declaration["next_turn_id"] == "H014:decomposition"
 
 
+def test_h014_decomposition_recovery_declaration_is_externally_bound():
+    declaration = v3.AMBIGUITY_RECOVERY_DECLARATIONS["H014:decomposition"]
+
+    assert declaration["sequence"] == 10
+    assert declaration["phase"] == "decomposition"
+    assert declaration["operation"] == "eval_claim_decomposition_v2"
+    assert declaration["previous_recovery_harness_commit"] == (
+        "e5f40d296fb58925d586bc54e8bd19d1e42725db"
+    )
+    assert declaration["previous_continuation_file_sha256"] == (
+        "3b102a33b6de74e13a614ae782e88a41a5054ca80230bc34971bab13355f4656"
+    )
+    assert declaration["intent_file_sha256"] == (
+        "35e053871fa024940b023a95ac348915aeff6579816f8bb6d4b1beb8a1b075eb"
+    )
+    assert declaration["outcome_file_sha256"] == (
+        "008c18e4248298a3b1156331aabcc3e1330f4b10e0f6b8572fed71e6ff7c71b0"
+    )
+    assert declaration["provider_request_shape_sha256"] == (
+        "8696b68731d37e45c7cf3fe70fe847a7958ec73d814224508e7d6e76aa7749cd"
+    )
+    assert declaration["request_binding_sha256"] == (
+        "8957a11a89e812221c9413cb36a1a3f2d64c9393072fdffcffdeb9c0d34f69d0"
+    )
+    assert declaration["projected_worst_case_reserved_nano_usd"] == 176_209_375
+    assert declaration["next_turn_id"] == "H015:decomposition"
+
+
 def test_recovery_budget_without_continuations_does_not_create_ledger(tmp_path):
     ledger = tmp_path / "absent.sqlite3"
 
@@ -959,3 +987,112 @@ def test_manifest_loader_accepts_original_after_continuation_validation(monkeypa
 
     assert selected == original
     assert observed == ["6" * 40]
+
+
+def _write_diagnostic_inventory(paths: V3Paths) -> None:
+    paths.root.mkdir(parents=True, exist_ok=True)
+    paths.cohort_manifest.write_text("{}\n", encoding="utf-8")
+    paths.instrument_freeze.write_text("{}\n", encoding="utf-8")
+    paths.ledger.write_bytes(b"sealed-ledger")
+    paths.ambiguity_continuation.write_text("{}\n", encoding="utf-8")
+    for ordinal in range(1, 38):
+        item_id = f"H{ordinal:03d}"
+        root = paths.root / "items" / item_id
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "generation-intent.json").write_text("{}\n", encoding="utf-8")
+        (root / "generation.json").write_text("{}\n", encoding="utf-8")
+    for ordinal in range(1, 11):
+        root = paths.root / "development" / f"G{ordinal:03d}"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "decomposition-intent.json").write_text("{}\n", encoding="utf-8")
+        (root / "decomposition.json").write_text("{}\n", encoding="utf-8")
+    for ordinal in range(1, 15):
+        root = paths.root / "items" / f"H{ordinal:03d}"
+        (root / "decomposition-intent.json").write_text("{}\n", encoding="utf-8")
+        (root / "decomposition.json").write_text("{}\n", encoding="utf-8")
+
+
+def test_close_diagnostic_cohort_is_provider_free_idempotent_and_terminal(
+    monkeypatch,
+    tmp_path,
+):
+    paths = _paths(tmp_path / "run")
+    _write_diagnostic_inventory(paths)
+    cohort = SimpleNamespace(paths=paths)
+    summary = {
+        "schema": v3.V3_DIAGNOSTIC_PARTIAL_SUMMARY_SCHEMA,
+        "evaluation_id": v3.EVALUATION_ID,
+        "terminal_status": "closed_incomplete_timeout_diagnostic",
+        "privacy": {
+            "contains_questions": False,
+            "contains_answers": False,
+            "contains_manuscript_text": False,
+            "contains_provider_response_metadata": False,
+        },
+    }
+    monkeypatch.setattr(
+        v3,
+        "build_diagnostic_partial_summary",
+        lambda *_args, **_kwargs: summary,
+    )
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "7" * 40)
+
+    first = v3.close_diagnostic_cohort(cohort, base_dir=tmp_path)
+    closure_bytes = paths.diagnostic_closure.read_bytes()
+    second = v3.close_diagnostic_cohort(cohort, base_dir=tmp_path)
+
+    assert first == second == summary
+    assert paths.diagnostic_closure.read_bytes() == closure_bytes
+    closure = v3.validate_diagnostic_closure(paths)
+    assert closure["provider_operations_during_closure"] == 0
+    assert closure["retries_during_closure"] == 0
+    assert closure["resume_turn_id"] is None
+    assert closure["paid_phases_permanently_disabled"] is True
+    with pytest.raises(V3EvaluationError, match="closed as an incomplete diagnostic"):
+        with v3.master_usage_scope(paths):
+            pytest.fail("closed cohort opened a usage ledger scope")
+
+
+def test_diagnostic_closure_detects_mutation_of_sealed_artifact(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    _write_diagnostic_inventory(paths)
+    cohort = SimpleNamespace(paths=paths)
+    monkeypatch.setattr(
+        v3,
+        "build_diagnostic_partial_summary",
+        lambda *_args, **_kwargs: {
+            "schema": v3.V3_DIAGNOSTIC_PARTIAL_SUMMARY_SCHEMA,
+            "evaluation_id": v3.EVALUATION_ID,
+        },
+    )
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "8" * 40)
+    v3.close_diagnostic_cohort(cohort, base_dir=tmp_path)
+    generation = paths.root / "items" / "H037" / "generation.json"
+    generation.write_text('{"changed":true}\n', encoding="utf-8")
+
+    with pytest.raises(V3EvaluationError, match="diagnostic closure identity changed"):
+        v3.validate_diagnostic_closure(paths)
+
+
+def test_diagnostic_terminal_state_requires_reconciled_h014(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    cohort = SimpleNamespace(paths=paths)
+    monkeypatch.setattr(v3, "require_complete_generation", lambda _cohort: None)
+    monkeypatch.setattr(v3, "require_instrument_freeze", lambda _paths: None)
+    monkeypatch.setattr(
+        v3,
+        "validate_ambiguity_continuation",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "9" * 40)
+    monkeypatch.setattr(
+        v3,
+        "_ambiguity_chain_state",
+        lambda _paths: {
+            "reservations": [{"turn_id": "H013:decomposition"}],
+            "cumulative_reserved_nano_usd": 3_334_184_375,
+        },
+    )
+
+    with pytest.raises(V3EvaluationError, match="requires the sealed H014"):
+        v3._validate_diagnostic_terminal_state(cohort, base_dir=tmp_path)
