@@ -333,6 +333,29 @@ def test_started_provider_attempt_without_usage_is_ambiguous_and_stops():
         )
 
 
+def test_h021_recovery_declaration_is_externally_bound():
+    declaration = v3.AMBIGUITY_RECOVERY_DECLARATIONS["H021"]
+
+    assert declaration["sequence"] == 2
+    assert declaration["previous_continuation_file_sha256"] == (
+        "860dfc056e3b0889b2eb489e0e6fcdfd801a2bc4a7755e568afb3f82e4823330"
+    )
+    assert declaration["generation_intent_file_sha256"] == (
+        "8ccac460a72f35657796c5f71bca0e4ae09e9ce0ad668dd1302f1831d03947e4"
+    )
+    assert declaration["generation_outcome_file_sha256"] == (
+        "16c6e6d2cdcebc032abb23ecda51b15a5cfc1cb8f3a840b5561662cce4fd4cd9"
+    )
+    assert declaration["provider_request_shape_sha256"] == (
+        "67b8150d9b69754d8650be9a548411ed53497276268cd65bf74bd13043cdf43b"
+    )
+    assert declaration["request_binding_sha256"] == (
+        "5ec831a3895f1c47be49a0a00accdb50cd7c51be0d0ad72dcb78b9e84c1165c7"
+    )
+    assert declaration["projected_worst_case_reserved_nano_usd"] == 392_612_500
+    assert declaration["next_item_id"] == "H022"
+
+
 def test_recovery_budget_without_continuations_does_not_create_ledger(tmp_path):
     ledger = tmp_path / "absent.sqlite3"
 

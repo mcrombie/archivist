@@ -172,7 +172,45 @@ AMBIGUITY_RECOVERY_DECLARATIONS: Mapping[str, Mapping[str, object]] = {
         "later_generation_item_ids_sha256": (
             "75e332da0125cf75d81758aacd3645e006f0bb3067404230763d180be7471a96"
         ),
-    }
+    },
+    "H021": {
+        "sequence": 2,
+        "turn_id": "H021:generation",
+        "previous_recovery_harness_commit": (
+            "d4143c779e75fdf850d302583ec6fde2f1ce0979"
+        ),
+        "previous_continuation_file": "ambiguity-continuations/0001-H003.json",
+        "generation_intent_file_sha256": (
+            "8ccac460a72f35657796c5f71bca0e4ae09e9ce0ad668dd1302f1831d03947e4"
+        ),
+        "generation_intent_canonical_sha256": (
+            "1cb8df6d517bb5f0eafb90d00eae31ada2b7d734622166bb1ca14fae2bacb5dc"
+        ),
+        "generation_outcome_file_sha256": (
+            "16c6e6d2cdcebc032abb23ecda51b15a5cfc1cb8f3a840b5561662cce4fd4cd9"
+        ),
+        "generation_outcome_canonical_sha256": (
+            "c3eb3ebb130f2abf8941354a052a8582bbd67f1a5216fa0882d33632be181f98"
+        ),
+        "previous_continuation_file_sha256": (
+            "860dfc056e3b0889b2eb489e0e6fcdfd801a2bc4a7755e568afb3f82e4823330"
+        ),
+        "provider_request_shape_sha256": (
+            "67b8150d9b69754d8650be9a548411ed53497276268cd65bf74bd13043cdf43b"
+        ),
+        "provider_request_serialized_bytes": 21_410,
+        "provider_request_token_overhead_upper_bound": 32_768,
+        "provider_input_token_upper_bound": 54_178,
+        "max_output_tokens": 1_800,
+        "projected_worst_case_reserved_nano_usd": 392_612_500,
+        "request_binding_sha256": (
+            "5ec831a3895f1c47be49a0a00accdb50cd7c51be0d0ad72dcb78b9e84c1165c7"
+        ),
+        "next_item_id": "H022",
+        "later_generation_item_ids_sha256": (
+            "9999fcadbf9b834f2b3f8c33dd3846bac0e255ec6788c1dca8137c2065c293aa"
+        ),
+    },
 }
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
