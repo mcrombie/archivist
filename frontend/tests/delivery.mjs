@@ -79,7 +79,56 @@ try {
   const delivery = await server.ssrLoadModule("/src/delivery.ts");
   const api = await server.ssrLoadModule("/src/api.ts");
 
+  assert.equal(api.answerPolicyLabel("application-compiled-v1"), "Application-compiled v1");
+  assert.equal(api.answerPolicyLabel("evidence-planned-v26"), "Evidence-planned v26");
+  assert.equal(api.answerPolicyLabel("future-policy"), "Answer policy · future-policy");
+  assert.equal(api.answerPolicyLabel(null), null);
+
+  const completeRequestBodies = [];
+  const completeResult = {
+    ...canonicalResult,
+    answer_strategy_version: "application-compiled-v1"
+  };
+  globalThis.fetch = async (url, init) => {
+    completeRequestBodies.push({ url, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify(completeResult), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+  const localComplete = await api.askQuestion(...requestArguments);
+  assert.equal(
+    Object.hasOwn(completeRequestBodies[0].body, "rag_policy_version"),
+    false,
+    "development complete-answer requests should not carry a retired RAG policy selector"
+  );
+  assert.equal(
+    localComplete.answer_strategy_version,
+    "application-compiled-v1",
+    "the complete-answer client should preserve the policy identity reported by the server"
+  );
+  await api.askQuestion(
+    ...requestArguments.slice(0, 5),
+    {
+      ...requestArguments[5],
+      publicDemo: true
+    }
+  );
+  assert.equal(
+    Object.hasOwn(completeRequestBodies[1].body, "rag_policy_version"),
+    false,
+    "public complete-answer requests must never carry a developer RAG policy selector"
+  );
+
   const chatCss = readFileSync(new URL("../src/chat.css", import.meta.url), "utf8");
+  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(
+    appSource,
+    /V27 compact|Experimental latency settings/,
+    "the retired compact-latency experiment must not appear in the reader UI"
+  );
+  assert.match(appSource, /Essential returns the compiled evidence directly/);
+  assert.match(appSource, /Lens, voice, and\s+worldview are prose settings/);
   const settingsPanelRules = [
     ...chatCss.matchAll(
       /\.chat-answer-settings-disclosure\s*>\s*\.chat-answer-settings-panel\s*\{([^}]*)\}/g
@@ -209,6 +258,7 @@ try {
   const checkedClaimTwo = "A second checked claim names a ship. [Source 2].";
   const framedResult = {
     ...canonicalResult,
+    answer_strategy_version: "application-compiled-v1",
     answer: [
       "A subjective preface remains withheld while claims stream.",
       checkedClaimOne,
@@ -220,15 +270,19 @@ try {
   const heartbeats = [];
   const checkedClaims = [];
   const claimCallbackOrder = [];
-  globalThis.fetch = async () => responseForLines([
-    JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Server text must not reach the UI." }),
-    JSON.stringify({ schema, type: "heartbeat", sequence: 1 }),
-    JSON.stringify({ schema, type: "stage", sequence: 2, stage: "generating_answer", message: "Another server-owned string." }),
-    JSON.stringify({ schema, type: "checked_claim", sequence: 3, claim_index: 1, paragraph: 1, text: checkedClaimOne }),
-    JSON.stringify({ schema, type: "stage", sequence: 4, stage: "validating_answer", message: "Untrusted server copy." }),
-    JSON.stringify({ schema, type: "checked_claim", sequence: 5, claim_index: 2, paragraph: 2, text: checkedClaimTwo }),
-    JSON.stringify({ schema, type: "complete", sequence: 6, result: framedResult })
-  ], [1, 7, 31, 88, 173]);
+  let progressiveRequest;
+  globalThis.fetch = async (url, init) => {
+    progressiveRequest = { url, body: JSON.parse(init.body) };
+    return responseForLines([
+      JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Server text must not reach the UI." }),
+      JSON.stringify({ schema, type: "heartbeat", sequence: 1 }),
+      JSON.stringify({ schema, type: "stage", sequence: 2, stage: "generating_answer", message: "Another server-owned string." }),
+      JSON.stringify({ schema, type: "checked_claim", sequence: 3, claim_index: 1, paragraph: 1, text: checkedClaimOne }),
+      JSON.stringify({ schema, type: "stage", sequence: 4, stage: "validating_answer", message: "Untrusted server copy." }),
+      JSON.stringify({ schema, type: "checked_claim", sequence: 5, claim_index: 2, paragraph: 2, text: checkedClaimTwo }),
+      JSON.stringify({ schema, type: "complete", sequence: 6, result: framedResult })
+    ], [1, 7, 31, 88, 173]);
+  };
   const completed = await api.askQuestionProgressively(...requestArguments.slice(0, 5), {
     ...requestArguments[5],
     onStage: (update) => stages.push(update),
@@ -241,6 +295,16 @@ try {
     }
   });
   assert.deepEqual(completed, framedResult);
+  assert.equal(
+    Object.hasOwn(progressiveRequest.body, "rag_policy_version"),
+    false,
+    "development progressive requests should not carry a retired RAG policy selector"
+  );
+  assert.equal(
+    completed.answer_strategy_version,
+    "application-compiled-v1",
+    "a progressive completion should preserve the policy identity reported in its terminal result"
+  );
   assert.deepEqual(checkedClaims, [
     { claimIndex: 1, paragraph: 1, text: checkedClaimOne },
     { claimIndex: 2, paragraph: 2, text: checkedClaimTwo }
@@ -253,6 +317,29 @@ try {
   ]);
   assert.deepEqual(heartbeats, [{ count: 1 }]);
   assert.deepEqual(claimCallbackOrder, ["start:1", "end:1", "start:2", "end:2"]);
+
+  const reorderedGeneratedResult = {
+    ...framedResult,
+    answer: [
+      "Editorial interpretation - the evidence can be read in another order.",
+      checkedClaimTwo,
+      "Editorial interpretation - the framing remains terminal-only.",
+      checkedClaimOne
+    ].join("\n\n")
+  };
+  globalThis.fetch = async () => responseForLines([
+    JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Request accepted." }),
+    JSON.stringify({ schema, type: "stage", sequence: 1, stage: "generating_answer", message: "Generating." }),
+    JSON.stringify({ schema, type: "checked_claim", sequence: 2, claim_index: 1, paragraph: 1, text: checkedClaimOne }),
+    JSON.stringify({ schema, type: "checked_claim", sequence: 3, claim_index: 2, paragraph: 2, text: checkedClaimTwo }),
+    JSON.stringify({ schema, type: "stage", sequence: 4, stage: "validating_answer", message: "Validated." }),
+    JSON.stringify({ schema, type: "complete", sequence: 5, result: reorderedGeneratedResult })
+  ]);
+  assert.deepEqual(
+    await api.askQuestionProgressively(...requestArguments),
+    reorderedGeneratedResult,
+    "terminal reconciliation should accept independently preserved claims in generated prose order"
+  );
 
   globalThis.fetch = async () => responseForLines([
     JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Request accepted." }),
@@ -399,19 +486,31 @@ try {
   ]);
   await assert.rejects(api.askQuestionProgressively(...requestArguments), /did not match its canonical answer/);
 
-  globalThis.fetch = async () => responseForLines([
-    JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Request accepted." }),
-    JSON.stringify({ schema, type: "stage", sequence: 1, stage: "generating_answer", message: "Generating." }),
-    JSON.stringify({ schema, type: "checked_claim", sequence: 2, claim_index: 1, paragraph: 1, text: checkedClaimOne }),
-    JSON.stringify({ schema, type: "stage", sequence: 3, stage: "checking_release", message: "Release check." }),
-    JSON.stringify({ schema, type: "complete", sequence: 4, result: { ...canonicalResult, answer: checkedClaimOne } })
-  ]);
+  let publicProgressiveRequest;
+  globalThis.fetch = async (url, init) => {
+    publicProgressiveRequest = { url, body: JSON.parse(init.body) };
+    return responseForLines([
+      JSON.stringify({ schema, type: "stage", sequence: 0, stage: "accepted", message: "Request accepted." }),
+      JSON.stringify({ schema, type: "stage", sequence: 1, stage: "generating_answer", message: "Generating." }),
+      JSON.stringify({ schema, type: "checked_claim", sequence: 2, claim_index: 1, paragraph: 1, text: checkedClaimOne }),
+      JSON.stringify({ schema, type: "stage", sequence: 3, stage: "checking_release", message: "Release check." }),
+      JSON.stringify({ schema, type: "complete", sequence: 4, result: { ...canonicalResult, answer: checkedClaimOne } })
+    ]);
+  };
   assert.deepEqual(
     await api.askQuestionProgressively(
       ...requestArguments.slice(0, 5),
-      { ...requestArguments[5], publicDemo: true }
+      {
+        ...requestArguments[5],
+        publicDemo: true
+      }
     ),
     { ...canonicalResult, answer: checkedClaimOne }
+  );
+  assert.equal(
+    Object.hasOwn(publicProgressiveRequest.body, "rag_policy_version"),
+    false,
+    "public progressive requests must never carry a developer RAG policy selector"
   );
 
   globalThis.fetch = async () => responseForLines([

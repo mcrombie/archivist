@@ -1,88 +1,84 @@
 # Answer Delivery Modes
 
 Archivist offers two delivery contracts for the same question-answering pipeline. Delivery does
-not select a different corpus, retrieval policy, prompt, model, evidence scope, or interpretive
-setting. It controls when reader-visible prose may cross the server boundary.
+not select a different corpus, retrieval policy, evidence scope, or interpretive setting. It
+controls when application-compiled evidence may cross the server boundary. It does not expose a
+V26/V27 policy selector.
 
 ## Reader choices
 
 ### Complete answer (default)
 
 **Complete answer** is the recommended and evaluation-reference behavior. The interface waits
-while Archivist retrieves, generates, and validates. The answer, citations, and sources appear
-together only after the whole response passes its ordinary grounding and public-release gates.
+while Archivist retrieves, compiles, optionally arranges, and validates. The answer, citations,
+and sources appear together only after the whole response passes its ordinary grounding and
+public-release gates.
 
-This is the strict fail-closed choice: a response that fails whole-answer validation exposes no
-answer prose.
+Essential performs local BM25 retrieval and renders immutable evidence cards with zero provider
+calls. Professional, Pretty Pink Princess, and Baleful Black Baron make exactly one no-retry,
+low-reasoning `gpt-5.6-sol` call that may select only exact card placeholders and typed IDs from
+the chosen mode's closed cue catalog. Local code supplies every displayed word and citation. A
+selector or client failure returns the direct Essential evidence.
 
 ### Progressive response (experimental)
 
-**Progressive response** uses streaming on the existing final generation request. It first shows
-the same fixed operational stages as Complete answer. While the model is producing its structured
-answer, the server then extracts one complete factual claim at a time, checks that claim locally,
-and sends an ordered `checked_claim` frame. The browser presents those claims as **checked
-manuscript claims while the complete answer is still being assembled**.
+**Progressive response** first shows the same fixed operational stages as Complete answer. As the
+application compiler creates each immutable evidence card, the server sends its exact
+citation-rendered form in an ordered `checked_claim` frame. The browser presents those cards as
+**checked manuscript evidence while the complete arrangement is still being assembled**. In a
+generated mode this can happen before the one optional selector call finishes; Essential has no
+provider call to wait for.
 
 This is not chain-of-thought or a transcript of private reasoning. The stream never contains raw
-model tokens, partial JSON, prompts, retrieval queries, manuscript passages, source-admission
-deliberations, validation traces, or private diagnostics. A claim becomes eligible only after its
-complete structured object exists and its atomic sentence, identifier and paragraph order,
-citation grammar and declared source mapping, source bounds, and cumulative limits pass local
-checks.
+model tokens, selector JSON, prompts, retrieval queries, unbounded manuscript passages,
+source-admission deliberations, validation traces, or private diagnostics. A card becomes eligible
+only after local compilation fixes its bounded excerpt, paragraph order, source mapping, citation,
+and cumulative limits.
 
-The first releasable non-correction claim has an additional reader-facing gate: it must state the
-bottom line in one sentence of no more than 45 words and, when the question supplies trustworthy
-subject anchors, name that subject. A premise correction remains withheld until whole-answer
-validation; the next factual claim becomes the first progressive candidate. Failure of this local
-lead gate suppresses provisional prose but does not cancel, retry, or invalidate an otherwise
-sound terminal answer.
+Each evidence card is bounded to the compiler's concise excerpt limit and keeps the question's
+matched evidence in application-owned form. Progressive delivery does not summarize, paraphrase,
+or extend it.
 
 For the public demo, every claim also passes the configured edition-locator boundary and a rolling
 verbatim-overlap audit before release. The rolling audit includes all claims already released, so
 splitting a long quotation across several short claims cannot bypass the quotation limit.
 
-The claim gate is deliberately narrower than whole-answer validation. It cannot yet prove that all
-requested parts were covered, that every premise and evidence obligation is globally consistent,
-that a later claim will not duplicate or contradict an earlier one, or that an interpretive frame
-will pass. Streamed claims therefore remain provisional **as a complete answer**, even though each
-has passed its local release checks.
+The card gate is deliberately narrower than terminal validation. Streamed cards are immutable and
+cited, but their final order and the placement of any local editorial cues are not yet settled.
+They therefore remain provisional **as an arranged answer**, not as model-drafted factual prose.
 
-When generation finishes, Archivist runs the unchanged whole-answer validator and public release
-gate. A successful terminal `complete` replaces the working claims with the canonical cohesive
-answer and enables citations, sources, copying, cost metadata, and conversation history. On a late
-validation failure or interruption, the client clears the working claims, shows a safe failure,
-and never commits the partial turn to history. This means Progressive response intentionally does
-not retain Complete answer's stronger promise that rejected prose was never briefly visible.
+When arrangement finishes, Archivist runs terminal validation and the public release gate. A
+successful `complete` replaces the working cards with the canonical answer and enables sources,
+copying, cost metadata, and conversation history. The final answer contains every evidence card
+exactly once, although a generated mode may reorder them and interleave application-owned cues. On
+interruption, the client clears the working view and never commits the partial turn to history.
 
-Interpretive prefaces and conclusions are not streamed. The shared generation schemas now
-serialize the factual claim array immediately after the schema identifier, before private
-premise, coverage, and obligation ledgers; interpretive fields follow later even though the final
-renderer places the preface first. This ordering applies equally to Complete and Progressive and
-opened the `evidence-coverage-v11` and `full-context-coverage-v3` generation cohorts. Delivery mode
-still does not select a different prompt or schema within those cohorts. Progressive presents the
-factual claims while working and introduces selected framing only in the canonical final answer.
+Application-owned interpretations and character asides are not streamed. They appear only in the
+canonical final answer after the generated-mode response has passed the closed placeholder/cue
+schema. Delivery mode does not alter that schema or add a call.
+
+The former V26 design streamed locally checked claims parsed from provider-authored structured
+generation. That remains historical behavior of an explicit compatibility policy; it is not the
+current `application-compiled-v1` reader contract.
 
 ## Latency and cost claim
 
-Progressive response replaces the final blocking Responses API generation with one streamed
-Responses API generation. It does not add a second generation or validation call. Existing work
-that precedes generation—conversation resolution, optional planning, embeddings, retrieval, and
-evidence admission—remains unchanged, so there can still be a meaningful delay before the first
-claim. Total generation and validation time may remain similar; the improvement is earlier useful
-prose once answer generation reaches its first complete claim.
+Progressive response does not add a provider or validation call. Current follow-up resolution,
+BM25 retrieval, evidence admission, and card compilation are local, so an Essential request is
+provider-free. A generated mode uses the same single no-retry selector call as Complete answer.
+The progressive benefit is that checked local evidence may become visible before optional
+arrangement finishes; this document makes no latency guarantee.
 
 During a prose-free interval, the server sends a text-free heartbeat every three seconds. The
-browser turns those frames into a visible elapsed-work indicator rather than pretending a claim
-exists. A private structured timing record is also written once per Progressive request after both
-the paid worker and response stream end. It measures stage entry, first provider text delta,
-provider terminal, first checked claim, terminal outcome, worker finish, and stream finish, but
-contains no question, source, manuscript, prompt, answer, or error text. These measurements
-distinguish upstream retrieval time, provider time, local release delay, and proxy/browser delay
-without weakening the disclosure boundary.
+browser turns those frames into a visible elapsed-work indicator rather than pretending a card
+exists. A private structured timing record is written once per Progressive request after both the
+worker and response stream end. It measures stage entry, first checked card, terminal outcome,
+worker finish, and stream finish. It contains no question, source, manuscript, prompt, answer, or
+error text.
 
-Provider usage is recorded once from the terminal streamed response. A malformed structured
-answer is still consumed through its provider terminal event before local parsing fails, so a
-failed parse cannot silently disappear from the cost ledger. No automatic replay is permitted.
+Generated-mode provider usage is recorded once. Malformed selector output falls back to direct
+Essential evidence and cannot silently trigger a replay. Essential records no provider usage. No
+automatic replay is permitted.
 
 Complete answer remains the evaluation presentation. Progressive delivery is an experimental
 reader surface, not an answer-quality cohort. Its final authoritative result must still use the
@@ -111,7 +107,7 @@ The response is `application/x-ndjson`; each line is one complete object carryin
 The fixed stages are `accepted`, `checking_corpus`, `resolving_question`, `planning_search`,
 `retrieving_sources`, `checking_evidence`, `preparing_context`, `generating_answer`,
 `validating_answer`, and `checking_release`. Stages may continue after checked claims begin because
-whole-answer validation and the public gate occur after the last generated unit.
+optional arrangement, terminal validation, and the public gate occur after local card compilation.
 
 Exactly one terminal `complete` or `error` ends an accepted stream. End-of-file without a terminal
 frame is interruption, not success. The client bounds frame size, cumulative claim text, claim and
@@ -120,16 +116,18 @@ authoritative answer or sends them back as conversation history.
 
 ### Retry, cancellation, and stream lifetime
 
-The browser must not automatically retry after the server accepts a progressive request. A
-disconnect may occur after paid work began, and a replay could charge twice. A reader-controlled
-retry is a new request. Closing the page is not a guarantee that provider work stopped.
+The browser must not automatically retry after the server accepts a progressive request. In a
+generated mode, a disconnect may occur after paid work began and a replay could charge twice. A
+reader-controlled retry is a new request. In a generated mode, closing the page is not a guarantee
+that the one
+selector call stopped. Essential has no paid work.
 
 Compatibility fallback to Complete answer is allowed only when the progressive endpoint rejects
 the request before acceptance with an explicit unavailable response such as `404`, `405`, or
 `501`. There is no fallback after the first stream frame.
 
 An accepted public stream occupies the same rate and concurrency allowance as Complete answer.
-The lease remains held until both the response stream and paid worker have ended, including
+The lease remains held until both the response stream and worker have ended, including
 disconnect cleanup. The route remains inside the public request-size, schema, strategy, monthly
 spend, source minimization, security-header, and private-route boundaries. Responses are not
 cacheable.
@@ -139,24 +137,24 @@ cacheable.
 Offline checks must establish that:
 
 - Complete answer remains the default and its JSON behavior is unchanged;
-- Complete and Progressive use the same prompt and property-ordered generation schema;
-- progressive generation invokes the provider exactly once and records terminal usage once;
-- a checked claim can arrive before `response.completed`;
-- the first released factual claim is direct, subject-linked when possible, and at most 45 words;
-- arbitrary token splits, escaped JSON, and truncated members never release an incomplete claim;
+- Complete and Progressive use the same evidence compiler and, where applicable, the same closed
+  arrangement schema;
+- Essential invokes no provider, while each generated mode invokes it exactly once with no retry;
+- a checked evidence card can arrive before optional arrangement finishes;
+- every released card is exact application-owned text with an application-owned citation;
+- selector output, token boundaries, or malformed JSON can never alter a released card;
 - claim indices, paragraphs, citations, declared sources, IDs, and cumulative limits fail closed;
 - public locators and rolling cross-claim quotation limits run before each public claim release;
-- late global failure or interruption clears claims and never creates conversation history;
+- interruption clears the working cards and never creates conversation history;
 - accepted streams end exactly once and are never automatically replayed;
 - public concurrency remains occupied through worker and stream cleanup; and
 - the progressive endpoint cannot bypass body, rate, concurrency, spend, or route controls.
 
 Deployment verification still requires a live Render smoke. Confirm that the elapsed indicator
-updates during prose-free work and that at least one `checked_claim` arrives in the browser before
-the terminal provider result. Confirm that the final answer replaces rather than duplicates the
-working claims and that citations and edition-qualified sources appear normally. Compare the
-custom domain with Render's direct subdomain and inspect the private timing record to separate
-application timing from proxy buffering. Interrupt a request to confirm no replay and no retained
-partial turn, then repeat one question through Complete answer to verify its strict behavior is
-unchanged. A local suite cannot prove how Render, Cloudflare, or the browser will buffer the
-deployed stream.
+updates, at least one `checked_claim` carries exact local evidence, and the final answer replaces
+rather than duplicates the working cards. Confirm citations and edition-qualified sources appear
+normally. Compare the custom domain with Render's direct subdomain and inspect the private timing
+record to separate application timing from proxy buffering. Interrupt a request to confirm no
+replay and no retained partial turn, then repeat one question through Complete answer. An
+Essential smoke must record zero provider use; a generated-mode smoke must record at most its one
+authorized selector call. A local suite cannot prove deployed proxy or browser buffering.

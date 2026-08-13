@@ -463,7 +463,9 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
         voice,
         worldview,
         history,
+        archivist_mode,
         answer_strategy="rag",
+        application_compiled=False,
     ):
         captured.update(
             project_id=project_id,
@@ -472,6 +474,8 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
             historiographical_lens=historiographical_lens,
             voice=voice,
             worldview=worldview,
+            archivist_mode=archivist_mode,
+            application_compiled=application_compiled,
         )
         return SimpleNamespace(
             answer="Synthetic answer [Source 1].",
@@ -479,12 +483,15 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
             status="answered",
             evidence_decision="direct_answer",
             resolved_question=question,
+            answer_strategy_version="application-compiled-v1",
+            diagnostics={},
         )
 
     monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
     request = web_api.QuestionRequest(
         question="What happened?",
         n_results=7,
+        archivist_mode="professional",
         historiographical_lens="tragic",
         voice="plainspoken",
         worldview="secular_humanist",
@@ -499,6 +506,8 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
         "historiographical_lens": HistoriographicalLens.TRAGIC,
         "voice": AnswerVoice.PLAINSPOKEN,
         "worldview": Worldview.SECULAR_HUMANIST,
+        "archivist_mode": web_api.ArchivistMode.PROFESSIONAL,
+        "application_compiled": True,
     }
     assert response["historiographical_lens"] == "tragic"
     assert response["voice"] == "plainspoken"

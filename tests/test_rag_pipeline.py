@@ -9,10 +9,16 @@ import pytest
 import rag_pipeline
 from answer_progress import ProviderStreamMilestone
 from answer_coverage import (
+    COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+    COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
     EVIDENCE_COVERAGE_SCHEMA,
     INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
     AnswerUnit,
     AnswerUnitRole,
+    CompactAnswerUnit,
+    CompactEvidenceCoverageAnswer,
+    CompactInterpretiveEvidenceCoverageAnswer,
+    CompactRequirementCoverage,
     EvidenceDimension,
     EvidenceDimensionCoverage,
     EvidenceCoverageAnswer,
@@ -321,6 +327,56 @@ def supported_interpretive_answer(
     )
 
 
+def supported_compact_answer(
+    requirement_ids: tuple[str, ...],
+    *,
+    source_number: int = 1,
+) -> CompactEvidenceCoverageAnswer:
+    return CompactEvidenceCoverageAnswer(
+        schema=COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=(),
+        coverage=tuple(
+            CompactRequirementCoverage(
+                requirement_id=requirement_id,
+                status=RequirementStatus.SUPPORTED,
+            )
+            for requirement_id in requirement_ids
+        ),
+        answer_units=tuple(
+            CompactAnswerUnit(
+                unit_id=f"U{index}",
+                requirement_ids=(requirement_id,),
+                role=AnswerUnitRole.EVENT,
+                text=f"Synthetic supported point {index} [Source {source_number}].",
+                paragraph=index,
+            )
+            for index, requirement_id in enumerate(requirement_ids, start=1)
+        ),
+    )
+
+
+def supported_compact_interpretive_answer(
+    requirement_ids: tuple[str, ...],
+    *,
+    moves: tuple[InterpretiveMove, ...],
+    source_number: int = 1,
+) -> CompactInterpretiveEvidenceCoverageAnswer:
+    factual = supported_compact_answer(requirement_ids, source_number=source_number)
+    return CompactInterpretiveEvidenceCoverageAnswer(
+        schema=COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
+        premise_decisions=factual.premise_decisions,
+        coverage=factual.coverage,
+        obligation_coverage=factual.obligation_coverage,
+        answer_units=factual.answer_units,
+        interpretive_moves=moves,
+        interpretive_preface=(
+            "Project Lumen deserves recognition as a meaningful achievement. "
+            "Project Lumen turns pressure into a proving ground of durable capacity."
+        ),
+        interpretive_coda=("Project Lumen therefore stands as a meaningful accomplishment."),
+    )
+
+
 def supported_obligation_answer(
     requirement_ids: tuple[str, ...],
     obligation_scopes: tuple[EvidenceObligationScope, ...],
@@ -472,6 +528,38 @@ def test_evidence_coverage_prompt_enforces_premise_source_lanes():
     assert (
         "for status unresolved, source_numbers must be empty and correction_unit_id must be null"
     ) in instructions
+
+
+def test_v27_compact_prompt_is_guarded_representation_only():
+    canonical = " ".join(rag_pipeline.EVIDENCE_COVERAGE_INSTRUCTIONS.split())
+    compact = " ".join(rag_pipeline.COMPACT_EVIDENCE_COVERAGE_INSTRUCTIONS.split())
+
+    assert rag_pipeline.COMPACT_EVIDENCE_COVERAGE_PROMPT_VERSION == "evidence-coverage-v12"
+    for semantic_duty in (
+        "exactly one independently checkable factual claim",
+        "Treat every listed premise as a hypothesis",
+        "Inspect every inspection passage in order",
+        "do not infer a link merely because",
+        "required for that requirement is supported",
+    ):
+        assert semantic_duty in canonical
+        assert semantic_duty in compact
+    assert "declared source_numbers" in canonical
+    assert "do not return a separate answer-unit source_numbers field" in compact
+    assert "all reasoning duties above remain" in compact
+
+
+def test_v27_policy_and_request_schema_are_explicit():
+    assert rag_pipeline.EVIDENCE_PLANNED_POLICY.coverage_representation.value == "canonical"
+    assert rag_pipeline.EVIDENCE_PLANNED_POLICY.version == "evidence-planned-v26"
+    assert rag_pipeline.V27_COMPACT_CANDIDATE_POLICY.coverage_representation.value == "compact_v1"
+    assert rag_pipeline.V27_COMPACT_CANDIDATE_POLICY.version == "evidence-planned-v27"
+    with pytest.raises(ValueError, match="requires the v27"):
+        rag_pipeline.RagPolicy(
+            coverage_representation=rag_pipeline.CoverageRepresentation.COMPACT_V1
+        )
+    with pytest.raises(ValueError, match="requires compact_v1"):
+        rag_pipeline.RagPolicy(version="evidence-planned-v27")
 
 
 def test_broad_inspection_and_anchor_obligations_have_distinct_jobs():
@@ -934,6 +1022,151 @@ def test_focused_question_uses_no_planner_and_one_structured_answer(monkeypatch)
         "pipeline_total",
     }.issubset(run_diagnostics["stage_timings_ms"])
     assert all(value >= 0 for value in run_diagnostics["stage_timings_ms"].values())
+    generation = result.diagnostics["generation"]
+    assert generation["prompt_version"] == "evidence-coverage-v11"
+    assert generation["request_schema"] == "archivist.answer_request/6"
+    assert "provider_schema" not in generation
+
+
+def test_v27_compact_neutral_path_expands_then_uses_canonical_validator(monkeypatch):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    calls: list[dict] = []
+    emitted_trace: dict[str, object] = {}
+
+    def fake_parse(_client, *, operation, **request):
+        calls.append({"operation": operation, **request})
+        return SimpleNamespace(output_parsed=supported_compact_answer(("R1",)), output=())
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+    monkeypatch.setattr(
+        rag_pipeline,
+        "emit_retrieval_trace",
+        lambda trace: emitted_trace.update(trace),
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        policy=rag_pipeline.V27_COMPACT_CANDIDATE_POLICY,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["text_format"] is CompactEvidenceCoverageAnswer
+    assert calls[0]["instructions"] == rag_pipeline.COMPACT_EVIDENCE_COVERAGE_INSTRUCTIONS
+    assert '"schema": "archivist.answer_request/7"' in calls[0]["input"]
+    assert calls[0]["max_output_tokens"] == rag_pipeline.MAX_COVERAGE_OUTPUT_TOKENS
+    assert {
+        key: calls[0][key] for key in ("model", "reasoning", "text")
+    } == GENERATOR_SETTINGS.responses_create_kwargs()
+    assert result.status == "answered"
+    assert result.answer == "Synthetic supported point 1 [Source 1]."
+    assert result.answer_strategy_version == "evidence-planned-v27"
+    generation = result.diagnostics["generation"]
+    assert generation["prompt_version"] == "evidence-coverage-v12"
+    assert generation["request_schema"] == "archivist.answer_request/7"
+    assert generation["provider_schema"] == COMPACT_EVIDENCE_COVERAGE_SCHEMA
+    assert generation["expanded_schema"] == EVIDENCE_COVERAGE_SCHEMA
+    assert generation["expander_version"] == "compact-evidence-expander/1"
+    assert generation["schema_sha256"] == generation["provider_schema_sha256"]
+    assert generation["provider_schema_sha256"] != generation["expanded_schema_sha256"]
+    validate_text_free_retrieval_trace(emitted_trace)
+
+
+def test_v27_compact_invalid_mapping_fails_closed_without_retry(monkeypatch):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    parsed = supported_compact_answer(("R1",))
+    parsed = parsed.model_copy(
+        update={
+            "answer_units": (parsed.answer_units[0].model_copy(update={"requirement_ids": ()}),)
+        }
+    )
+    calls = []
+
+    def fake_parse(_client, **request):
+        calls.append(request)
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        policy=rag_pipeline.V27_COMPACT_CANDIDATE_POLICY,
+    )
+
+    assert len(calls) == 1
+    assert result.status == "generation_contract_failed"
+    assert result.diagnostics["generation"]["validation_result"] == "invalid"
+
+
+def test_v27_pre_generation_failure_still_binds_candidate_contract(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: calls.append("called"),
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(standalone_question="Who was Project Lumen?"),
+        collection_handle=Collection(count=2),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        policy=rag_pipeline.V27_COMPACT_CANDIDATE_POLICY,
+    )
+
+    assert calls == []
+    assert result.status == "corpus_integrity_failed"
+    assert result.answer_strategy_version == "evidence-planned-v27"
+    generation = result.diagnostics["generation"]
+    assert generation["structured_generation_called"] is False
+    assert generation["prompt_version"] == "evidence-coverage-v12"
+    assert generation["provider_schema"] == COMPACT_EVIDENCE_COVERAGE_SCHEMA
+
+
+def test_v27_interpretive_pre_generation_failure_binds_intended_schema(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: calls.append("called"),
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(standalone_question="Who was Project Lumen?"),
+        collection_handle=Collection(count=2),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        policy=rag_pipeline.V27_COMPACT_CANDIDATE_POLICY,
+        historiographical_lens=HistoriographicalLens.TRAGIC,
+    )
+
+    assert calls == []
+    assert result.status == "corpus_integrity_failed"
+    generation = result.diagnostics["generation"]
+    assert generation["structured_generation_called"] is False
+    assert generation["provider_schema"] == COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA
+    assert generation["expanded_schema"] == INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA
 
 
 def test_focused_progressive_path_streams_one_request_then_runs_terminal_validator(
@@ -942,9 +1175,7 @@ def test_focused_progressive_path_streams_one_request_then_runs_terminal_validat
     install_planned_retrieval(monkeypatch, [CHUNK])
     parsed = supported_answer(("R1",))
     direct_lead = parsed.answer_units[0].model_copy(
-        update={
-            "text": "Project Lumen established a synthetic institution [Source 1]."
-        }
+        update={"text": "Project Lumen established a synthetic institution [Source 1]."}
     )
     parsed = parsed.model_copy(update={"answer_units": (direct_lead,)})
     encoded = json.dumps(parsed.model_dump(mode="json"))
@@ -1016,11 +1247,56 @@ def test_focused_progressive_path_streams_one_request_then_runs_terminal_validat
     ]
     assert events == ["checked_claim", "provider_terminal", "terminal_validator"]
     assert checked_claims[0].paragraph == 1
-    assert (
-        checked_claims[0].text
-        == "Project Lumen established a synthetic institution [Source 1]."
-    )
+    assert checked_claims[0].text == "Project Lumen established a synthetic institution [Source 1]."
     assert checked_claims[0].source_chunks == (CHUNK,)
+    assert result.status == "answered"
+    assert result.answer == "Project Lumen established a synthetic institution [Source 1]."
+
+
+def test_v27_compact_progressive_path_streams_compact_units(monkeypatch):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    parsed = supported_compact_answer(("R1",))
+    direct_lead = parsed.answer_units[0].model_copy(
+        update={"text": "Project Lumen established a synthetic institution [Source 1]."}
+    )
+    parsed = parsed.model_copy(update={"answer_units": (direct_lead,)})
+    encoded = json.dumps(parsed.model_dump(mode="json"))
+    checked_claims = []
+    calls = []
+
+    def fake_stream(_client, *, on_text_delta=None, **request):
+        calls.append(request)
+        assert on_text_delta is not None
+        on_text_delta(encoded)
+        return SimpleNamespace(output_parsed=parsed, output=())
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_stream", fake_stream)
+    monkeypatch.setattr(
+        rag_pipeline,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: pytest.fail("blocking generation path was called"),
+    )
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        checked_claim_callback=checked_claims.append,
+        policy=rag_pipeline.V27_COMPACT_CANDIDATE_POLICY,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["text_format"] is CompactEvidenceCoverageAnswer
+    assert [claim.text for claim in checked_claims] == [
+        "Project Lumen established a synthetic institution [Source 1]."
+    ]
     assert result.status == "answered"
     assert result.answer == "Project Lumen established a synthetic institution [Source 1]."
 
@@ -1039,8 +1315,7 @@ def test_focused_progressive_path_withholds_truncated_unit_but_accepts_valid_ter
         stream_calls.append({"operation": operation, **request})
         assert on_text_delta is not None
         on_text_delta(
-            '{"answer_units":[{"unit_id":"U1","requirement_ids":["R1"],'
-            '"text":"Never completed'
+            '{"answer_units":[{"unit_id":"U1","requirement_ids":["R1"],"text":"Never completed'
         )
         return SimpleNamespace(output_parsed=parsed, output=())
 
@@ -1225,6 +1500,47 @@ def test_lens_or_worldview_frames_the_evidence_with_subjective_prose(
     assert f'"required_moves": [\n      "{move.value}"' in calls[0]["input"]
     assert '"required_question_anchors": [\n      "Project Lumen"' in calls[0]["input"]
     assert '"first_person": "forbidden"' in calls[0]["input"]
+
+
+def test_v27_compact_interpretive_path_keeps_framing_contract(monkeypatch):
+    install_planned_retrieval(monkeypatch, [CHUNK])
+    calls = []
+    move = InterpretiveMove.TRAGIC_TENSION_AND_CONTINGENCY
+
+    def fake_parse(_client, **request):
+        calls.append(request)
+        return SimpleNamespace(
+            output_parsed=supported_compact_interpretive_answer(
+                ("R1",),
+                moves=(move,),
+            ),
+            output=(),
+        )
+
+    monkeypatch.setattr(rag_pipeline, "tracked_responses_parse", fake_parse)
+
+    result = rag_pipeline.run_evidence_planned_answer(
+        resolved_turn=ResolvedTurn(
+            standalone_question="Who was Project Lumen?",
+            entities=("Project Lumen",),
+            trusted_user_texts=("Who was Project Lumen?",),
+        ),
+        collection_handle=Collection(),
+        chunks=[CHUNK],
+        client=object(),
+        corpus_manifest=corpus_manifest(CHUNK),
+        corpus_manifest_sha256=MANIFEST_SHA256,
+        historiographical_lens=HistoriographicalLens.TRAGIC,
+        policy=rag_pipeline.V27_COMPACT_CANDIDATE_POLICY,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["text_format"] is CompactInterpretiveEvidenceCoverageAnswer
+    assert result.status == "answered"
+    assert result.answer.startswith("Project Lumen deserves recognition")
+    generation = result.diagnostics["generation"]
+    assert generation["provider_schema"] == COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA
+    assert generation["expanded_schema"] == INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA
 
 
 def test_voice_alone_keeps_the_ordinary_compact_answer_contract(monkeypatch):

@@ -9,12 +9,16 @@ from pydantic import ValidationError
 from answer_coverage import (
     ALL_UNSUPPORTED_MESSAGE,
     CITATION_GRAMMAR,
+    COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+    COMPACT_EVIDENCE_EXPANDER_VERSION,
+    COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
     EVIDENCE_COVERAGE_SCHEMA,
     GENERATION_CONTRACT_FAILED_MESSAGE,
     INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
     NO_SOURCES_MESSAGE,
     AnswerUnit,
     AnswerUnitRole,
+    CompactEvidenceCoverageAnswer,
     CitationLocalityFailureCode,
     ContentCompletenessContext,
     ContentCompletenessProfile,
@@ -41,12 +45,16 @@ from answer_coverage import (
     RequirementCoverage,
     RequirementStatus,
     coverage_diagnostic_summary,
+    expand_compact_evidence_coverage,
+    expand_compact_interpretive_evidence_coverage,
     parse_citation_numbers,
+    process_compact_evidence_coverage,
     process_evidence_coverage,
     process_interpretive_evidence_coverage,
     render_evidence_coverage,
     validate_evidence_coverage,
     validate_evidence_coverage_context,
+    validate_streamable_compact_answer_unit,
     validate_streamable_answer_unit,
 )
 
@@ -372,6 +380,619 @@ def test_json_shaped_payload_is_accepted_and_validated_against_trusted_inputs():
     assert validated.answer == _valid_answer()
     assert validated.citation_count == 3
     assert CITATION_GRAMMAR == r"\[Source\s+\d+(?:\s*,\s*Source\s+\d+)*\]"
+
+
+def test_compact_contract_expands_exact_canonical_ledgers_from_units():
+    expanded = _expand_compact(_compact_payload())
+
+    assert expanded == _valid_answer()
+    assert COMPACT_EVIDENCE_EXPANDER_VERSION == "compact-evidence-expander/1"
+    assert (
+        validate_evidence_coverage(
+            expanded,
+            requirement_ids=("R1", "R2"),
+            premise_ids=("P1",),
+            premise_source_scopes=_premise_scopes(("P1",), 3),
+            source_count=3,
+        ).answer
+        == _valid_answer()
+    )
+
+
+def test_compact_unsupported_requirement_with_unit_remains_strictly_rejected():
+    payload = _compact_payload()
+    payload["coverage"][0]["status"] = RequirementStatus.UNSUPPORTED
+    expanded = _expand_compact(payload)
+
+    assert expanded.coverage[0].unit_ids == ()
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            expanded,
+            requirement_ids=("R1", "R2"),
+            premise_ids=("P1",),
+            premise_source_scopes=_premise_scopes(("P1",), 3),
+            source_count=3,
+        )
+    assert captured.value.code is CoverageValidationErrorCode.UNSUPPORTED_REQUIREMENT_HAS_UNIT
+
+
+@pytest.mark.parametrize(
+    ("coverage", "expected_code"),
+    [
+        (
+            [{"requirement_id": "R1", "status": "supported"}],
+            CoverageValidationErrorCode.MISSING_REQUIREMENT_ID,
+        ),
+        (
+            [
+                {"requirement_id": "R1", "status": "supported"},
+                {"requirement_id": "RX", "status": "partial"},
+            ],
+            CoverageValidationErrorCode.UNKNOWN_REQUIREMENT_ID,
+        ),
+        (
+            [
+                {"requirement_id": "R2", "status": "partial"},
+                {"requirement_id": "R1", "status": "supported"},
+            ],
+            CoverageValidationErrorCode.OUT_OF_ORDER_REQUIREMENT_ID,
+        ),
+    ],
+)
+def test_compact_expansion_fails_closed_on_requirement_identity_errors(
+    coverage: list[dict[str, str]],
+    expected_code: CoverageValidationErrorCode,
+):
+    payload = _compact_payload()
+    payload["coverage"] = coverage
+    with pytest.raises(CoverageContractError) as captured:
+        _expand_compact(payload)
+    assert captured.value.code is expected_code
+
+
+def test_compact_expansion_fails_closed_on_premise_identity_order():
+    payload = _compact_payload()
+    payload["premise_decisions"] = []
+    with pytest.raises(CoverageContractError) as captured:
+        _expand_compact(payload)
+    assert captured.value.code is CoverageValidationErrorCode.MISSING_PREMISE_ID
+
+
+def test_compact_expansion_fails_closed_on_schema_version():
+    payload = _compact_payload()
+    payload["schema"] = "archivist.compact_evidence_coverage/999"
+    with pytest.raises(CoverageContractError) as captured:
+        _expand_compact(payload)
+    assert captured.value.code is CoverageValidationErrorCode.INVALID_PAYLOAD
+
+
+def test_compact_interpretive_expansion_preserves_framing_and_premise_fields():
+    canonical = _interpretive_answer()
+    payload = _compact_payload(canonical)
+    payload.update(
+        {
+            "schema": COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
+            "interpretive_moves": list(canonical.interpretive_moves),
+            "interpretive_preface": canonical.interpretive_preface,
+            "interpretive_coda": canonical.interpretive_coda,
+        }
+    )
+
+    expanded = expand_compact_interpretive_evidence_coverage(
+        payload,
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    assert expanded == canonical
+
+
+def test_compact_broad_obligation_mappings_expand_but_role_contract_still_rejects():
+    scope = _obligation_scope()
+    payload = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [
+            {
+                "unit_id": "U1",
+                "requirement_ids": ["R1"],
+                "role": AnswerUnitRole.QUALIFICATION,
+                "text": "A synthetic mechanism is asserted [Source 1].",
+                "paragraph": 1,
+                "obligation_links": [
+                    {
+                        "obligation_id": "O1",
+                        "dimension": EvidenceDimension.MECHANISM,
+                    }
+                ],
+            }
+        ],
+        "premise_decisions": [],
+        "coverage": [{"requirement_id": "R1", "status": "supported"}],
+        "obligation_coverage": [
+            {
+                "obligation_id": "O1",
+                "dimensions": [{"dimension": "mechanism", "status": "supported"}],
+            }
+        ],
+    }
+    expanded = expand_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=1,
+    )
+    assert expanded.obligation_coverage[0].dimensions[0].unit_ids == ("U1",)
+    with pytest.raises(CoverageContractError) as captured:
+        validate_evidence_coverage(
+            expanded,
+            requirement_ids=("R1",),
+            obligation_scopes=(scope,),
+            source_count=1,
+        )
+    assert captured.value.code is CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_code"),
+    [
+        (
+            lambda records: [],
+            CoverageValidationErrorCode.MISSING_OBLIGATION_ID,
+        ),
+        (
+            lambda records: [
+                {**records[0], "obligation_id": "OX"},
+            ],
+            CoverageValidationErrorCode.UNKNOWN_OBLIGATION_ID,
+        ),
+        (
+            lambda records: [
+                {
+                    **records[0],
+                    "dimensions": [
+                        {"dimension": "cause_or_enabler", "status": "supported"},
+                        {"dimension": "mechanism", "status": "supported"},
+                    ],
+                }
+            ],
+            CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_DIMENSION,
+        ),
+    ],
+)
+def test_compact_expansion_fails_closed_on_obligation_identity_and_order(
+    mutate,
+    expected_code: CoverageValidationErrorCode,
+):
+    scope = _obligation_scope(
+        dimensions=(EvidenceDimension.MECHANISM, EvidenceDimension.CAUSE_OR_ENABLER)
+    )
+    payload = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [],
+        "premise_decisions": [],
+        "coverage": [{"requirement_id": "R1", "status": "unsupported"}],
+        "obligation_coverage": [
+            {
+                "obligation_id": "O1",
+                "dimensions": [
+                    {"dimension": "mechanism", "status": "unsupported"},
+                    {"dimension": "cause_or_enabler", "status": "unsupported"},
+                ],
+            }
+        ],
+    }
+    payload["obligation_coverage"] = mutate(payload["obligation_coverage"])
+    with pytest.raises(CoverageContractError) as captured:
+        expand_compact_evidence_coverage(
+            payload,
+            requirement_ids=("R1",),
+            obligation_scopes=(scope,),
+            source_count=1,
+        )
+    assert captured.value.code is expected_code
+
+
+def test_compact_stream_adapter_derives_sources_before_existing_unit_validation():
+    context = validate_evidence_coverage_context(("R1",), source_count=2)
+    validated = validate_streamable_compact_answer_unit(
+        {
+            "unit_id": "U1",
+            "requirement_ids": ["R1"],
+            "role": "event",
+            "text": "A compact unit cites its support [Source 2].",
+            "paragraph": 1,
+            "obligation_links": [],
+        },
+        context=context,
+        unit_ordinal=1,
+    )
+    assert validated.source_numbers == (2,)
+
+
+def test_compact_stream_adapter_preserves_duplicate_citations_for_strict_rejection():
+    context = validate_evidence_coverage_context(("R1",), source_count=2)
+    with pytest.raises(CoverageContractError) as captured:
+        validate_streamable_compact_answer_unit(
+            {
+                "unit_id": "U1",
+                "requirement_ids": ["R1"],
+                "role": "event",
+                "text": "A compact unit repeats a source [Source 2, Source 2].",
+                "paragraph": 1,
+                "obligation_links": [],
+            },
+            context=context,
+            unit_ordinal=1,
+        )
+    assert captured.value.code is CoverageValidationErrorCode.DUPLICATE_SOURCE_NUMBER
+
+
+def test_compact_processor_preserves_expansion_error_code():
+    payload = _compact_payload()
+    payload["coverage"] = [{"requirement_id": "R1", "status": "supported"}]
+    result = process_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+    assert result.status is CoverageOutcomeStatus.GENERATION_CONTRACT_FAILED
+    assert result.diagnostics.error_code is CoverageValidationErrorCode.MISSING_REQUIREMENT_ID
+
+
+def test_compact_conflicting_status_derives_the_canonical_gap_and_source_ledgers():
+    payload = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [
+            {
+                "unit_id": "U1",
+                "requirement_ids": ["R1"],
+                "role": "qualification",
+                "text": "The supplied accounts conflict on the synthetic point [Source 1, Source 2].",
+                "paragraph": 1,
+                "obligation_links": [],
+            }
+        ],
+        "premise_decisions": [],
+        "coverage": [{"requirement_id": "R1", "status": "conflicting"}],
+        "obligation_coverage": [],
+    }
+
+    result = process_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1",),
+        source_count=2,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.coverage[0].status is RequirementStatus.CONFLICTING
+    assert result.diagnostics.coverage[0].unit_ids == ("U1",)
+    assert result.diagnostics.coverage[0].source_numbers == (1, 2)
+
+
+def test_compact_partial_requirement_remains_a_valid_partial_answer():
+    result = process_compact_evidence_coverage(
+        _compact_payload(),
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_PARTIAL
+    assert result.diagnostics.coverage[1].status is RequirementStatus.PARTIAL
+    assert result.answer.endswith(
+        "The retrieved passages establish only part of the requested answer."
+    )
+
+
+def test_compact_requirement_component_expands_through_the_unchanged_validator():
+    scope = EvidenceObligationScope(
+        obligation_id="O1",
+        kind=EvidenceObligationKind.REQUIREMENT_COMPONENT,
+        source_number=1,
+        paragraph_start=1,
+        paragraph_end=1,
+        allowed_requirement_ids=("R1",),
+        focus=EvidenceObligationFocus.CROSS_CUTTING,
+        dimension_ids=(EvidenceDimension.SIGNIFICANCE_OR_CONSEQUENCE,),
+        required_for_requirement_status=True,
+    )
+    payload = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [
+            {
+                "unit_id": "U1",
+                "requirement_ids": ["R1"],
+                "role": "consequence",
+                "text": "The synthetic reform expanded civic capacity [Source 1].",
+                "paragraph": 1,
+                "obligation_links": [
+                    {
+                        "obligation_id": "O1",
+                        "dimension": "significance_or_consequence",
+                    }
+                ],
+            }
+        ],
+        "premise_decisions": [],
+        "coverage": [{"requirement_id": "R1", "status": "supported"}],
+        "obligation_coverage": [
+            {
+                "obligation_id": "O1",
+                "dimensions": [
+                    {
+                        "dimension": "significance_or_consequence",
+                        "status": "supported",
+                    }
+                ],
+            }
+        ],
+    }
+
+    result = process_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
+    assert result.diagnostics.obligation_coverage[0].dimensions[0].unit_ids == ("U1",)
+    assert result.diagnostics.obligation_coverage[0].dimensions[0].source_numbers == (1,)
+
+
+def test_compact_stage_and_adjacent_link_chain_is_content_complete():
+    canonical, scopes = _two_stage_supported_answer(include_transition=True)
+
+    result = process_compact_evidence_coverage(
+        _compact_payload(canonical),
+        requirement_ids=("R1", "R2"),
+        obligation_scopes=scopes,
+        source_count=2,
+        completeness_context=_two_stage_completeness_context(),
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_COMPLETE
+    assert result.diagnostics.realized_stage_count == 2
+    assert result.diagnostics.realized_transition_count == 1
+    assert result.diagnostics.required_obligation_dimension_count == 3
+
+
+def test_compact_institutional_handoff_realizes_a_lineage_stage():
+    scope = EvidenceObligationScope(
+        obligation_id="O1",
+        source_number=1,
+        paragraph_start=1,
+        paragraph_end=1,
+        allowed_requirement_ids=("R1",),
+        focus=EvidenceObligationFocus.ORIGIN,
+        dimension_ids=(
+            EvidenceDimension.STAGE_DEVELOPMENT,
+            EvidenceDimension.INSTITUTIONAL_HANDOFF,
+        ),
+        required_for_requirement_status=True,
+    )
+    payload = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [
+            {
+                "unit_id": "U1",
+                "requirement_ids": ["R1"],
+                "role": "event",
+                "text": "The institution transferred its civic capacity to its successor [Source 1].",
+                "paragraph": 1,
+                "obligation_links": [
+                    {"obligation_id": "O1", "dimension": "stage_development"},
+                    {"obligation_id": "O1", "dimension": "institutional_handoff"},
+                ],
+            }
+        ],
+        "premise_decisions": [],
+        "coverage": [{"requirement_id": "R1", "status": "supported"}],
+        "obligation_coverage": [
+            {
+                "obligation_id": "O1",
+                "dimensions": [
+                    {"dimension": "stage_development", "status": "supported"},
+                    {"dimension": "institutional_handoff", "status": "supported"},
+                ],
+            }
+        ],
+    }
+    completeness = ContentCompletenessContext(
+        profile=ContentCompletenessProfile.LONG_INSTITUTIONAL_LINEAGE,
+        required_requirement_ids=("R1",),
+        expected_stage_requirement_ids=("R1",),
+        expected_stage_transitions=(),
+        minimum_supported_obligation_ratio=1.0,
+        require_institutional_handoffs=True,
+    )
+
+    result = process_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1",),
+        obligation_scopes=(scope,),
+        source_count=1,
+        completeness_context=completeness,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.validation_result is DiagnosticValidationResult.VALID
+    assert result.diagnostics.content_outcome is ContentOutcome.VALID_COMPLETE
+    assert result.diagnostics.realized_stage_count == 1
+    assert result.diagnostics.supported_required_obligation_dimension_count == 2
+
+
+def test_compact_contradicted_premise_preserves_the_correction_contract():
+    payload = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [
+            {
+                "unit_id": "U1",
+                "requirement_ids": [],
+                "role": "premise_correction",
+                "text": "The assumed premise is contradicted [Source 1].",
+                "paragraph": 1,
+                "obligation_links": [],
+            },
+            {
+                "unit_id": "U2",
+                "requirement_ids": ["R1"],
+                "role": "event",
+                "text": "The requested point is separately supported [Source 2].",
+                "paragraph": 2,
+                "obligation_links": [],
+            },
+        ],
+        "premise_decisions": [
+            {
+                "premise_id": "P1",
+                "status": "contradicted",
+                "source_numbers": [1],
+                "correction_unit_id": "U1",
+            }
+        ],
+        "coverage": [{"requirement_id": "R1", "status": "supported"}],
+        "obligation_coverage": [],
+    }
+
+    result = process_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1",),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 2),
+        source_count=2,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.answer.startswith("The assumed premise is contradicted")
+    assert result.diagnostics.premise_decisions[0].status is PremiseStatus.CONTRADICTED
+    assert result.diagnostics.premise_decisions[0].source_numbers == (1,)
+    assert result.diagnostics.answer_units[0].source_numbers == (1,)
+
+
+def test_compact_unresolved_premise_stays_uncited_and_has_no_correction():
+    payload = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [
+            {
+                "unit_id": "U1",
+                "requirement_ids": ["R1"],
+                "role": "event",
+                "text": "The requested point is supported independently [Source 1].",
+                "paragraph": 1,
+                "obligation_links": [],
+            }
+        ],
+        "premise_decisions": [
+            {
+                "premise_id": "P1",
+                "status": "unresolved",
+                "source_numbers": [],
+                "correction_unit_id": None,
+            }
+        ],
+        "coverage": [{"requirement_id": "R1", "status": "supported"}],
+        "obligation_coverage": [],
+    }
+
+    result = process_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1",),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 1),
+        source_count=1,
+    )
+
+    assert result.status is CoverageOutcomeStatus.ANSWERED
+    assert result.diagnostics.premise_decisions[0].status is PremiseStatus.UNRESOLVED
+    assert result.diagnostics.premise_decisions[0].source_numbers == ()
+    assert result.diagnostics.premise_decisions[0].correction_unit_id is None
+
+
+def test_compact_progressive_unit_expands_identically_to_terminal_expansion():
+    payload = _compact_payload()
+    context = validate_evidence_coverage_context(
+        ("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
+
+    streamed_unit = validate_streamable_compact_answer_unit(
+        payload["answer_units"][0],
+        context=context,
+        unit_ordinal=1,
+    )
+    terminal_unit = _expand_compact(payload).answer_units[0]
+
+    assert streamed_unit == terminal_unit
+
+
+def test_compact_all_unsupported_and_no_sources_preserve_abstention_outcomes():
+    unsupported = {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [],
+        "premise_decisions": [],
+        "coverage": [{"requirement_id": "R1", "status": "unsupported"}],
+        "obligation_coverage": [],
+    }
+
+    result = process_compact_evidence_coverage(
+        unsupported,
+        requirement_ids=("R1",),
+        source_count=1,
+    )
+    no_sources = process_compact_evidence_coverage(
+        unsupported,
+        requirement_ids=("R1",),
+        source_count=0,
+    )
+
+    assert result.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert result.answer == ALL_UNSUPPORTED_MESSAGE
+    assert result.diagnostics.content_outcome is ContentOutcome.INSUFFICIENT_EVIDENCE
+    assert no_sources.status is CoverageOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert no_sources.answer == NO_SOURCES_MESSAGE
+    assert no_sources.diagnostics.validation_result is DiagnosticValidationResult.NOT_RUN
+
+
+def test_compact_json_schema_is_smaller_and_omits_redundant_mapping_fields():
+    canonical = json.dumps(EvidenceCoverageAnswer.model_json_schema(), sort_keys=True)
+    compact_schema = CompactEvidenceCoverageAnswer.model_json_schema()
+    compact = json.dumps(compact_schema, sort_keys=True)
+
+    assert len(compact) < len(canonical)
+    assert "source_numbers" not in compact_schema["$defs"]["CompactAnswerUnit"]["properties"]
+    compact_requirement = compact_schema["$defs"]["CompactRequirementCoverage"]["properties"]
+    assert set(compact_requirement) == {"requirement_id", "status"}
+    compact_dimension = compact_schema["$defs"]["CompactEvidenceDimensionCoverage"]["properties"]
+    assert set(compact_dimension) == {"dimension", "status"}
+
+
+def test_representative_compact_payload_is_materially_smaller_than_canonical_payload():
+    canonical, _scopes = _two_stage_supported_answer(include_transition=True)
+    canonical_json = json.dumps(
+        canonical.model_dump(mode="json", by_alias=True),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    compact_json = json.dumps(
+        _compact_payload(canonical),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    assert len(canonical_json) - len(compact_json) >= 300
+    assert len(compact_json) / len(canonical_json) <= 0.8
 
 
 def test_interpretive_coverage_frames_the_factual_answer_with_subjective_prose():
@@ -1136,9 +1757,7 @@ def test_broad_obligation_ledger_validates_exact_source_dimension_and_role():
 
 
 def test_streamable_unit_rejects_role_incompatible_with_linked_dimension():
-    scope = _obligation_scope(
-        dimensions=(EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT,)
-    )
+    scope = _obligation_scope(dimensions=(EvidenceDimension.QUALIFICATION_OR_COUNTERARGUMENT,))
     context = validate_evidence_coverage_context(
         requirement_ids=("R1",),
         premise_ids=(),
@@ -1169,6 +1788,61 @@ def test_streamable_unit_rejects_role_incompatible_with_linked_dimension():
         )
 
     assert captured.value.code is CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
+
+
+def _compact_payload(
+    answer: EvidenceCoverageAnswer | None = None,
+) -> dict[str, object]:
+    canonical = answer or _valid_answer()
+    return {
+        "schema": COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+        "answer_units": [
+            {
+                "unit_id": unit.unit_id,
+                "requirement_ids": list(unit.requirement_ids),
+                "role": unit.role,
+                "text": unit.text,
+                "paragraph": unit.paragraph,
+                "obligation_links": [
+                    link.model_dump(mode="json") for link in unit.obligation_links
+                ],
+            }
+            for unit in canonical.answer_units
+        ],
+        "premise_decisions": [
+            record.model_dump(mode="json") for record in canonical.premise_decisions
+        ],
+        "coverage": [
+            {
+                "requirement_id": record.requirement_id,
+                "status": record.status,
+            }
+            for record in canonical.coverage
+        ],
+        "obligation_coverage": [
+            {
+                "obligation_id": record.obligation_id,
+                "dimensions": [
+                    {
+                        "dimension": dimension.dimension,
+                        "status": dimension.status,
+                    }
+                    for dimension in record.dimensions
+                ],
+            }
+            for record in canonical.obligation_coverage
+        ],
+    }
+
+
+def _expand_compact(payload: dict[str, object]) -> EvidenceCoverageAnswer:
+    return expand_compact_evidence_coverage(
+        payload,
+        requirement_ids=("R1", "R2"),
+        premise_ids=("P1",),
+        premise_source_scopes=_premise_scopes(("P1",), 3),
+        source_count=3,
+    )
 
 
 def test_generation_schemas_put_streamable_units_before_terminal_ledgers():

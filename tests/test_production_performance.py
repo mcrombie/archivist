@@ -47,11 +47,56 @@ def _prepared() -> tuple[dict[str, object], tuple[protocol.SelectedItem, ...]]:
         )
 
 
-def _session(manifest: dict[str, object], *, epoch: str = EPOCH) -> dict[str, object]:
+def _runtime_identity(manifest: dict[str, object], *, epoch: str = EPOCH) -> dict[str, object]:
     cost_contract = manifest["cost_contract"]
     assert isinstance(cost_contract, dict)
-    identity = {
+    return {
         "schema": protocol.PUBLIC_RUNTIME_IDENTITY_SCHEMA,
+        "deployment_commit": COMMIT,
+        "process_epoch": epoch,
+        "answer_policy_version": "application-compiled-v1",
+        "evidence_retrieval_kind": "local_bm25",
+        "generated_prose_model": manifest["generated_prose_model_expected"],
+        "corpus_manifest_sha256": manifest["corpus_manifest_sha256"],
+        "frozen_candidate_commit": manifest["frozen_candidate_commit"],
+        "frozen_candidate_rag_policy": manifest["frozen_candidate_rag_policy"],
+        "public_rag_request_cost_ceiling_version": cost_contract[
+            "public_rag_request_cost_ceiling_version"
+        ],
+        "public_rag_request_cost_ceiling_nano_usd": cost_contract[
+            "public_rag_request_cost_ceiling_nano_usd"
+        ],
+    }
+
+
+def _legacy_manifest() -> dict[str, object]:
+    current, _items = _prepared()
+    legacy = dict(current)
+    legacy["schema"] = protocol.LEGACY_PREPARED_MANIFEST_SCHEMA
+    legacy.pop("answer_policy_version_expected")
+    legacy.pop("evidence_retrieval_kind_expected")
+    legacy.pop("answer_provider_model_expected")
+    legacy["generator_model_expected"] = legacy.pop("generated_prose_model_expected")
+    cost_contract = dict(legacy["cost_contract"])
+    cost_contract.pop("answer_provider_contract")
+    cost_contract.pop("expected_provider_event_count_per_attempt")
+    cost_contract.pop("max_next_attempt_cost_nano_usd")
+    cost_contract["max_next_attempt_cost_usd"] = protocol.MAX_NEXT_ATTEMPT_COST_USD
+    cost_contract["ceiling_enforcement"] = (
+        "server_reserves_the_full_request_ceiling_before_RAG_and_projects_"
+        "every_provider_operation_before_send"
+    )
+    legacy["cost_contract"] = cost_contract
+    return protocol.sealed_artifact(legacy)
+
+
+def _legacy_runtime_identity(
+    manifest: dict[str, object], *, epoch: str = EPOCH
+) -> dict[str, object]:
+    cost_contract = manifest["cost_contract"]
+    assert isinstance(cost_contract, dict)
+    return {
+        "schema": protocol.LEGACY_PUBLIC_RUNTIME_IDENTITY_SCHEMA,
         "deployment_commit": COMMIT,
         "process_epoch": epoch,
         "rag_policy_version": manifest["frozen_candidate_rag_policy"],
@@ -66,6 +111,14 @@ def _session(manifest: dict[str, object], *, epoch: str = EPOCH) -> dict[str, ob
             "public_rag_request_cost_ceiling_nano_usd"
         ],
     }
+
+
+def _session(manifest: dict[str, object], *, epoch: str = EPOCH) -> dict[str, object]:
+    identity = (
+        _runtime_identity(manifest, epoch=epoch)
+        if protocol.manifest_is_providerless_essential(manifest)
+        else _legacy_runtime_identity(manifest, epoch=epoch)
+    )
     health = {
         "status": 200,
         "body_status": "ready",
@@ -89,6 +142,20 @@ def _usage(*, cost: float = 0.01) -> dict[str, object]:
         "reasoning_tokens": 2,
         "total_tokens": 17,
         "event_count": 1,
+        "unpriced_event_count": 0,
+    }
+
+
+def _zero_usage() -> dict[str, object]:
+    return {
+        "estimated_cost_usd": 0.0,
+        "input_tokens": 0,
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+        "event_count": 0,
         "unpriced_event_count": 0,
     }
 
@@ -152,16 +219,18 @@ def _outcome(
             epoch=epoch,
         ),
         diagnostics=diagnostics if diagnostics is not None else {"answer_status": "answered"},
-        usage_totals=_usage(),
+        usage_totals=(
+            _zero_usage()
+            if protocol.manifest_is_providerless_essential(manifest)
+            else _usage()
+        ),
     )
     return intent, outcome
 
 
 class _Ledger:
     def __init__(self, outcomes: list[dict[str, object]]):
-        self.totals = {
-            str(outcome["request_id"]): outcome["usage_totals"] for outcome in outcomes
-        }
+        self.totals = {str(outcome["request_id"]): outcome["usage_totals"] for outcome in outcomes}
 
     def request_usage_totals(self, request_id: str):
         return self.totals[request_id]
@@ -176,22 +245,23 @@ class _Ledger:
 def _authorization_record(
     manifest: dict[str, object],
     *,
-    maximum: float = 40.0,
+    maximum: float | None = None,
 ) -> dict[str, object]:
     cost_contract = manifest["cost_contract"]
     assert isinstance(cost_contract, dict)
+    providerless = protocol.manifest_is_providerless_essential(manifest)
+    authorized_maximum = (0.0 if providerless else 40.0) if maximum is None else maximum
     return protocol.sealed_artifact(
         {
             "schema": runner.AUTHORIZATION_SCHEMA,
             "run_id": manifest["run_id"],
             "manifest_sha256": manifest["artifact_sha256"],
-            "max_cost_usd": maximum,
-            "max_next_attempt_cost_usd": cost_contract[
-                "max_next_attempt_cost_usd"
-            ],
-            "max_next_attempt_cost_nano_usd": cost_contract[
-                "public_rag_request_cost_ceiling_nano_usd"
-            ],
+            "max_cost_usd": authorized_maximum,
+            "max_next_attempt_cost_usd": cost_contract["max_next_attempt_cost_usd"],
+            "max_next_attempt_cost_nano_usd": cost_contract.get(
+                "max_next_attempt_cost_nano_usd",
+                cost_contract["public_rag_request_cost_ceiling_nano_usd"],
+            ),
             "request_cost_ceiling_version": cost_contract[
                 "public_rag_request_cost_ceiling_version"
             ],
@@ -224,7 +294,7 @@ def _materialize_complete_run(tmp_path: Path):
         outcomes.append(outcome)
     usage_db = tmp_path / "usage.sqlite3"
     usage_db.write_bytes(b"SQLite format 3\0")
-    runner._authorization(run_root=run_root, manifest=manifest, maximum=40.0)
+    runner._authorization(run_root=run_root, manifest=manifest, maximum=0.0)
     return run_root, usage_db, manifest, items, session, outcomes
 
 
@@ -233,7 +303,7 @@ def _args(run_root: Path, usage_db: Path) -> argparse.Namespace:
         run_root=run_root,
         usage_db=usage_db,
         authorize_production_performance=True,
-        max_cost_usd=40.0,
+        max_cost_usd=0.0,
         gold=GOLD,
         provenance=PROVENANCE,
         corpus_manifest=CORPUS_MANIFEST,
@@ -243,15 +313,28 @@ def _args(run_root: Path, usage_db: Path) -> argparse.Namespace:
 def test_closed_selection_is_exact_answerable_file_order_and_text_free_on_disk():
     manifest, items = _prepared()
     raw = json.loads(GOLD.read_text(encoding="utf-8"))
-    expected_ids = [
-        item["id"] for item in raw["items"] if item["expected_behavior"] == "answer"
-    ]
+    expected_ids = [item["id"] for item in raw["items"] if item["expected_behavior"] == "answer"]
 
     assert len(items) == protocol.PLANNED_ATTEMPT_COUNT == 33
+    assert manifest["schema"] == "archivist.production_performance_manifest/2"
+    assert manifest["answer_policy_version_expected"] == "application-compiled-v1"
+    assert manifest["answer_provider_model_expected"] is None
+    assert manifest["generated_prose_model_expected"] == "gpt-5.6-sol"
+    assert manifest["cost_contract"] == {
+        "answer_provider_contract": "providerless_essential_zero_calls",
+        "expected_provider_event_count_per_attempt": 0,
+        "public_rag_request_cost_ceiling_version": "public-rag-request-ceiling-v1",
+        "public_rag_request_cost_ceiling_nano_usd": 2_000_000_000,
+        "max_next_attempt_cost_usd": 0.0,
+        "max_next_attempt_cost_nano_usd": 0,
+        "ceiling_enforcement": (
+            "essential_is_providerless_and_request_scoped_usage_must_remain_zero"
+        ),
+        "unpriced_events_allowed": False,
+        "scope": "exact_request_ids_in_this_cohort",
+    }
     assert [item.item_id for item in items] == expected_ids
-    assert [binding["ordinal"] for binding in manifest["item_bindings"]] == list(
-        range(1, 34)
-    )
+    assert [binding["ordinal"] for binding in manifest["item_bindings"]] == list(range(1, 34))
     assert all("question" not in binding for binding in manifest["item_bindings"])
     assert manifest["request_contract"] == {
         "delivery": "complete",
@@ -268,6 +351,59 @@ def test_closed_selection_is_exact_answerable_file_order_and_text_free_on_disk()
         "minimum_start_interval_seconds": 12.0,
         "request_timeout_seconds": 240.0,
     }
+
+
+def test_runtime_identity_requires_application_compiled_v3_contract():
+    manifest, _items = _prepared()
+    identity = _runtime_identity(manifest)
+
+    assert protocol.validate_runtime_identity(identity, manifest=manifest) == identity
+
+    obsolete_identity = {**identity, "schema": "archivist.public_runtime_identity/2"}
+    with pytest.raises(
+        protocol.ProductionPerformanceError,
+        match="unsupported identity contract",
+    ):
+        protocol.validate_runtime_identity(obsolete_identity, manifest=manifest)
+
+
+def test_loader_and_runtime_validator_preserve_sealed_v1_contract(tmp_path):
+    manifest = _legacy_manifest()
+    path = tmp_path / "prepared-manifest.json"
+    protocol.write_json_no_overwrite(path, manifest)
+
+    loaded = protocol.load_prepared_manifest(path)
+
+    assert loaded == manifest
+    assert loaded["artifact_sha256"] == manifest["artifact_sha256"]
+    identity = _legacy_runtime_identity(manifest)
+    assert protocol.validate_runtime_identity(identity, manifest=manifest) == identity
+    with pytest.raises(protocol.ProductionPerformanceError, match="unsupported identity contract"):
+        protocol.validate_runtime_identity(_runtime_identity(_prepared()[0]), manifest=manifest)
+
+
+def test_legacy_v1_summary_remains_reportable_without_contract_rewrite():
+    manifest = _legacy_manifest()
+    _current, items = _prepared()
+    session = _session(manifest)
+    outcomes = [
+        _outcome(manifest, item, duration_ms=float(item.ordinal * 100))[1]
+        for item in items
+    ]
+
+    _private, public = protocol.aggregate_summaries(
+        manifest=manifest,
+        session=session,
+        authorization=_authorization_record(manifest),
+        outcomes=outcomes,
+    )
+
+    assert public["protocol_version"] == "production-performance-v1"
+    assert public["cost"]["recorded_estimated_cost_usd"] == 0.33
+    assert public["authorization"]["max_next_attempt_cost_usd"] == 2.0
+    assert "Enforced maximum accounted per next/unknown attempt: $2.000000" in (
+        protocol.public_report_markdown(public)
+    )
 
 
 def test_prepare_is_offline_even_when_all_client_construction_is_fatal(tmp_path, monkeypatch):
@@ -344,8 +480,8 @@ def test_session_preflight_uses_real_public_health_and_version_contract(tmp_path
 
 
 def test_completed_resume_constructs_no_client_and_makes_no_replacement(tmp_path, monkeypatch):
-    run_root, usage_db, _manifest, _items, _session_value, outcomes = (
-        _materialize_complete_run(tmp_path)
+    run_root, usage_db, _manifest, _items, _session_value, outcomes = _materialize_complete_run(
+        tmp_path
     )
     monkeypatch.setattr(runner, "UsageLedger", lambda _path: _Ledger(outcomes))
 
@@ -358,8 +494,8 @@ def test_completed_resume_constructs_no_client_and_makes_no_replacement(tmp_path
 
 
 def test_report_is_offline_and_public_artifacts_are_closed(tmp_path, monkeypatch):
-    run_root, usage_db, _manifest, items, _session_value, outcomes = (
-        _materialize_complete_run(tmp_path)
+    run_root, usage_db, _manifest, items, _session_value, outcomes = _materialize_complete_run(
+        tmp_path
     )
     monkeypatch.setattr(runner, "UsageLedger", lambda _path: _Ledger(outcomes))
     monkeypatch.setattr(
@@ -437,7 +573,7 @@ def test_terminal_observation_recovers_without_replay_and_process_restart_stops(
             return {"answer_status": "answered"}
 
         def request_usage_totals(self, _request_id):
-            return _usage()
+            return _zero_usage()
 
     recovered = runner._recover_intent(
         run_root=tmp_path,
@@ -500,7 +636,7 @@ def test_post_attempt_is_exactly_once_and_persists_intent_first(tmp_path, monkey
             return {"answer_status": "answered"}
 
         def request_usage_totals(self, _request_id):
-            return _usage()
+            return _zero_usage()
 
     monkeypatch.setattr(runner, "_seconds_until_start_allowed", lambda _root: 0.0)
     outcome = runner._post_one(
@@ -549,9 +685,9 @@ def test_latency_requires_zero_instrumentation_failures_and_uses_closed_estimato
         "p95_seconds": 31.0,
     }
     assert public["authorization"] == {
-        "max_cost_usd": 40.0,
-        "max_next_attempt_cost_usd": 2.0,
-        "max_next_attempt_cost_nano_usd": 2_000_000_000,
+        "max_cost_usd": 0.0,
+        "max_next_attempt_cost_usd": 0.0,
+        "max_next_attempt_cost_nano_usd": 0,
         "request_cost_ceiling_version": "public-rag-request-ceiling-v1",
         "cost_ceiling_enforcement": manifest["cost_contract"]["ceiling_enforcement"],
     }
@@ -580,17 +716,22 @@ def test_zero_latency_eligible_rows_still_emit_honest_public_report():
     assert "unavailable (zero latency-eligible completions)" in report
 
 
-def test_authorization_cannot_be_smaller_than_enforced_next_attempt_maximum(tmp_path):
+def test_providerless_authorization_requires_an_exact_zero_cap(tmp_path):
     manifest, _items = _prepared()
+    with pytest.raises(protocol.ProductionPerformanceError, match="exactly zero"):
+        runner._authorization(run_root=tmp_path, manifest=manifest, maximum=0.01)
+
+
+def test_legacy_authorization_retains_full_server_enforced_reserve(tmp_path):
+    manifest = _legacy_manifest()
     with pytest.raises(protocol.ProductionPerformanceError, match="server-enforced"):
         runner._authorization(run_root=tmp_path, manifest=manifest, maximum=1.99)
 
 
-def test_valid_public_completion_with_zero_usage_events_is_not_latency_eligible():
+def test_valid_application_compiled_completion_with_zero_usage_is_latency_eligible():
     manifest, items = _prepared()
     intent = protocol.build_attempt_intent(manifest=manifest, item=items[0])
-    usage = _usage(cost=0.0)
-    usage.update({"event_count": 0, "total_tokens": 0})
+    usage = _zero_usage()
     outcome = protocol.build_attempt_outcome(
         manifest=manifest,
         intent=intent,
@@ -613,7 +754,32 @@ def test_valid_public_completion_with_zero_usage_events_is_not_latency_eligible(
         usage_totals=usage,
     )
 
-    assert "zero_usage_events" in outcome["instrumentation_failures"]
+    assert outcome["instrumentation_failures"] == []
+
+
+def test_legacy_valid_completion_still_requires_a_usage_event():
+    manifest = _legacy_manifest()
+    _current, items = _prepared()
+    intent = protocol.build_attempt_intent(manifest=manifest, item=items[0])
+    outcome = protocol.build_attempt_outcome(
+        manifest=manifest,
+        intent=intent,
+        request_id="2" * 32,
+        http_status=200,
+        response_contract_valid=True,
+        response_error_code=None,
+        answer_status="answered",
+        response_payload_sha256="c" * 64,
+        client_duration_ms=104.0,
+        header_duration_ms=100.0,
+        header_commit=COMMIT,
+        header_process_epoch=EPOCH,
+        observation=_observation(items[0], request_id="2" * 32, duration_ms=100.0),
+        diagnostics={"answer_status": "answered"},
+        usage_totals=_zero_usage(),
+    )
+
+    assert outcome["instrumentation_failures"] == ["zero_usage_events"]
 
 
 def test_ambiguous_terminal_outcome_closes_fixed_denominator_with_reserved_cost():
@@ -647,8 +813,8 @@ def test_ambiguous_terminal_outcome_closes_fixed_denominator_with_reserved_cost(
     assert public["instrumentation_failure_count"] == 1
     assert public["latency_eligible_completion_count"] == 32
     assert public["cost"]["estimated_cost_usd"] is None
-    assert public["cost"]["recorded_estimated_cost_usd"] == 0.32
-    assert public["cost"]["authorization_accounted_cost_usd"] == 2.32
+    assert public["cost"]["recorded_estimated_cost_usd"] == 0.0
+    assert public["cost"]["authorization_accounted_cost_usd"] == 0.0
     assert "Attempts with unavailable usage: 1" in report
 
 
@@ -746,8 +912,32 @@ def test_recorded_request_cost_cannot_exceed_deployed_per_request_ceiling():
         )
 
 
+def test_providerless_outcome_marks_any_provider_event_as_instrumentation_failure():
+    manifest, items = _prepared()
+    intent = protocol.build_attempt_intent(manifest=manifest, item=items[0])
+    outcome = protocol.build_attempt_outcome(
+        manifest=manifest,
+        intent=intent,
+        request_id="3" * 32,
+        http_status=200,
+        response_contract_valid=True,
+        response_error_code=None,
+        answer_status="answered",
+        response_payload_sha256="c" * 64,
+        client_duration_ms=104.0,
+        header_duration_ms=100.0,
+        header_commit=COMMIT,
+        header_process_epoch=EPOCH,
+        observation=_observation(items[0], request_id="3" * 32, duration_ms=100.0),
+        diagnostics={"answer_status": "answered"},
+        usage_totals=_usage(),
+    )
+
+    assert outcome["instrumentation_failures"] == ["unexpected_provider_usage"]
+
+
 def test_next_attempt_capacity_reserves_full_server_enforced_maximum():
-    manifest, _items = _prepared()
+    manifest = _legacy_manifest()
     authorization = _authorization_record(manifest, maximum=4.0)
 
     runner._require_next_attempt_capacity(

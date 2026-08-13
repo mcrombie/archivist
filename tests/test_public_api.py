@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 import web_api
 from costs import CostLimitExceeded, UsageLedger, current_usage_context
@@ -28,9 +29,7 @@ from web_project import source_payload
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-LOCATOR_PATH = (
-    BASE_DIR / "fixtures" / "edition_locators" / "typeset_pdf_0706.json"
-)
+LOCATOR_PATH = BASE_DIR / "fixtures" / "edition_locators" / "typeset_pdf_0706.json"
 MANIFEST_PATH = BASE_DIR / "fixtures" / "corpus_manifest.json"
 
 
@@ -100,11 +99,7 @@ def synthetic_chunks(count: int) -> list[dict[str, object]]:
 
 def all_keys(value: object) -> set[str]:
     if isinstance(value, dict):
-        return set(value) | {
-            key
-            for child in value.values()
-            for key in all_keys(child)
-        }
+        return set(value) | {key for child in value.values() for key in all_keys(child)}
     if isinstance(value, list):
         return {key for child in value for key in all_keys(child)}
     return set()
@@ -112,9 +107,7 @@ def all_keys(value: object) -> set[str]:
 
 def test_public_profile_requires_a_server_budget():
     try:
-        ExposureSettings.from_env(
-            {"ARCHIVIST_EXPOSURE_PROFILE": "public_demo"}
-        )
+        ExposureSettings.from_env({"ARCHIVIST_EXPOSURE_PROFILE": "public_demo"})
     except ExposureConfigurationError as exc:
         assert "ARCHIVIST_PUBLIC_MONTHLY_BUDGET_USD" in str(exc)
     else:
@@ -122,18 +115,24 @@ def test_public_profile_requires_a_server_budget():
 
 
 def test_deployment_commit_validation_never_masks_render_identity():
-    assert validated_deployment_commit(
-        {
-            "ARCHIVIST_DEPLOY_COMMIT": "invalid-local-override",
-            "RENDER_GIT_COMMIT": "A" * 40,
-        }
-    ) == "a" * 40
-    assert validated_deployment_commit(
-        {
-            "ARCHIVIST_DEPLOY_COMMIT": "b" * 40,
-            "RENDER_GIT_COMMIT": "c" * 40,
-        }
-    ) == "c" * 40
+    assert (
+        validated_deployment_commit(
+            {
+                "ARCHIVIST_DEPLOY_COMMIT": "invalid-local-override",
+                "RENDER_GIT_COMMIT": "A" * 40,
+            }
+        )
+        == "a" * 40
+    )
+    assert (
+        validated_deployment_commit(
+            {
+                "ARCHIVIST_DEPLOY_COMMIT": "b" * 40,
+                "RENDER_GIT_COMMIT": "c" * 40,
+            }
+        )
+        == "c" * 40
+    )
     assert (
         validated_deployment_commit(
             {
@@ -143,9 +142,7 @@ def test_deployment_commit_validation_never_masks_render_identity():
         )
         is None
     )
-    assert validated_deployment_commit(
-        {"ARCHIVIST_DEPLOY_COMMIT": "E" * 40}
-    ) == "e" * 40
+    assert validated_deployment_commit({"ARCHIVIST_DEPLOY_COMMIT": "E" * 40}) == "e" * 40
 
 
 def test_public_app_exposes_only_the_allowlisted_api(monkeypatch):
@@ -295,31 +292,27 @@ def test_public_version_is_closed_text_free_and_bound_to_frozen_candidate(monkey
         "schema",
         "deployment_commit",
         "process_epoch",
-        "rag_policy_version",
-        "generator_model",
+        "answer_policy_version",
+        "evidence_retrieval_kind",
+        "generated_prose_model",
         "corpus_manifest_sha256",
         "frozen_candidate_commit",
         "frozen_candidate_rag_policy",
         "public_rag_request_cost_ceiling_version",
         "public_rag_request_cost_ceiling_nano_usd",
     }
-    assert payload["schema"] == "archivist.public_runtime_identity/2"
+    assert payload["schema"] == "archivist.public_runtime_identity/3"
     assert payload["deployment_commit"] == "b" * 40
     assert payload["process_epoch"] == web_api.PROCESS_EPOCH
-    assert payload["rag_policy_version"] == "evidence-planned-v26"
-    assert payload["generator_model"] == "gpt-5.6-sol"
-    assert (
-        payload["public_rag_request_cost_ceiling_version"]
-        == "public-rag-request-ceiling-v1"
-    )
+    assert payload["answer_policy_version"] == "application-compiled-v1"
+    assert payload["evidence_retrieval_kind"] == "local_bm25"
+    assert payload["generated_prose_model"] == "gpt-5.6-sol"
+    assert payload["public_rag_request_cost_ceiling_version"] == "public-rag-request-ceiling-v1"
     assert payload["public_rag_request_cost_ceiling_nano_usd"] == 2_000_000_000
     assert len(payload["corpus_manifest_sha256"]) == 64
     for identity_response in (response, health):
         assert identity_response.headers["x-archivist-commit"] == "b" * 40
-        assert (
-            identity_response.headers["x-archivist-process-epoch"]
-            == web_api.PROCESS_EPOCH
-        )
+        assert identity_response.headers["x-archivist-process-epoch"] == web_api.PROCESS_EPOCH
     assert not {
         "question",
         "answer",
@@ -351,13 +344,69 @@ def test_public_rag_reserves_full_request_before_answer_pipeline(monkeypatch):
     request_id = "e" * 32
     with pytest.raises(HTTPException) as exc_info:
         web_api._run_public_question(
-            web_api.PublicQuestionRequest(question="What happened?"),
+            web_api.PublicQuestionRequest(
+                question="What happened?",
+                archivist_mode="professional",
+            ),
             public_settings(),
             request_id=request_id,
         )
 
     assert exc_info.value.status_code == 503
     assert observed == [(2_000_000_000, request_id)]
+
+
+def test_public_essential_compiler_skips_budget_and_request_reservation(monkeypatch):
+    chunks = synthetic_chunks(1)
+    captured: dict[str, object] = {}
+
+    class NoBudgetLedger:
+        def get_settings(self):
+            raise AssertionError("providerless compiler must not configure a public budget")
+
+        def budget_state(self):
+            raise AssertionError("providerless compiler must not read a public budget")
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+    def fake_answer(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            answer="Alpha evidence 1 supports this answer. [Source 1]",
+            final_chunks=chunks,
+            status="application_compiled",
+        )
+
+    monkeypatch.setattr(web_api, "UsageLedger", NoBudgetLedger)
+    monkeypatch.setattr(
+        web_api,
+        "enforce_projected_usage_budget",
+        lambda *_args, **_kwargs: pytest.fail("providerless compiler must not reserve $2"),
+    )
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+
+    response = web_api._run_public_question(
+        web_api.PublicQuestionRequest(question="What happened?"),
+        public_settings(),
+    )
+
+    assert response["answer_status"] == "application_compiled"
+    assert captured["application_compiled"] is True
+
+
+def test_public_progressive_preflight_skips_budget_for_essential_compiler(monkeypatch):
+    monkeypatch.setattr(
+        web_api,
+        "UsageLedger",
+        lambda: (_ for _ in ()).throw(AssertionError("budget preflight must not start")),
+    )
+
+    web_api._preflight_public_progressive_question(
+        web_api.PublicQuestionRequest(question="What happened?"),
+        public_settings(),
+    )
 
 
 def test_public_complete_validation_error_is_correlated_and_persisted(monkeypatch):
@@ -418,19 +467,54 @@ def test_public_request_rejects_client_tuning_and_budget_bypass(monkeypatch):
     monkeypatch.setattr(web_api, "_public_project_config", lambda _settings: ready_config())
     client = TestClient(web_api.create_app(public_settings()))
 
-    for forbidden in ({"allow_over_budget": True}, {"n_results": 12}):
+    for forbidden in (
+        {"allow_over_budget": True},
+        {"n_results": 12},
+        {"rag_policy_version": web_api.COMPACT_RAG_POLICY_VERSION},
+    ):
         response = client.post(
             "/api/projects/current/question",
             json={"question": "What happened?", **forbidden},
         )
         assert response.status_code == 422
 
+    with pytest.raises(ValidationError):
+        web_api.PublicQuestionRequest.model_validate(
+            {
+                "question": "What happened?",
+                "rag_policy_version": web_api.COMPACT_RAG_POLICY_VERSION,
+            }
+        )
+
+
+@pytest.mark.parametrize("mode", ("forest", "cromb_coo_coo", "cosmic_almanac"))
+def test_public_request_rejects_temporarily_hidden_modes(mode):
+    with pytest.raises(ValidationError, match="temporarily unavailable"):
+        web_api.PublicQuestionRequest(question="What happened?", archivist_mode=mode)
+
+
+def test_public_essential_rejects_prose_only_overrides():
+    with pytest.raises(ValidationError, match="does not use prose settings"):
+        web_api.PublicQuestionRequest(
+            question="What happened?",
+            archivist_mode="essential",
+            worldview="pious",
+        )
+
+
+@pytest.mark.parametrize("request_model", (web_api.QuestionRequest, web_api.PublicQuestionRequest))
+def test_essential_rejects_generative_full_context_scope(request_model):
+    with pytest.raises(ValidationError, match="zero-provider direct-evidence mode"):
+        request_model(
+            question="What happened?",
+            archivist_mode="essential",
+            answer_strategy="full_context",
+        )
+
 
 def test_public_request_size_is_enforced_when_content_length_lies(monkeypatch):
     monkeypatch.setattr(web_api, "_public_project_config", lambda _settings: ready_config())
-    client = TestClient(
-        web_api.create_app(public_settings(max_request_bytes=400))
-    )
+    client = TestClient(web_api.create_app(public_settings(max_request_bytes=400)))
 
     response = client.post(
         "/api/projects/current/question",
@@ -443,14 +527,12 @@ def test_public_request_size_is_enforced_when_content_length_lies(monkeypatch):
 
     assert response.status_code == 413
     assert response.json()["detail"]["code"] == "request_too_large"
-    assert (
-        response.json()["detail"]["request_id"]
-        == response.headers["x-request-id"]
-    )
+    assert response.json()["detail"]["request_id"] == response.headers["x-request-id"]
     assert response.headers["server-timing"].startswith("app;dur=")
     assert (
-        UsageLedger()
-        .get_public_request_observation(response.headers["x-request-id"])["http_status"]
+        UsageLedger().get_public_request_observation(response.headers["x-request-id"])[
+            "http_status"
+        ]
         == 413
     )
     assert response.headers["x-content-type-options"] == "nosniff"
@@ -460,8 +542,7 @@ def test_public_request_size_is_enforced_when_content_length_lies(monkeypatch):
 def test_public_source_payload_preserves_numbers_and_bounds_excerpts():
     chunks = synthetic_chunks(5)
     answer = " ".join(
-        f"Alpha evidence {number} supports this claim. [Source {number}]"
-        for number in range(1, 6)
+        f"Alpha evidence {number} supports this claim. [Source {number}]" for number in range(1, 6)
     )
 
     payload = public_source_payload(
@@ -510,12 +591,12 @@ def test_public_question_response_omits_internal_diagnostics_and_costs(monkeypat
 
     monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
     monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+
     def fake_answer(*_args, **_kwargs):
         observed_request_ids.append(current_usage_context().request_id)
         return SimpleNamespace(
             answer=(
-                "Alpha evidence 1 directly supports the requested historical claim. "
-                "[Source 1]"
+                "Alpha evidence 1 directly supports the requested historical claim. [Source 1]"
             ),
             final_chunks=chunks,
             status="answered",
@@ -595,6 +676,7 @@ def test_public_full_context_rejects_long_reproduction_from_uncited_chunk(monkey
         web_api._run_public_question(
             web_api.PublicQuestionRequest(
                 question="What happened?",
+                archivist_mode="professional",
                 answer_strategy="full_context",
             ),
             public_settings(
@@ -709,6 +791,7 @@ def test_public_full_context_request_is_rejected_when_the_server_disables_it():
         web_api._run_public_question(
             web_api.PublicQuestionRequest(
                 question="What happened?",
+                archivist_mode="professional",
                 answer_strategy="full_context",
             ),
             settings,
@@ -725,10 +808,13 @@ def test_public_full_context_needs_both_switches_and_is_off_by_default():
     assert public_settings().full_context_available is False
     assert public_settings(full_context_enabled=True).full_context_available is False
     assert public_settings(public_full_context_enabled=True).full_context_available is False
-    assert public_settings(
-        full_context_enabled=True,
-        public_full_context_enabled=True,
-    ).full_context_available is True
+    assert (
+        public_settings(
+            full_context_enabled=True,
+            public_full_context_enabled=True,
+        ).full_context_available
+        is True
+    )
 
 
 def test_public_config_reports_full_context_availability_for_its_own_profile():
@@ -807,7 +893,11 @@ def test_development_endpoint_rejects_a_disabled_full_context_request(monkeypatc
     try:
         web_api.question(
             "current",
-            web_api.QuestionRequest(question="What happened?", answer_strategy="full_context"),
+            web_api.QuestionRequest(
+                question="What happened?",
+                archivist_mode="professional",
+                answer_strategy="full_context",
+            ),
         )
     except HTTPException as exc:
         assert exc.status_code == 422
@@ -817,7 +907,10 @@ def test_development_endpoint_rejects_a_disabled_full_context_request(monkeypatc
 
     # Rejected before any pipeline work, so nothing was spent.
     assert called == []
-    assert web_api._feature_flags(
-        ExposureProfile.DEVELOPMENT,
-        ExposureSettings.development(full_context_enabled=True),
-    )["full_context_answers"] is True
+    assert (
+        web_api._feature_flags(
+            ExposureProfile.DEVELOPMENT,
+            ExposureSettings.development(full_context_enabled=True),
+        )["full_context_answers"]
+        is True
+    )

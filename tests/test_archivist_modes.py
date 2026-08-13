@@ -11,8 +11,10 @@ from archivist_modes import (
     ArchivistMode,
     archivist_mode_metadata,
     build_archivist_mode_prompt_block,
+    resolve_archivist_mode_settings,
 )
 from perspectives import AnswerVoice, HistoriographicalLens, Worldview
+from prose_renderer import evidence_prose_prompt_metadata
 from prompts import build_answer_prompt, build_interpretive_answer_prompt
 
 
@@ -140,28 +142,66 @@ def test_omitted_mode_is_essential_and_preserves_the_prompt_byte_for_byte():
         ),
     ],
 )
-def test_explicit_mode_resolves_defaults(mode, lens, voice, worldview):
-    request = web_api.QuestionRequest(
-        question="What happened?",
-        archivist_mode=mode,
+def test_registered_mode_resolves_defaults(mode, lens, voice, worldview):
+    selected_mode, selected_lens, selected_voice, selected_worldview = (
+        resolve_archivist_mode_settings(mode)
     )
 
-    assert request.historiographical_lens is lens
-    assert request.voice is voice
-    assert request.worldview is worldview
+    assert selected_mode is ArchivistMode(mode)
+    assert selected_lens is lens
+    assert selected_voice is voice
+    assert selected_worldview is worldview
+
+
+@pytest.mark.parametrize(
+    "mode",
+    (
+        "professional",
+        "essential",
+        "pretty_pink_princess",
+        "baleful_black_baron",
+    ),
+)
+def test_current_request_contract_accepts_compiled_modes(mode):
+    assert web_api.QuestionRequest(
+        question="What happened?",
+        archivist_mode=mode,
+    ).archivist_mode is ArchivistMode(mode)
+    assert web_api.PublicQuestionRequest(
+        question="What happened?",
+        archivist_mode=mode,
+    ).archivist_mode is ArchivistMode(mode)
+
+
+@pytest.mark.parametrize(
+    "mode",
+    (
+        "forest",
+        "cromb_coo_coo",
+        "tidal_archivist",
+        "ember_and_ink",
+        "illuminated_codex",
+        "cosmic_almanac",
+    ),
+)
+def test_current_request_contract_rejects_dormant_modes(mode):
+    with pytest.raises(ValidationError, match="temporarily unavailable"):
+        web_api.QuestionRequest(question="What happened?", archivist_mode=mode)
+    with pytest.raises(ValidationError, match="temporarily unavailable"):
+        web_api.PublicQuestionRequest(question="What happened?", archivist_mode=mode)
 
 
 def test_advanced_facets_override_mode_defaults():
     request = web_api.QuestionRequest(
         question="What happened?",
-        archivist_mode="forest",
-        historiographical_lens="evidence_first",
-        voice="plainspoken",
+        archivist_mode="professional",
+        historiographical_lens="tragic",
+        voice="romantic",
         worldview="enlightenment_rationalist",
     )
 
-    assert request.historiographical_lens is HistoriographicalLens.EVIDENCE_FIRST
-    assert request.voice is AnswerVoice.PLAINSPOKEN
+    assert request.historiographical_lens is HistoriographicalLens.TRAGIC
+    assert request.voice is AnswerVoice.ROMANTIC
     assert request.worldview is Worldview.ENLIGHTENMENT_RATIONALIST
 
 
@@ -487,6 +527,7 @@ def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):
         history,
         archivist_mode,
         answer_strategy="rag",
+        application_compiled=False,
     ):
         captured.update(
             project_id=project_id,
@@ -497,6 +538,7 @@ def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):
             voice=voice,
             worldview=worldview,
             history=history,
+            application_compiled=application_compiled,
         )
         return SimpleNamespace(
             answer="Synthetic answer [Source 1].",
@@ -505,23 +547,43 @@ def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):
             evidence_decision="direct_answer",
             diagnostics={},
             resolved_question=question,
+            answer_strategy_version="application-compiled-v1",
         )
 
     monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
     request = web_api.QuestionRequest(
         question="What happened?",
-        archivist_mode="forest",
+        archivist_mode="professional",
     )
 
     response = web_api.question("current", request)
 
-    assert captured["archivist_mode"] is ArchivistMode.FOREST
-    assert captured["historiographical_lens"] is HistoriographicalLens.TRAGIC
-    assert captured["voice"] is AnswerVoice.ROMANTIC
-    assert captured["worldview"] is Worldview.NONE
-    assert response["archivist_mode"] == "forest"
+    assert captured["archivist_mode"] is ArchivistMode.PROFESSIONAL
+    assert captured["historiographical_lens"] is HistoriographicalLens.EVIDENCE_FIRST
+    assert captured["voice"] is AnswerVoice.PLAINSPOKEN
+    assert captured["worldview"] is Worldview.SECULAR_HUMANIST
+    assert captured["application_compiled"] is True
+    assert response["archivist_mode"] == "professional"
     assert response["archivist_mode_version"] == "1"
-    assert response["influence_profile_id"] == "dunsany_elfland"
+    assert response["influence_profile_id"] == "professional_public_history"
     assert response["influence_profile_version"] == "1"
     assert len(response["influence_prompt_sha256"]) == 64
-    assert response["influence_provenance"][0]["source_identifier"] == ("project-gutenberg:61077")
+    assert response["influence_provenance"][0]["source_identifier"] == (
+        "project-gutenberg:28555"
+    )
+    renderer_metadata = evidence_prose_prompt_metadata(
+        ArchivistMode.PROFESSIONAL,
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.PLAINSPOKEN,
+        worldview=Worldview.SECULAR_HUMANIST,
+    )
+    assert response["prose_renderer_version"] == "evidence-prose-renderer-v3"
+    assert response["prose_renderer_prompt_sha256"] == renderer_metadata[
+        "prose_renderer_prompt_sha256"
+    ]
+    assert response["prose_renderer_mode_instruction_sha256"] == renderer_metadata[
+        "prose_renderer_mode_instruction_sha256"
+    ]
+    assert response["prose_renderer_influence_prompt_sha256"] == response[
+        "influence_prompt_sha256"
+    ]

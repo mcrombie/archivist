@@ -10,10 +10,18 @@ cannot be certified under weaker rules than the writer applies.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections.abc import Mapping
 from datetime import datetime
+
+from answer_coverage import (
+    CompactEvidenceCoverageAnswer,
+    CompactInterpretiveEvidenceCoverageAnswer,
+    EvidenceCoverageAnswer,
+    InterpretiveEvidenceCoverageAnswer,
+)
 
 
 RETRIEVAL_TRACE_SCHEMA = "archivist.retrieval_trace/13"
@@ -397,6 +405,9 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "generator_model",
             "generator_reasoning_effort",
             "generator_verbosity",
+            "expanded_schema",
+            "expanded_schema_sha256",
+            "expander_version",
             "instructions_sha256",
             "inspection_scope_count",
             "inspection_scopes",
@@ -413,6 +424,8 @@ _OBJECT_FIELDS: dict[tuple[str, ...], frozenset[str]] = {
             "premise_source_scopes",
             "premise_status_counts",
             "prompt_version",
+            "provider_schema",
+            "provider_schema_sha256",
             "request_schema",
             "renderer_version",
             "realized_stage_count",
@@ -1099,6 +1112,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-planned-v24",
             "evidence-planned-v25",
             "evidence-planned-v26",
+            "evidence-planned-v27",
         }
     ),
     "prompt_version": frozenset(
@@ -1113,8 +1127,22 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "evidence-coverage-v9",
             "evidence-coverage-v10",
             "evidence-coverage-v11",
+            "evidence-coverage-v12",
         }
     ),
+    "provider_schema": frozenset(
+        {
+            "archivist.compact_evidence_coverage/1",
+            "archivist.compact_interpretive_evidence_coverage/1",
+        }
+    ),
+    "expanded_schema": frozenset(
+        {
+            "archivist.evidence_coverage/5",
+            "archivist.interpretive_evidence_coverage/3",
+        }
+    ),
+    "expander_version": frozenset({"compact-evidence-expander/1"}),
     "pool_names": frozenset({"canonical", "mechanism", "provider"}),
     "request_schema": frozenset(
         {
@@ -1122,6 +1150,7 @@ _EXACT_STRING_VALUES: dict[str, frozenset[str]] = {
             "archivist.answer_request/4",
             "archivist.answer_request/5",
             "archivist.answer_request/6",
+            "archivist.answer_request/7",
         }
     ),
     "reason": frozenset(
@@ -1258,11 +1287,122 @@ _CHUNK_ID_ARRAY_FIELDS = frozenset(
     }
 )
 
+_COMPACT_GENERATION_METADATA_FIELDS = frozenset(
+    {
+        "provider_schema",
+        "provider_schema_sha256",
+        "expanded_schema",
+        "expanded_schema_sha256",
+        "expander_version",
+    }
+)
+_COMPACT_GENERATION_SCHEMA_PAIRS = {
+    "archivist.compact_evidence_coverage/1": "archivist.evidence_coverage/5",
+    "archivist.compact_interpretive_evidence_coverage/1": (
+        "archivist.interpretive_evidence_coverage/3"
+    ),
+}
+_COMPACT_GENERATION_PROVIDER_SCHEMA_MODELS = {
+    "archivist.compact_evidence_coverage/1": CompactEvidenceCoverageAnswer,
+    "archivist.compact_interpretive_evidence_coverage/1": (
+        CompactInterpretiveEvidenceCoverageAnswer
+    ),
+}
+_COMPACT_GENERATION_EXPANDED_SCHEMA_MODELS = {
+    "archivist.evidence_coverage/5": EvidenceCoverageAnswer,
+    "archivist.interpretive_evidence_coverage/3": InterpretiveEvidenceCoverageAnswer,
+}
+_COMPACT_GENERATION_POLICY_VERSION = "evidence-planned-v27"
+_COMPACT_GENERATION_PROMPT_VERSION = "evidence-coverage-v12"
+_COMPACT_GENERATION_REQUEST_SCHEMA = "archivist.answer_request/7"
+_COMPACT_GENERATION_EXPANDER_VERSION = "compact-evidence-expander/1"
+
 
 def document_identifier_sha256(value: object) -> str:
     """Return the stable trace identifier for a corpus document label."""
 
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def _pydantic_schema_sha256(schema_model: type[object]) -> str:
+    model_json_schema = getattr(schema_model, "model_json_schema")
+    canonical_json = json.dumps(
+        model_json_schema(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def _validate_compact_generation_metadata(trace: Mapping[str, object]) -> None:
+    """Require a complete, internally coherent compact-contract audit record."""
+
+    raw_generation = trace.get("generation_contract")
+    generation = raw_generation if isinstance(raw_generation, Mapping) else None
+    raw_plan = trace.get("plan")
+    plan = raw_plan if isinstance(raw_plan, Mapping) else None
+    policy_version = plan.get("policy_version") if plan is not None else None
+
+    present_fields = (
+        _COMPACT_GENERATION_METADATA_FIELDS.intersection(generation)
+        if generation is not None
+        else frozenset()
+    )
+    candidate_declared = bool(present_fields)
+    candidate_signalled = candidate_declared or policy_version == _COMPACT_GENERATION_POLICY_VERSION
+    if generation is not None:
+        candidate_signalled = candidate_signalled or (
+            generation.get("prompt_version") == _COMPACT_GENERATION_PROMPT_VERSION
+            or generation.get("request_schema") == _COMPACT_GENERATION_REQUEST_SCHEMA
+        )
+    if not candidate_signalled:
+        return
+
+    if present_fields != _COMPACT_GENERATION_METADATA_FIELDS:
+        missing = sorted(_COMPACT_GENERATION_METADATA_FIELDS - present_fields)
+        raise ValueError(
+            "compact generation trace metadata must be all-or-none; missing " + ", ".join(missing)
+        )
+    assert generation is not None
+
+    if plan is not None and policy_version != _COMPACT_GENERATION_POLICY_VERSION:
+        raise ValueError("compact generation trace must use evidence-planned-v27")
+    if generation.get("prompt_version") != _COMPACT_GENERATION_PROMPT_VERSION:
+        raise ValueError("compact generation trace must use evidence-coverage-v12")
+    if generation.get("request_schema") != _COMPACT_GENERATION_REQUEST_SCHEMA:
+        raise ValueError("compact generation trace must use archivist.answer_request/7")
+    if generation.get("expander_version") != _COMPACT_GENERATION_EXPANDER_VERSION:
+        raise ValueError("compact generation trace has an unsupported expander version")
+
+    provider_schema = generation.get("provider_schema")
+    expanded_schema = generation.get("expanded_schema")
+    if (
+        not isinstance(provider_schema, str)
+        or _COMPACT_GENERATION_SCHEMA_PAIRS.get(provider_schema) != expanded_schema
+    ):
+        raise ValueError("compact generation trace has an invalid schema expansion pair")
+
+    provider_schema_sha256 = generation.get("provider_schema_sha256")
+    expanded_schema_sha256 = generation.get("expanded_schema_sha256")
+    if not isinstance(provider_schema_sha256, str) or not isinstance(expanded_schema_sha256, str):
+        raise ValueError("compact generation trace schema hashes must be strings")
+    legacy_schema_sha256 = generation.get("schema_sha256")
+    if legacy_schema_sha256 is not None and legacy_schema_sha256 != provider_schema_sha256:
+        raise ValueError("compact generation trace schema_sha256 must identify the provider schema")
+
+    provider_schema_model = _COMPACT_GENERATION_PROVIDER_SCHEMA_MODELS[provider_schema]
+    if provider_schema_sha256 != _pydantic_schema_sha256(provider_schema_model):
+        raise ValueError(
+            "compact generation trace provider_schema_sha256 does not match the "
+            "declared provider schema"
+        )
+    assert isinstance(expanded_schema, str)
+    expanded_schema_model = _COMPACT_GENERATION_EXPANDED_SCHEMA_MODELS[expanded_schema]
+    if expanded_schema_sha256 != _pydantic_schema_sha256(expanded_schema_model):
+        raise ValueError(
+            "compact generation trace expanded_schema_sha256 does not match the "
+            "declared expanded schema"
+        )
 
 
 def validate_text_free_retrieval_trace(trace: object) -> None:
@@ -1396,6 +1536,8 @@ def validate_text_free_retrieval_trace(trace: object) -> None:
             validate_string(item, path)
 
     walk(trace, ())
+    if isinstance(trace, Mapping):
+        _validate_compact_generation_metadata(trace)
     unbound_documents = distributed_document_hashes - referenced_document_hashes
     if unbound_documents:
         raise ValueError(

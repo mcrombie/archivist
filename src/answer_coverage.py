@@ -30,6 +30,9 @@ from pydantic import (
 __all__ = [
     "ALL_UNSUPPORTED_MESSAGE",
     "CITATION_GRAMMAR",
+    "COMPACT_EVIDENCE_COVERAGE_SCHEMA",
+    "COMPACT_EVIDENCE_EXPANDER_VERSION",
+    "COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA",
     "EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA",
     "EVIDENCE_COVERAGE_NORMALIZER_VERSION",
     "EVIDENCE_COVERAGE_RENDERER_VERSION",
@@ -41,6 +44,12 @@ __all__ = [
     "NO_SOURCES_MESSAGE",
     "AnswerUnit",
     "AnswerUnitRole",
+    "CompactAnswerUnit",
+    "CompactEvidenceCoverageAnswer",
+    "CompactEvidenceDimensionCoverage",
+    "CompactEvidenceObligationCoverage",
+    "CompactInterpretiveEvidenceCoverageAnswer",
+    "CompactRequirementCoverage",
     "ContentCompletenessContext",
     "ContentCompletenessProfile",
     "ContentOutcome",
@@ -72,18 +81,26 @@ __all__ = [
     "RequirementStatus",
     "ValidatedEvidenceCoverage",
     "coverage_diagnostic_summary",
+    "expand_compact_evidence_coverage",
+    "expand_compact_interpretive_evidence_coverage",
     "parse_citation_numbers",
+    "process_compact_evidence_coverage",
+    "process_compact_interpretive_evidence_coverage",
     "process_evidence_coverage",
     "process_interpretive_evidence_coverage",
     "render_evidence_coverage",
     "validate_evidence_coverage",
     "validate_evidence_coverage_context",
+    "validate_streamable_compact_answer_unit",
     "validate_streamable_answer_unit",
 ]
 
 
 EVIDENCE_COVERAGE_SCHEMA = "archivist.evidence_coverage/5"
 INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = "archivist.interpretive_evidence_coverage/3"
+COMPACT_EVIDENCE_COVERAGE_SCHEMA = "archivist.compact_evidence_coverage/1"
+COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA = "archivist.compact_interpretive_evidence_coverage/1"
+COMPACT_EVIDENCE_EXPANDER_VERSION = "compact-evidence-expander/1"
 EVIDENCE_COVERAGE_DIAGNOSTIC_SCHEMA = "archivist.evidence_coverage_diagnostics/8"
 EVIDENCE_COVERAGE_RENDERER_VERSION = "evidence-coverage-renderer/2"
 EVIDENCE_COVERAGE_NORMALIZER_VERSION = "evidence-coverage-normalizer/7"
@@ -544,6 +561,101 @@ class EvidenceCoverageAnswer(_ContractModel):
     @property
     def schema(self) -> str:
         return self.schema_version
+
+
+class CompactAnswerUnit(_ContractModel):
+    """Provider-owned answer unit without a redundant source-number ledger.
+
+    Source numbers are recovered mechanically from the unit's terminal citation
+    before the existing :class:`AnswerUnit` validator sees the payload.
+    """
+
+    unit_id: Identifier
+    requirement_ids: tuple[Identifier, ...] = Field(max_length=MAX_REQUIREMENTS)
+    role: AnswerUnitRole
+    text: UnitText = Field(
+        description=(
+            "Exactly one complete sentence asserting one independently checkable "
+            "factual claim, followed by exactly one terminal citation group and "
+            "its only ending punctuation. The claim must spell out or rephrase "
+            "period-containing abbreviations, titles, and initials."
+        ),
+        json_schema_extra={"pattern": ATOMIC_CITATION_TEXT_PATTERN},
+    )
+    paragraph: Annotated[int, Field(strict=True, ge=1, le=MAX_ANSWER_UNITS)]
+    obligation_links: tuple[ObligationLink, ...] = Field(
+        default=(),
+        max_length=MAX_EVIDENCE_OBLIGATIONS,
+    )
+
+    @field_validator("text")
+    @classmethod
+    def reject_blank_or_padded_text(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("answer unit text must be nonblank and have no outer whitespace")
+        return value
+
+
+class CompactRequirementCoverage(_ContractModel):
+    """Provider judgment for one requirement; mappings are derived locally."""
+
+    requirement_id: Identifier
+    status: RequirementStatus
+
+
+class CompactEvidenceDimensionCoverage(_ContractModel):
+    """Provider judgment for one ordered obligation dimension."""
+
+    dimension: EvidenceDimension
+    status: RequirementStatus
+
+
+class CompactEvidenceObligationCoverage(_ContractModel):
+    obligation_id: Identifier
+    dimensions: tuple[CompactEvidenceDimensionCoverage, ...] = Field(
+        min_length=1,
+        max_length=MAX_OBLIGATION_DIMENSIONS,
+    )
+
+
+class CompactEvidenceCoverageAnswer(_ContractModel):
+    """Representation-only compact form of ``EvidenceCoverageAnswer``."""
+
+    schema_version: Literal["archivist.compact_evidence_coverage/1"] = Field(alias="schema")
+    answer_units: tuple[CompactAnswerUnit, ...] = Field(max_length=MAX_ANSWER_UNITS)
+    premise_decisions: tuple[PremiseDecision, ...] = Field(max_length=MAX_PREMISES)
+    coverage: tuple[CompactRequirementCoverage, ...] = Field(
+        min_length=1,
+        max_length=MAX_REQUIREMENTS,
+    )
+    obligation_coverage: tuple[CompactEvidenceObligationCoverage, ...] = Field(
+        default=(),
+        max_length=MAX_EVIDENCE_OBLIGATIONS,
+    )
+
+    @property
+    def schema(self) -> str:
+        return self.schema_version
+
+
+class CompactInterpretiveEvidenceCoverageAnswer(CompactEvidenceCoverageAnswer):
+    """Compact factual ledgers plus the unchanged interpretive framing fields."""
+
+    schema_version: Literal["archivist.compact_interpretive_evidence_coverage/1"] = Field(
+        alias="schema"
+    )
+    interpretive_moves: tuple[InterpretiveMove, ...] = Field(min_length=1, max_length=2)
+    interpretive_preface: InterpretivePrefaceText
+    interpretive_coda: InterpretiveCodaText
+
+    @field_validator("interpretive_preface", "interpretive_coda")
+    @classmethod
+    def reject_blank_padded_or_multiline_framing(cls, value: str) -> str:
+        if not value.strip() or value != value.strip() or "\n" in value or "\r" in value:
+            raise ValueError(
+                "interpretive framing must be one nonblank paragraph with no outer whitespace"
+            )
+        return value
 
 
 class InterpretiveEvidenceCoverageAnswer(EvidenceCoverageAnswer):
@@ -1818,6 +1930,384 @@ def validate_evidence_coverage_context(
     )
 
 
+def process_compact_evidence_coverage(
+    payload: CompactEvidenceCoverageAnswer | Mapping[str, Any] | None,
+    *,
+    requirement_ids: Sequence[str],
+    premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
+    source_count: int,
+    requirement_labels: Mapping[str, str] | None = None,
+    completeness_context: ContentCompletenessContext | Mapping[str, Any] | None = None,
+    refused: bool = False,
+) -> EvidenceCoverageResult:
+    """Expand compact output, then use the unchanged canonical processor."""
+
+    try:
+        context = validate_evidence_coverage_context(
+            requirement_ids,
+            premise_ids,
+            premise_source_scopes,
+            obligation_scopes,
+            source_count,
+        )
+    except CoverageContractError as error:
+        return _contract_failure_result(context=None, error_code=error.code)
+    if context.source_count == 0 or refused or payload is None:
+        return process_evidence_coverage(
+            None,
+            requirement_ids=context.requirement_ids,
+            premise_ids=context.premise_ids,
+            premise_source_scopes=context.premise_source_scopes,
+            obligation_scopes=context.obligation_scopes,
+            source_count=context.source_count,
+            requirement_labels=requirement_labels,
+            completeness_context=completeness_context,
+            refused=refused,
+        )
+    try:
+        expanded = expand_compact_evidence_coverage(
+            payload,
+            requirement_ids=context.requirement_ids,
+            premise_ids=context.premise_ids,
+            premise_source_scopes=context.premise_source_scopes,
+            obligation_scopes=context.obligation_scopes,
+            source_count=context.source_count,
+        )
+    except CoverageContractError as error:
+        return _contract_failure_result(
+            context=context,
+            error_code=error.code,
+            citation_locality_failure=error.citation_locality_failure,
+        )
+    return process_evidence_coverage(
+        expanded,
+        requirement_ids=context.requirement_ids,
+        premise_ids=context.premise_ids,
+        premise_source_scopes=context.premise_source_scopes,
+        obligation_scopes=context.obligation_scopes,
+        source_count=context.source_count,
+        requirement_labels=requirement_labels,
+        completeness_context=completeness_context,
+    )
+
+
+def process_compact_interpretive_evidence_coverage(
+    payload: CompactInterpretiveEvidenceCoverageAnswer | Mapping[str, Any] | None,
+    *,
+    required_moves: Sequence[InterpretiveMove],
+    question_anchors: Sequence[str] = (),
+    requirement_ids: Sequence[str],
+    premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
+    source_count: int,
+    requirement_labels: Mapping[str, str] | None = None,
+    completeness_context: ContentCompletenessContext | Mapping[str, Any] | None = None,
+    refused: bool = False,
+) -> EvidenceCoverageResult:
+    """Expand compact interpretive output, then use the canonical processor."""
+
+    try:
+        context = validate_evidence_coverage_context(
+            requirement_ids,
+            premise_ids,
+            premise_source_scopes,
+            obligation_scopes,
+            source_count,
+        )
+        _validate_required_interpretive_moves(required_moves)
+        _validate_interpretive_question_anchors(question_anchors)
+    except CoverageContractError as error:
+        return _contract_failure_result(context=None, error_code=error.code)
+    if context.source_count == 0 or refused or payload is None:
+        return process_interpretive_evidence_coverage(
+            None,
+            required_moves=required_moves,
+            question_anchors=question_anchors,
+            requirement_ids=context.requirement_ids,
+            premise_ids=context.premise_ids,
+            premise_source_scopes=context.premise_source_scopes,
+            obligation_scopes=context.obligation_scopes,
+            source_count=context.source_count,
+            requirement_labels=requirement_labels,
+            completeness_context=completeness_context,
+            refused=refused,
+        )
+    try:
+        expanded = expand_compact_interpretive_evidence_coverage(
+            payload,
+            requirement_ids=context.requirement_ids,
+            premise_ids=context.premise_ids,
+            premise_source_scopes=context.premise_source_scopes,
+            obligation_scopes=context.obligation_scopes,
+            source_count=context.source_count,
+        )
+    except CoverageContractError as error:
+        return _contract_failure_result(
+            context=context,
+            error_code=error.code,
+            citation_locality_failure=error.citation_locality_failure,
+        )
+    return process_interpretive_evidence_coverage(
+        expanded,
+        required_moves=required_moves,
+        question_anchors=question_anchors,
+        requirement_ids=context.requirement_ids,
+        premise_ids=context.premise_ids,
+        premise_source_scopes=context.premise_source_scopes,
+        obligation_scopes=context.obligation_scopes,
+        source_count=context.source_count,
+        requirement_labels=requirement_labels,
+        completeness_context=completeness_context,
+    )
+
+
+def expand_compact_evidence_coverage(
+    payload: CompactEvidenceCoverageAnswer | Mapping[str, Any],
+    *,
+    requirement_ids: Sequence[str],
+    premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
+    source_count: int,
+) -> EvidenceCoverageAnswer:
+    """Expand compact provider output into the existing canonical contract.
+
+    The adapter adds no model judgment. It copies provider-owned prose and
+    statuses, derives source numbers from terminal citations, derives mapping
+    ledgers from unit links, and derives the deterministic gap reason belonging
+    to each status. The existing strict validator remains the only authority
+    that can accept the resulting answer.
+    """
+
+    context = validate_evidence_coverage_context(
+        requirement_ids,
+        premise_ids,
+        premise_source_scopes,
+        obligation_scopes,
+        source_count,
+    )
+    answer = _parse_compact_payload(payload, CompactEvidenceCoverageAnswer)
+    expanded = _expand_compact_factual_fields(answer, context=context)
+    return EvidenceCoverageAnswer(
+        schema=EVIDENCE_COVERAGE_SCHEMA,
+        **expanded,
+    )
+
+
+def expand_compact_interpretive_evidence_coverage(
+    payload: CompactInterpretiveEvidenceCoverageAnswer | Mapping[str, Any],
+    *,
+    requirement_ids: Sequence[str],
+    premise_ids: Sequence[str] = (),
+    premise_source_scopes: Sequence[PremiseSourceScope | Mapping[str, Any]] = (),
+    obligation_scopes: Sequence[EvidenceObligationScope | Mapping[str, Any]] = (),
+    source_count: int,
+) -> InterpretiveEvidenceCoverageAnswer:
+    """Expand compact interpretive output without changing its framing prose."""
+
+    context = validate_evidence_coverage_context(
+        requirement_ids,
+        premise_ids,
+        premise_source_scopes,
+        obligation_scopes,
+        source_count,
+    )
+    answer = _parse_compact_payload(
+        payload,
+        CompactInterpretiveEvidenceCoverageAnswer,
+    )
+    expanded = _expand_compact_factual_fields(answer, context=context)
+    return InterpretiveEvidenceCoverageAnswer(
+        schema=INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
+        **expanded,
+        interpretive_moves=answer.interpretive_moves,
+        interpretive_preface=answer.interpretive_preface,
+        interpretive_coda=answer.interpretive_coda,
+    )
+
+
+def validate_streamable_compact_answer_unit(
+    payload: CompactAnswerUnit | Mapping[str, Any],
+    *,
+    context: CoverageValidationContext,
+    unit_ordinal: int,
+    seen_unit_ids: Sequence[str] = (),
+    previous_paragraph: int | None = None,
+) -> AnswerUnit:
+    """Expand and validate one compact streamed unit using the legacy authority."""
+
+    try:
+        compact_unit = (
+            payload
+            if type(payload) is CompactAnswerUnit
+            else CompactAnswerUnit.model_validate(payload)
+        )
+        unit = _expand_compact_answer_unit(compact_unit)
+    except CoverageContractError:
+        raise
+    except (TypeError, ValidationError):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
+    return validate_streamable_answer_unit(
+        unit,
+        context=context,
+        unit_ordinal=unit_ordinal,
+        seen_unit_ids=seen_unit_ids,
+        previous_paragraph=previous_paragraph,
+    )
+
+
+def _parse_compact_payload(
+    payload: Any,
+    model_type: type[CompactEvidenceCoverageAnswer],
+) -> CompactEvidenceCoverageAnswer:
+    try:
+        return (
+            payload
+            if type(payload) is model_type
+            else model_type.model_validate(
+                payload.model_dump(mode="python", by_alias=True)
+                if isinstance(payload, BaseModel)
+                else payload
+            )
+        )
+    except (TypeError, ValidationError):
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
+
+
+def _expand_compact_answer_unit(unit: CompactAnswerUnit) -> AnswerUnit:
+    cited_numbers = parse_citation_numbers(unit.text)
+    return AnswerUnit(
+        unit_id=unit.unit_id,
+        requirement_ids=unit.requirement_ids,
+        role=unit.role,
+        text=unit.text,
+        # Preserve the exact parsed tuple. Duplicate citations remain visible
+        # to the existing duplicate-source validator and are never normalized.
+        source_numbers=cited_numbers,
+        paragraph=unit.paragraph,
+        obligation_links=unit.obligation_links,
+    )
+
+
+def _expand_compact_factual_fields(
+    answer: CompactEvidenceCoverageAnswer,
+    *,
+    context: CoverageValidationContext,
+) -> dict[str, Any]:
+    _validate_exact_ids(
+        actual=tuple(record.requirement_id for record in answer.coverage),
+        expected=context.requirement_ids,
+        missing=CoverageValidationErrorCode.MISSING_REQUIREMENT_ID,
+        duplicate=CoverageValidationErrorCode.DUPLICATE_REQUIREMENT_ID,
+        unknown=CoverageValidationErrorCode.UNKNOWN_REQUIREMENT_ID,
+        out_of_order=CoverageValidationErrorCode.OUT_OF_ORDER_REQUIREMENT_ID,
+    )
+    _validate_exact_ids(
+        actual=tuple(record.premise_id for record in answer.premise_decisions),
+        expected=context.premise_ids,
+        missing=CoverageValidationErrorCode.MISSING_PREMISE_ID,
+        duplicate=CoverageValidationErrorCode.DUPLICATE_PREMISE_ID,
+        unknown=CoverageValidationErrorCode.UNKNOWN_PREMISE_ID,
+        out_of_order=CoverageValidationErrorCode.OUT_OF_ORDER_PREMISE_ID,
+    )
+    _validate_exact_ids(
+        actual=tuple(record.obligation_id for record in answer.obligation_coverage),
+        expected=tuple(scope.obligation_id for scope in context.obligation_scopes),
+        missing=CoverageValidationErrorCode.MISSING_OBLIGATION_ID,
+        duplicate=CoverageValidationErrorCode.DUPLICATE_OBLIGATION_ID,
+        unknown=CoverageValidationErrorCode.UNKNOWN_OBLIGATION_ID,
+        out_of_order=CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_ID,
+    )
+
+    scope_by_id = {scope.obligation_id: scope for scope in context.obligation_scopes}
+    for record in answer.obligation_coverage:
+        _validate_exact_ids(
+            actual=tuple(dimension.dimension.value for dimension in record.dimensions),
+            expected=tuple(
+                dimension.value for dimension in scope_by_id[record.obligation_id].dimension_ids
+            ),
+            missing=CoverageValidationErrorCode.MISSING_OBLIGATION_DIMENSION,
+            duplicate=CoverageValidationErrorCode.DUPLICATE_OBLIGATION_DIMENSION,
+            unknown=CoverageValidationErrorCode.UNKNOWN_OBLIGATION_DIMENSION,
+            out_of_order=CoverageValidationErrorCode.OUT_OF_ORDER_OBLIGATION_DIMENSION,
+        )
+
+    try:
+        units = tuple(_expand_compact_answer_unit(unit) for unit in answer.answer_units)
+    except ValidationError:
+        raise CoverageContractError(CoverageValidationErrorCode.INVALID_PAYLOAD) from None
+
+    coverage = tuple(_expand_compact_requirement(record, units=units) for record in answer.coverage)
+    obligation_coverage = tuple(
+        _expand_compact_obligation(record, units=units) for record in answer.obligation_coverage
+    )
+    return {
+        "answer_units": units,
+        "premise_decisions": answer.premise_decisions,
+        "coverage": coverage,
+        "obligation_coverage": obligation_coverage,
+    }
+
+
+def _expand_compact_requirement(
+    record: CompactRequirementCoverage,
+    *,
+    units: Sequence[AnswerUnit],
+) -> RequirementCoverage:
+    mapped_units = tuple(unit for unit in units if record.requirement_id in unit.requirement_ids)
+    # Unsupported ledgers are canonically empty. If a unit nevertheless maps to
+    # this requirement, the strict validator observes that contradiction and
+    # rejects UNSUPPORTED_REQUIREMENT_HAS_UNIT.
+    if record.status is RequirementStatus.UNSUPPORTED:
+        mapped_units = ()
+    return RequirementCoverage(
+        requirement_id=record.requirement_id,
+        status=record.status,
+        unit_ids=tuple(unit.unit_id for unit in mapped_units),
+        source_numbers=_ordered_unique(
+            number for unit in mapped_units for number in unit.source_numbers
+        ),
+        gap_reason=_STATUS_GAP_REASON[record.status],
+    )
+
+
+def _expand_compact_obligation(
+    record: CompactEvidenceObligationCoverage,
+    *,
+    units: Sequence[AnswerUnit],
+) -> EvidenceObligationCoverage:
+    dimensions: list[EvidenceDimensionCoverage] = []
+    for dimension in record.dimensions:
+        mapped_units = tuple(
+            unit
+            for unit in units
+            if any(
+                link.obligation_id == record.obligation_id and link.dimension is dimension.dimension
+                for link in unit.obligation_links
+            )
+        )
+        if dimension.status is RequirementStatus.UNSUPPORTED:
+            mapped_units = ()
+        dimensions.append(
+            EvidenceDimensionCoverage(
+                dimension=dimension.dimension,
+                status=dimension.status,
+                unit_ids=tuple(unit.unit_id for unit in mapped_units),
+                source_numbers=_ordered_unique(
+                    number for unit in mapped_units for number in unit.source_numbers
+                ),
+                gap_reason=_STATUS_GAP_REASON[dimension.status],
+            )
+        )
+    return EvidenceObligationCoverage(
+        obligation_id=record.obligation_id,
+        dimensions=tuple(dimensions),
+    )
+
+
 def validate_streamable_answer_unit(
     payload: AnswerUnit | Mapping[str, Any],
     *,
@@ -1939,16 +2429,12 @@ def validate_streamable_answer_unit(
             )
             for link in unit.obligation_links
         ):
-            raise CoverageContractError(
-                CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH
-            )
+            raise CoverageContractError(CoverageValidationErrorCode.OBLIGATION_REQUIREMENT_MISMATCH)
         if any(
             unit.role not in _DIMENSION_COMPATIBLE_ROLES[link.dimension]
             for link in unit.obligation_links
         ):
-            raise CoverageContractError(
-                CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH
-            )
+            raise CoverageContractError(CoverageValidationErrorCode.OBLIGATION_ROLE_MISMATCH)
     return unit
 
 

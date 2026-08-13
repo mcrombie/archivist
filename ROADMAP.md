@@ -17,35 +17,43 @@ and its first formal held-out answer-quality baseline are complete. The latter i
 mechanical baseline, not yet a complete semantic answer-quality scorecard, and those accomplishments
 must not be conflated.
 
-## Current checkpoint — 2026-08-11
+## Current checkpoint — 2026-08-12
 
-The repository's current Answer Mode is `evidence-planned-v26`, with
-`query-planner-v11` and `evidence-coverage-v11`. It searches 481 retrieval-eligible chunks from the
-complete substantive manuscript. The code also contains the separately versioned
-`full-context-v2` experiment, which is feature-gated and disabled on the public deployment by
-default.
+The built-in retrieval product now defaults to `application-compiled-v1`. Follow-up resolution and
+question planning are local, deterministic BM25 ranks the 481 eligible manuscript chunks, and the
+application compiles no more than three immutable, bounded evidence cards and owns every factual
+word and citation. Frozen `evidence-planned-v26` remains immutable and explicitly callable for
+development/evaluation policy compatibility. V27 compact remains an unpromoted historical
+experiment whose reader-facing selector has been removed. The separately versioned
+`full-context-v2` experiment remains feature-gated and disabled on the public deployment.
 
 The reader-facing application now implements:
 
 - a live, book-specific public demo with private server-side corpus storage and bounded source
   disclosure;
-- ten reader modes that combine appearance with bounded interpretive framing;
+- four reader-selectable modes: Professional, Essential, Pretty Pink Princess, and Baleful Black
+  Baron;
 - eleven appearance-only themes under Advanced controls;
 - Complete answer as the recommended fail-closed default; and
 - Progressive response as an experimental checked-claim delivery option.
 
-These product features do not constitute formal RAG-quality evidence. Essential remains the
-neutral evaluation baseline. Reader modes may change framing, but they do not authorize changes to
-retrieval evidence, historical claims, or citation rules. Progressive and Complete share the same
-answer request, although the schema reordering required for checked-claim release opened the
-current generation cohorts.
+Essential now returns the compiled evidence directly and makes zero OpenAI/provider calls in the
+current RAG path; Essential plus Full Context is rejected. Each of the other three modes makes
+exactly one no-retry `gpt-5.6-sol` low-reasoning call over closed card IDs and text. That model may
+only choose card order and typed, mode-bound editorial cue IDs. Local code owns every displayed
+factual and editorial word, label, and citation; any provider or contract failure falls back to
+direct cited evidence. Advanced lens, voice, and worldview settings affect cue selection only. Dormant mode
+definitions and assets are compatibility-only, not current UI/API choices.
 
 The public service is live at `https://archivist.mcrombie.com`, and the first fixed production-
 performance cohort is complete against deployed wrapper commit
 `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. Production deploys remain manual. `/api/version`
-bound Render's authoritative `RENDER_GIT_COMMIT`, one unchanged process epoch, the corpus and RAG
-identities, and the versioned `$2.00` public Complete-RAG request ceiling before any measured
-question was sent.
+bound Render's authoritative `RENDER_GIT_COMMIT`, one unchanged process epoch, the corpus and V26
+RAG identities, and the versioned `$2.00` public Complete-RAG request ceiling before any measured
+question was sent. That production-performance v1 identity and every result below remain unchanged.
+The current public runtime identity schema is `archivist.public_runtime_identity/3`; it separately
+binds `application-compiled-v1`, local BM25 retrieval, and the generated-prose model while retaining
+the frozen V26 identity.
 
 The cohort attempted all 33 predeclared answerable items without retry or replacement. Twenty-nine
 were valid successful completions and four failed, for a 12.1212% all-attempt error rate; there
@@ -186,6 +194,8 @@ After formal lock:
 | **7. Formal baseline and evaluation report** | **Complete descriptive baseline; semantic scoring pending** | Preserve the public/private hash-bound reports. Diagnose the decomposition instrument in a separate new measurement cohort before relying heavily on claim-derived results; any later semantic calibration is a separate supplement. |
 | **8. Public-demo safety gate** | **Complete for the launched public boundary** | Continue bounded excerpts, edition-qualified locators, server-side controls, and private corpus handling. Confirm deployed-commit parity manually after releases. |
 | **8A. Production observability and latency evidence** | **Complete for the first observed cohort** | Preserve the text-free public artifacts and private audit root. The 33-attempt run produced 29 latency-eligible successes, four request failures, zero instrumentation failures, 54.393-second server p50, 113.801-second server p95, and `$4.90594694` estimated cost. Treat these as one observed warm cohort, not an SLA. |
+| **8B. V27 compact generation representation** | **Historical experiment; unpromoted and superseded** | Preserve the offline experiment and its proposed A/B in `docs/latency_optimization.md`. No paid candidate call ran, its old UI selector is gone, and it is not the current product path. |
+| **8C. Application-compiled answer path** | **Current default implemented; paid performance unmeasured** | Preserve immutable evidence cards and application-owned facts, cue text, and citations. Essential RAG must remain zero-provider; the three prose modes must remain exactly one low-reasoning Sol selection call, no retry, with direct-evidence fallback. A new cohort is required before any latency, quality, or reliability improvement claim. |
 
 ## Next sequence
 
@@ -234,17 +244,35 @@ top of the list.
     the exact 33-attempt denominator, 29-success latency denominator, 12.1212% request-failure rate,
     zero instrumentation failures, and observed cost. Publish the result as one warm cohort rather
     than an SLA or generalized production guarantee.
-11. **Next — repair the three production generation-contract defects.** Strengthen the structured
-    generation contract so every non-premise-correction unit links to a requirement, obligation
-    dimensions accept only compatible unit roles, and unsupported requirements cannot own answer
-    units. Add synthetic regressions for all three closed codes. Any later live comparison must be
-    a separately versioned cohort; do not retry or overwrite this sealed run.
-12. **Then — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
+11. **Completed historically — preserve the unpromoted V27 compact experiment.** Its offline
+    equivalence and serialization work remains useful negative/development evidence, but no paid
+    comparison ran and it was never promoted. The old V26/V27 browser selector is removed. Both
+    policies remain explicit development calls only; see `docs/latency_optimization.md`.
+12. **Completed for implementation — make `application-compiled-v1` the built-in RAG default.**
+    Local planning and BM25 produce at most three bounded immutable cards. Essential renders them
+    directly with zero provider calls. Professional, Pretty Pink Princess, and Baleful Black Baron
+    each get one no-retry low-reasoning Sol selection call over card placeholders and typed
+    mode-bound cue IDs; application code owns every displayed word and citation, and failures fall
+    back to direct evidence. Runtime identity is now
+    version 3. Frozen V26 and production-performance v1 remain unchanged.
+13. **Completed for narrow compatibility — run the generated-mode smoke.** After exact
+    payload/provider authorization, one Professional, one Princess, and one Baron call all passed
+    the closed cue contract with no retries in 8.357/6.839/5.162 seconds, using 6,292 tokens and
+    `$0.060071250` estimated cost. This single question is not a performance cohort. Before making a
+    speed, quality, or reliability claim, bind the exact
+    questions, deployment/commit, mode mix, runtime identity, denominators, no-retry rule, and cost
+    ceiling in a separately versioned cohort. Do not use the informal local experience as a latency
+    result.
+14. **Next, after deployment identity verification — open production-performance v2.** Preserve v1's
+    54.393/113.801-second p50/p95 and all four failures unchanged. A v2 report must state that it
+    measures a different answer policy and must remain an observed cohort comparison unless the
+    required repeat/noise protocol supports a stronger claim.
+15. **Then — rebuild the decomposition instrument in a new measurement cohort.** Diagnose why 26
     of 37 outputs violated exact-span validation, then prospectively declare and test a revised
     instrument without changing or rerunning this baseline. The eight substantively decomposed
     releases are enough to preserve limited mechanical measurements, not enough to support strong
     claim-derived conclusions.
-13. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+16. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
     subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
     technical failures are preserved, measure judge and decomposition agreement, and publish a
     hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
@@ -271,17 +299,30 @@ may live in a later release commit, so the production report binds both that dep
 the unchanged policy/corpus identities. Timing an unidentified deployment or a new retrieval/prompt
 cohort would produce an operational number about a different system.
 
+The first production cohort identified its V26 answer-generation boundary as the site of all four
+request failures. The current application-compiled policy changes that ownership boundary rather
+than promoting V27: the application fixes evidence and citations before optional prose generation.
+That is a new system, not a retroactive repair to v1. Deployment and production-performance v2 may
+follow only after a fresh identity and authorization are fixed, and no improvement claim precedes
+that evidence.
+
 ## Reader experience workstream
 
 The visual and interpretive reader experience exists now; it is no longer a hypothetical second
-phase. Its formal comparative evaluation remains deferred until the neutral baseline is measured.
+phase. Frozen V26 has a descriptive neutral baseline, but the current application-compiled policy
+and its prose modes have no paid comparative evaluation.
 
 Current contract:
 
 - Professional is the new-reader default.
-- Essential is the neutral, evidence-first evaluation path.
-- Reader modes may influence framing, emphasis, length, and style only after manuscript evidence
-  has been selected.
+- Essential is the direct, evidence-first product path; frozen V26 Essential remains the evaluated
+  baseline.
+- Only Professional, Essential, Pretty Pink Princess, and Baleful Black Baron are selectable.
+- Essential is direct cited evidence with no provider call in current RAG; Essential plus Full
+  Context is rejected. The other three modes may choose card order and mode-bound editorial cue IDs
+  only after evidence has been compiled.
+- The selection model cannot author displayed text or citations; a failed call falls back to the
+  direct evidence without retry.
 - Fine-grained lens, voice, worldview, and appearance overrides remain Advanced controls.
 - Complete answer is the recommended default.
 - Progressive response is experimental and may show only locally checked complete factual claims;

@@ -1418,17 +1418,20 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
         voice,
         worldview,
         history,
+        archivist_mode,
         answer_strategy="rag",
+        application_compiled=False,
     ):
-        captured.append(("answer", project_id, question, history, current_usage_context()))
-        record_openai_response(
-            SimpleNamespace(
-                id="resolver",
-                model="gpt-5",
-                usage=SimpleNamespace(input_tokens=100, output_tokens=10, total_tokens=110),
-            ),
-            operation="followup_resolution",
-            requested_model="gpt-5",
+        captured.append(
+            (
+                "answer",
+                project_id,
+                question,
+                history,
+                current_usage_context(),
+                archivist_mode,
+                application_compiled,
+            )
         )
         record_openai_response(
             SimpleNamespace(
@@ -1445,12 +1448,27 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
             status="answered",
             evidence_decision="direct_answer",
             resolved_question="Standalone question?",
+            answer_strategy=answer_strategy,
+            answer_strategy_version="application-compiled-v1",
+            diagnostics={
+                "generation": {
+                    "validation_result": "valid",
+                    "prompt_version": "evidence-prose-renderer-v3",
+                    "normalizer_version": "application-compiled-v1",
+                    "instructions_sha256": "a" * 64,
+                    "schema_sha256": "b" * 64,
+                    "generator_model": "gpt-5.6-sol",
+                    "generator_reasoning_effort": "low",
+                    "generator_verbosity": "low",
+                }
+            },
         )
 
     monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
     request = web_api.QuestionRequest(
         question="What happened next?",
         history=[{"question": "Who?", "answer": "A prior answer."}],
+        archivist_mode="professional",
         conversation_id="conversation-1",
         turn_id="turn-1",
     )
@@ -1465,21 +1483,23 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
         context.enforce_budget,
         context.allow_over_budget,
     ) == ("current", "conversation-1", "turn-1", True, False)
+    assert captured[0][5] is web_api.ArchivistMode.PROFESSIONAL
+    assert captured[0][6] is True
     assert response["conversation_id"] == "conversation-1"
     assert response["turn_id"] == "turn-1"
     assert response["resolved_query"] == "Standalone question?"
     run_diagnostics = dict(response["run_diagnostics"])
     cohort = run_diagnostics.pop("cohort")
-    assert cohort["rag_policy_version"] == "evidence-planned-v26"
-    assert cohort["query_planner_prompt_version"] == "query-planner-v11"
-    assert cohort["coverage_prompt_version"] == "evidence-coverage-v11"
-    assert cohort["normalizer_version"] == "evidence-coverage-normalizer/7"
+    assert cohort["rag_policy_version"] == "application-compiled-v1"
+    assert cohort["query_planner_prompt_version"] == "not-applicable"
+    assert cohort["coverage_prompt_version"] == "evidence-prose-renderer-v3"
+    assert cohort["normalizer_version"] == "application-compiled-v1"
     assert len(cohort["coverage_instructions_sha256"]) == 64
     assert run_diagnostics == {
         "schema": "archivist.answer_run_diagnostics/3",
         "answer_status": "answered",
         "evidence_decision": "direct_answer",
-        "validation_result": "not_run",
+        "validation_result": "valid",
         "content_outcome": None,
         "validation_error_code": None,
         "repair_applied": False,
@@ -1497,7 +1517,6 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     assert response["costs"]["turn_usd"] > 0
     assert response["costs"]["turn_usd"] == response["costs"]["conversation_usd"]
     assert {item["operation"] for item in response["costs"]["operations"]} == {
-        "followup_resolution",
         "answer_generation",
     }
     persisted = UsageLedger().get_answer_run_diagnostics(
@@ -1507,7 +1526,7 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
     )
     assert persisted is not None
     assert persisted["answer_status"] == "answered"
-    assert persisted["validation_result"] == "not_run"
+    assert persisted["validation_result"] == "valid"
 
 
 def test_question_api_persists_explicit_legacy_cohort(monkeypatch, ledger_path):
@@ -1550,7 +1569,10 @@ def test_question_api_persists_explicit_legacy_cohort(monkeypatch, ledger_path):
     assert persisted["cohort"] == cohort
 
 
-def test_question_api_hard_stop_and_explicit_override(monkeypatch, ledger_path):
+def test_question_api_essential_bypasses_budget_but_professional_hard_stops(
+    monkeypatch,
+    ledger_path,
+):
     monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(ledger_path))
     ledger = UsageLedger()
     ledger.update_settings(
@@ -1566,26 +1588,44 @@ def test_question_api_hard_stop_and_explicit_override(monkeypatch, ledger_path):
         usage=TokenUsage(input_tokens=10_000, total_tokens=10_000),
     )
 
-    blocked = web_api.QuestionRequest(question="Question?")
+    contexts = []
+
+    def fake_answer(*_args, **_kwargs):
+        contexts.append(current_usage_context())
+        return SimpleNamespace(
+            answer="Allowed answer.",
+            final_chunks=[],
+            status="answered",
+            evidence_decision="direct_answer",
+            resolved_question="Question?",
+            answer_strategy_version="application-compiled-v1",
+            diagnostics={},
+        )
+
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+
+    essential = web_api.QuestionRequest(question="Question?")
+    assert web_api.question("current", essential)["answer"] == "Allowed answer."
+    assert contexts[-1].enforce_budget is False
+
+    blocked = web_api.QuestionRequest(
+        question="Question?",
+        archivist_mode="professional",
+    )
     with pytest.raises(HTTPException) as exc_info:
         web_api.question("current", blocked)
     assert exc_info.value.status_code == 402
     assert exc_info.value.detail["code"] == "cost_limit_exceeded"
     assert exc_info.value.detail["budget"]["exceeded"] is True
 
-    monkeypatch.setattr(
-        web_api,
-        "answer_project_question_result",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            answer="Allowed answer.",
-            final_chunks=[],
-            status="answered",
-            evidence_decision="direct_answer",
-            resolved_question="Question?",
-        ),
+    allowed = web_api.QuestionRequest(
+        question="Question?",
+        archivist_mode="professional",
+        allow_over_budget=True,
     )
-    allowed = web_api.QuestionRequest(question="Question?", allow_over_budget=True)
     assert web_api.question("current", allowed)["answer"] == "Allowed answer."
+    assert contexts[-1].enforce_budget is True
+    assert contexts[-1].allow_over_budget is True
 
 
 def test_post_answer_summary_failure_does_not_discard_paid_answer(monkeypatch):

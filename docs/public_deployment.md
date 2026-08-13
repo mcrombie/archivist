@@ -120,9 +120,10 @@ After restart:
 
 1. `GET /api/live` returns `200` with `{"status":"live"}`.
 2. `GET /api/health` returns `200` with `{"status":"ready"}`.
-3. `GET /api/version` reports schema `archivist.public_runtime_identity/2`, a non-null
-   `deployment_commit` equal to the exact commit deployed by Render, one `process_epoch`, the active
-   RAG policy and generator model, the corpus-manifest SHA-256, the frozen-candidate identity,
+3. `GET /api/version` reports schema `archivist.public_runtime_identity/3`, a non-null
+   `deployment_commit` equal to the exact commit deployed by Render, one `process_epoch`,
+   `answer_policy_version=application-compiled-v1`, `evidence_retrieval_kind=local_bm25`,
+   `generated_prose_model=gpt-5.6-sol`, the corpus-manifest SHA-256, the frozen-candidate identity,
    `public-rag-request-ceiling-v1`, and `2000000000` nano-USD (`$2.00`) as the public RAG request
    ceiling. A missing or malformed `RENDER_GIT_COMMIT` is not acceptable for a measurement release;
    Render's value is authoritative and cannot be masked by the local/test override.
@@ -191,13 +192,15 @@ renders even though no `run_diagnostics` object is returned.
 ## Progressive-response release check
 
 The optional Progressive response uses a same-origin NDJSON `POST` at
-`/api/projects/current/question/progressive`. It replaces the final blocking generation request
-with one streamed request; it does not add a second generation call and it never exposes raw tokens
-or private reasoning. After fixed operational progress, the service may emit only complete
-`checked_claim` objects that pass local citation/source checks plus the public edition-locator and
-rolling quotation boundaries. Those claims remain provisional as a complete answer until the
-terminal whole-answer validator succeeds. Complete answer remains the strict default. The protocol
-and invariants are specified in [Answer delivery modes](answer_delivery.md).
+`/api/projects/current/question/progressive`. It does not add a generation call and never exposes
+raw tokens or private reasoning. After fixed operational progress, the current application
+compiler may emit exact citation-rendered evidence cards as `checked_claim` objects after the
+public edition-locator and rolling quotation checks pass. Those cards are immutable but their
+final arrangement remains provisional. Essential makes zero provider calls. Professional, Pretty
+Pink Princess, and Baleful Black Baron use the same one no-retry selector call as Complete answer;
+the call chooses only exact card placeholders and application-owned cue IDs. Complete answer
+remains the strict default. The protocol and invariants are specified in
+[Answer delivery modes](answer_delivery.md).
 
 The public rate/concurrency slot belongs to the full stream lifetime, not merely to the time needed
 to return response headers. It must be released exactly once after normal completion, terminal
@@ -210,13 +213,14 @@ Before promoting this transport, run a live smoke through `https://archivist.mcr
    retains the existing behavior.
 2. Select Progressive response and submit a question. Fixed operational progress must appear
    first, the elapsed-work indicator must continue updating on roughly three-second heartbeats,
-   and at least one visibly complete checked claim should appear before the terminal result.
+   and at least one exact locally compiled evidence card should appear before the terminal result.
 3. In the browser network panel, confirm the progressive response is
    `application/x-ndjson` with schema `archivist.answer_stream/2`, monotonically sequenced frames,
    and exactly one terminal frame. It must contain no chain-of-thought, private diagnostics,
-   source text, raw token delta, or incomplete structured claim.
-4. Confirm the working claim log is visibly marked not final, then is replaced—not duplicated—by
-   the authoritative cohesive answer with citations and edition-qualified public sources.
+   unbounded source text, raw token delta, selector payload, or incomplete evidence card.
+4. Confirm the working evidence is visibly marked not final, then is replaced—not duplicated—by
+   the authoritative answer with citations and edition-qualified public sources. Every card must
+   remain byte-identical even when a generated mode reorders it around local editorial cues.
 5. Interrupt one accepted stream. Confirm there is no automatic retry and no partial answer is
    retained as a completed conversation turn.
 6. While a public stream is held open, confirm a competing request is refused by the configured
@@ -224,15 +228,13 @@ Before promoting this transport, run a live smoke through `https://archivist.mcr
 7. Repeat the Progressive question through Render's generated `onrender.com` address. If the
    direct address shows a claim earlier than `https://archivist.mcrombie.com`, investigate
    Cloudflare buffering rather than changing generation or retrieval.
-8. Inspect the Render log for the single `progressive_delivery_timing` record. Compare
-   `generating_answer`, `first_provider_delta`, `first_checked_claim`, `provider_terminal`, and
-   the terminal/worker/stream milestones. The record must contain durations and milestone names
-   only—never question, source, manuscript, prompt, answer, or error text.
+8. Inspect the Render log for the single `progressive_delivery_timing` record. Compare the first
+   checked claim and terminal/worker/stream milestones. The record must contain durations and
+   milestone names only—never question, source, manuscript, prompt, answer, or error text.
 
 This smoke checks deployment behavior that the offline suite cannot establish, including Render
-proxy buffering and stream cleanup. Progressive response can reduce time to the first useful claim
-after generation begins, but it does not remove retrieval/planning latency or reduce total model
-compute and must not be described as a server-latency optimization.
+proxy buffering and stream cleanup. Progressive response can expose compiled evidence before
+optional arrangement completes, but this runbook makes no latency or model-performance claim.
 
 ## Production-performance cohort
 

@@ -59,6 +59,7 @@ import {
   getCostSummary,
   getManuscriptSources,
   isProgressiveFallbackEligible,
+  answerPolicyLabel,
   searchExistingIndex,
   updateCostSettings
 } from "./api";
@@ -854,6 +855,7 @@ type ChatTurn = {
   // a request is rejected, so the badge reads the second one.
   requestedStrategy: AnswerStrategy;
   answerStrategy?: AnswerStrategy;
+  answerStrategyVersion?: string;
   requestedDelivery: ResponseDelivery;
   responseDelivery: ResponseDelivery;
   status: ChatTurnStatus;
@@ -1731,6 +1733,9 @@ function QuestionMode({
         answer: pipelineFailed ? "" : result.answer,
         answerStatus: result.answer_status,
         answerStrategy: result.answer_strategy ?? DEFAULT_ANSWER_STRATEGY,
+        answerStrategyVersion: result.answer_strategy_version
+          ?? result.run_diagnostics?.cohort.answer_strategy_version
+          ?? undefined,
         responseDelivery: actualDelivery,
         resolvedQuery: result.resolved_query,
         archivistMode: result.archivist_mode ?? turnMode,
@@ -1849,6 +1854,7 @@ function QuestionMode({
       error: undefined,
       answerStatus: undefined,
       validationErrorCode: undefined,
+      answerStrategyVersion: undefined,
       stageTimingsMs: undefined,
       budgetBlocked: false,
       progressiveStage: undefined,
@@ -2440,7 +2446,16 @@ function ConversationComposer({
                 <ChevronDown size={15} aria-hidden="true" />
               </summary>
               <div>
-                {answerSettings}
+                {archivistModeId === "essential" ? (
+                  <div className="chat-mode-context">
+                    <strong>Direct cited evidence</strong>
+                    <p>
+                      Essential returns the compiled evidence directly. Lens, voice, and
+                      worldview are prose settings, so they do not apply in this mode. Choose
+                      Professional, Pretty Pink Princess, or Baleful Black Baron to use them.
+                    </p>
+                  </div>
+                ) : answerSettings}
                 {appearanceSettings}
                 <div className="chat-advanced-reset-row">
                   <span>
@@ -2710,9 +2725,16 @@ function ConversationTurn({
                     : "Archivist could not complete this answer."}
               </strong>
               <p>{turn.error}</p>
-              {!publicDemo && (turn.validationErrorCode || turn.turnCostUsd !== undefined) ? (
+              {!publicDemo && (
+                turn.validationErrorCode
+                || turn.turnCostUsd !== undefined
+                || turn.answerStrategyVersion
+              ) ? (
                 <details className="turn-error-details">
                   <summary>Technical details</summary>
+                  {turn.answerStrategyVersion ? (
+                    <span>Answer policy: <code>{turn.answerStrategyVersion}</code></span>
+                  ) : null}
                   {turn.validationErrorCode ? (
                     <span>Validation code: <code>{turn.validationErrorCode}</code></span>
                   ) : null}
@@ -2777,6 +2799,11 @@ function ConversationTurn({
                 </details>
               ) : null}
               <div className="turn-response-actions">
+                {!publicDemo && turn.answerStrategyVersion ? (
+                  <span className="turn-strategy-chip">
+                    {answerPolicyLabel(turn.answerStrategyVersion)}
+                  </span>
+                ) : null}
                 {turn.answerStrategy === "full_context" ? (
                   <span className="turn-strategy-chip">Full book</span>
                 ) : null}

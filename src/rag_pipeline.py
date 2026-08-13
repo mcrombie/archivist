@@ -37,24 +37,34 @@ from answer_coverage import (
     CoverageContractError,
     CoverageOutcomeStatus,
     CoverageValidationErrorCode,
+    COMPACT_EVIDENCE_COVERAGE_SCHEMA,
+    COMPACT_EVIDENCE_EXPANDER_VERSION,
+    COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
+    CompactEvidenceCoverageAnswer,
+    CompactInterpretiveEvidenceCoverageAnswer,
     DiagnosticValidationResult,
     EVIDENCE_COVERAGE_NORMALIZER_VERSION,
     EvidenceDimension,
     EvidenceCoverageAnswer,
+    EVIDENCE_COVERAGE_SCHEMA,
     EvidenceCoverageResult,
     EvidenceObligationFocus,
     EvidenceObligationKind,
     EvidenceObligationScope,
     ExpectedStageTransition,
     InterpretiveEvidenceCoverageAnswer,
+    INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA,
     InterpretiveMove,
     MAX_ANSWER_UNITS,
     MAX_TOTAL_UNIT_TEXT_CHARACTERS,
     PremiseSourceScope,
     process_evidence_coverage,
+    process_compact_evidence_coverage,
+    process_compact_interpretive_evidence_coverage,
     process_interpretive_evidence_coverage,
     validate_evidence_coverage_context,
     validate_streamable_answer_unit,
+    validate_streamable_compact_answer_unit,
 )
 from costs import (
     CostLimitExceeded,
@@ -86,6 +96,7 @@ from evidence_policy import (
     split_compound_named_anchor,
     tokenize_anchor,
 )
+from evidence_compiler import APPLICATION_COMPILED_POLICY_VERSION
 from filters import should_skip_document
 from full_context_coverage import FullContextValidationErrorCode
 from model_config import GENERATOR_SETTINGS, QUERY_PLANNER_SETTINGS
@@ -135,12 +146,16 @@ from document_roles import (
 
 
 RAG_POLICY_VERSION = "evidence-planned-v26"
+COMPACT_RAG_POLICY_VERSION = "evidence-planned-v27"
 LEGACY_RAG_POLICY_VERSION = "legacy-answer-v1"
 NOT_APPLICABLE_COHORT_VALUE = "not-applicable"
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
 QUERY_PLANNER_PROMPT_VERSION = "query-planner-v11"
 EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v11"
+COMPACT_EVIDENCE_COVERAGE_PROMPT_VERSION = "evidence-coverage-v12"
+EVIDENCE_COVERAGE_REQUEST_SCHEMA = "archivist.answer_request/6"
+COMPACT_EVIDENCE_COVERAGE_REQUEST_SCHEMA = "archivist.answer_request/7"
 MAX_PLANNER_OUTPUT_TOKENS = 4_000
 MAX_COVERAGE_OUTPUT_TOKENS = 12_000
 MAX_BROAD_EVIDENCE_OBLIGATIONS = 32
@@ -464,6 +479,90 @@ when its one atomic claim genuinely realizes every linked dimension.
 """
 
 
+def _build_compact_evidence_coverage_instructions() -> str:
+    """Derive v12 from v11 while guarding every representation-only edit."""
+
+    replacements = (
+        (
+            "Its declared source_numbers must exactly match the one citation group.",
+            (
+                "Archivist derives each answer unit's source_numbers exactly from "
+                "that terminal citation group; do not return a separate answer-unit "
+                "source_numbers field."
+            ),
+        ),
+        (
+            "keep unsupported\n  dimensions free of unit and source mappings;",
+            (
+                "keep unsupported dimensions free of answer-unit obligation links; "
+                "do not create a unit for an unsupported dimension;"
+            ),
+        ),
+        (
+            "with no unit or source mapping rather than inventing connective tissue.",
+            "with no linked answer unit rather than inventing connective tissue.",
+        ),
+        (
+            "Never reference a\nunit_id that is absent from answer_units. ",
+            (
+                "Every obligation link in answer_units must reference an obligation "
+                "and dimension supplied by the request. "
+            ),
+        ),
+    )
+    instructions = EVIDENCE_COVERAGE_INSTRUCTIONS
+    for old, new in replacements:
+        if instructions.count(old) != 1:
+            raise RuntimeError("v11 coverage prompt changed outside the guarded v12 adapter")
+        instructions = instructions.replace(old, new)
+    return (
+        instructions
+        + """
+
+Compact provider representation (representation only; all reasoning duties above remain):
+- Return the compact schema selected by Structured Outputs. Do not return fields omitted by it.
+- answer_units still own every factual claim, requirement_id, role, paragraph, citation, and
+  obligation_link. The application derives only each unit's source_numbers from its one terminal
+  citation group.
+- coverage returns every requirement_id in order with the model-chosen status only. The
+  application derives unit_ids and source_numbers from answer_units and derives the fixed
+  gap_reason implied by that status. A status inconsistent with those units still fails the
+  unchanged canonical validator.
+- obligation_coverage returns every obligation_id and dimension in order with the model-chosen
+  status only. The application derives its unit and source mappings from obligation_links and
+  terminal citations and derives the fixed gap_reason. Missing, extra, reordered, or
+  contradictory entries still fail the unchanged canonical validator.
+- premise_decisions and, when requested, interpretive framing remain fully provider-owned and
+  unchanged. Do not omit or simplify them.
+"""
+    )
+
+
+COMPACT_EVIDENCE_COVERAGE_INSTRUCTIONS = _build_compact_evidence_coverage_instructions()
+
+
+class CoverageRepresentation(StrEnum):
+    """Provider-side representation used for the evidence contract."""
+
+    CANONICAL = "canonical"
+    COMPACT_V1 = "compact_v1"
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageContractBundle:
+    """Auditable provider contract and its canonical validation target."""
+
+    prompt_version: str
+    request_schema: str
+    instructions: str
+    provider_format: type[Any]
+    provider_schema: str
+    expanded_format: type[Any]
+    expanded_schema: str
+    expander_version: str | None
+    compact: bool
+
+
 _OBLIGATION_DIMENSIONS_BY_FOCUS: Mapping[
     EvidenceObligationFocus,
     tuple[EvidenceDimension, ...],
@@ -594,6 +693,56 @@ class RagPolicy:
     decomposition: bool = True
     premise_checking: bool = True
     absence_gate: bool = True
+    coverage_representation: CoverageRepresentation = CoverageRepresentation.CANONICAL
+
+    def __post_init__(self) -> None:
+        representation = CoverageRepresentation(self.coverage_representation)
+        object.__setattr__(self, "coverage_representation", representation)
+        if representation is CoverageRepresentation.COMPACT_V1:
+            if self.version != COMPACT_RAG_POLICY_VERSION:
+                raise ValueError("compact_v1 coverage requires the v27 candidate policy")
+        elif self.version == COMPACT_RAG_POLICY_VERSION:
+            raise ValueError("the v27 candidate policy requires compact_v1 coverage")
+
+
+def _coverage_contract_bundle(
+    policy: RagPolicy,
+    *,
+    interpretive: bool,
+) -> CoverageContractBundle:
+    if interpretive:
+        canonical_format = InterpretiveEvidenceCoverageAnswer
+        canonical_schema = INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA
+        compact_format = CompactInterpretiveEvidenceCoverageAnswer
+        compact_schema = COMPACT_INTERPRETIVE_EVIDENCE_COVERAGE_SCHEMA
+    else:
+        canonical_format = EvidenceCoverageAnswer
+        canonical_schema = EVIDENCE_COVERAGE_SCHEMA
+        compact_format = CompactEvidenceCoverageAnswer
+        compact_schema = COMPACT_EVIDENCE_COVERAGE_SCHEMA
+    if policy.coverage_representation is CoverageRepresentation.COMPACT_V1:
+        return CoverageContractBundle(
+            prompt_version=COMPACT_EVIDENCE_COVERAGE_PROMPT_VERSION,
+            request_schema=COMPACT_EVIDENCE_COVERAGE_REQUEST_SCHEMA,
+            instructions=COMPACT_EVIDENCE_COVERAGE_INSTRUCTIONS,
+            provider_format=compact_format,
+            provider_schema=compact_schema,
+            expanded_format=canonical_format,
+            expanded_schema=canonical_schema,
+            expander_version=COMPACT_EVIDENCE_EXPANDER_VERSION,
+            compact=True,
+        )
+    return CoverageContractBundle(
+        prompt_version=EVIDENCE_COVERAGE_PROMPT_VERSION,
+        request_schema=EVIDENCE_COVERAGE_REQUEST_SCHEMA,
+        instructions=EVIDENCE_COVERAGE_INSTRUCTIONS,
+        provider_format=canonical_format,
+        provider_schema=canonical_schema,
+        expanded_format=canonical_format,
+        expanded_schema=canonical_schema,
+        expander_version=None,
+        compact=False,
+    )
 
 
 class AnswerStrategy(StrEnum):
@@ -662,9 +811,11 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     # Both strategies report through this one record, so a full-context failure
     # code has to survive here rather than being flattened to "no code" - which
     # the ledger would then reject as an invalid result with no reason attached.
-    valid_error_codes = {code.value for code in CoverageValidationErrorCode} | {
-        code.value for code in FullContextValidationErrorCode
-    }
+    valid_error_codes = (
+        {code.value for code in CoverageValidationErrorCode}
+        | {code.value for code in FullContextValidationErrorCode}
+        | {"provider_failure", "invalid_response", "refusal"}
+    )
     valid_results = {value.value for value in DiagnosticValidationResult}
     valid_content_outcomes = {value.value for value in ContentOutcome}
 
@@ -741,6 +892,33 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
             "generator_reasoning_effort": GENERATOR_SETTINGS.reasoning_effort,
             "generator_verbosity": GENERATOR_SETTINGS.verbosity,
         }
+    elif strategy_cohort["answer_strategy_version"] == APPLICATION_COMPILED_POLICY_VERSION:
+        cohort = {
+            **strategy_cohort,
+            "rag_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+            "query_planner_prompt_version": NOT_APPLICABLE_COHORT_VALUE,
+            "coverage_prompt_version": str(
+                generation.get("prompt_version") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "normalizer_version": str(
+                generation.get("normalizer_version") or APPLICATION_COMPILED_POLICY_VERSION
+            ),
+            "coverage_instructions_sha256": str(
+                generation.get("instructions_sha256") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "coverage_schema_sha256": str(
+                generation.get("schema_sha256") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "generator_model": str(
+                generation.get("generator_model") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "generator_reasoning_effort": str(
+                generation.get("generator_reasoning_effort") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+            "generator_verbosity": str(
+                generation.get("generator_verbosity") or NOT_APPLICABLE_COHORT_VALUE
+            ),
+        }
     elif strategy_cohort["answer_strategy"] == AnswerStrategy.FULL_CONTEXT.value:
         # Full context has no planner, no retrieval policy, and no coverage
         # normalizer. Reporting RAG's constants for those would misattribute a
@@ -816,6 +994,10 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
 
 
 EVIDENCE_PLANNED_POLICY = RagPolicy()
+V27_COMPACT_CANDIDATE_POLICY = RagPolicy(
+    version=COMPACT_RAG_POLICY_VERSION,
+    coverage_representation=CoverageRepresentation.COMPACT_V1,
+)
 
 
 def _elapsed_ms(start_ns: int) -> float:
@@ -2666,7 +2848,13 @@ def build_coverage_input(
     voice: AnswerVoice | str,
     worldview: Worldview | str,
     archivist_mode: ArchivistMode | str = ArchivistMode.ESSENTIAL,
+    request_schema: str = EVIDENCE_COVERAGE_REQUEST_SCHEMA,
 ) -> str:
+    if request_schema not in {
+        EVIDENCE_COVERAGE_REQUEST_SCHEMA,
+        COMPACT_EVIDENCE_COVERAGE_REQUEST_SCHEMA,
+    }:
+        raise ValueError("unsupported evidence coverage request schema")
     requirement_sources = _requirement_source_map(plan, facet_source_numbers)
     requirement_by_id = {
         requirement.requirement_id: requirement for requirement in plan.requirements
@@ -2724,7 +2912,7 @@ def build_coverage_input(
         synthesis_obligations.append(obligation_payload)
 
     control = {
-        "schema": "archivist.answer_request/6",
+        "schema": request_schema,
         "question": resolved_turn.standalone_question,
         "conversation_context": {
             "entities": list(resolved_turn.entities),
@@ -2847,22 +3035,25 @@ def _generation_trace(
     status: str,
     inspection_scopes: Sequence[EvidenceInspectionScope] = (),
     style_prompt_sha256: str | None = None,
-    response_format: type[EvidenceCoverageAnswer] = EvidenceCoverageAnswer,
+    policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
+    interpretive: bool = False,
     structured_generation_called: bool | None = None,
 ) -> dict[str, Any]:
+    bundle = _coverage_contract_bundle(policy, interpretive=interpretive)
+    provider_schema_sha256 = hashlib.sha256(
+        json.dumps(
+            bundle.provider_format.model_json_schema(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     contract = {
-        "prompt_version": EVIDENCE_COVERAGE_PROMPT_VERSION,
-        "request_schema": "archivist.answer_request/6",
-        "instructions_sha256": hashlib.sha256(
-            EVIDENCE_COVERAGE_INSTRUCTIONS.encode("utf-8")
-        ).hexdigest(),
-        "schema_sha256": hashlib.sha256(
-            json.dumps(
-                response_format.model_json_schema(),
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest(),
+        "prompt_version": bundle.prompt_version,
+        "request_schema": bundle.request_schema,
+        "instructions_sha256": hashlib.sha256(bundle.instructions.encode("utf-8")).hexdigest(),
+        # Preserve the cohort field's meaning: this is always the schema the
+        # provider was asked to return, never the locally expanded schema.
+        "schema_sha256": provider_schema_sha256,
         "generator_model": GENERATOR_SETTINGS.model,
         "generator_reasoning_effort": GENERATOR_SETTINGS.reasoning_effort,
         "generator_verbosity": GENERATOR_SETTINGS.verbosity,
@@ -2881,6 +3072,22 @@ def _generation_trace(
             for scope in inspection_scopes
         ],
     }
+    if bundle.compact:
+        contract.update(
+            {
+                "provider_schema": bundle.provider_schema,
+                "provider_schema_sha256": provider_schema_sha256,
+                "expanded_schema": bundle.expanded_schema,
+                "expanded_schema_sha256": hashlib.sha256(
+                    json.dumps(
+                        bundle.expanded_format.model_json_schema(),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest(),
+                "expander_version": bundle.expander_version,
+            }
+        )
     if coverage is None:
         return {
             **contract,
@@ -2923,6 +3130,9 @@ def run_evidence_planned_answer(
     pipeline_started_ns = perf_counter_ns()
     stage_timings_ms: dict[str, float] = {}
     planner_call_diagnostics: dict[str, Any] = _planner_call_diagnostic("not_called")
+    requested_interpretive_expansion = bool(
+        interpretive_moves_for_settings(historiographical_lens, worldview)
+    )
 
     def result_diagnostics(
         evidence: Mapping[str, Any],
@@ -2971,6 +3181,8 @@ def run_evidence_planned_answer(
             "generation": _generation_trace(
                 None,
                 status="corpus_integrity_failed",
+                policy=policy,
+                interpretive=requested_interpretive_expansion,
             ),
             "planner": dict(planner_call_diagnostics),
         }
@@ -2987,6 +3199,7 @@ def run_evidence_planned_answer(
                     "pipeline_total": _elapsed_ms(pipeline_started_ns),
                 },
             },
+            answer_strategy_version=policy.version,
         )
 
     emit_progress(progress_callback, AnswerProgressStage.PLANNING_SEARCH)
@@ -3071,6 +3284,8 @@ def run_evidence_planned_answer(
         generation_diagnostics = _generation_trace(
             coverage,
             status=coverage.status.value,
+            policy=policy,
+            interpretive=requested_interpretive_expansion,
             structured_generation_called=False,
         )
         planned.trace["evidence"] = gate_diagnostics
@@ -3086,6 +3301,7 @@ def run_evidence_planned_answer(
                 gate_diagnostics,
                 generation_diagnostics,
             ),
+            answer_strategy_version=policy.version,
         )
     gate_started_ns = perf_counter_ns()
     gate, gate_diagnostics, target_label = apply_evidence_gate(
@@ -3108,6 +3324,8 @@ def run_evidence_planned_answer(
         planned.trace["generation_contract"] = _generation_trace(
             None,
             status="clean_abstention",
+            policy=policy,
+            interpretive=requested_interpretive_expansion,
         )
         emit_retrieval_trace(planned.trace)
         return AnswerModeResult(
@@ -3120,6 +3338,7 @@ def run_evidence_planned_answer(
                 gate_diagnostics,
                 planned.trace["generation_contract"],
             ),
+            answer_strategy_version=policy.version,
         )
 
     emit_progress(progress_callback, AnswerProgressStage.PREPARING_CONTEXT)
@@ -3180,6 +3399,8 @@ def run_evidence_planned_answer(
             coverage,
             status="insufficient_evidence",
             inspection_scopes=inspection_scopes,
+            policy=policy,
+            interpretive=requested_interpretive_expansion,
         )
         emit_retrieval_trace(planned.trace)
         return AnswerModeResult(
@@ -3192,6 +3413,7 @@ def run_evidence_planned_answer(
                 gate_diagnostics,
                 planned.trace["generation_contract"],
             ),
+            answer_strategy_version=policy.version,
         )
 
     style_block = build_archivist_mode_prompt_block(
@@ -3209,8 +3431,9 @@ def run_evidence_planned_answer(
         plan,
     )
     interpretive_expansion = bool(required_interpretive_moves)
-    response_format = (
-        InterpretiveEvidenceCoverageAnswer if interpretive_expansion else EvidenceCoverageAnswer
+    coverage_contract = _coverage_contract_bundle(
+        policy,
+        interpretive=interpretive_expansion,
     )
     style_prompt_sha256 = (
         hashlib.sha256(style_block.encode("utf-8")).hexdigest() if style_block else None
@@ -3242,7 +3465,8 @@ def run_evidence_planned_answer(
             status=coverage.status.value,
             inspection_scopes=inspection_scopes,
             style_prompt_sha256=style_prompt_sha256,
-            response_format=response_format,
+            policy=policy,
+            interpretive=interpretive_expansion,
             structured_generation_called=False,
         )
         emit_retrieval_trace(planned.trace)
@@ -3256,6 +3480,7 @@ def run_evidence_planned_answer(
                 gate_diagnostics,
                 planned.trace["generation_contract"],
             ),
+            answer_strategy_version=policy.version,
         )
     context_validation_ms = _elapsed_ms(context_validation_started_ns)
 
@@ -3272,14 +3497,15 @@ def run_evidence_planned_answer(
         voice=voice,
         worldview=worldview,
         archivist_mode=archivist_mode,
+        request_schema=coverage_contract.request_schema,
     )
     emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
     generation_started_ns = perf_counter_ns()
     try:
         generation_request = {
-            "instructions": EVIDENCE_COVERAGE_INSTRUCTIONS,
+            "instructions": coverage_contract.instructions,
             "input": coverage_input,
-            "text_format": response_format,
+            "text_format": coverage_contract.provider_format,
             "max_output_tokens": MAX_COVERAGE_OUTPUT_TOKENS,
             **GENERATOR_SETTINGS.responses_create_kwargs(),
         }
@@ -3307,7 +3533,12 @@ def run_evidence_planned_answer(
                 try:
                     values = extractor.feed(delta)
                     for value in values:
-                        unit = validate_streamable_answer_unit(
+                        unit_validator = (
+                            validate_streamable_compact_answer_unit
+                            if coverage_contract.compact
+                            else validate_streamable_answer_unit
+                        )
+                        unit = unit_validator(
                             value,
                             context=stream_validation_context,
                             unit_ordinal=len(seen_unit_ids) + 1,
@@ -3367,7 +3598,12 @@ def run_evidence_planned_answer(
     emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
     validation_started_ns = perf_counter_ns()
     if interpretive_expansion:
-        coverage = process_interpretive_evidence_coverage(
+        interpretive_processor = (
+            process_compact_interpretive_evidence_coverage
+            if coverage_contract.compact
+            else process_interpretive_evidence_coverage
+        )
+        coverage = interpretive_processor(
             parsed,
             required_moves=required_interpretive_moves,
             question_anchors=required_question_anchors,
@@ -3381,7 +3617,12 @@ def run_evidence_planned_answer(
             refused=refused,
         )
     else:
-        coverage = process_evidence_coverage(
+        neutral_processor = (
+            process_compact_evidence_coverage
+            if coverage_contract.compact
+            else process_evidence_coverage
+        )
+        coverage = neutral_processor(
             parsed,
             requirement_ids=requirement_ids,
             premise_ids=premise_ids,
@@ -3401,7 +3642,8 @@ def run_evidence_planned_answer(
         status=coverage.status.value,
         inspection_scopes=inspection_scopes,
         style_prompt_sha256=style_prompt_sha256,
-        response_format=response_format,
+        policy=policy,
+        interpretive=interpretive_expansion,
     )
     emit_retrieval_trace(planned.trace)
     return AnswerModeResult(
@@ -3414,17 +3656,22 @@ def run_evidence_planned_answer(
             gate_diagnostics,
             planned.trace["generation_contract"],
         ),
+        answer_strategy_version=policy.version,
     )
 
 
 __all__ = [
     "AnswerModeResult",
     "AnswerStrategy",
+    "COMPACT_EVIDENCE_COVERAGE_INSTRUCTIONS",
+    "COMPACT_RAG_POLICY_VERSION",
+    "CoverageRepresentation",
     "EVIDENCE_PLANNED_POLICY",
     "EVIDENCE_COVERAGE_INSTRUCTIONS",
     "NOT_APPLICABLE_COHORT_VALUE",
     "RAG_POLICY_VERSION",
     "RagPolicy",
+    "V27_COMPACT_CANDIDATE_POLICY",
     "answer_run_diagnostics",
     "apply_evidence_gate",
     "assess_answer_corpus_integrity",

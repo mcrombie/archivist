@@ -7,7 +7,7 @@ import re
 import shutil
 import zipfile
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,8 +22,10 @@ from openai import OpenAI, OpenAIError
 from answer_progress import (
     AnswerProgressStage,
     CheckedClaimCallback,
+    CheckedClaimCandidate,
     ProgressCallback,
     ProviderStreamMilestoneCallback,
+    emit_checked_claim,
     emit_progress,
 )
 from archivist_modes import (
@@ -38,6 +40,13 @@ from costs import (
     tracked_responses_parse,
 )
 from filters import should_skip_document
+from evidence_compiler import (
+    APPLICATION_COMPILED_POLICY_VERSION,
+    EvidencePacket,
+    compile_evidence_packet,
+    render_evidence_card_claim,
+    render_direct_evidence_answer,
+)
 from importers import (
     SUPPORTED_DOCUMENT_SUFFIXES,
     build_chunks_for_imported_document,
@@ -56,10 +65,21 @@ from perspectives import (
 )
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
 from query_planning import ResolvedTurn, build_question_plan
+from prose_renderer import (
+    EVIDENCE_PROSE_RENDERER_VERSION,
+    READER_PROSE_SETTINGS,
+    EvidenceProseResponse,
+    ProseFailureCode,
+    ProseRenderStatus,
+    build_evidence_prose_instructions,
+    generate_evidence_prose,
+)
 from full_context_pipeline import run_full_context_answer
 from rag_pipeline import (
     AnswerModeResult,
     AnswerStrategy,
+    EVIDENCE_PLANNED_POLICY,
+    RagPolicy,
     preflight_answer_corpus,
     run_evidence_planned_answer,
     without_automatic_retries,
@@ -68,6 +88,7 @@ from retrieval import (
     finalize_context_chunks,
     finalize_index_context,
     find_exact_match_chunks,
+    lexical_candidates,
     retrieve_from_collection,
     retrieve_semantic_from_collection,
 )
@@ -92,6 +113,20 @@ MAX_CONTEXT_QUESTION_CHARS = 1_500
 MAX_CONTEXT_ANSWER_CHARS = 3_000
 MAX_RESOLVED_QUERY_CHARS = 4_000
 MAX_RESOLVED_TURN_OUTPUT_TOKENS = 2_000
+
+APPLICATION_COMPILED_MODES = frozenset(
+    {
+        ArchivistMode.ESSENTIAL,
+        ArchivistMode.PROFESSIONAL,
+        ArchivistMode.PRETTY_PINK_PRINCESS,
+        ArchivistMode.BALEFUL_BLACK_BARON,
+    }
+)
+_LOCAL_FOLLOWUP_PATTERN = re.compile(
+    r"\b(?:he|her|hers|him|his|it|its|she|that|their|them|they|this)\b|"
+    r"^\s*(?:and\b|how about\b|what about\b|what happened next\b)",
+    flags=re.IGNORECASE,
+)
 
 CONVERSATION_QUERY_INSTRUCTIONS = """\
 Resolve the current message into the supplied ResolvedTurn schema for a manuscript archive.
@@ -215,7 +250,9 @@ def load_existing_index_chunks(project_id: str) -> list[dict[str, Any]]:
 
 def current_project_manifest() -> dict[str, Any]:
     chunks = read_json(LEGACY_CHUNKS_FILE, [])
-    filtered_chunks = [chunk for chunk in chunks if not should_skip_document(chunk.get("document", ""))]
+    filtered_chunks = [
+        chunk for chunk in chunks if not should_skip_document(chunk.get("document", ""))
+    ]
     index_chunks = [chunk for chunk in chunks if is_index_document_name(chunk.get("document", ""))]
     return {
         "id": "current",
@@ -227,7 +264,13 @@ def current_project_manifest() -> dict[str, Any]:
             "consult_existing_index": False,
         },
         "source_files": [path.name for path in sorted(LEGACY_MANUSCRIPT_DIR.glob("*.md"))],
-        "ignored_documents": sorted({chunk.get("document", "") for chunk in chunks if should_skip_document(chunk.get("document", ""))}),
+        "ignored_documents": sorted(
+            {
+                chunk.get("document", "")
+                for chunk in chunks
+                if should_skip_document(chunk.get("document", ""))
+            }
+        ),
         "existing_index_documents": sorted({chunk.get("document", "") for chunk in index_chunks}),
         "stats": {
             "source_files": len(list(LEGACY_MANUSCRIPT_DIR.glob("*.md"))),
@@ -259,7 +302,9 @@ def is_index_document_name(name: str) -> bool:
 def is_index_document(path: Path, text: str) -> bool:
     if is_index_document_name(path.name):
         return True
-    title = extract_chapter_title(text, fallback=clean_title_from_filename(path.stem)).strip().lower()
+    title = (
+        extract_chapter_title(text, fallback=clean_title_from_filename(path.stem)).strip().lower()
+    )
     return title in {"index", "index of names", "general index"}
 
 
@@ -327,7 +372,9 @@ def build_project(
         if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_DOCUMENT_SUFFIXES:
             continue
         imported_document = import_document(file_path)
-        manuscript_document, embedded_index_document = split_existing_index_section(imported_document)
+        manuscript_document, embedded_index_document = split_existing_index_section(
+            imported_document
+        )
         index_doc = is_index_document(file_path, imported_document.text)
         skip_doc = should_skip_document(file_path.name)
         embedded_index_chunks: list[dict[str, object]] = []
@@ -469,7 +516,11 @@ def embed_texts(client: OpenAI, texts: list[str]) -> list[list[float]]:
 
 def embed_project(project_id: str) -> dict[str, Any]:
     manifest = load_manifest(project_id)
-    chunks = [chunk for chunk in load_project_chunks(project_id) if not should_skip_document(chunk.get("document", ""))]
+    chunks = [
+        chunk
+        for chunk in load_project_chunks(project_id)
+        if not should_skip_document(chunk.get("document", ""))
+    ]
     if not chunks:
         raise RuntimeError("This project has no searchable chunks.")
 
@@ -485,7 +536,7 @@ def embed_project(project_id: str) -> dict[str, Any]:
 
     batch_size = 50
     for start in range(0, len(chunks), batch_size):
-        batch = chunks[start:start + batch_size]
+        batch = chunks[start : start + batch_size]
         texts = [chunk["text"] for chunk in batch]
         ids = [chunk["chunk_id"] for chunk in batch]
         embeddings = embed_texts(client, texts)
@@ -538,7 +589,7 @@ def _truncate_conversation_text(value: object, limit: int) -> str:
     text = str(value).strip()
     if len(text) <= limit:
         return text
-    return f"{text[:limit - 1].rstrip()}\N{HORIZONTAL ELLIPSIS}"
+    return f"{text[: limit - 1].rstrip()}\N{HORIZONTAL ELLIPSIS}"
 
 
 def bounded_conversation_history(
@@ -570,8 +621,7 @@ def build_conversation_query_input(
 ) -> str:
     payload = {
         "prior_user_questions": [
-            turn["question"]
-            for turn in bounded_conversation_history(history)
+            turn["question"] for turn in bounded_conversation_history(history)
         ],
         "current_question": question,
     }
@@ -614,9 +664,7 @@ def resolve_conversation_turn(
         )
         parsed = getattr(response, "output_parsed", None)
         resolved = (
-            parsed
-            if isinstance(parsed, ResolvedTurn)
-            else ResolvedTurn.model_validate(parsed)
+            parsed if isinstance(parsed, ResolvedTurn) else ResolvedTurn.model_validate(parsed)
         )
     except CostLimitExceeded:
         raise
@@ -648,6 +696,35 @@ def resolve_conversation_query(
 ) -> str:
     """Compatibility wrapper returning only the resolved standalone question."""
     return resolve_conversation_turn(question, history).standalone_question
+
+
+def resolve_application_compiled_turn(
+    question: str,
+    history: Sequence[Mapping[str, object]],
+) -> ResolvedTurn:
+    """Resolve ordinary follow-ups locally for the application-owned path.
+
+    The previous user question may disambiguate a short pronoun follow-up, but
+    prior assistant prose is never copied into the query or trusted evidence.
+    """
+
+    bounded_history = bounded_conversation_history(history)
+    prior_questions = tuple(
+        str(turn.get("question") or "").strip()
+        for turn in bounded_history
+        if str(turn.get("question") or "").strip()
+    )
+    trusted_user_texts = tuple(dict.fromkeys((*prior_questions, question)))
+    standalone_question = question
+    if prior_questions and _LOCAL_FOLLOWUP_PATTERN.search(question):
+        standalone_question = f"{prior_questions[-1]} Follow-up question: {question}"
+    return ResolvedTurn(
+        standalone_question=_truncate_conversation_text(
+            standalone_question,
+            MAX_RESOLVED_QUERY_CHARS,
+        ),
+        trusted_user_texts=trusted_user_texts,
+    )
 
 
 def annotate_chapter_titles(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -686,11 +763,13 @@ def merge_adjacent_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return []
 
     ranked = list(enumerate(chunks))
-    ranked.sort(key=lambda item: (
-        str(item[1].get("document", "")),
-        int(item[1].get("paragraph_start") or 0),
-        item[0],
-    ))
+    ranked.sort(
+        key=lambda item: (
+            str(item[1].get("document", "")),
+            int(item[1].get("paragraph_start") or 0),
+            item[0],
+        )
+    )
     merged: list[dict[str, Any]] = []
 
     for _, chunk in ranked:
@@ -716,7 +795,9 @@ def merge_adjacent_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         new_text = "\n\n".join(current_paragraphs[overlap:]).strip()
         if new_text:
             previous["text"] = f"{str(previous.get('text', '')).rstrip()}\n\n{new_text}"
-        previous["paragraph_end"] = max(previous_end, int(current.get("paragraph_end") or previous_end))
+        previous["paragraph_end"] = max(
+            previous_end, int(current.get("paragraph_end") or previous_end)
+        )
         previous["chunk_ids"] = [*previous["chunk_ids"], *current["chunk_ids"]]
         if "source_numbers" in current:
             previous["source_numbers"] = [
@@ -734,20 +815,16 @@ def _resolved_answer_style(
     voice: AnswerVoice | str | None,
     worldview: Worldview | str | None,
 ) -> tuple[ArchivistMode, HistoriographicalLens, AnswerVoice, Worldview]:
-    selected_mode, lens, selected_voice, selected_worldview = (
-        resolve_archivist_mode_settings(
-            archivist_mode,
-            historiographical_lens,
-            voice,
-            worldview,
-        )
+    selected_mode, lens, selected_voice, selected_worldview = resolve_archivist_mode_settings(
+        archivist_mode,
+        historiographical_lens,
+        voice,
+        worldview,
     )
     if perspective is None:
         return selected_mode, lens, selected_voice, selected_worldview
 
-    legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(
-        perspective
-    )
+    legacy_lens, legacy_voice, legacy_worldview = settings_for_legacy_perspective(perspective)
     if (
         historiographical_lens is None
         or historiographical_lens == HistoriographicalLens.EVIDENCE_FIRST
@@ -758,6 +835,238 @@ def _resolved_answer_style(
     if worldview is None or worldview == Worldview.NONE:
         selected_worldview = legacy_worldview
     return selected_mode, lens, selected_voice, selected_worldview
+
+
+def _application_compiled_generation_trace(
+    *,
+    mode: ArchivistMode,
+    generation_called: bool,
+    generation_valid: bool,
+    historiographical_lens: HistoriographicalLens | None = None,
+    voice: AnswerVoice | None = None,
+    worldview: Worldview | None = None,
+    fallback_code: str | None = None,
+) -> dict[str, object]:
+    if not generation_called:
+        failed_before_call = fallback_code is not None
+        return {
+            "status": "fallback_to_direct_evidence" if failed_before_call else "not_called",
+            "validation_result": (
+                "invalid"
+                if failed_before_call
+                else ("valid" if generation_valid else "not_run")
+            ),
+            "error_code": fallback_code,
+            "content_outcome": (
+                None
+                if failed_before_call
+                else ("valid_partial" if generation_valid else "insufficient_evidence")
+            ),
+            "repair_applied": False,
+            "repair_codes": [],
+            "prompt_version": "not-applicable",
+            "normalizer_version": APPLICATION_COMPILED_POLICY_VERSION,
+            "instructions_sha256": "not-applicable",
+            "schema_sha256": "not-applicable",
+            "generator_model": "not-applicable",
+            "generator_reasoning_effort": "not-applicable",
+            "generator_verbosity": "not-applicable",
+            "structured_generation_called": False,
+            "fallback_code": fallback_code,
+        }
+
+    instructions = build_evidence_prose_instructions(
+        mode,
+        historiographical_lens=historiographical_lens,
+        voice=voice,
+        worldview=worldview,
+    )
+    schema_sha256 = hashlib.sha256(
+        json.dumps(
+            EvidenceProseResponse.model_json_schema(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "status": "generated" if generation_valid else "fallback_to_direct_evidence",
+        "validation_result": "valid" if generation_valid else "invalid",
+        "error_code": (None if generation_valid else (fallback_code or "invalid_response")),
+        "content_outcome": "valid_partial" if generation_valid else None,
+        "repair_applied": False,
+        "repair_codes": [],
+        "prompt_version": EVIDENCE_PROSE_RENDERER_VERSION,
+        "normalizer_version": APPLICATION_COMPILED_POLICY_VERSION,
+        "instructions_sha256": hashlib.sha256(instructions.encode("utf-8")).hexdigest(),
+        "schema_sha256": schema_sha256,
+        "generator_model": READER_PROSE_SETTINGS.model,
+        "generator_reasoning_effort": READER_PROSE_SETTINGS.reasoning_effort,
+        "generator_verbosity": READER_PROSE_SETTINGS.verbosity,
+        "structured_generation_called": True,
+        "fallback_code": fallback_code,
+    }
+
+
+def _run_application_compiled_answer(
+    *,
+    resolved_turn: ResolvedTurn,
+    chunks: list[dict[str, Any]],
+    client_factory: Callable[[], object],
+    n_results: int,
+    archivist_mode: ArchivistMode,
+    historiographical_lens: HistoriographicalLens,
+    voice: AnswerVoice,
+    worldview: Worldview,
+    integrity: object,
+    progress_callback: ProgressCallback | None,
+    checked_claim_callback: CheckedClaimCallback | None,
+) -> AnswerModeResult:
+    """Compile the factual spine locally, then optionally ask for prose once."""
+
+    pipeline_started_ns = perf_counter_ns()
+    timings: dict[str, float] = {}
+    plan = build_question_plan(resolved_turn)
+    if not bool(getattr(integrity, "passed", False)):
+        return AnswerModeResult(
+            answer=(
+                "The manuscript index could not be verified against its promoted corpus "
+                "snapshot. Rebuild or restore the index before asking another question."
+            ),
+            final_chunks=[],
+            status="corpus_integrity_failed",
+            plan=plan,
+            evidence_decision="indeterminate",
+            diagnostics={
+                "rag_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+                "planner": {"status": "not_called"},
+                "generation": _application_compiled_generation_trace(
+                    mode=archivist_mode,
+                    generation_called=False,
+                    generation_valid=False,
+                ),
+                "stage_timings_ms": {"pipeline_total": _elapsed_ms(pipeline_started_ns)},
+            },
+            answer_strategy_version=APPLICATION_COMPILED_POLICY_VERSION,
+        )
+
+    emit_progress(progress_callback, AnswerProgressStage.RETRIEVING_SOURCES)
+    retrieval_started_ns = perf_counter_ns()
+    eligible_chunks = [
+        chunk for chunk in chunks if not should_skip_document(str(chunk.get("document") or ""))
+    ]
+    ranked, lexical_diagnostics = lexical_candidates(
+        resolved_turn.standalone_question,
+        eligible_chunks,
+        limit=max(12, min(20, n_results * 3)),
+    )
+    retrieved_chunks = [dict(candidate["chunk"]) for candidate in ranked]
+    timings["retrieval"] = _elapsed_ms(retrieval_started_ns)
+
+    emit_progress(progress_callback, AnswerProgressStage.CHECKING_EVIDENCE)
+    compilation_started_ns = perf_counter_ns()
+    packet: EvidencePacket = compile_evidence_packet(
+        resolved_turn.standalone_question,
+        retrieved_chunks,
+    )
+    direct = render_direct_evidence_answer(packet)
+    timings["evidence_gate"] = _elapsed_ms(compilation_started_ns)
+    compiler_diagnostics = {
+        **packet.diagnostics,
+        "retrieval": {
+            **lexical_diagnostics,
+            "ranked_chunk_count": len(retrieved_chunks),
+            "retrieval_kind": "local_bm25",
+        },
+    }
+
+    emit_progress(progress_callback, AnswerProgressStage.PREPARING_CONTEXT)
+    for card in packet.cards:
+        emit_checked_claim(
+            checked_claim_callback,
+            CheckedClaimCandidate(
+                paragraph=card.source_number,
+                text=render_evidence_card_claim(card),
+                source_chunks=packet.source_chunks,
+                audit_chunks=packet.source_chunks,
+            ),
+        )
+
+    if not packet.cards:
+        generation = _application_compiled_generation_trace(
+            mode=archivist_mode,
+            generation_called=False,
+            generation_valid=False,
+        )
+        answer = direct.answer
+        status = direct.status
+    elif archivist_mode is ArchivistMode.ESSENTIAL:
+        generation = _application_compiled_generation_trace(
+            mode=archivist_mode,
+            generation_called=False,
+            generation_valid=True,
+        )
+        answer = direct.answer
+        status = direct.status
+    else:
+        emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
+        generation_started_ns = perf_counter_ns()
+        try:
+            client = client_factory()
+        except Exception:
+            timings["answer_generation"] = _elapsed_ms(generation_started_ns)
+            fallback_code = ProseFailureCode.PROVIDER_FAILURE.value
+            generation = _application_compiled_generation_trace(
+                mode=archivist_mode,
+                generation_called=False,
+                generation_valid=False,
+                fallback_code=fallback_code,
+            )
+            answer = direct.answer
+            status = "application_compiled_fallback"
+        else:
+            prose = generate_evidence_prose(
+                client,
+                question=resolved_turn.standalone_question,
+                cards=packet.cards,
+                mode=archivist_mode,
+                historiographical_lens=historiographical_lens,
+                voice=voice,
+                worldview=worldview,
+            )
+            timings["answer_generation"] = _elapsed_ms(generation_started_ns)
+            generated = prose.status is ProseRenderStatus.GENERATED and prose.answer is not None
+            generation = _application_compiled_generation_trace(
+                mode=archivist_mode,
+                generation_called=True,
+                generation_valid=generated,
+                historiographical_lens=historiographical_lens,
+                voice=voice,
+                worldview=worldview,
+                fallback_code=(
+                    prose.failure_code.value if prose.failure_code is not None else None
+                ),
+            )
+            answer = prose.answer if generated else direct.answer
+            status = "application_compiled_prose" if generated else "application_compiled_fallback"
+
+    emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
+    timings["answer_validation"] = 0.0
+    timings["pipeline_total"] = _elapsed_ms(pipeline_started_ns)
+    return AnswerModeResult(
+        answer=answer,
+        final_chunks=list(packet.source_chunks),
+        status=status,
+        plan=plan,
+        evidence_decision=("direct_answer" if packet.cards else "clean_abstention"),
+        diagnostics={
+            "rag_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+            "planner": {"status": "not_called"},
+            "generation": generation,
+            "evidence_compiler": compiler_diagnostics,
+            "stage_timings_ms": timings,
+        },
+        answer_strategy_version=APPLICATION_COMPILED_POLICY_VERSION,
+    )
 
 
 def answer_project_question_legacy(
@@ -826,6 +1135,8 @@ def answer_project_question_result(
     resolved_turn: ResolvedTurn | None = None,
     history: Sequence[Mapping[str, object]] = (),
     answer_strategy: AnswerStrategy | str = AnswerStrategy.RAG,
+    rag_policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
+    application_compiled: bool = False,
     progress_callback: ProgressCallback | None = None,
     checked_claim_callback: CheckedClaimCallback | None = None,
     stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
@@ -837,6 +1148,8 @@ def answer_project_question_result(
     """
     answer_run_started_ns = perf_counter_ns()
     selected_strategy = AnswerStrategy(answer_strategy)
+    if selected_strategy is AnswerStrategy.FULL_CONTEXT and rag_policy != EVIDENCE_PLANNED_POLICY:
+        raise ValueError("experimental RAG policies apply only to retrieval-backed answers")
     selected_mode, historiographical_lens, voice, worldview = _resolved_answer_style(
         archivist_mode=archivist_mode,
         perspective=perspective,
@@ -844,11 +1157,24 @@ def answer_project_question_result(
         voice=voice,
         worldview=worldview,
     )
+    if application_compiled and (
+        project_id != "current"
+        or selected_strategy is not AnswerStrategy.RAG
+        or selected_mode not in APPLICATION_COMPILED_MODES
+    ):
+        raise ValueError(
+            "application-compiled answers require the built-in retrieval corpus "
+            "and a supported reader mode"
+        )
 
     # Custom projects do not yet persist the independent per-chunk identity
     # manifest required to certify a whole-corpus absence. Keep their established
     # behavior until project ingestion writes that snapshot.
     if project_id != "current":
+        if rag_policy != EVIDENCE_PLANNED_POLICY:
+            raise ValueError(
+                "experimental RAG policies are available only for the built-in manuscript"
+            )
         emit_progress(progress_callback, AnswerProgressStage.RESOLVING_QUESTION)
         turn = resolved_turn or resolve_conversation_turn(question, history)
         answer, final_chunks = answer_project_question_legacy(
@@ -859,11 +1185,7 @@ def answer_project_question_result(
             voice=voice,
             worldview=worldview,
             archivist_mode=selected_mode,
-            **(
-                {"progress_callback": progress_callback}
-                if progress_callback is not None
-                else {}
-            ),
+            **({"progress_callback": progress_callback} if progress_callback is not None else {}),
         )
         result = AnswerModeResult(
             answer=answer,
@@ -881,19 +1203,13 @@ def answer_project_question_result(
     emit_progress(progress_callback, AnswerProgressStage.CHECKING_CORPUS)
     collection = chroma_client().get_collection(name=collection_name(project_id))
     chunks = load_project_chunks(project_id)
-    chunks_file = (
-        LEGACY_CHUNKS_FILE
-        if project_id == "current"
-        else chunks_path(project_id)
-    )
+    chunks_file = LEGACY_CHUNKS_FILE if project_id == "current" else chunks_path(project_id)
     corpus_trace: dict[str, object] = {
         "project_id": project_id,
         "collection_name": collection_name(project_id),
     }
     if chunks_file.is_file():
-        corpus_trace["chunks_sha256"] = hashlib.sha256(
-            chunks_file.read_bytes()
-        ).hexdigest()
+        corpus_trace["chunks_sha256"] = hashlib.sha256(chunks_file.read_bytes()).hexdigest()
     configuration = getattr(collection, "configuration", {})
     if isinstance(configuration, Mapping):
         hnsw = configuration.get("hnsw")
@@ -905,9 +1221,7 @@ def answer_project_question_result(
     fixture_manifest = BASE_DIR / "fixtures" / "corpus_manifest.json"
     if project_id == "current" and fixture_manifest.is_file():
         corpus_manifest = read_json(fixture_manifest, None)
-        corpus_manifest_sha256 = hashlib.sha256(
-            fixture_manifest.read_bytes()
-        ).hexdigest()
+        corpus_manifest_sha256 = hashlib.sha256(fixture_manifest.read_bytes()).hexdigest()
         corpus_trace["corpus_manifest_sha256"] = corpus_manifest_sha256
 
     preflight_started_ns = perf_counter_ns()
@@ -924,7 +1238,11 @@ def answer_project_question_result(
     turn = resolved_turn
     if turn is None:
         turn = (
-            resolve_conversation_turn(question, history)
+            (
+                resolve_application_compiled_turn(question, history)
+                if application_compiled
+                else resolve_conversation_turn(question, history)
+            )
             if integrity.passed
             else ResolvedTurn(
                 standalone_question=question,
@@ -932,8 +1250,22 @@ def answer_project_question_result(
             )
         )
     conversation_resolution_ms = _elapsed_ms(resolution_started_ns)
-    client = openai_client() if integrity.passed else object()
-    if selected_strategy is AnswerStrategy.FULL_CONTEXT:
+    if application_compiled:
+        result = _run_application_compiled_answer(
+            resolved_turn=turn,
+            chunks=chunks,
+            client_factory=openai_client,
+            n_results=n_results,
+            archivist_mode=selected_mode,
+            historiographical_lens=historiographical_lens,
+            voice=voice,
+            worldview=worldview,
+            integrity=integrity,
+            progress_callback=progress_callback,
+            checked_claim_callback=checked_claim_callback,
+        )
+    elif selected_strategy is AnswerStrategy.FULL_CONTEXT:
+        client = openai_client() if integrity.passed else object()
         # n_results has no referent here: full context has no retrieval depth to
         # tune. It is ignored rather than rejected so an existing client need not
         # conditionally omit a field based on the reader's evidence scope.
@@ -951,11 +1283,7 @@ def answer_project_question_result(
             voice=voice,
             worldview=worldview,
             archivist_mode=selected_mode,
-            **(
-                {"progress_callback": progress_callback}
-                if progress_callback is not None
-                else {}
-            ),
+            **({"progress_callback": progress_callback} if progress_callback is not None else {}),
             **(
                 {"checked_claim_callback": checked_claim_callback}
                 if checked_claim_callback is not None
@@ -968,6 +1296,7 @@ def answer_project_question_result(
             ),
         )
     else:
+        client = openai_client() if integrity.passed else object()
         result = run_evidence_planned_answer(
             resolved_turn=turn,
             collection_handle=collection,
@@ -983,11 +1312,8 @@ def answer_project_question_result(
             voice=voice,
             worldview=worldview,
             archivist_mode=selected_mode,
-            **(
-                {"progress_callback": progress_callback}
-                if progress_callback is not None
-                else {}
-            ),
+            policy=rag_policy,
+            **({"progress_callback": progress_callback} if progress_callback is not None else {}),
             **(
                 {"checked_claim_callback": checked_claim_callback}
                 if checked_claim_callback is not None
@@ -1042,7 +1368,9 @@ def search_existing_index(project_id: str, term: str, limit: int = 8) -> list[di
     return matches[:limit]
 
 
-def generate_index_entry(project_id: str, term: str, consult_existing_index: bool) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+def generate_index_entry(
+    project_id: str, term: str, consult_existing_index: bool
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     semantic_results = retrieve_project_semantic(project_id, term, n_results=5)
     chunks = load_project_chunks(project_id)
     final_chunks = finalize_index_context(
@@ -1051,7 +1379,9 @@ def generate_index_entry(project_id: str, term: str, consult_existing_index: boo
         chunks=chunks,
         empty_term_matches=False,
     )
-    existing_index_chunks = search_existing_index(project_id, term) if consult_existing_index else []
+    existing_index_chunks = (
+        search_existing_index(project_id, term) if consult_existing_index else []
+    )
     prompt = build_index_prompt_web(term, final_chunks, existing_index_chunks)
     response = tracked_responses_create(
         openai_client(),
@@ -1066,11 +1396,33 @@ def candidate_terms(project_id: str, limit: int = 50) -> list[dict[str, Any]]:
     chunks = load_project_chunks(project_id)
     counter: Counter[str] = Counter()
     stop = {
-        "The", "A", "An", "And", "But", "For", "This", "That", "These", "Those",
-        "In", "On", "At", "By", "From", "As", "It", "Its", "They", "Their",
-        "Chapter", "Appendix", "Introduction",
+        "The",
+        "A",
+        "An",
+        "And",
+        "But",
+        "For",
+        "This",
+        "That",
+        "These",
+        "Those",
+        "In",
+        "On",
+        "At",
+        "By",
+        "From",
+        "As",
+        "It",
+        "Its",
+        "They",
+        "Their",
+        "Chapter",
+        "Appendix",
+        "Introduction",
     }
-    phrase_pattern = re.compile(r"\b([A-Z][A-Za-z]+(?:\s+(?:of|the|and|de|du|[A-Z][A-Za-z]+)){0,4})\b")
+    phrase_pattern = re.compile(
+        r"\b([A-Z][A-Za-z]+(?:\s+(?:of|the|and|de|du|[A-Z][A-Za-z]+)){0,4})\b"
+    )
     for chunk in chunks:
         if should_skip_document(chunk.get("document", "")):
             continue
@@ -1086,28 +1438,29 @@ def candidate_terms(project_id: str, limit: int = 50) -> list[dict[str, Any]]:
 def source_payload(chunks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     sources = []
     for i, chunk in enumerate(chunks, start=1):
-        sources.append({
-            "source_number": i,
-            "citation_label": citation_label(chunk),
-            "document": chunk.get("document", "N/A"),
-            "chapter_title": chunk.get("chapter_title", "N/A"),
-            "chunk_id": chunk.get("chunk_id", "N/A"),
-            "chunk_ids": [chunk.get("chunk_id", "N/A")],
-            "paragraph_start": chunk.get("paragraph_start"),
-            "paragraph_end": chunk.get("paragraph_end"),
-            "text": chunk.get("text", ""),
-        })
+        sources.append(
+            {
+                "source_number": i,
+                "citation_label": citation_label(chunk),
+                "document": chunk.get("document", "N/A"),
+                "chapter_title": chunk.get("chapter_title", "N/A"),
+                "chunk_id": chunk.get("chunk_id", "N/A"),
+                "chunk_ids": [chunk.get("chunk_id", "N/A")],
+                "paragraph_start": chunk.get("paragraph_start"),
+                "paragraph_end": chunk.get("paragraph_end"),
+                "text": chunk.get("text", ""),
+            }
+        )
 
-    numbered_chunks = [
-        {**chunk, "source_numbers": [i]}
-        for i, chunk in enumerate(chunks, start=1)
-    ]
+    numbered_chunks = [{**chunk, "source_numbers": [i]} for i, chunk in enumerate(chunks, start=1)]
     display_groups = []
     for group in merge_adjacent_chunks(numbered_chunks):
         numbers = group["source_numbers"]
-        display_groups.append({
-            "source_numbers": numbers,
-            "text": group.get("text", ""),
-            "citation_labels": [sources[number - 1]["citation_label"] for number in numbers],
-        })
+        display_groups.append(
+            {
+                "source_numbers": numbers,
+                "text": group.get("text", ""),
+                "citation_labels": [sources[number - 1]["citation_label"] for number in numbers],
+            }
+        )
     return {"sources": sources, "display_groups": display_groups}

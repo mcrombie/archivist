@@ -59,6 +59,59 @@ before calibration.
 
 ---
 
+## [2026-08-12] A valid card ID could have laundered invented factual prose
+Phase/Brief: Application-compiled answer and prose-rendering contract
+Symptom: the requested prose boundary allowed a generated segment to name an admitted evidence-card
+ID while also supplying its own factual-looking sentence. Application code could then have attached
+the card's valid `[Source N]` citation to model-authored text, making an invented or altered claim
+look mechanically grounded even though the cited card text never said it.
+Cause: specification gap. The brief correctly reserved evidence selection and citation numbering to
+the application but did not specify whether a valid card ID authorized the prose model to rewrite
+the card. That omitted mechanic would have conflated evidence ordering with factual authorship.
+Resolution and verification: evidence segments now accept only the exact immutable
+`<use-evidence-card>` placeholder and one known card ID. The application replaces that placeholder
+with the frozen bounded card text and locally owned citation. Interpretation and character-aside
+segments cannot carry card IDs or authored prose; they contain only typed, mode-bound cue IDs whose
+distinct text and labels are owned by local code. Unknown/omitted cards, model-written citations,
+raw prose, cross-mode cues, and invalid editorial shapes fail the one-call selection contract and trigger direct cited-evidence fallback
+without retry. Focused offline renderer and application-pipeline tests cover immutable substitution,
+labeling, failure fallback, exactly-one-call generated modes, and Essential's zero-provider path.
+The current product transition also removed the V26/V27 reader selector: frozen V26 remains an
+explicit immutable development/evaluation policy, and V27 remains an unpromoted historical
+experiment superseded by `application-compiled-v1`. Essential plus Full Context is rejected so its
+zero-provider contract is unambiguous. Production-performance v1 is unchanged. After exact owner
+authorization, a bounded three-mode smoke produced three valid closed-cue responses with no retries,
+but its one-question scope carries no latency or quality-improvement claim.
+
+## [2026-08-12] Provider-authored redundant ledgers are a latency and reliability liability
+Phase/Brief: Post-production latency optimization
+Symptom: the sealed production cohort observed 54.393-second server p50 and 113.801-second p95
+across 29 valid completions. Its four request failures all occurred after successful planning and
+direct-answer evidence selection when the generated structured payload violated one of three
+relational release checks: two `missing_unit_requirement_id`, one `obligation_role_mismatch`, and
+one `unsupported_requirement_has_unit`.
+Cause: generation-contract design hypothesis under investigation. The provider is asked to author
+relationship ledgers that repeat information already implied by answer units and trusted request
+context, so generation spends tokens on redundant structure and independently produced views can
+disagree. The cohort does not prove that redundancy caused the four failures. Provider-owned
+statuses, requirement links, and obligation roles can remain semantically incompatible even after
+local derivation. The existing terminal validator correctly fails closed; weakening it would hide
+rather than repair the defect.
+Resolution and verification: implemented and offline-verified a universal representation-only
+candidate in `docs/latency_optimization.md`. Under V27, every eligible generated answer uses the
+compact provider contract, and deterministic local code expands it into the same canonical object
+consumed by the unchanged validator and renderer. Equivalence, malformed-input, trace, and pipeline gates pass; repository-
+wide Ruff, 1,022 pytest tests with one intentional skip, both frontend test suites, and the
+production build also pass. Synthetic serialization measurements reduce the neutral and
+interpretive schemas by 14.51% and 19.68%, and representative neutral and interpretive payloads by
+21.06% and 15.05%. This entry is **not closed**: those are representation measurements, the
+candidate does not itself eliminate the three semantic defect classes, no paid candidate call has
+run, no provider latency or reliability improvement has been measured, and the candidate is not
+promoted. Promotion requires the separately authorized paired G001-G010 A/B, including a
+paired median generation-latency ratio at or below 0.70, preserved release reliability and
+development quality, 100% citation resolvability, and zero malformed citations. Frozen V26 and
+production-performance v1 remain unchanged.
+
 ## [2026-08-12] Opening-page advanced settings were clipped below the viewport
 Phase/Brief: Public reader usability after the production cohort
 Symptom: on the opening page, expanding the reading options and their advanced disclosures could
@@ -91,7 +144,11 @@ zero instrumentation failures, 500,164 tokens, 80 priced and zero unpriced event
 `$4.90594694` estimated cost. Repair the three relationships with synthetic contract regressions,
 then measure any improvement only in a separately versioned cohort. Do not silently infer or repair
 semantic requirement/role mappings, and do not overwrite this run. These are cohort observations,
-not an SLA or generalized reliability claim.
+not an SLA or generalized reliability claim. On 2026-08-12 the universal compact
+provider-contract candidate above became an implemented, offline-verified latency experiment: it
+derives redundant mappings locally before applying the same validator. It does not itself eliminate
+these semantic defects. The production defect remains open until later work and a separately
+authorized comparison demonstrate the result; passing offline checks alone does not close it.
 
 ## [2026-08-10] Runner-only cost reserve did not bound one live public RAG request
 Phase/Brief: Production observability and resume-claim evidence

@@ -24,8 +24,9 @@ The design is now represented in code:
   as an operational fallback;
 - Cromblog discovers that address through `NEXT_PUBLIC_ARCHIVIST_URL` without hard-coding hosting
   details into either repository; and
-- the browser defaults new visitors to the Professional reader mode while the omitted-mode API,
-  CLI, and evaluation path stays on the frozen Essential baseline.
+- the browser defaults new visitors to Professional while the omitted-mode API resolves to
+  Essential; current RAG identifies itself as `application-compiled-v1` through public runtime
+  identity schema `archivist.public_runtime_identity/3`.
 
 The public smoke performed on July 27 used four paid turns: a focused opening question, a
 context-dependent follow-up, a broad tobacco/labor question, and a deliberate absence question.
@@ -59,43 +60,35 @@ claim-local excerpts.
 
 ## Reader modes and public disclosure
 
-Reader modes do not widen the public evidence boundary. All ten semantic modes search the same
-private *Cradle* manuscript corpus and pass through the same citation, quotation, and source-display
-controls. Their optional influence profiles are fixed, reviewed generation instructions rather
-than retrievable books or additional evidence.
+Reader modes do not widen the public evidence boundary. Exactly four modes are selectable:
+Professional, Essential, Pretty Pink Princess, and Baleful Black Baron. Their four matching
+appearances are the only selectable appearances. Dormant IDs, reviewed historical profiles, and
+visual assets remain in the repository for compatibility but are not public choices.
 
-Professional is the public frontend default and uses interpretive methods distilled from selected
-public-domain artifacts by Wesley Frank Craven, Charles A. Beard, and W. E. B. Du Bois. Mythical
-Forest Folio uses reviewed formal qualities from Lord Dunsany's *The King of Elfland's Daughter*.
-Cromb Coo Coo uses a reviewed profile derived locally from an owner-supplied private manuscript.
-Pretty Pink Princess and Baleful Black Baron apply strong project-authored optimistic and tragic
-profiles. Tidal Archivist uses bounded formal qualities reviewed from Project Gutenberg #15,
-*Moby-Dick; or, The Whale*, rather than the Forest mode's Dunsany influence. Ember & Ink uses a
-text-free Realist Statecraft profile historically associated with Henry Kissinger; it does not
-ingest, quote, paraphrase, imitate, or cite a Kissinger work. Those influences may shape framing,
-Illuminated Codex uses a text-free modern liberal history profile centered on rights, pluralism,
-representative institutions, reform, inclusion, and accountable power without present-day party
-advocacy. Cosmic Almanac uses a text-free future-science history profile that considers systems,
-long time horizons, uncertainty, and plausible future implications without inventing predictions
-or treating them as evidence. Those influences may shape framing, emphasis, cadence, and judgment,
-but they may never supply a historical assertion, citation, quotation, proper noun, plot element,
-lore, or answer-specific causal link. The private Cromb PDF and extracts are neither committed nor
-sent to an API. Essential adds no curated external influence and remains the held-out and gold
-evaluation mode. See `docs/archivist_modes.md` for the versioned registry, artifact identities, and
-rights cautions.
+Current RAG ranks with local BM25 and application code compiles bounded immutable evidence cards.
+Essential returns those cards directly and makes zero provider calls. Professional, Pretty Pink
+Princess, and Baleful Black Baron each make exactly one no-retry `gpt-5.6-sol` call with low
+reasoning. That call selects only exact evidence-card placeholders and typed IDs from the selected
+mode's closed, application-owned cue catalog. Local code supplies every displayed factual word,
+editorial word, label, and citation. Raw prose, unknown or cross-mode cues, malformed card use, or
+provider/client failure cannot enter the answer and instead produce the direct Essential evidence.
+See `docs/archivist_modes.md` for the current registry and preserved historical provenance.
 
 The public request contract accepts only allowlisted mode IDs and resolved facet values. It does
 not accept prompt text, source paths, arbitrary influence identifiers, or raw influence excerpts.
-The response records mode and profile versions for reproducibility. Advanced overrides are
-reader-visible and apply only to future turns; completed answers retain their resolved settings.
+The response records mode, compiler, and selector metadata for reproducibility. Advanced overrides
+are reader-visible and apply only to future turns; completed answers retain their resolved
+settings. The UI has no V26/V27 selector. Those policies remain accessible only through explicit
+development API compatibility requests.
 
 ## What an index means here
 
-The RAG index is not the printed index at the back of the book. It is the private Chroma collection
-containing embeddings for the 481 retrieval-eligible manuscript chunks. At question time Archivist
-embeds the question, finds relevant chunks in that collection, and sends only the selected evidence
-to the answer model. Searching the complete manuscript therefore does not mean sending the
-594-page book to the model on every turn.
+The RAG index is not the printed index at the back of the book. The private runtime retains the
+481 retrieval-eligible manuscript chunks and the frozen Chroma collection used by explicit legacy
+policies. Current `application-compiled-v1` RAG ranks those private chunks with local BM25 and
+compiles only the selected bounded evidence cards. Essential sends no question or evidence to an
+answer model. A generated mode sends only the question, selected cards, and closed selector
+contract to its one optional arrangement call; it never sends the 594-page book.
 
 The printed Index, front matter, table of contents, acknowledgments, illustration notes,
 bibliography, and illustration credits remain outside the answer corpus. The complete substantive
@@ -187,9 +180,11 @@ two verified profiles exist.
 
 ## Public citation and quotation contract
 
-The model-facing citation contract remains `[Source N]`. Edition mapping happens after generation,
-in presentation, so adding or changing a locator profile cannot change retrieval results or
-measured answer behavior.
+In current RAG, `[Source N]` is application-owned. The evidence compiler assigns it mechanically,
+and the optional selector can reference only the exact evidence-card placeholder; it cannot write
+or renumber citations. Edition mapping remains a local presentation step, so adding or changing a
+locator profile cannot change retrieval results or the immutable evidence text. Explicit V26/V27
+compatibility policies retain their historical model-facing citation contract.
 
 Every cited public source receives:
 
@@ -212,9 +207,9 @@ Every cited source can still show its edition locator even when it does not rece
 three excerpt slots. These figures are implementation defaults to validate with disclosure tests,
 not a licensing claim.
 
-The public answer prompt should prefer concise paraphrase and forbid extended reproduction.
-Separate output checks should flag unexpectedly long verbatim overlap before a response is
-released. This is complementary to, not a substitute for, the source-payload limits.
+The current evidence compiler enforces bounded excerpt cards before answer assembly. Public output
+checks and source-payload limits remain separate safeguards; a selector response cannot introduce
+additional manuscript prose because local rendering accepts no free text.
 
 ## Public API boundary
 

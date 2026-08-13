@@ -113,11 +113,7 @@ def test_incremental_array_reader_handles_every_character_split_json_numbers():
         "answer_units": [1.25e-12, -350.5, 0],
     }
 
-    emitted = [
-        item
-        for character in json.dumps(payload)
-        for item in reader.feed(character)
-    ]
+    emitted = [item for character in json.dumps(payload) for item in reader.feed(character)]
 
     assert emitted == payload["answer_units"]
     assert reader.done is True
@@ -127,7 +123,7 @@ def test_incremental_array_reader_handles_every_character_split_json_numbers():
     "truncated",
     [
         '{"answer_units":[{"text":"complete value"}',
-        '{"answer_units":[{"text":"escaped \\\"quote',
+        '{"answer_units":[{"text":"escaped \\"quote',
     ],
 )
 def test_incremental_array_reader_withholds_truncated_members(truncated):
@@ -140,9 +136,7 @@ def test_incremental_array_reader_withholds_truncated_members(truncated):
 def test_incremental_array_reader_emits_only_delimited_member_before_truncation():
     reader = IncrementalJSONArrayItems("answer_units")
 
-    assert reader.feed('{"answer_units":[{"text":"value"}, {"text":') == (
-        {"text": "value"},
-    )
+    assert reader.feed('{"answer_units":[{"text":"value"}, {"text":') == ({"text": "value"},)
     assert reader.done is False
 
 
@@ -209,11 +203,7 @@ def test_incremental_array_reader_finds_escaped_top_level_key_after_decoys():
         field_name: expected,
     }
 
-    emitted = [
-        item
-        for character in json.dumps(payload)
-        for item in reader.feed(character)
-    ]
+    emitted = [item for character in json.dumps(payload) for item in reader.feed(character)]
 
     assert emitted == expected
     assert reader.done is True
@@ -235,12 +225,8 @@ def test_incremental_array_reader_rejects_missing_top_level_field_comma():
 
 def test_incremental_array_reader_enforces_inclusive_buffer_bound():
     payload = '{"answer_units":[{"unit_id":"u1"}]}'
-    within_bound = IncrementalJSONArrayItems(
-        "answer_units", maximum_characters=len(payload)
-    )
-    over_bound = IncrementalJSONArrayItems(
-        "answer_units", maximum_characters=len(payload) - 1
-    )
+    within_bound = IncrementalJSONArrayItems("answer_units", maximum_characters=len(payload))
+    over_bound = IncrementalJSONArrayItems("answer_units", maximum_characters=len(payload) - 1)
 
     assert within_bound.feed(payload) == ({"unit_id": "u1"},)
     assert within_bound.done is True
@@ -293,8 +279,10 @@ def test_development_progressive_endpoint_delivers_checked_claim_during_generati
         progress_callback=None,
         checked_claim_callback=None,
         stream_milestone_callback=None,
-        **_kwargs,
+        **kwargs,
     ):
+        assert kwargs["rag_policy"] is web_api.V27_COMPACT_CANDIDATE_POLICY
+        assert "application_compiled" not in kwargs
         assert progress_callback is not None
         assert checked_claim_callback is not None
         assert stream_milestone_callback is not None
@@ -338,7 +326,10 @@ def test_development_progressive_endpoint_delivers_checked_claim_during_generati
 
     response = TestClient(web_api.app).post(
         "/api/projects/current/question/progressive",
-        json={"question": "What happened?"},
+        json={
+            "question": "What happened?",
+            "rag_policy_version": web_api.COMPACT_RAG_POLICY_VERSION,
+        },
     )
     frames = _frames(response)
 
@@ -354,9 +345,7 @@ def test_development_progressive_endpoint_delivers_checked_claim_during_generati
     assert frames[0]["type"] == "stage"
     assert frames[0]["stage"] == "accepted"
     validation_index = next(
-        index
-        for index, frame in enumerate(frames)
-        if frame.get("stage") == "validating_answer"
+        index for index, frame in enumerate(frames) if frame.get("stage") == "validating_answer"
     )
     claim_indexes = [
         index for index, frame in enumerate(frames) if frame["type"] == "checked_claim"
@@ -465,10 +454,7 @@ def _public_settings(**overrides) -> ExposureSettings:
     values = {
         "monthly_budget_usd": "5.00",
         "locator_artifact": (
-            web_api.BASE_DIR
-            / "fixtures"
-            / "edition_locators"
-            / "typeset_pdf_0706.json"
+            web_api.BASE_DIR / "fixtures" / "edition_locators" / "typeset_pdf_0706.json"
         ),
     }
     values.update(overrides)
@@ -537,9 +523,7 @@ def test_public_progressive_endpoint_keeps_safe_terminal_shape(monkeypatch):
 
     assert response.status_code == 200
     release_index = next(
-        index
-        for index, frame in enumerate(frames)
-        if frame.get("stage") == "checking_release"
+        index for index, frame in enumerate(frames) if frame.get("stage") == "checking_release"
     )
     first_claim = next(
         index for index, frame in enumerate(frames) if frame["type"] == "checked_claim"
@@ -936,7 +920,11 @@ def test_progressive_preflights_remain_http_errors_and_release_public_gate(monke
     )
     development = TestClient(web_api.app).post(
         "/api/projects/current/question/progressive",
-        json={"question": "What happened?", "answer_strategy": "full_context"},
+        json={
+            "question": "What happened?",
+            "archivist_mode": "professional",
+            "answer_strategy": "full_context",
+        },
     )
     assert development.status_code == 422
     assert development.headers["content-type"].startswith("application/json")
@@ -954,7 +942,11 @@ def test_progressive_preflights_remain_http_errors_and_release_public_gate(monke
     for _ in range(2):
         public = public_client.post(
             "/api/projects/current/question/progressive",
-            json={"question": "What happened?", "answer_strategy": "full_context"},
+            json={
+                "question": "What happened?",
+                "archivist_mode": "professional",
+                "answer_strategy": "full_context",
+            },
         )
         assert public.status_code == 503
         assert public.headers["content-type"].startswith("application/json")
@@ -989,10 +981,13 @@ def test_stream_gate_lifecycle_releases_once_after_both_sides_finish():
 
 
 def test_progressive_answer_feature_is_advertised_for_both_profiles():
-    assert web_api._feature_flags(web_api.ExposureProfile.DEVELOPMENT)[
-        "progressive_answers"
-    ] is True
-    assert web_api._feature_flags(
+    development = web_api._feature_flags(web_api.ExposureProfile.DEVELOPMENT)
+    public = web_api._feature_flags(
         web_api.ExposureProfile.PUBLIC_DEMO,
         _public_settings(),
-    )["progressive_answers"] is True
+    )
+
+    assert development["progressive_answers"] is True
+    assert public["progressive_answers"] is True
+    assert development["experimental_compact_rag"] is False
+    assert public["experimental_compact_rag"] is False

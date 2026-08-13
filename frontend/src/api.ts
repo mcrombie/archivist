@@ -79,6 +79,13 @@ export type AppConfig = {
 
 export type AnswerStrategy = "rag" | "full_context";
 
+export function answerPolicyLabel(version: string | null | undefined) {
+  if (version === "application-compiled-v1") return "Application-compiled v1";
+  if (version === "evidence-planned-v26") return "Evidence-planned v26";
+  if (version === "full-context-v2") return "Full-context v2";
+  return version ? `Answer policy · ${version}` : null;
+}
+
 export const DEFAULT_ANSWER_STRATEGY: AnswerStrategy = "rag";
 
 export type ProgressiveAnswerStage =
@@ -714,8 +721,7 @@ export async function askQuestionProgressively(
         if (!seenStages.has(requiredStage)) {
           throw new Error("Archivist completed an answer before the required checks finished.");
         }
-        const checkedText = progressiveCheckedClaimsText(checkedClaims);
-        if (checkedText && !frame.result.answer.includes(checkedText)) {
+        if (checkedClaims.some((claim) => !frame.result.answer.includes(claim.text))) {
           throw new Error("Archivist's checked claims did not match its canonical answer.");
         }
         terminal = frame.result;

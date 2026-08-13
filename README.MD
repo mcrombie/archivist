@@ -12,8 +12,10 @@ chunks, internal traces, or arbitrary file paths.
 
 ## Current product
 
-The interactive application currently uses RAG policy `evidence-planned-v26` over **481
-retrieval-eligible chunks**. Those chunks cover the Introduction, geological formation, Prologue,
+The built-in RAG product now defaults to `application-compiled-v1` over **481
+retrieval-eligible chunks**. Archivist resolves ordinary follow-ups and plans locally, ranks the
+eligible manuscript with deterministic BM25, and compiles at most three immutable, bounded
+evidence cards. The chunks cover the Introduction, geological formation, Prologue,
 Chapters 1–20, Epilogue, Afterword, and Appendices A–D. Front matter, the table of contents,
 acknowledgments, illustration notes, bibliography, printed index, and credits are excluded from
 retrieval.
@@ -21,30 +23,43 @@ retrieval.
 The reader experience includes:
 
 - a one-page, multi-turn conversation with contextual follow-up resolution;
-- query decomposition, premise checking, absence handling, evidence-coverage checks, and inline
-  source citations;
-- **10 semantic modes**: Professional, Essential, Mythical Forest Folio, Cromb Coo Coo, Pretty
-  Pink Princess, Baleful Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and Cosmic
-  Almanac;
-- **11 visual appearances**, available separately under advanced controls;
+- local follow-up resolution and planning, BM25 ranking, bounded evidence-card compilation, and
+  inline source citations;
+- **4 reader-selectable modes**: Professional, Essential, Pretty Pink Princess, and Baleful Black
+  Baron;
+- **4 mode-linked visual appearances**; dormant appearance assets are hidden compatibility data;
 - Professional as the new-visitor default and Essential as the neutral evidence-first baseline for
   API, CLI, and evaluation callers that omit a mode;
 - **Complete answer** as the fail-closed default delivery mode;
 - **Progressive response** as an experimental advanced setting that may reveal locally checked,
-  cited claims from the same generation call before the canonical answer finishes validation;
+  cited evidence from the same request before the canonical answer finishes validation;
 - typeset-PDF page locators and tightly bounded excerpts in the public demo; and
 - local cost estimates and budget controls for development.
 
-Modes influence framing, emphasis, and prose style. They do not change the manuscript evidence,
-retrieval corpus, citation requirements, premise checks, or absence decisions.
+In current RAG, Essential returns the compiled evidence cards directly with application-owned
+`[Source N]` citations and makes **zero OpenAI or other provider calls**. Professional, Pretty Pink
+Princess, and Baleful Black Baron each make exactly one `gpt-5.6-sol` low-reasoning selection call
+over closed card IDs/text and application-owned typed editorial cue IDs, with no retry. The model
+chooses card order and cue IDs only. Local code supplies every displayed factual and editorial word,
+label, and citation. Each cue belongs to one distinct mode catalog, and cross-mode cues fail local
+validation. An invalid, refused, failed, or unavailable call falls back to the same direct evidence.
+
+Advanced lens, voice, and worldview settings guide card order and local cue selection only. They do
+not apply to Essential and never change retrieval, card text, displayed-word ownership, or citations. Historical mode
+definitions and assets remain only so stored and server compatibility data continue to resolve;
+they are not selectable through the current UI or API.
 
 Progressive response is not chain-of-thought and does not make a second answer-model call. It may
 improve perceived responsiveness, but planning and retrieval still occur before prose can be
 released. Any provisional text is discarded if the final response fails validation. Complete
 answer remains the reference behavior.
 
-An experimental `full-context-v2` strategy also exists behind server-side feature flags. It is
-disabled by default and disabled on the public deployment; the public demo uses the V26 RAG path.
+An experimental `full-context-v2` strategy also exists behind server-side feature flags and
+remains disabled on the public deployment. Because Full Context is generative, API requests that
+combine it with zero-provider Essential are rejected. Frozen `evidence-planned-v26` remains immutable and
+callable only when a developer explicitly requests that policy. The unpromoted V27 compact policy
+is retained as a historical development experiment. Its old reader-facing selector has been
+removed; neither V26 nor V27 is the current product default.
 
 ## Architecture
 
@@ -58,13 +73,22 @@ deterministic preparation, manifest, and edition locators
 private Chroma index (481 eligible text-embedding-3-small vectors)
         |
         v
-V26 conversation resolution, planning, retrieval, and evidence checks
+local follow-up resolution and question planning
         |
         v
-structured answer generation through the OpenAI Responses API
+deterministic BM25 ranking and up to 3 bounded evidence cards
         |
         v
-grounding, citation, premise, completeness, and exposure validation
+application-owned factual text, editorial cue text, labels, and [Source N] citations
+        |
+        +--> Essential RAG: direct evidence, zero provider calls
+        |
+        `--> three generated modes: one no-retry gpt-5.6-sol call
+                     selects card order + typed local editorial cue IDs
+                     (failure falls back to direct evidence)
+        |
+        v
+public quotation, citation, and exposure validation
         |
         +--> development: private diagnostics and full source inspection
         |
@@ -74,8 +98,9 @@ grounding, citation, premise, completeness, and exposure validation
 FastAPI service + React/Vite conversation interface
 ```
 
-The interactive generator, follow-up resolver, and planner use `gpt-5.6-sol` with explicit
-role-specific settings. For formal evaluation, Archivist prefers immutable dated snapshots, but
+Only the three generated-prose modes use `gpt-5.6-sol`, with low reasoning and explicit settings;
+follow-up resolution, planning, BM25 ranking, evidence compilation, Essential rendering, and
+citations are local. For formal evaluation, Archivist prefers immutable dated snapshots, but
 OpenAI's current catalog exposes only the canonical current-snapshot IDs `gpt-5.6-sol` and
 `gpt-5.6-terra`, not dated variants. The first answer-quality cohort therefore binds the committed
 provider-catalog observation, exact requested and provider-returned IDs, role-specific settings,
@@ -90,7 +115,7 @@ Requirements:
 - Python 3.13;
 - Node.js and npm;
 - `uv`;
-- an OpenAI API key; and
+- an OpenAI API key for the three generated-prose modes (Essential does not require one); and
 - the private runtime corpus already present under `output/` and `chroma_db/`.
 
 Install dependencies and build the frontend:
@@ -117,6 +142,14 @@ uv run uvicorn web_api:app --app-dir src --reload
 
 Open `http://127.0.0.1:8000`. Development mode exposes private diagnostic tools and must not be
 published to the internet.
+
+### Explicit legacy development policies
+
+Omitting `rag_policy_version` uses `application-compiled-v1`. A local development API caller may
+still explicitly request `evidence-planned-v26` or `evidence-planned-v27` for compatibility and
+historical investigation. The browser no longer exposes that selector, and the public request
+contract accepts neither field. V26 remains the immutable evaluated candidate; V27 compact was
+never promoted. See [`docs/latency_optimization.md`](docs/latency_optimization.md).
 
 To exercise the hardened public profile locally:
 
@@ -162,9 +195,10 @@ Archivist now has a privacy-safe production-measurement path: one random request
 correlates a public request with its text-free server record; successful answer runs retain
 pipeline-stage timings, returned token usage, and estimated API cost; and safe failure records keep
 the HTTP outcome without storing the question, answer, manuscript passage, prompt, or source text.
-The public version endpoint binds a running process to Render's `RENDER_GIT_COMMIT`, the corpus
-manifest, active RAG policy, and versioned public request-cost contract before a measurement begins.
-On Render, its automatic commit identity is authoritative.
+The public version endpoint now reports `archivist.public_runtime_identity/3`, binding a running
+process to Render's `RENDER_GIT_COMMIT`, `application-compiled-v1`, local BM25 retrieval, the
+generated-prose model, the corpus manifest, the frozen V26 candidate identity, and the versioned
+public request-cost contract. On Render, its automatic commit identity is authoritative.
 
 The predeclared production cohort is now **complete** against deployed wrapper commit
 `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`. It attempted exactly 33 answerable held-out items with
@@ -192,12 +226,21 @@ text-free. The summary file SHA-256 is
 `dd13ad2cf60a863daf88e549106059a1d05126b40ffa3c66c3c8e18cb6246b7f`; its embedded canonical
 artifact hash is `e2fcc051e66b115cf56abf7061fa93bfcd3c12297396cbdc3fad42b8bd1bfd30`.
 These numbers describe one observed warm production cohort, not an SLA, uptime study, load test,
-or latency guarantee.
+or latency guarantee. This sealed production-performance v1 cohort exercised frozen V26 before
+`application-compiled-v1` became the product default. Its identities, results, and interpretation
+are unchanged, and no paid performance comparison has yet been run for the new default. After exact
+payload/provider authorization, a narrow Edwin Sandys compatibility smoke made one no-retry call
+for each generated mode. All three passed the closed cue contract in 8.357, 6.839, and 5.162
+seconds; the isolated ledger records 6,292 tokens, three priced events, zero unpriced events, and
+`$0.060071250` estimated cost. One question is not a performance cohort, so it supports no general
+speed, quality, or reliability claim.
 
-The public Complete-RAG path now has a server-owned, versioned **$2.00 per-request maximum**. The
-service checks that maximum against the monthly budget before RAG, projects each provider operation
-before sending it, and requires strict usage accounting. The runner binds the deployed ceiling and
-requires the same $2.00 of headroom before each attempt. An ambiguous transport outcome is never
+Provider-using public Complete-RAG paths retain a server-owned, versioned **$2.00 per-request
+maximum**. The service checks that maximum against the monthly budget, projects each provider
+operation before sending it, and requires strict usage accounting. Current Essential RAG is
+providerless: it does not reserve `$2.00`, and a future production cohort for it requires zero
+provider events and zero provider spend. Historical production-performance v1 retains its original
+deployed ceiling and accounting contract. An ambiguous provider transport outcome is never
 replayed or treated as free: it consumes the full maximum in conservative authorization accounting,
 and exact cohort spend remains unavailable unless every attempt has request-scoped usage. Existing
 conversation/turn scopes are rejected before a cohort POST so stale production records cannot be
@@ -452,12 +495,12 @@ commit in a detached worktree rather than the later documentation-only head.
 
 This is a complete **descriptive baseline**, not yet a full semantic answer-quality scorecard.
 Faithfulness, abstention, gold-claim recall, and related semantic measures remain pending by design.
-The next product repair is to strengthen the three generation-contract relationships exposed by
-the production cohort, using synthetic regression cases before any separately versioned live
-cohort. The next measurement-instrument work is to diagnose and redesign canonical decomposition
-without changing or rerunning the held-out baseline; an optional calibration/semantic supplement
-remains lower priority. V26 stays frozen, and the interactive application and earlier practical
-evaluations remain development evidence only.
+The current product replaces that provider-authored factual contract with
+`application-compiled-v1`, while keeping frozen V26 and all completed measurements unchanged. The
+new default has not had a paid latency or quality cohort, so no speed or reliability improvement is
+claimed. The next measurement-instrument work is still to diagnose and redesign canonical
+decomposition without changing or rerunning the held-out baseline; an optional
+calibration/semantic supplement remains lower priority.
 
 ## Documentation map
 
@@ -470,6 +513,8 @@ evaluations remain development evidence only.
 - [`docs/full_context_answer_strategy_design.md`](docs/full_context_answer_strategy_design.md) —
   disabled full-context experiment.
 - [`docs/answer_delivery.md`](docs/answer_delivery.md) — Complete and Progressive delivery rules.
+- [`docs/latency_optimization.md`](docs/latency_optimization.md) — historical, unpromoted V27
+  compact-response experiment and its superseded promotion protocol.
 - [`docs/public_demo_design.md`](docs/public_demo_design.md) — public exposure and citation design.
 - [`docs/public_deployment.md`](docs/public_deployment.md) — Render deployment and recovery runbook.
 - [`docs/production_performance.md`](docs/production_performance.md) — protocol and interpretation

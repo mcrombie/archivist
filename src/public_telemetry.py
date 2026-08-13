@@ -13,8 +13,9 @@ from typing import Mapping
 from uuid import uuid4
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-PUBLIC_RUNTIME_IDENTITY_SCHEMA = "archivist.public_runtime_identity/2"
+PUBLIC_RUNTIME_IDENTITY_SCHEMA = "archivist.public_runtime_identity/3"
 PUBLIC_REQUEST_OBSERVATION_SCHEMA = "archivist.public_request_observation/1"
+PUBLIC_EVIDENCE_RETRIEVAL_KIND = "local_bm25"
 PROCESS_EPOCH = uuid4().hex
 
 _COMMIT_PATTERN = re.compile(r"^[a-f0-9]{40}$")
@@ -40,9 +41,7 @@ def validated_deployment_commit(
     if render_raw:
         normalized_render = render_raw.casefold()
         return (
-            normalized_render
-            if _COMMIT_PATTERN.fullmatch(normalized_render) is not None
-            else None
+            normalized_render if _COMMIT_PATTERN.fullmatch(normalized_render) is not None else None
         )
 
     override_raw = str(env.get("ARCHIVIST_DEPLOY_COMMIT") or "").strip()
@@ -87,8 +86,8 @@ def public_runtime_identity(
         PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
         PUBLIC_RAG_REQUEST_COST_CEILING_VERSION,
     )
-    from model_config import GENERATOR_SETTINGS
-    from rag_pipeline import RAG_POLICY_VERSION
+    from evidence_compiler import APPLICATION_COMPILED_POLICY_VERSION
+    from prose_renderer import READER_PROSE_SETTINGS
 
     manifest_path = corpus_manifest_path or BASE_DIR / "fixtures" / "corpus_manifest.json"
     gold_provenance_path = provenance_path or BASE_DIR / "fixtures" / "gold_set.provenance.json"
@@ -116,17 +115,14 @@ def public_runtime_identity(
         "schema": PUBLIC_RUNTIME_IDENTITY_SCHEMA,
         "deployment_commit": validated_deployment_commit(environment),
         "process_epoch": PROCESS_EPOCH,
-        "rag_policy_version": RAG_POLICY_VERSION,
-        "generator_model": GENERATOR_SETTINGS.model,
+        "answer_policy_version": APPLICATION_COMPILED_POLICY_VERSION,
+        "evidence_retrieval_kind": PUBLIC_EVIDENCE_RETRIEVAL_KIND,
+        "generated_prose_model": READER_PROSE_SETTINGS.model,
         "corpus_manifest_sha256": manifest_sha256,
         "frozen_candidate_commit": candidate_commit,
         "frozen_candidate_rag_policy": candidate_policy,
-        "public_rag_request_cost_ceiling_version": (
-            PUBLIC_RAG_REQUEST_COST_CEILING_VERSION
-        ),
-        "public_rag_request_cost_ceiling_nano_usd": (
-            PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD
-        ),
+        "public_rag_request_cost_ceiling_version": (PUBLIC_RAG_REQUEST_COST_CEILING_VERSION),
+        "public_rag_request_cost_ceiling_nano_usd": (PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD),
     }
 
 
@@ -202,6 +198,7 @@ def observation_log_payload(observation: PublicRequestObservation) -> dict[str, 
 
 __all__ = [
     "PROCESS_EPOCH",
+    "PUBLIC_EVIDENCE_RETRIEVAL_KIND",
     "PUBLIC_REQUEST_OBSERVATION_SCHEMA",
     "PUBLIC_RUNTIME_IDENTITY_SCHEMA",
     "PublicRequestObservation",

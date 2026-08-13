@@ -40,6 +40,7 @@ from production_performance import (  # noqa: E402
     build_prepared_manifest,
     build_runtime_session,
     load_prepared_manifest,
+    manifest_is_providerless_essential,
     normalize_usage_totals,
     parse_server_timing,
     public_report_markdown,
@@ -89,13 +90,16 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--authorize-production-performance",
         action="store_true",
-        help="Required acknowledgement that this subcommand makes paid production requests.",
+        help="Required acknowledgement that this subcommand makes live production requests.",
     )
     run.add_argument(
         "--max-cost-usd",
         type=float,
         required=True,
-        help="Finite positive owner-authorized ceiling for this cohort's request-scoped ledger.",
+        help=(
+            "Owner-authorized request-scoped cost ceiling. Providerless Essential v2 requires "
+            "exactly 0; historical v1 requires a finite positive ceiling."
+        ),
     )
 
     report = subparsers.add_parser(
@@ -198,8 +202,16 @@ def _validate_authorization_binding(
     cost_contract = manifest.get("cost_contract")
     if not isinstance(cost_contract, Mapping):
         raise ProductionPerformanceError("prepared cost contract is unavailable")
+    if (
+        manifest.get("schema") != "archivist.production_performance_manifest/1"
+        and not manifest_is_providerless_essential(manifest)
+    ):
+        raise ProductionPerformanceError("prepared v2 provider contract is invalid")
     expected_next = cost_contract.get("max_next_attempt_cost_usd")
-    expected_nano = cost_contract.get("public_rag_request_cost_ceiling_nano_usd")
+    expected_nano = cost_contract.get(
+        "max_next_attempt_cost_nano_usd",
+        cost_contract.get("public_rag_request_cost_ceiling_nano_usd"),
+    )
     expected_version = cost_contract.get("public_rag_request_cost_ceiling_version")
     expected_enforcement = cost_contract.get("ceiling_enforcement")
     if (
@@ -212,6 +224,12 @@ def _validate_authorization_binding(
     ):
         raise ProductionPerformanceError("authorization does not bind this exact prepared cohort")
     maximum = authorization.get("max_cost_usd")
+    providerless = manifest_is_providerless_essential(manifest)
+    if (
+        manifest.get("schema") != "archivist.production_performance_manifest/1"
+        and not providerless
+    ):
+        raise ProductionPerformanceError("prepared v2 provider contract is invalid")
     if (
         not isinstance(maximum, (int, float))
         or isinstance(maximum, bool)
@@ -219,8 +237,14 @@ def _validate_authorization_binding(
         or not isinstance(expected_next, (int, float))
         or isinstance(expected_next, bool)
         or not math.isfinite(float(expected_next))
-        or float(expected_next) != MAX_NEXT_ATTEMPT_COST_USD
-        or float(maximum) < float(expected_next)
+        or (
+            float(expected_next) != 0
+            or expected_nano != 0
+            or float(maximum) != 0
+            if providerless
+            else float(expected_next) != MAX_NEXT_ATTEMPT_COST_USD
+            or float(maximum) < float(expected_next)
+        )
     ):
         raise ProductionPerformanceError("authorization cost ceiling is invalid")
 
@@ -244,29 +268,43 @@ def _authorization(
     manifest: Mapping[str, object],
     maximum: float,
 ) -> dict[str, object]:
-    if not math.isfinite(maximum) or maximum <= 0:
-        raise ProductionPerformanceError("--max-cost-usd must be a finite positive number")
+    providerless = manifest_is_providerless_essential(manifest)
+    if (
+        manifest.get("schema") != "archivist.production_performance_manifest/1"
+        and not providerless
+    ):
+        raise ProductionPerformanceError("prepared v2 provider contract is invalid")
+    if not math.isfinite(maximum) or (maximum != 0 if providerless else maximum <= 0):
+        expectation = "exactly zero" if providerless else "a finite positive number"
+        raise ProductionPerformanceError(f"--max-cost-usd must be {expectation}")
     cost_contract = manifest.get("cost_contract")
     if not isinstance(cost_contract, Mapping):
         raise ProductionPerformanceError("prepared cost contract is unavailable")
     maximum_next = cost_contract.get("max_next_attempt_cost_usd")
-    maximum_next_nano = cost_contract.get("public_rag_request_cost_ceiling_nano_usd")
+    maximum_next_nano = cost_contract.get(
+        "max_next_attempt_cost_nano_usd",
+        cost_contract.get("public_rag_request_cost_ceiling_nano_usd"),
+    )
     ceiling_version = cost_contract.get("public_rag_request_cost_ceiling_version")
     enforcement = cost_contract.get("ceiling_enforcement")
     if (
         not isinstance(maximum_next, (int, float))
         or isinstance(maximum_next, bool)
-        or float(maximum_next) != MAX_NEXT_ATTEMPT_COST_USD
+        or (
+            float(maximum_next) != 0
+            if providerless
+            else float(maximum_next) != MAX_NEXT_ATTEMPT_COST_USD
+        )
         or not isinstance(maximum_next_nano, int)
         or isinstance(maximum_next_nano, bool)
-        or maximum_next_nano <= 0
+        or (maximum_next_nano != 0 if providerless else maximum_next_nano <= 0)
         or not isinstance(ceiling_version, str)
         or not ceiling_version
         or not isinstance(enforcement, str)
         or not enforcement
     ):
         raise ProductionPerformanceError("prepared request-cost ceiling contract is invalid")
-    if maximum < float(maximum_next):
+    if not providerless and maximum < float(maximum_next):
         raise ProductionPerformanceError(
             f"--max-cost-usd must be at least the server-enforced ${float(maximum_next):.2f} "
             "maximum for one next attempt"
@@ -418,16 +456,23 @@ def _authorization_accounted_usage(
 
     recorded, events, unavailable = _scoped_usage(ledger, outcomes)
     maximum_next = authorization.get("max_next_attempt_cost_usd")
+    maximum_next_nano = authorization.get("max_next_attempt_cost_nano_usd")
     maximum = authorization.get("max_cost_usd")
+    providerless = maximum_next == 0 and maximum_next_nano == 0
     if (
         not isinstance(maximum_next, (int, float))
         or isinstance(maximum_next, bool)
         or not math.isfinite(float(maximum_next))
-        or float(maximum_next) <= 0
+        or float(maximum_next) < 0
+        or not isinstance(maximum_next_nano, int)
+        or isinstance(maximum_next_nano, bool)
+        or maximum_next_nano != round(float(maximum_next) * 1_000_000_000)
         or not isinstance(maximum, (int, float))
         or isinstance(maximum, bool)
         or not math.isfinite(float(maximum))
-        or float(maximum) <= 0
+        or float(maximum) < 0
+        or (providerless and float(maximum) != 0)
+        or (not providerless and (float(maximum_next) <= 0 or float(maximum) <= 0))
     ):
         raise ProductionPerformanceError("authorization cost contract is invalid")
     for outcome in outcomes:
@@ -443,6 +488,12 @@ def _authorization_accounted_usage(
             raise ProductionPerformanceError(
                 "recorded request spend exceeds the deployed per-request ceiling"
             )
+        if providerless and (
+            usage.get("event_count") != 0
+            or usage.get("total_tokens") != 0
+            or float(cost) != 0
+        ):
+            raise ProductionPerformanceError("providerless Essential recorded provider usage")
     accounted = recorded + unavailable * float(maximum_next)
     if accounted > float(maximum) + 1e-12:
         raise ProductionPerformanceError(
@@ -861,7 +912,7 @@ def run(
 ) -> int:
     if not args.authorize_production_performance:
         raise ProductionPerformanceError(
-            "run requires --authorize-production-performance because it makes paid live requests"
+            "run requires --authorize-production-performance because it makes live requests"
         )
     _validate_canonical_fixture_paths(args)
     _validate_usage_db(args.usage_db)

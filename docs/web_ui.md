@@ -41,8 +41,8 @@ The web API needs:
   without sending a request or adding synthetic turns to conversation history.
 - Transitions into a full-width, multi-turn conversation after the first submission.
 - Keeps earlier questions, answers, and their manuscript sources in the transcript.
-- Uses recent completed turns to resolve follow-up references, then retrieves fresh manuscript
-  evidence for each answer.
+- Uses recent completed turns to resolve follow-up references locally, then ranks fresh manuscript
+  evidence with local BM25 for each current RAG answer.
 - Keeps the composer available at the bottom of the conversation and supports Enter to send or
   Shift+Enter for a new line.
 - Uses compact numbered citations in the answer while preserving the full reference in accessible
@@ -53,39 +53,33 @@ The web API needs:
   in both the conversation header and the top-of-page introduction.
 - Places Answer delivery inside a collapsed **Advanced delivery settings** disclosure under
   Reading options. **Complete answer** is the recommended strict default. **Progressive
-  response** is experimental: after fixed
-  operational progress, it reveals complete locally checked factual claims from the existing
-  streamed generation call while the whole answer remains provisional. A roughly three-second
-  heartbeat keeps an elapsed-work indicator visibly active before prose is available, and the
-  first provisional factual claim must be a short direct answer linked to the question's subject.
-  The canonical answer, interpretive framing, sources, copy action, and conversation history
-  appear only after final validation; interruption or late failure discards the working claims.
-  It neither exposes model reasoning nor adds another generation call. See
+  response** is experimental: after fixed operational progress, it reveals locally compiled
+  immutable evidence cards while the final arrangement remains provisional. A roughly
+  three-second heartbeat keeps an elapsed-work indicator active. Essential needs no provider call;
+  in a generated mode the cards can appear while the one no-retry selector call chooses card order
+  and local cue IDs. The canonical answer, sources, copy action, and conversation history appear
+  only after final validation; interruption or late failure discards the working view. It exposes
+  neither model reasoning nor model-authored prose and adds no provider call. See
   [Answer delivery modes](answer_delivery.md).
-- Offers ten reader-facing Archivist modes that bundle appearance and answer character:
-  Professional, Essential, Mythical Forest Folio, Cromb Coo Coo, Pretty Pink Princess, Baleful
-  Black Baron, Tidal Archivist, Ember & Ink, Illuminated Codex, and Cosmic Almanac. Professional is
-  the new-visitor default; Essential is the unchanged concise neutral baseline. Princess is
-  consistently optimistic without minimizing harm; Baron is strongly tragic without inventing
-  loss; Tidal uses a bounded Moby-Dick-informed maritime profile; Ember uses a project-authored
-  realist-statecraft frame associated with Henry Kissinger without ingesting or imitating his
-  works; Codex uses a lowercase-l modern liberal frame without present-day party advocacy; and
-  Almanac uses a future-science perspective attentive to systems, long horizons, and uncertainty
-  without turning projections into facts. Every mode keeps historical claims and citations
-  grounded in *Cradle of the Empire*.
+- Offers exactly four reader-facing Archivist modes: Professional, Essential, Pretty Pink
+  Princess, and Baleful Black Baron. Professional is the new-visitor default. Essential returns
+  the direct evidence compiled by the application with zero provider calls. Each generated mode
+  makes exactly one no-retry, low-reasoning `gpt-5.6-sol` call that may select only exact evidence
+  placeholders and IDs from its application-owned cue catalog. Local code supplies every displayed
+  factual and editorial word and every citation; a failed call falls back to Essential.
 - Keeps Evidence scope separate from interpretation. Retrieved passages and experimental Full book
   select what manuscript context the answer receives; neither choice selects a personality.
 - Moves the independent Historiographical lens, Voice, and Worldview selectors into an Advanced
-  interpretive settings disclosure. The same disclosure retains all eleven visual appearances as
-  explicit appearance-only overrides. Custom values apply to future turns, retries retain the
-  settings that originally produced the turn, and Reset to mode restores the active preset.
-- A non-default voice changes expression without automatically lengthening the answer. A
-  non-Evidence-first lens or any worldview frames the cited factual answer with an uncited
-  interpretive opening and conclusion. Both framing paragraphs must directly address the
-  question's subject and use impersonal prose. They display with the evidence as one cohesive
-  answer, while the application keeps their internal boundary so only the factual middle enters
-  follow-up conversation history. Interpretive claims must grow from concrete facts in that
-  middle; combined settings elaborate one judgment rather than multiplying unrelated themes.
+  interpretive settings disclosure. Its appearance override offers only the four appearances that
+  match the current modes. Dormant mode IDs, appearance definitions, and assets remain in the code
+  for compatibility but are not selectable. Custom values apply to future turns, retries retain
+  the settings that originally produced the turn, and Reset to mode restores the active preset.
+- Generated modes use the resolved interpretive settings to constrain selection from a closed,
+  mode-specific cue catalog. The model cannot return free prose, and local validation rejects raw
+  text, unknown cue IDs, cross-mode cues, or a card arrangement that does not use every evidence
+  card exactly once.
+- Exposes no V26/V27 latency or RAG-policy selector. Explicit V26/V27 compatibility remains a
+  development API concern, not a reader control.
 - Shows a locally persisted API-cost estimate for each answer, conversation, UTC month, and all
   tracked use, with optional budget warnings and a local hard stop. OpenAI billing remains the
   financial source of truth; see [Cost tracking](cost_tracking.md).

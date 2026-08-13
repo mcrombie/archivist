@@ -12,9 +12,12 @@ The corpus is also the moat. Rigorous evaluation depends on knowing the source m
 
 ## Current priorities and answer surfaces
 
-The highest-leverage unfinished product work is repairing the three structured-generation
-relationships exposed by the first production cohort. The highest-leverage unfinished measurement
-work remains diagnosing the decomposition instrument and, in a separately declared cohort,
+The highest-leverage unfinished product work is measuring the new `application-compiled-v1`
+default in a separately declared cohort without altering the completed V26 records. One authorized
+three-mode Edwin Sandys smoke has run, but no performance or quality cohort has yet run for that
+default. Its three no-retry calls all passed the closed cue contract in 8.357, 6.839, and 5.162
+seconds for `$0.060071250` estimated cost; this single question is compatibility evidence only. The highest-leverage unfinished
+measurement work remains diagnosing the decomposition instrument and, in a separately declared cohort,
 rebuilding the claim-derived scoring path described in `EVAL_CONTRACT.md` and `ROADMAP.md`. The
 completed baselines and production cohort must stay unchanged. The objective is not "the answers
 look good." Retrieval, faithfulness, citation, abstention, release reliability, latency, and spend
@@ -73,20 +76,30 @@ appearance and interpretive modes are implemented and public; they are no longer
 Index Assistant Mode remains deferred and requires its own measurement before repair or promotion.
 Do not mistake a shipped reader feature for completion of the evaluation.
 
-Archivist currently has two answer strategies:
+Archivist currently has three answer-policy families:
 
-- **Retrieval-backed Answer Mode.** `Essential` is the concise neutral default for API, CLI, and
-  evaluation callers that omit a reader mode. It is the evaluated baseline. Professional and the
-  other public reader modes may alter framing, voice, worldview, length, and appearance, but they
-  use the same corpus identity, retrieval primitives, evidence admission, source ordering,
-  citation contract, and terminal grounding checks. Reader-mode quality is not formal evidence
-  about Essential unless it is evaluated in a separately declared cohort.
+- **`application-compiled-v1`.** This is the default for current built-in RAG. Archivist resolves
+  ordinary follow-ups and plans locally, BM25 ranks, and application code compiles at most three
+  bounded immutable evidence cards. Essential RAG makes zero provider calls and returns direct
+  cited evidence. Professional, Pretty Pink Princess, and Baleful Black Baron each make exactly one
+  no-retry low-reasoning `gpt-5.6-sol` selection call over closed card IDs/text and application-owned
+  typed editorial cue IDs. The model chooses card order and cue IDs only. Local code supplies every
+  displayed factual and editorial word, label, and citation. Cue catalogs are distinct and
+  mode-bound; cross-mode cues fail validation. Failures fall back to direct evidence. Lens, voice,
+  and worldview guide order and cue selection only. These four modes and linked appearances are the
+  only current UI/API choices; dormant definitions and assets are compatibility-only.
+- **`evidence-planned-v26` and V27 compatibility policies.** Frozen V26 remains immutable, callable
+  only by an explicit development/evaluation policy, and continues to identify its completed
+  cohorts. V27 compact remains an unpromoted historical experiment. Its former reader-facing
+  selector is removed. Neither policy is the current product default.
 - **`full-context-v2`.** This separately versioned experiment supplies the complete eligible corpus
   and intentionally bypasses query planning, ranking, retrieval, neighbour expansion, and the RAG
   evidence-obligation contract. It shares corpus-integrity, conversation, cost, mode-style,
   citation-remapping, and public-disclosure boundaries where those concepts apply. It is disabled
   by default and must remain behind the server-side full-context flags; the public flag cannot
-  enable it unless the general flag is also enabled. Never mix its results into a retrieval cohort.
+  enable it unless the general flag is also enabled. Essential is incompatible with this generative
+  scope and API requests combining Essential with Full Context are rejected. Never mix its results
+  into a retrieval cohort.
 
 ## The layers
 
@@ -98,8 +111,9 @@ In decreasing order of fixedness. Changes to a lower number are more expensive a
 
    Sections settle on their own clocks. §§1–5 — run identity, the corpus contract, the gold-set schema, retrieval recall, citation accuracy — are settleable at the desk and are locked. §6 faithfulness and §7 abstention are drafted but **not yet settled**, because judge agreement and threshold placement can only be answered by a later calibration exercise. That work begins only after all 37 baseline answers and canonical decompositions are preserved, and its pending state cannot delay the baseline. The sections lock once calibration has answered what only runs can answer. There is no category of formal metric that stays permanently adjustable.
 
-2. **The system under test.** The Essential retrieval path, its prompt and model configuration, and
-   any separately declared experimental arm. Freely changeable — that is the point — but every
+2. **The system under test.** The current Essential application-compiled path, any generated-prose
+   mode and its model configuration, the frozen V26 candidate when reproducing its cohort, and any
+   separately declared experimental arm. Freely changeable — that is the point — but every
    behavioral change either opens a new run cohort or is a defect, and which one it is must be
    stated (see Run identity and cohorts). A reader mode's interpretive prompt is behavior, not mere
    presentation.
@@ -151,10 +165,11 @@ If you find yourself wanting to improve retrieval before it has been measured, t
 
 ## One retrieval core
 
-There is exactly **one** implementation of each retrieval primitive — distance filtering,
-neighbour expansion, context finalization, and context building. Every retrieval-backed reader
-mode, including Essential, calls those same primitives. A mode-specific variation is a parameter
-on the shared function, never a second copy of it.
+There is exactly **one** implementation of each retrieval primitive — BM25 ranking, distance
+filtering, neighbour expansion, context finalization, and context building. The
+application-compiled path uses the shared BM25 ranker; explicit V26/V27 policies use their existing
+shared retrieval core. A mode-specific variation is a parameter on a shared function, never a
+second copy of it.
 
 Prior to Brief 1 there were three partial copies (`retrieval.py`, `web_project.py`, `query.py`). The
 duplication was drift, not design, and it will re-form the moment a mode asks for "just a small
@@ -171,11 +186,15 @@ by a public upload-anything surface.**
 
 ## The citation contract
 
-**Retrieval-backed generation emits `[Source N]`, where N is a 1-based index into the ordered
-source list it was given.** The separately versioned `full-context-v2` experiment instead returns
-stable chunk IDs in its structured claim payload; local validation resolves those IDs against the
-exact supplied corpus and mechanically renders the same compact `[Source N]` presentation. The UI
-never invents, parses, or renumbers model citations.
+**In `application-compiled-v1`, local code owns every displayed word and `[Source N]`.** The model
+may return only immutable evidence-card placeholders and typed IDs from the selected mode's closed,
+application-owned editorial cue catalog. Local validation substitutes exact card text, cue text,
+labels, and mechanically assigned citations. A valid card or cue ID never authorizes model-written
+prose, and a cue from another mode is invalid. Explicit V26/V27 retrieval-backed generation retains its historical model-facing
+`[Source N]` contract. The separately versioned `full-context-v2` experiment instead returns stable
+chunk IDs in its structured claim payload; local validation resolves those IDs against the exact
+supplied corpus and mechanically renders the same compact `[Source N]` presentation. The UI never
+invents, parses, or renumbers citations.
 
 Human-readable citations — `Chapter 4 Cradle of the Empire (1601 – 1622), ¶49–52` — are **presentation**. They are attached to each source in the API payload and rendered by the frontend by substitution. They never appear in the prompt.
 
@@ -323,6 +342,8 @@ Log to `DEFECTS.md` whenever:
 - a retrieval primitive has been duplicated rather than parameterized
 - a reader mode changed retrieval/evidence behavior, or its result was represented as evidence for
   the Essential evaluation cohort without a declared comparison
+- a prose model could attach a valid evidence-card ID or citation to factual text that the
+  application did not compile from that card
 - `full-context-v2` was silently substituted for retrieval, enabled outside its flags, or mixed into
   a retrieval cohort
 - a metric's run-to-run spread exceeds the effect being claimed
@@ -345,7 +366,7 @@ Use the entry format at the top of that file.
 | Lint & format | **ruff** | |
 | Vector store | **ChromaDB, persistent; HNSW `l2`** | The corpus manifest pins the store contract. |
 | Embeddings | **`text-embedding-3-small`** | Current, not deprecated, and re-embedding is expensive — no reason to move. |
-| Interactive generation | **`gpt-5.6-sol` with explicit settings** | Product configuration; separately identified from formal cohorts. |
+| Interactive arrangement selection | **`gpt-5.6-sol`, low reasoning, exactly one no-retry call** | Applies only to Professional, Pretty Pink Princess, and Baleful Black Baron in current RAG. It selects card order and local cue IDs; Essential RAG makes no provider call. |
 | Formal generation/judging | **Dated snapshots when exposed; otherwise catalog-bound canonical IDs** | Bind the catalog observation plus requested/returned IDs, report the limitation, and keep generator and judge independent. |
 
 ### Distance contract
@@ -405,13 +426,16 @@ These are decided. A brief may note a consequence, but may not reopen the questi
 - **The gold set is the first artifact** and the input to all three measurements.
 - **Optimize for this manuscript; keep the plumbing corpus-agnostic.**
 - **Answer Mode reaches done without Index Mode.**
-- **Essential is the neutral evaluated retrieval baseline.** Reader modes and advanced interpretive
-  settings are legitimate product features, but they do not change retrieval or become formal
-  evidence for Essential without their own declared cohorts and checks.
+- **Frozen V26 Essential is the neutral evaluated retrieval baseline.** Current RAG
+  `application-compiled-v1` Essential is the zero-provider product default but has no paid quality
+  or performance cohort. Reader-mode or new-policy results do not become evidence for the frozen
+  baseline without their own declared cohorts and checks.
 - **`full-context-v2` remains a disabled, separately versioned experiment.** It is not a silent
-  fallback, retrieval improvement, or substitute evaluation arm.
-- **`[Source N]` is the retrieval model-facing and common reader-facing citation contract.**
-  `full-context-v2` uses validated stable chunk IDs internally and remaps them locally; human-readable
-  labels remain presentation.
+  fallback, retrieval improvement, or substitute evaluation arm. Its generative scope is
+  incompatible with Essential and the API rejects that combination.
+- **`[Source N]` is the common reader-facing citation contract.** Application-compiled answers
+  assign it locally; explicit V26/V27 generation retains its historical model-facing form;
+  `full-context-v2` uses validated stable chunk IDs internally and remaps them locally.
+  Human-readable labels remain presentation.
 - **The generic multi-project stack is deferred**, not deleted. Do not extend it incidentally while
   working on the single-corpus product or its evaluation.

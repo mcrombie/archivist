@@ -24,23 +24,29 @@ from costs import (
     PUBLIC_RAG_REQUEST_COST_CEILING_VERSION,
 )
 from gold_set import validate_gold_set_file
-from model_config import GENERATOR_SETTINGS
+from evidence_compiler import APPLICATION_COMPILED_POLICY_VERSION
+from prose_renderer import READER_PROSE_SETTINGS
+from public_telemetry import PUBLIC_EVIDENCE_RETRIEVAL_KIND
 from retrieval_benchmark import LockedGold, load_locked_gold
 
 
 PROTOCOL_VERSION = "production-performance-v1"
-PREPARED_MANIFEST_SCHEMA = "archivist.production_performance_manifest/1"
+LEGACY_PREPARED_MANIFEST_SCHEMA = "archivist.production_performance_manifest/1"
+PREPARED_MANIFEST_SCHEMA = "archivist.production_performance_manifest/2"
 RUNTIME_SESSION_SCHEMA = "archivist.production_performance_session/1"
 ATTEMPT_INTENT_SCHEMA = "archivist.production_performance_attempt_intent/1"
 ATTEMPT_OUTCOME_SCHEMA = "archivist.production_performance_attempt_outcome/1"
 PRIVATE_SUMMARY_SCHEMA = "archivist.production_performance_private_summary/1"
 PUBLIC_SUMMARY_SCHEMA = "archivist.production_performance_public_summary/1"
-PUBLIC_RUNTIME_IDENTITY_SCHEMA = "archivist.public_runtime_identity/2"
+LEGACY_PUBLIC_RUNTIME_IDENTITY_SCHEMA = "archivist.public_runtime_identity/2"
+PUBLIC_RUNTIME_IDENTITY_SCHEMA = "archivist.public_runtime_identity/3"
 PUBLIC_REQUEST_OBSERVATION_SCHEMA = "archivist.public_request_observation/1"
 
 PLANNED_ATTEMPT_COUNT = 33
 MINIMUM_START_INTERVAL_SECONDS = 12.0
 MAX_NEXT_ATTEMPT_COST_USD = PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD / 1_000_000_000
+PROVIDERLESS_MAX_NEXT_ATTEMPT_COST_NANO_USD = 0
+PROVIDERLESS_MAX_NEXT_ATTEMPT_COST_USD = 0.0
 PUBLIC_QUESTION_PATH = "/api/projects/current/question"
 PUBLIC_HEALTH_PATH = "/api/health"
 PUBLIC_VERSION_PATH = "/api/version"
@@ -127,6 +133,22 @@ def validate_sealed_artifact(
         raise ProductionPerformanceError(f"{label} hash does not bind its exact contents")
     payload["artifact_sha256"] = observed_hash
     return payload
+
+
+def manifest_is_providerless_essential(manifest: Mapping[str, object]) -> bool:
+    """Identify the v2 Essential contract without reinterpreting sealed v1 runs."""
+
+    if manifest.get("schema") != PREPARED_MANIFEST_SCHEMA:
+        return False
+    cost_contract = manifest.get("cost_contract")
+    return (
+        isinstance(cost_contract, Mapping)
+        and cost_contract.get("answer_provider_contract")
+        == "providerless_essential_zero_calls"
+        and cost_contract.get("expected_provider_event_count_per_attempt") == 0
+        and cost_contract.get("max_next_attempt_cost_usd") == 0
+        and cost_contract.get("max_next_attempt_cost_nano_usd") == 0
+    )
 
 
 def read_json(path: Path, *, label: str) -> dict[str, object]:
@@ -257,9 +279,7 @@ def build_prepared_manifest(
         scope_nonce=scope_nonce,
     )
     if not base_url.startswith("https://") or base_url.rstrip("/") != base_url:
-        raise ProductionPerformanceError(
-            "base URL must be an HTTPS origin with no trailing slash"
-        )
+        raise ProductionPerformanceError("base URL must be an HTTPS origin with no trailing slash")
     wrapper_commit = clean_wrapper_commit(repository_root)
     manifest = sealed_artifact(
         {
@@ -314,21 +334,28 @@ def build_prepared_manifest(
                 "no_outlier_trimming": True,
             },
             "cost_contract": {
+                "answer_provider_contract": "providerless_essential_zero_calls",
+                "expected_provider_event_count_per_attempt": 0,
                 "public_rag_request_cost_ceiling_version": (
                     PUBLIC_RAG_REQUEST_COST_CEILING_VERSION
                 ),
                 "public_rag_request_cost_ceiling_nano_usd": (
                     PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD
                 ),
-                "max_next_attempt_cost_usd": MAX_NEXT_ATTEMPT_COST_USD,
+                "max_next_attempt_cost_usd": PROVIDERLESS_MAX_NEXT_ATTEMPT_COST_USD,
+                "max_next_attempt_cost_nano_usd": (
+                    PROVIDERLESS_MAX_NEXT_ATTEMPT_COST_NANO_USD
+                ),
                 "ceiling_enforcement": (
-                    "server_reserves_the_full_request_ceiling_before_RAG_and_projects_"
-                    "every_provider_operation_before_send"
+                    "essential_is_providerless_and_request_scoped_usage_must_remain_zero"
                 ),
                 "unpriced_events_allowed": False,
                 "scope": "exact_request_ids_in_this_cohort",
             },
-            "generator_model_expected": GENERATOR_SETTINGS.model,
+            "answer_policy_version_expected": APPLICATION_COMPILED_POLICY_VERSION,
+            "evidence_retrieval_kind_expected": PUBLIC_EVIDENCE_RETRIEVAL_KIND,
+            "answer_provider_model_expected": None,
+            "generated_prose_model_expected": READER_PROSE_SETTINGS.model,
             "evaluation_relationship": (
                 "separate operational cohort; no answer-quality scoring and no mutation of "
                 "the frozen V26 evaluation"
@@ -339,11 +366,11 @@ def build_prepared_manifest(
 
 
 def load_prepared_manifest(path: Path) -> dict[str, object]:
-    return validate_sealed_artifact(
-        read_json(path, label="prepared manifest"),
-        schema=PREPARED_MANIFEST_SCHEMA,
-        label="prepared manifest",
-    )
+    value = read_json(path, label="prepared manifest")
+    schema = value.get("schema")
+    if schema not in {LEGACY_PREPARED_MANIFEST_SCHEMA, PREPARED_MANIFEST_SCHEMA}:
+        raise ProductionPerformanceError("prepared manifest uses an unsupported schema")
+    return validate_sealed_artifact(value, schema=str(schema), label="prepared manifest")
 
 
 def selected_items_from_manifest(
@@ -428,47 +455,86 @@ def validate_runtime_identity(
     if not isinstance(identity, Mapping):
         raise ProductionPerformanceError("/api/version did not return a JSON object")
     value = dict(identity)
-    required = {
-        "schema",
-        "deployment_commit",
-        "process_epoch",
-        "rag_policy_version",
-        "generator_model",
-        "corpus_manifest_sha256",
-        "frozen_candidate_commit",
-        "frozen_candidate_rag_policy",
-        "public_rag_request_cost_ceiling_version",
-        "public_rag_request_cost_ceiling_nano_usd",
-    }
-    if set(value) != required or value.get("schema") != PUBLIC_RUNTIME_IDENTITY_SCHEMA:
+    providerless = manifest_is_providerless_essential(manifest)
+    if manifest.get("schema") == PREPARED_MANIFEST_SCHEMA and not providerless:
+        raise ProductionPerformanceError("prepared v2 provider contract is invalid")
+    if providerless:
+        required = {
+            "schema",
+            "deployment_commit",
+            "process_epoch",
+            "answer_policy_version",
+            "evidence_retrieval_kind",
+            "generated_prose_model",
+            "corpus_manifest_sha256",
+            "frozen_candidate_commit",
+            "frozen_candidate_rag_policy",
+            "public_rag_request_cost_ceiling_version",
+            "public_rag_request_cost_ceiling_nano_usd",
+        }
+        expected_schema = PUBLIC_RUNTIME_IDENTITY_SCHEMA
+    elif manifest.get("schema") == LEGACY_PREPARED_MANIFEST_SCHEMA:
+        required = {
+            "schema",
+            "deployment_commit",
+            "process_epoch",
+            "rag_policy_version",
+            "generator_model",
+            "corpus_manifest_sha256",
+            "frozen_candidate_commit",
+            "frozen_candidate_rag_policy",
+            "public_rag_request_cost_ceiling_version",
+            "public_rag_request_cost_ceiling_nano_usd",
+        }
+        expected_schema = LEGACY_PUBLIC_RUNTIME_IDENTITY_SCHEMA
+    else:
+        raise ProductionPerformanceError("prepared manifest uses an unsupported schema")
+    if set(value) != required or value.get("schema") != expected_schema:
         raise ProductionPerformanceError("/api/version uses an unsupported identity contract")
     deployment_commit = value.get("deployment_commit")
     process_epoch = value.get("process_epoch")
-    if not isinstance(deployment_commit, str) or _COMMIT_PATTERN.fullmatch(deployment_commit) is None:
+    if (
+        not isinstance(deployment_commit, str)
+        or _COMMIT_PATTERN.fullmatch(deployment_commit) is None
+    ):
         raise ProductionPerformanceError("deployment commit is unavailable or invalid")
-    if not isinstance(process_epoch, str) or _PROCESS_EPOCH_PATTERN.fullmatch(process_epoch) is None:
+    if (
+        not isinstance(process_epoch, str)
+        or _PROCESS_EPOCH_PATTERN.fullmatch(process_epoch) is None
+    ):
         raise ProductionPerformanceError("process epoch is unavailable or invalid")
+    policy_comparisons = (
+        (
+            ("answer_policy_version", manifest.get("answer_policy_version_expected")),
+            (
+                "evidence_retrieval_kind",
+                manifest.get("evidence_retrieval_kind_expected"),
+            ),
+            ("generated_prose_model", manifest.get("generated_prose_model_expected")),
+        )
+        if providerless
+        else (
+            ("rag_policy_version", manifest.get("frozen_candidate_rag_policy")),
+            ("generator_model", manifest.get("generator_model_expected")),
+        )
+    )
+    cost_contract = manifest.get("cost_contract")
     comparisons = (
         ("deployment_commit", manifest.get("wrapper_commit")),
-        ("rag_policy_version", manifest.get("frozen_candidate_rag_policy")),
-        ("generator_model", manifest.get("generator_model_expected")),
+        *policy_comparisons,
         ("corpus_manifest_sha256", manifest.get("corpus_manifest_sha256")),
         ("frozen_candidate_commit", manifest.get("frozen_candidate_commit")),
         ("frozen_candidate_rag_policy", manifest.get("frozen_candidate_rag_policy")),
         (
             "public_rag_request_cost_ceiling_version",
-            manifest.get("cost_contract", {}).get(
-                "public_rag_request_cost_ceiling_version"
-            )
-            if isinstance(manifest.get("cost_contract"), Mapping)
+            cost_contract.get("public_rag_request_cost_ceiling_version")
+            if isinstance(cost_contract, Mapping)
             else None,
         ),
         (
             "public_rag_request_cost_ceiling_nano_usd",
-            manifest.get("cost_contract", {}).get(
-                "public_rag_request_cost_ceiling_nano_usd"
-            )
-            if isinstance(manifest.get("cost_contract"), Mapping)
+            cost_contract.get("public_rag_request_cost_ceiling_nano_usd")
+            if isinstance(cost_contract, Mapping)
             else None,
         ),
     )
@@ -603,7 +669,7 @@ def build_attempt_outcome(
     unpriced_count = usage_totals.get("unpriced_event_count")
     estimated_cost = usage_totals.get("estimated_cost_usd")
     total_tokens = usage_totals.get("total_tokens")
-    if (
+    usage_totals_valid = not (
         not isinstance(event_count, int)
         or isinstance(event_count, bool)
         or event_count < 0
@@ -617,12 +683,18 @@ def build_attempt_outcome(
         or isinstance(estimated_cost, bool)
         or not math.isfinite(float(estimated_cost))
         or float(estimated_cost) < 0
-    ):
+    )
+    if not usage_totals_valid:
         instrumentation_failures.append("invalid_usage_totals")
     if unpriced_count:
         instrumentation_failures.append("unpriced_usage_event")
-    if response_contract_valid and event_count == 0:
-        instrumentation_failures.append("zero_usage_events")
+    if response_contract_valid and not manifest_is_providerless_essential(manifest):
+        if event_count == 0:
+            instrumentation_failures.append("zero_usage_events")
+    if usage_totals_valid and manifest_is_providerless_essential(manifest) and (
+        event_count != 0 or total_tokens != 0 or float(estimated_cost) != 0
+    ):
+        instrumentation_failures.append("unexpected_provider_usage")
     if recovered_without_replay:
         instrumentation_failures.append("client_completion_unobserved")
 
@@ -823,14 +895,11 @@ def aggregate_summaries(
 
     successful = [value for value in ordered if value.get("response_contract_valid") is True]
     failures = len(ordered) - len(successful)
-    instrumentation = [
-        value for value in ordered if bool(value.get("instrumentation_failures"))
-    ]
+    instrumentation = [value for value in ordered if bool(value.get("instrumentation_failures"))]
     latency_eligible = [
         value
         for value in successful
-        if not value.get("instrumentation_failures")
-        and not value.get("recovered_without_replay")
+        if not value.get("instrumentation_failures") and not value.get("recovered_without_replay")
     ]
     timed_server = [
         float(value["public_server_duration_ms"])
@@ -869,7 +938,10 @@ def aggregate_summaries(
         unpriced = usage.get("unpriced_event_count")
         if not isinstance(cost, (int, float)) or isinstance(cost, bool):
             raise ProductionPerformanceError("outcome cost is invalid")
-        if not all(isinstance(item, int) and not isinstance(item, bool) for item in (tokens, events, unpriced)):
+        if not all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in (tokens, events, unpriced)
+        ):
             raise ProductionPerformanceError("outcome usage counts are invalid")
         total_cost += float(cost)
         total_tokens += int(tokens)
@@ -881,27 +953,42 @@ def aggregate_summaries(
     maximum_next_nano = authorization.get("max_next_attempt_cost_nano_usd")
     ceiling_version = authorization.get("request_cost_ceiling_version")
     ceiling_enforcement = authorization.get("cost_ceiling_enforcement")
+    cost_contract = manifest.get("cost_contract")
+    if not isinstance(cost_contract, Mapping):
+        raise ProductionPerformanceError("prepared cost contract is unavailable")
+    providerless = manifest_is_providerless_essential(manifest)
+    expected_next = cost_contract.get("max_next_attempt_cost_usd")
+    expected_next_nano = cost_contract.get(
+        "max_next_attempt_cost_nano_usd",
+        cost_contract.get("public_rag_request_cost_ceiling_nano_usd"),
+    )
+    expected_ceiling_version = cost_contract.get("public_rag_request_cost_ceiling_version")
+    expected_enforcement = cost_contract.get("ceiling_enforcement")
     if (
         not isinstance(maximum, (int, float))
         or isinstance(maximum, bool)
         or not math.isfinite(float(maximum))
-        or float(maximum) <= 0
+        or (float(maximum) != 0 if providerless else float(maximum) <= 0)
         or not isinstance(maximum_next, (int, float))
         or isinstance(maximum_next, bool)
         or not math.isfinite(float(maximum_next))
-        or float(maximum_next) <= 0
+        or (float(maximum_next) != 0 if providerless else float(maximum_next) <= 0)
         or not isinstance(maximum_next_nano, int)
         or isinstance(maximum_next_nano, bool)
         or maximum_next_nano != round(float(maximum_next) * 1_000_000_000)
+        or maximum_next != expected_next
+        or maximum_next_nano != expected_next_nano
         or not isinstance(ceiling_version, str)
         or not ceiling_version
+        or ceiling_version != expected_ceiling_version
         or not isinstance(ceiling_enforcement, str)
         or not ceiling_enforcement
+        or ceiling_enforcement != expected_enforcement
     ):
         raise ProductionPerformanceError("authorization cost contract is invalid")
-    authorization_accounted_cost = total_cost + (
-        unavailable_usage_attempts * float(maximum_next)
-    )
+    if providerless and (total_cost != 0 or total_tokens != 0 or priced_events != 0):
+        raise ProductionPerformanceError("providerless Essential recorded provider usage")
+    authorization_accounted_cost = total_cost + (unavailable_usage_attempts * float(maximum_next))
     if authorization_accounted_cost > float(maximum) + 1e-12:
         raise ProductionPerformanceError(
             "conservative cohort cost accounting exceeds authorization"
@@ -1097,6 +1184,8 @@ def public_report_markdown(summary: Mapping[str, object]) -> str:
 __all__ = [
     "ATTEMPT_INTENT_SCHEMA",
     "ATTEMPT_OUTCOME_SCHEMA",
+    "LEGACY_PREPARED_MANIFEST_SCHEMA",
+    "LEGACY_PUBLIC_RUNTIME_IDENTITY_SCHEMA",
     "MINIMUM_START_INTERVAL_SECONDS",
     "MAX_NEXT_ATTEMPT_COST_USD",
     "PLANNED_ATTEMPT_COUNT",
@@ -1120,6 +1209,7 @@ __all__ = [
     "build_runtime_session",
     "canonical_json_bytes",
     "load_prepared_manifest",
+    "manifest_is_providerless_essential",
     "median",
     "nearest_rank",
     "normalize_usage_totals",

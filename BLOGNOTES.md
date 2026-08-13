@@ -7,9 +7,11 @@ anything that still requires measurement.
 ## Current checkpoint — 2026-08-12
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
-  local code reports `evidence-planned-v26`, `query-planner-v11`, and
-  `evidence-coverage-v11` over 481 retrieval-eligible manuscript chunks. Render deploys remain
-  manual. The production cohort bound deployed wrapper commit
+  built-in RAG default is now `application-compiled-v1` over 481 retrieval-eligible manuscript
+  chunks: local follow-up resolution and planning, deterministic BM25, no more than three bounded
+  immutable evidence cards, and application-owned factual text and citations. Public runtime
+  identity is `archivist.public_runtime_identity/3`. Render deploys remain manual. The earlier
+  production cohort bound deployed wrapper commit
   `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`, one process epoch, policy, model, corpus manifest,
   and the versioned `$2.00` Complete-RAG request ceiling before sending any measured question.
 - **Public spend ceiling:** the owner raised the ongoing public-demo ceiling from `$5.00` to
@@ -18,11 +20,15 @@ anything that still requires measurement.
   `$4.90594694` production-cohort spend, leaving `$5.09405306` beneath the new ceiling before any
   later public usage. The separate `$2.00` conservative per-request maximum is unchanged.
 - **Reader experience:** Complete answer is the default. Progressive response is an experimental
-  advanced setting. Ten semantic modes and eleven visual appearances are implemented; they are
-  public interpretive prototypes, not formal evidence that perspective changes preserve answer
-  quality. Opening-page advanced settings now expand in document flow so all controls remain
-  reachable by ordinary page scrolling; docked settings remain a viewport-bounded overlay. The
-  separate full-context-v2 experiment remains disabled on the public server.
+  advanced setting. Four modes are reader-selectable: Professional, Essential, Pretty Pink
+  Princess, and Baleful Black Baron. Essential RAG makes no provider call and returns direct cited
+  cards; Essential plus Full Context is rejected. Each other mode makes one no-retry low-reasoning
+  Sol selection call. It may order cards and choose typed, mode-bound editorial cue IDs, while local
+  code owns every displayed factual and editorial word, label, and citation. Lens, voice, and
+  worldview affect cue selection only. Four mode-linked appearances are selectable; dormant
+  mode definitions/assets are compatibility-only. The separate full-context-v2 experiment remains
+  disabled on the public server. Frozen V26 and historical V27 remain explicit development
+  policies, but their former browser selector has been removed.
 - **Measurement:** the unchanged ten-question cohort is development evidence. The 37-item
   owner-adjudicated gold set and provenance are formally locked against frozen V26. Its first
   held-out measurement is complete: dense macro Recall@5 was 24.71% and hybrid Recall@5 was 25.97%
@@ -65,13 +71,131 @@ anything that still requires measurement.
   `obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. This is reassuring for
   infrastructure observability but not for product reliability: the public response-contract
   completion rate was 29/33, or 87.9%.
-- **Next evidence step:** preserve the descriptive and production cohorts unchanged. The production
-  resume blank can now be filled with the exact observed denominators. If stronger claim-derived
-  answer scoring is still useful, diagnose and redesign the decomposition instrument in a separate
-  cohort. Semantic calibration remains optional, lower-priority supplemental work.
+- **Next product step:** preserve the descriptive and production cohorts unchanged and obtain
+  a separately versioned measurement of `application-compiled-v1`. A narrow authorized Edwin
+  Sandys smoke subsequently made exactly three no-retry generated-mode calls: all three passed the
+  closed cue contract in 8.357, 6.839, and 5.162 seconds, for 6,292 tokens and `$0.060071250`
+  estimated cost. This single question is compatibility evidence, not a latency or reliability
+  cohort, so the new default still carries no general improvement claim.
+  Frozen V26 remains callable and immutable; V27 compact remains unpromoted historical evidence.
+  If stronger claim-derived scoring is still useful, decomposition redesign remains a later,
+  separate cohort; semantic calibration remains optional supplemental work.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-12 — Move factual authorship from the model into Archivist
+
+- Promoted `application-compiled-v1` as the current built-in RAG default. Archivist now resolves
+  ordinary follow-ups and builds the question plan locally, ranks the eligible manuscript with
+  deterministic BM25, and compiles at most three immutable evidence cards of at most 32 words.
+- Made the mode contract legible. Essential returns those cards directly with locally assigned
+  `[Source N]` citations and performs zero OpenAI/provider calls. Professional, Pretty Pink
+  Princess, and Baleful Black Baron each make exactly one `gpt-5.6-sol` low-reasoning prose call,
+  with automatic retries disabled. The call chooses card order and typed application-owned cue IDs;
+  it writes no displayed prose. A failed, refused, or invalid response falls back to the same direct
+  cited evidence.
+- Closed a dangerous ambiguity in the first prose contract. Allowing a model to pair a valid card
+  ID with prose it wrote could have laundered an invented factual sentence into an apparently
+  grounded, application-cited answer. Evidence segments now contain only an immutable card
+  placeholder. Local code substitutes the exact frozen card text and citation. Model-authored
+  interpretation and character asides cannot carry card IDs. The model returns only mode-bound cue
+  IDs; local code supplies their distinct Professional, Princess, or Baron text and labels.
+- Kept advanced interpretation downstream of evidence. Lens, voice, and worldview change only the
+  cue-selection layer; Essential rejects those prose overrides. The selection model may order
+  cards, but it cannot add, alter, cite, silently omit evidence, or author displayed text.
+- Reduced the selectable product surface to Professional, Essential, Pretty Pink Princess, and
+  Baleful Black Baron. Historical mode definitions and assets remain only for stored/server
+  compatibility. The old V26/V27 browser selector is gone. Frozen V26 remains immutable and
+  explicitly callable for development/evaluation policy, while V27 remains an unpromoted historical
+  experiment.
+- Bumped the text-free public runtime identity to `archivist.public_runtime_identity/3`, which binds
+  `application-compiled-v1`, local BM25 retrieval, and the generated-prose model while continuing to
+  expose the frozen V26 identity. Production-performance v1 remains sealed and unchanged.
+- The first execution request for the prepared three-mode Edwin Sandys smoke was blocked before
+  network egress pending explicit payload/provider authorization. After the owner authorized the
+  exact question, three compiled excerpts, OpenAI model, call count, no-retry rule, and `$1.05`
+  cap, the smoke made exactly one Professional, one Princess, and one Baron call. All three returned
+  valid generated arrangements in 8.357, 6.839, and 5.162 seconds. The isolated ledger contains
+  three unique response IDs, three priced `gpt-5.6-sol` events, zero unpriced events, 6,292 tokens,
+  no retries, and `$0.060071250` estimated cost. This is one-question compatibility evidence, not a
+  performance cohort; it does not support a general claim that the new default is faster or more
+  reliable than V26.
+
+Useful blog lesson: a citation is only as trustworthy as the boundary behind it. If a model can
+write a sentence and merely attach a valid evidence identifier, the identifier can launder the
+sentence. Letting the model arrange immutable evidence while the application owns factual text and
+citations preserves useful voice without delegating historical authorship.
+
+## 2026-08-12 — Make the latency candidate manually inspectable
+
+- A local 90-second answer exposed an important testing mistake: the compact V27 candidate had
+  passed its offline gate, but the ordinary development interface still gave the owner no way to
+  select it. Manually rerunning a question therefore exercised V26 again and could say nothing
+  about whether compact generation helped.
+- Added a development-only selector under **Advanced settings → Experimental latency settings**.
+  V26 standard remains the default; V27 compact is explicitly marked experimental. Both paths use
+  the same Sol model, reasoning level, retrieval, admitted manuscript evidence, source order,
+  semantic instructions, citation contract, and final evidence validator. Only the structured
+  response representation changes.
+- Made identity visible after execution. A completed local answer shows **RAG V26 · standard** or
+  **RAG V27 · compact** using the version returned by the server, rather than trusting the option
+  the browser asked for. Retries preserve the policy attached to the original turn.
+- Kept the experiment out of the public surface. Public configuration does not advertise the
+  selector, and the public request schema rejects development-only policy fields. The deployed
+  reader remains locked to V26 until a separately authorized paired comparison passes its gates.
+- Manual timing is deliberately classified as exploratory. It can reveal whether the candidate
+  feels materially better or fails conspicuously, but one pair cannot control provider variance,
+  order effects, question mix, or warm state and therefore cannot support a “V27 is faster” claim.
+  No provider, network, deployment, or paid call was made to add the selector.
+
+Useful blog lesson: an experiment that exists only in backend code is not yet usable feedback.
+The interface should expose the controlled variable locally and display what actually executed,
+while keeping that convenience distinct from the protocol that earns a performance claim.
+
+## 2026-08-12 — Turn the generation bottleneck into one controlled experiment
+
+- The first production cohort made the usability problem measurable: successful responses had a
+  54.393-second server median and a 113.801-second p95. All four failed requests also reached the
+  structured-generation boundary after successful planning and direct-answer evidence selection.
+  The next repair therefore targets answer generation, not retrieval or the validator.
+- The current provider contract asks the model to author several mutually constrained relationship
+  ledgers whose facts overlap with the answer units and trusted request context. That creates extra
+  output work and possible inconsistency. The candidate asks the provider for a compact,
+  irreducible representation, then deterministically reconstructs the canonical full validation
+  object locally. It is one universal contract across eligible generated answers, not a fast lane
+  selected for supposedly simple questions.
+- The crucial restraint is what does **not** change: the corpus, planner, retrieved passages,
+  evidence admission, source order, citation contract, semantic instructions, Sol settings, and
+  terminal fail-closed validator remain fixed. This is an experiment in representation size, not a
+  shortcut around grounding.
+- Promotion has been separated into explicit stages. First, synthetic and registered-development
+  fixtures must prove canonical equivalence and malformed-input rejection entirely offline. Then a
+  separately authorized paired A/B may use G001-G010 with once-frozen evidence supplied to both
+  arms, counterbalanced order, one call per arm, and no retries or replacements. Held-out H answers
+  and annotations are not tuning material.
+- The directional target is a paired median generation-latency ratio no greater than 0.70, while
+  preserving citations, release count, contract validity, and the existing practical claim/group
+  measurements. Even a passing single A/B would justify a product decision, not a formal causal
+  performance claim; the five-repeat noise-floor protocol remains necessary for stronger wording.
+- Local derivation can reduce redundant serialization, but it cannot guarantee that provider-owned
+  statuses, requirement links, or obligation roles are semantically compatible. The same validator
+  must still reject those cases. The four production failures remain open evidence until later
+  work measures reliability; implementing the compact representation is not their closure.
+- The offline candidate is now implemented and verified. Minified sorted-key JSON measurements on
+  existing synthetic fixtures reduced the neutral schema from 6,196 to 5,297 bytes (14.51%) and
+  the interpretive schema from 7,438 to 5,974 bytes (19.68%). Representative neutral output fell
+  from 793 to 626 bytes (21.06%); representative interpretive output fell from 1,110 to 943 bytes
+  (15.05%). These are serialization measurements, not evidence of lower provider tokens or faster
+  answers.
+- Final offline verification passed repository-wide Ruff, 1,022 pytest tests with one intentional
+  skip, both frontend delivery and mode test suites, and the frontend production build. No OpenAI
+  call, network operation, deployment, or paid operation was made. V26 and production-performance
+  v1 remain unchanged; V27 remains unpromoted until the separately authorized paired A/B passes.
+
+Useful blog lesson: performance work becomes trustworthy when one variable is changed at a time.
+A smaller model-facing data structure may be faster, but the claim is not earned until identical
+evidence reaches both arms and the same validator accepts the result.
 
 ## 2026-08-12 — Let advanced settings enlarge the opening page
 

@@ -25,6 +25,22 @@ CHUNKS = [
 def test_question_request_history_is_optional_and_bounded():
     request = web_api.QuestionRequest(question="Who was this person?")
     assert request.history == []
+    assert request.rag_policy_version is None
+
+
+@pytest.mark.parametrize("mode", ("forest", "cromb_coo_coo", "tidal_archivist"))
+def test_hidden_modes_are_rejected_by_the_development_request(mode):
+    with pytest.raises(ValueError, match="temporarily unavailable"):
+        web_api.QuestionRequest(question="What happened?", archivist_mode=mode)
+
+
+def test_essential_rejects_prose_only_overrides():
+    with pytest.raises(ValueError, match="does not use prose settings"):
+        web_api.QuestionRequest(
+            question="What happened?",
+            archivist_mode="essential",
+            voice="romantic",
+        )
 
     turn = {"question": "Who was the person?", "answer": "A synthetic answer."}
     request = web_api.QuestionRequest(question="What happened next?", history=[turn])
@@ -75,9 +91,7 @@ def test_context_resolver_receives_only_bounded_dialogue(monkeypatch):
             )
             return SimpleNamespace(
                 output_parsed=ResolvedTurn(
-                    standalone_question=(
-                        "What happened to the named person afterward?"
-                    ),
+                    standalone_question=("What happened to the named person afterward?"),
                     entities=("Named Person",),
                     relationship="subsequent events",
                 )
@@ -89,8 +103,7 @@ def test_context_resolver_receives_only_bounded_dialogue(monkeypatch):
         lambda: SimpleNamespace(responses=FakeResponses()),
     )
     history = [
-        {"question": f"Question {number}", "answer": f"Answer {number}"}
-        for number in range(8)
+        {"question": f"Question {number}", "answer": f"Answer {number}"} for number in range(8)
     ]
 
     resolved_turn = web_project.resolve_conversation_turn(
@@ -112,10 +125,7 @@ def test_context_resolver_receives_only_bounded_dialogue(monkeypatch):
     assert "prior_user_questions" in captured["input"]
     assert "not supplied" in captured["instructions"].lower()
     assert captured["text_format"] is ResolvedTurn
-    assert (
-        captured["max_output_tokens"]
-        == web_project.MAX_RESOLVED_TURN_OUTPUT_TOKENS
-    )
+    assert captured["max_output_tokens"] == web_project.MAX_RESOLVED_TURN_OUTPUT_TOKENS
     assert extract_trusted_targets(resolved_turn)[0].absence_checkable is False
 
 
@@ -132,6 +142,7 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
         worldview,
         history,
         answer_strategy="rag",
+        application_compiled=False,
     ):
         calls.append(
             (
@@ -143,6 +154,7 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
                 voice,
                 worldview,
                 history,
+                application_compiled,
             )
         )
         return SimpleNamespace(
@@ -181,6 +193,7 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
                     "answer": "Prior assistant output must not become evidence.",
                 }
             ],
+            True,
         ),
     ]
     assert response["resolved_query"] == "What happened to John Doe afterward?"
@@ -188,6 +201,260 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
     assert response["answer_status"] == "answered"
     assert response["evidence_decision"] == "direct_answer"
     assert response["sources"][0]["text"] == "Synthetic manuscript evidence."
+
+
+@pytest.mark.parametrize(
+    "mode",
+    (
+        "professional",
+        "essential",
+        "pretty_pink_princess",
+        "baleful_black_baron",
+    ),
+)
+def test_selectable_rag_modes_use_the_application_compiler(monkeypatch, mode):
+    captured: dict[str, object] = {}
+
+    class FakeLedger:
+        def budget_state(self):
+            return {"hard_limit_enabled": False, "exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+        def summary(self, **_kwargs):
+            return None
+
+    def fake_answer(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            answer="A compiled answer [Source 1].",
+            final_chunks=CHUNKS,
+            status="application_compiled",
+            evidence_decision="direct_answer",
+            resolved_question="What happened?",
+        )
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+
+    web_api.question(
+        "current",
+        web_api.QuestionRequest(question="What happened?", archivist_mode=mode),
+    )
+
+    assert captured["application_compiled"] is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "strategy", "legacy_perspective"),
+    (("forest", "rag", False), ("essential", "full_context", False), ("essential", "rag", True)),
+)
+def test_hidden_legacy_and_full_context_modes_do_not_select_application_compiler(
+    mode,
+    strategy,
+    legacy_perspective,
+):
+    assert not web_api._uses_application_compiled_answer(
+        archivist_mode=web_api.ArchivistMode(mode),
+        answer_strategy=web_api.AnswerStrategy(strategy),
+        legacy_perspective=legacy_perspective,
+    )
+
+
+def test_essential_compiler_skips_local_budget_preflight(monkeypatch):
+    class NoBudgetLedger:
+        def budget_state(self):
+            raise AssertionError("providerless compiler must not read the budget")
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+        def summary(self, **_kwargs):
+            return None
+
+    captured: dict[str, object] = {}
+
+    def fake_answer(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            answer="A compiled answer [Source 1].",
+            final_chunks=CHUNKS,
+            status="application_compiled",
+            evidence_decision="direct_answer",
+            resolved_question="What happened?",
+        )
+
+    monkeypatch.setattr(web_api, "UsageLedger", NoBudgetLedger)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+
+    response = web_api.question("current", web_api.QuestionRequest(question="What happened?"))
+
+    assert response["answer_status"] == "application_compiled"
+    assert captured["application_compiled"] is True
+
+
+def test_v27_current_rag_forwards_exact_candidate_policy(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeLedger:
+        def budget_state(self):
+            return {"hard_limit_enabled": False, "exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+        def summary(self, **_kwargs):
+            return None
+
+    def fake_answer(
+        project_id,
+        question,
+        n_results,
+        *,
+        rag_policy,
+        **_kwargs,
+    ):
+        captured.update(
+            project_id=project_id,
+            question=question,
+            n_results=n_results,
+            rag_policy=rag_policy,
+        )
+        return SimpleNamespace(
+            answer="A compact-policy answer [Source 1].",
+            final_chunks=CHUNKS,
+            status="answered",
+            evidence_decision="direct_answer",
+            resolved_question=question,
+            answer_strategy_version=rag_policy.version,
+        )
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    monkeypatch.setattr(
+        web_api,
+        "answer_run_diagnostics",
+        lambda _result: {"schema": "archivist.answer_run_diagnostics/3"},
+    )
+
+    response = web_api.question(
+        "current",
+        web_api.QuestionRequest(
+            question="Who was Edwin Sandys?",
+            rag_policy_version=web_api.DevelopmentRagPolicyVersion.V27_COMPACT,
+        ),
+    )
+
+    assert captured["rag_policy"] is web_api.V27_COMPACT_CANDIDATE_POLICY
+    assert response["answer_strategy_version"] == web_api.COMPACT_RAG_POLICY_VERSION
+
+
+def test_explicit_v26_uses_frozen_pipeline_not_application_compiler(monkeypatch):
+    captured = {}
+
+    class FakeLedger:
+        def budget_state(self):
+            return {"hard_limit_enabled": False, "exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+        def summary(self, **_kwargs):
+            return None
+
+    def fake_answer(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            answer="A V26 answer [Source 1].",
+            final_chunks=CHUNKS,
+            status="answered",
+            evidence_decision="direct_answer",
+            resolved_question="What happened?",
+            answer_strategy_version=web_api.RAG_POLICY_VERSION,
+        )
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+    web_api.question(
+        "current",
+        web_api.QuestionRequest(
+            question="What happened?",
+            rag_policy_version=web_api.DevelopmentRagPolicyVersion.V26,
+        ),
+    )
+    assert "application_compiled" not in captured
+    assert "rag_policy" not in captured
+
+
+def test_custom_project_keeps_legacy_route_and_budget_semantics(monkeypatch):
+    captured = {}
+
+    class FakeLedger:
+        def budget_state(self):
+            return {"hard_limit_enabled": False, "exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+        def summary(self, **_kwargs):
+            return None
+
+    def fake_answer(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            answer="A custom-project answer [Source 1].",
+            final_chunks=CHUNKS,
+            status="legacy_answer",
+            evidence_decision="legacy_unclassified",
+            resolved_question="What happened?",
+        )
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+    web_api.question("custom", web_api.QuestionRequest(question="What happened?"))
+    assert "application_compiled" not in captured
+
+
+@pytest.mark.parametrize(
+    ("project_id", "answer_strategy", "expected_code"),
+    [
+        ("custom", "rag", "experimental_rag_policy_unavailable"),
+        ("current", "full_context", "experimental_rag_policy_requires_retrieval"),
+    ],
+)
+def test_v27_invalid_scope_fails_before_preflight_or_model_work(
+    monkeypatch,
+    project_id,
+    answer_strategy,
+    expected_code,
+):
+    monkeypatch.setattr(
+        web_api,
+        "_development_question_preflight",
+        lambda _request: (_ for _ in ()).throw(AssertionError("spend preflight must not run")),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("model work must not run")),
+    )
+    request = web_api.QuestionRequest(
+        question="What happened?",
+        archivist_mode="professional",
+        answer_strategy=answer_strategy,
+        rag_policy_version=web_api.DevelopmentRagPolicyVersion.V27_COMPACT,
+    )
+
+    with pytest.raises(web_api.HTTPException) as exc_info:
+        web_api.question(project_id, request)
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == expected_code
 
 
 def test_prior_assistant_output_never_enters_answer_prompt(monkeypatch):
@@ -224,16 +491,11 @@ def test_prior_assistant_output_never_enters_answer_prompt(monkeypatch):
                 "text": text,
             } == FOLLOWUP_RESOLVER_SETTINGS.responses_create_kwargs()
             assert text_format is ResolvedTurn
-            assert (
-                max_output_tokens
-                == web_project.MAX_RESOLVED_TURN_OUTPUT_TOKENS
-            )
+            assert max_output_tokens == web_project.MAX_RESOLVED_TURN_OUTPUT_TOKENS
             resolver_inputs.append(input)
             return SimpleNamespace(
                 output_parsed=ResolvedTurn(
-                    standalone_question=(
-                        "What happened to John Doe afterward?"
-                    ),
+                    standalone_question=("What happened to John Doe afterward?"),
                     entities=("John Doe",),
                     relationship="subsequent events",
                 )
@@ -296,16 +558,12 @@ def test_failed_preflight_skips_paid_followup_resolution(monkeypatch):
     monkeypatch.setattr(
         web_project,
         "preflight_answer_corpus",
-        lambda **_kwargs: (
-            calls.append("preflight") or failed_integrity
-        ),
+        lambda **_kwargs: calls.append("preflight") or failed_integrity,
     )
     monkeypatch.setattr(
         web_project,
         "resolve_conversation_turn",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("resolver must not run")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("resolver must not run")),
     )
     monkeypatch.setattr(web_project, "openai_client", lambda: object())
 
