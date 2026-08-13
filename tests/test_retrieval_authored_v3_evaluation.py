@@ -488,6 +488,34 @@ def test_h001_decomposition_recovery_declaration_is_externally_bound():
     assert declaration["next_turn_id"] == "H002:decomposition"
 
 
+def test_h012_decomposition_recovery_declaration_is_externally_bound():
+    declaration = v3.AMBIGUITY_RECOVERY_DECLARATIONS["H012:decomposition"]
+
+    assert declaration["sequence"] == 8
+    assert declaration["phase"] == "decomposition"
+    assert declaration["operation"] == "eval_claim_decomposition_v2"
+    assert declaration["previous_recovery_harness_commit"] == (
+        "bc2111b0b336764457b9539c402389142741e70b"
+    )
+    assert declaration["previous_continuation_file_sha256"] == (
+        "0a63acd50508d4baef512fa2a4ac7db6e80952ece01e004333b40407026a7be5"
+    )
+    assert declaration["intent_file_sha256"] == (
+        "d69d2739c9a24bd64cec53092e0e1b6351c86273d27e50314dcc0eae2dc46081"
+    )
+    assert declaration["outcome_file_sha256"] == (
+        "40ae8b368da730e692334edf9a258832138e329a51256d1871113cd2b89d157b"
+    )
+    assert declaration["provider_request_shape_sha256"] == (
+        "566fced7a1438b2d2e85ab2171f695e8571950d9e3ee37062db130250234f8aa"
+    )
+    assert declaration["request_binding_sha256"] == (
+        "da423c679c205a10046a640d97399754e1a541e93aca1d95977c8d220e369d7a"
+    )
+    assert declaration["projected_worst_case_reserved_nano_usd"] == 180_178_125
+    assert declaration["next_turn_id"] == "H013:decomposition"
+
+
 def test_recovery_budget_without_continuations_does_not_create_ledger(tmp_path):
     ledger = tmp_path / "absent.sqlite3"
 

@@ -25,7 +25,7 @@ decompositions, ledgers, gold annotations, and production artifacts are read-onl
 
 All paid phases share one ignored `usage.sqlite3`, one request ID, and the owner's cumulative
 `$7.00` authorization. Generation turns H002, H003, H021, H025, H026, H027, and H031, followed by
-H001's held-out decomposition turn, each reached the provider boundary once but produced no response
+H001's and H012's held-out decomposition turns, each reached the provider boundary once but produced no response
 or ledger event. All remain sealed technical failures and none is ever retried or
 replaced. The immutable H002 continuation stays byte-for-byte unchanged. A committed recovery
 declaration and append-only continuation entry bind each later zero-event item's intent, outcome,
@@ -44,8 +44,10 @@ H027's projection reserves `$0.390450000` (21,064 serialized request bytes, 53,8
 bound, and 1,800 maximum output tokens). H031's projection reserves `$0.406400000` (23,616 serialized
 request bytes, 56,384 input-token upper bound, and 1,800 maximum output tokens). H001's Terra
 decomposition projection reserves `$0.175984375` (4,347 serialized request bytes, 37,115 input-token
-upper bound, and 4,000 maximum output tokens). Their cumulative `$2.974615625` reserve lowers the
-dynamic tracked ceiling to `$4.025384375`.
+upper bound, and 4,000 maximum output tokens). H012's decomposition projection reserves
+`$0.180178125` (5,689 serialized request bytes, 38,457 input-token upper bound, and 4,000 maximum
+output tokens). Their cumulative `$3.154793750` reserve lowers the dynamic tracked ceiling to
+`$3.845206250`.
 A future ambiguity requires another committed declaration and
 no-overwrite chain entry; cumulative reserve plus recorded spend must stay within `$7.00`. Each
 provider boundary has no SDK retry. Private questions, answers, dossiers, rubrics, and response metadata remain below
