@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 
 import retrieval_authored_v4_evaluation as v4
-from costs import TokenUsage, UsageLedger
+from costs import TokenUsage, UsageLedger, current_usage_context
 
 
 @pytest.fixture
@@ -214,6 +214,30 @@ def test_zero_event_is_reserved_and_counts_against_exact_cap(local_root: Path) -
             cap_nano_usd=150,
             projected_nano_usd=51,
         )
+
+
+def test_master_scope_uses_effective_cap_not_remaining_balance(
+    local_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _paths(local_root)
+    monkeypatch.setattr(
+        v4,
+        "budget_state",
+        lambda _paths, *, cap_nano_usd: {
+            "ambiguity_reserved_nano_usd": 100_000_000,
+            "remaining_nano_usd": 400_000_000,
+        },
+    )
+
+    with v4.master_usage_scope(
+        paths,
+        cap_nano_usd=1_000_000_000,
+        turn_id="rubric:H036",
+    ):
+        context = current_usage_context()
+        assert context.request_cost_ceiling_nano_usd == 900_000_000
+        assert context.request_cost_ceiling_nano_usd != 400_000_000
 
 
 def test_crash_after_boundary_seals_reserve_without_replay(local_root: Path) -> None:

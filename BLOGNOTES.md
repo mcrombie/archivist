@@ -4462,3 +4462,12 @@ Add a dated subsection after any change that materially affects:
 
 Record what changed, why it mattered, what was deliberately not claimed, and the verification
 performed.
+# 2026-08-13 — A remaining balance is not a cumulative ceiling
+
+The v4 evaluation's shared request ID exposed a subtle accounting mistake:
+feeding a remaining balance into a guard that already sums cumulative request
+spend subtracts the past twice. The rubric stopped safely before H036's provider
+boundary. We now give the request guard the effective cohort ceiling and leave
+remaining-balance enforcement to the ledger plus the exact next-call
+projection. The once-only artifact protocol made the correction resumable
+without replaying a paid call.

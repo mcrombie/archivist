@@ -1862,3 +1862,14 @@ Phase/Brief: Phase 2, pre-Brief-9
 Symptom: for `Virginia Company`, the eight sources supplied are Chapter 3 chunk `_010` followed by Chapter 4 chunks `_002`–`_009`, stopping there — corpus order, earliest occurrences, nothing from Chapter 5 where the Company's dissolution is discussed.
 Cause: model error. `find_exact_match_chunks` returns every chunk containing the term in corpus order, and those fill `MAX_FINAL_SOURCES` before semantic results are consulted. The prompt then asks the model to identify "the strongest candidate locations" from a set that was never ranked. `docs/evaluation.md` records this case as "✅ Fixed and reliable."
 Resolution and verification: **Phase 2, Brief 9.** Explicitly not fixed in Phase 1. Verification when fixed: for a term appearing in more than `MAX_FINAL_SOURCES` chunks, the supplied set is not the first N in corpus order.
+# 2026-08-13 — v4 evaluation request ceiling double-counted recorded spend
+
+The fresh v4 rubric phase stopped before H036 without crossing a provider
+boundary even though the sealed cohort still had sufficient authorized
+headroom. The harness used the remaining cohort balance as the cost layer's
+cumulative request ceiling; because every phase shares one request ID, the cost
+layer then added already-recorded request spend again. The repair passes the
+effective cohort ceiling (the $7 owner cap less ambiguity reserves), while the
+monthly budget and exact per-call projection continue to enforce the remaining
+balance. H036 retained only its immutable intent, so resumption does not replay
+or replace a provider attempt.

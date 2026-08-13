@@ -71,3 +71,13 @@ dispositions and all 12 social outcomes. Its committed-safe shape contains only 
 rates, status categories, retrieval/citation/coverage metrics, cost, and latency—not question,
 answer, manuscript, or excerpt text. Semantic rubric results remain explicitly exploratory and
 uncalibrated.
+# Cost-ceiling resumption note
+
+The rubric phase initially stopped before H036's provider boundary because the
+harness supplied remaining headroom as a cumulative request ceiling, thereby
+double-counting recorded spend. H036 contains an intent but no boundary marker,
+outcome, usage event, or provider attempt. The repaired scope supplies the
+effective cohort ceiling (owner cap less ambiguity reservations); the ledger
+and exact request projection still enforce the actual remaining balance. A
+clean descendant commit may therefore resume at H036 without retrying any
+provider operation.

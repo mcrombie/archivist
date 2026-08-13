@@ -873,7 +873,12 @@ def master_usage_scope(
             request_id=MASTER_REQUEST_ID,
             enforce_budget=True,
             allow_over_budget=False,
-            request_cost_ceiling_nano_usd=int(state["remaining_nano_usd"]),
+            # The request ID is shared across the whole cohort, so the cost
+            # layer compares cumulative recorded request spend plus the next
+            # projection against this ceiling.  Pass the effective cohort cap
+            # (owner cap less ambiguity reserves), not the remaining balance;
+            # using the latter subtracts recorded spend a second time.
+            request_cost_ceiling_nano_usd=effective,
         ):
             yield ledger
     finally:
