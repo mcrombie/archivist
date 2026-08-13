@@ -287,6 +287,44 @@ AMBIGUITY_RECOVERY_DECLARATIONS: Mapping[str, Mapping[str, object]] = {
             "9723623b6ec36353d5837705057a0cdf8e189dbacb724968adf2e9d90cdb5cf7"
         ),
     },
+    "H027": {
+        "sequence": 5,
+        "turn_id": "H027:generation",
+        "previous_recovery_harness_commit": (
+            "b1a79f79b64b341be140a5d15fbbfe510099417b"
+        ),
+        "previous_continuation_file": "ambiguity-continuations/0004-H026.json",
+        "generation_intent_file_sha256": (
+            "be28db6792991a1991802b77b77e3c10ea67562e5757d4db28c875395129f4db"
+        ),
+        "generation_intent_canonical_sha256": (
+            "6b23bc34d6a8d63586d81c89674967f676544ca2b05b143fc4b2e942ab7a3d03"
+        ),
+        "generation_outcome_file_sha256": (
+            "c2118e787f48e6ab69bbdf7154bb272a8cddf56ff7f8b054f6390f68c3547cbf"
+        ),
+        "generation_outcome_canonical_sha256": (
+            "2e438610328e314967f3f66e34addd756b707490b563bbcdbf39a54445041f26"
+        ),
+        "previous_continuation_file_sha256": (
+            "f38ce09650f6f80efb62970f474887d422324c727e58bd9238cd15233752bfe1"
+        ),
+        "provider_request_shape_sha256": (
+            "73c163241c8fbea48666bdad4176dcd054bdf69341db484ea7c18be3a12d57ad"
+        ),
+        "provider_request_serialized_bytes": 21_064,
+        "provider_request_token_overhead_upper_bound": 32_768,
+        "provider_input_token_upper_bound": 53_832,
+        "max_output_tokens": 1_800,
+        "projected_worst_case_reserved_nano_usd": 390_450_000,
+        "request_binding_sha256": (
+            "154a73ccfff401c201b84fb5bfc169fd8b1ef571f1652ca0806fb818bc55d9b7"
+        ),
+        "next_item_id": "H028",
+        "later_generation_item_ids_sha256": (
+            "a545f0497f4f79cc365cd1ba8c5ab3f4cc0ba176172e7cf2834a5c5d5c30c513"
+        ),
+    },
 }
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
