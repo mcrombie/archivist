@@ -50,6 +50,7 @@ from authored_response import (
     AuthoredResponse,
     AuthoredResponseResult,
     AuthoredResponseStatus,
+    authored_failure_code_for_exception,
     authored_response_prompt_metadata,
     generate_authored_response,
 )
@@ -133,9 +134,9 @@ MAX_RESOLVED_QUERY_CHARS = 4_000
 MAX_RESOLVED_TURN_OUTPUT_TOKENS = 2_000
 
 APPLICATION_COMPILED_MODES = application_compiled_modes()
-AUTHORED_TOTAL_PROVIDER_DEADLINE_SECONDS = 25.0
+AUTHORED_TOTAL_PROVIDER_DEADLINE_SECONDS = 35.0
 AUTHORED_EMBEDDING_TIMEOUT_SECONDS = 8.0
-AUTHORED_AUTHORING_TIMEOUT_SECONDS = 20.0
+AUTHORED_AUTHORING_TIMEOUT_SECONDS = 30.0
 AUTHORED_MIN_AUTHORING_TIMEOUT_SECONDS = 1.0
 CHARACTER_CONVERSATION_TIMEOUT_SECONDS = 12.0
 
@@ -1223,7 +1224,7 @@ def _run_application_compiled_answer(
                 follow_up_questions=(),
                 used_unit_ids=(),
                 used_source_numbers=(),
-                failure_code=AuthoredFailureCode.PROVIDER_FAILURE,
+                failure_code=AuthoredFailureCode.REQUEST_TIMEOUT,
             )
         else:
             authoring_client = _provider_client_with_timeout(
@@ -1246,7 +1247,7 @@ def _run_application_compiled_answer(
                 )
             except CostLimitExceeded:
                 raise
-            except Exception:
+            except Exception as exc:
                 authored = AuthoredResponseResult(
                     status=AuthoredResponseStatus.FALLBACK_REQUIRED,
                     mode=archivist_mode,
@@ -1256,7 +1257,7 @@ def _run_application_compiled_answer(
                     follow_up_questions=(),
                     used_unit_ids=(),
                     used_source_numbers=(),
-                    failure_code=AuthoredFailureCode.PROVIDER_FAILURE,
+                    failure_code=authored_failure_code_for_exception(exc),
                 )
         timings["answer_generation"] = _elapsed_ms(generation_started_ns)
         generated = (

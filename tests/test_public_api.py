@@ -305,7 +305,7 @@ def test_public_version_is_closed_text_free_and_bound_to_frozen_candidate(monkey
     assert payload["schema"] == "archivist.public_runtime_identity/4"
     assert payload["deployment_commit"] == "b" * 40
     assert payload["process_epoch"] == web_api.PROCESS_EPOCH
-    assert payload["answer_policy_version"] == "retrieval-authored-v3"
+    assert payload["answer_policy_version"] == "retrieval-authored-v4"
     assert payload["evidence_retrieval_kind"] == "hybrid_bm25_rrf"
     assert payload["embedding_model"] == "text-embedding-3-small"
     assert payload["generated_prose_model"] == "gpt-5.6-sol"
@@ -692,7 +692,7 @@ def test_public_character_conversation_releases_without_manuscript_sources(monke
             final_chunks=[],
             status="character_conversation",
             answer_strategy="rag",
-            answer_strategy_version="retrieval-authored-v3",
+            answer_strategy_version="retrieval-authored-v4",
             evidence_decision="indeterminate",
         ),
     )

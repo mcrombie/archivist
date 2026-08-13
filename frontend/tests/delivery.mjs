@@ -92,6 +92,7 @@ try {
   const delivery = await server.ssrLoadModule("/src/delivery.ts");
   const api = await server.ssrLoadModule("/src/api.ts");
 
+  assert.equal(api.answerPolicyLabel("retrieval-authored-v4"), "Retrieval-authored v4");
   assert.equal(api.answerPolicyLabel("retrieval-authored-v3"), "Retrieval-authored v3");
   assert.equal(api.answerPolicyLabel("retrieval-authored-v2"), "Retrieval-authored v2");
   assert.equal(api.answerPolicyLabel("retrieval-authored-v1"), "Retrieval-authored v1");

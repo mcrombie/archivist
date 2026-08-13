@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from openai.lib._pydantic import to_strict_json_schema
 
@@ -495,7 +496,7 @@ def test_generation_is_exactly_one_low_reasoning_medium_verbosity_call(monkeypat
     assert "Selected advanced voice" in calls[0][2]["instructions"]
 
 
-def test_provider_and_invalid_output_return_typed_fallback_without_retry(monkeypatch):
+def test_provider_exception_and_invalid_output_are_distinct_without_retry(monkeypatch):
     client = RecordingClient()
     calls = 0
 
@@ -514,7 +515,7 @@ def test_provider_and_invalid_output_return_typed_fallback_without_retry(monkeyp
     )
     assert calls == 1
     assert failed.status is AuthoredResponseStatus.FALLBACK_REQUIRED
-    assert failed.failure_code is AuthoredFailureCode.PROVIDER_FAILURE
+    assert failed.failure_code is AuthoredFailureCode.PROVIDER_EXCEPTION
 
     monkeypatch.setattr(
         authored_response,
@@ -528,7 +529,107 @@ def test_provider_and_invalid_output_return_typed_fallback_without_retry(monkeyp
         dossier=_dossier(),
         mode=ArchivistMode.PROFESSIONAL,
     )
-    assert invalid.failure_code is AuthoredFailureCode.INVALID_RESPONSE
+    assert invalid.failure_code is AuthoredFailureCode.STRUCTURED_OUTPUT_REJECTED
+
+
+def test_timeout_structured_rejection_and_local_validation_have_distinct_codes(
+    monkeypatch,
+):
+    client = RecordingClient()
+
+    monkeypatch.setattr(
+        authored_response,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            httpx.ReadTimeout("synthetic offline timeout")
+        ),
+    )
+    timed_out = generate_authored_response(
+        client,
+        question="Who was Edwin Sandys?",
+        resolved_turn=TURN,
+        dossier=_dossier(),
+        mode=ArchivistMode.PROFESSIONAL,
+    )
+    assert timed_out.failure_code is AuthoredFailureCode.REQUEST_TIMEOUT
+
+    monkeypatch.setattr(
+        authored_response,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            httpx.ConnectError("synthetic offline transport failure")
+        ),
+    )
+    transport_failed = generate_authored_response(
+        client,
+        question="Who was Edwin Sandys?",
+        resolved_turn=TURN,
+        dossier=_dossier(),
+        mode=ArchivistMode.PROFESSIONAL,
+    )
+    assert transport_failed.failure_code is AuthoredFailureCode.TRANSPORT_FAILURE
+
+    monkeypatch.setattr(
+        authored_response,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            authored_response.ContentFilterFinishReasonError()
+        ),
+    )
+    provider_rejected = generate_authored_response(
+        client,
+        question="Who was Edwin Sandys?",
+        resolved_turn=TURN,
+        dossier=_dossier(),
+        mode=ArchivistMode.PROFESSIONAL,
+    )
+    assert (
+        provider_rejected.failure_code
+        is AuthoredFailureCode.STRUCTURED_OUTPUT_REJECTED
+    )
+
+    monkeypatch.setattr(
+        authored_response,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            output_parsed={"disposition": "answered", "paragraphs": []},
+            output=(),
+        ),
+    )
+    structurally_invalid = generate_authored_response(
+        client,
+        question="Who was Edwin Sandys?",
+        resolved_turn=TURN,
+        dossier=_dossier(),
+        mode=ArchivistMode.PROFESSIONAL,
+    )
+    assert (
+        structurally_invalid.failure_code
+        is AuthoredFailureCode.STRUCTURED_OUTPUT_REJECTED
+    )
+
+    unsupported = _response(
+        AuthoredParagraph(runs=(_grounded("A claim.", "unit:404"),))
+    )
+    monkeypatch.setattr(
+        authored_response,
+        "tracked_responses_parse",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            output_parsed=unsupported,
+            output=(),
+        ),
+    )
+    locally_invalid = generate_authored_response(
+        client,
+        question="Who was Edwin Sandys?",
+        resolved_turn=TURN,
+        dossier=_dossier(),
+        mode=ArchivistMode.PROFESSIONAL,
+    )
+    assert (
+        locally_invalid.failure_code
+        is AuthoredFailureCode.LOCAL_CONTRACT_VALIDATION_FAILED
+    )
 
 
 def test_provider_refusal_is_distinct_and_cost_limit_passes_through(monkeypatch):

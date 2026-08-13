@@ -23,7 +23,10 @@ from costs import (
     PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
     PUBLIC_RAG_REQUEST_COST_CEILING_VERSION,
 )
-from authored_response import AUTHORED_RESPONSE_SETTINGS
+from authored_response import (
+    AUTHORED_RESPONSE_POLICY_VERSION,
+    AUTHORED_RESPONSE_SETTINGS,
+)
 from gold_set import validate_gold_set_file
 from public_telemetry import PUBLIC_EMBEDDING_MODEL, PUBLIC_EVIDENCE_RETRIEVAL_KIND
 from retrieval_benchmark import LockedGold, load_locked_gold
@@ -55,7 +58,7 @@ PUBLIC_VERSION_PATH = "/api/version"
 REQUEST_TIMEOUT_SECONDS = 240.0
 # New preparations bind the current product policy. Previously written v2
 # manifests retain their own sealed expected identity and are never rewritten.
-PRODUCTION_COHORT_ANSWER_POLICY_VERSION = "retrieval-authored-v3"
+PRODUCTION_COHORT_ANSWER_POLICY_VERSION = AUTHORED_RESPONSE_POLICY_VERSION
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")

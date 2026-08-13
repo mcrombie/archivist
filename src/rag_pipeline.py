@@ -815,7 +815,17 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
     valid_error_codes = (
         {code.value for code in CoverageValidationErrorCode}
         | {code.value for code in FullContextValidationErrorCode}
-        | {"provider_failure", "invalid_response", "refusal", "retrieval_failure"}
+        | {
+            "provider_failure",
+            "invalid_response",
+            "refusal",
+            "retrieval_failure",
+            "request_timeout",
+            "transport_failure",
+            "provider_exception",
+            "structured_output_rejected",
+            "local_contract_validation_failed",
+        }
     )
     valid_results = {value.value for value in DiagnosticValidationResult}
     valid_content_outcomes = {value.value for value in ContentOutcome}

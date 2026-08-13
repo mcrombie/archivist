@@ -25,6 +25,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Literal, Protocol
 
+import httpx
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    ContentFilterFinishReasonError,
+    LengthFinishReasonError,
+)
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -57,7 +64,7 @@ from public_sources import answer_has_extended_verbatim_overlap
 
 
 AUTHORED_RESPONSE_INPUT_SCHEMA = "archivist.authored_response_input/1"
-AUTHORED_RESPONSE_POLICY_VERSION = "retrieval-authored-v3"
+AUTHORED_RESPONSE_POLICY_VERSION = "retrieval-authored-v4"
 AUTHORED_RESPONSE_SCHEMA = "archivist.retrieval_authored_answer/1"
 AUTHORED_RESPONSE_OUTPUT_SCHEMA = AUTHORED_RESPONSE_SCHEMA
 AUTHORED_RESPONSE_RENDERER_VERSION = "retrieval-authored-renderer-v1"
@@ -128,13 +135,37 @@ class AuthoredResponseStatus(StrEnum):
 
 
 class AuthoredFailureCode(StrEnum):
+    # Retained for deserializing and reporting sealed v1-v3 artifacts. The v4
+    # authoring path emits the granular codes below instead.
     PROVIDER_FAILURE = "provider_failure"
     INVALID_RESPONSE = "invalid_response"
+    REQUEST_TIMEOUT = "request_timeout"
+    TRANSPORT_FAILURE = "transport_failure"
+    PROVIDER_EXCEPTION = "provider_exception"
+    STRUCTURED_OUTPUT_REJECTED = "structured_output_rejected"
+    LOCAL_CONTRACT_VALIDATION_FAILED = "local_contract_validation_failed"
     REFUSAL = "refusal"
 
 
 class AuthoredResponseContractError(ValueError):
     """Raised when authored output cannot be safely resolved to the dossier."""
+
+
+def authored_failure_code_for_exception(exc: Exception) -> AuthoredFailureCode:
+    """Map an exception to a stable, text-free v4 authoring failure class."""
+
+    if isinstance(exc, (APITimeoutError, httpx.TimeoutException, TimeoutError)):
+        return AuthoredFailureCode.REQUEST_TIMEOUT
+    if isinstance(
+        exc,
+        (ValidationError, LengthFinishReasonError, ContentFilterFinishReasonError),
+    ):
+        return AuthoredFailureCode.STRUCTURED_OUTPUT_REJECTED
+    if isinstance(exc, (APIConnectionError, httpx.TransportError)):
+        return AuthoredFailureCode.TRANSPORT_FAILURE
+    if isinstance(exc, AuthoredResponseContractError):
+        return AuthoredFailureCode.LOCAL_CONTRACT_VALIDATION_FAILED
+    return AuthoredFailureCode.PROVIDER_EXCEPTION
 
 
 class _AuthoredRunBase(BaseModel):
@@ -578,17 +609,15 @@ def generate_authored_response(
         )
     except CostLimitExceeded:
         raise
-    except ValidationError:
-        return _fallback_result(selected_mode, AuthoredFailureCode.INVALID_RESPONSE)
-    except Exception:
-        return _fallback_result(selected_mode, AuthoredFailureCode.PROVIDER_FAILURE)
+    except Exception as exc:
+        return _fallback_result(selected_mode, authored_failure_code_for_exception(exc))
 
     parsed = getattr(response, "output_parsed", None)
     if parsed is None:
         failure = (
             AuthoredFailureCode.REFUSAL
             if _response_refused(response)
-            else AuthoredFailureCode.INVALID_RESPONSE
+            else AuthoredFailureCode.STRUCTURED_OUTPUT_REJECTED
         )
         return _fallback_result(selected_mode, failure)
     try:
@@ -597,9 +626,18 @@ def generate_authored_response(
             if isinstance(parsed, AuthoredResponse)
             else AuthoredResponse.model_validate(parsed)
         )
+    except (ValidationError, TypeError, ValueError):
+        return _fallback_result(
+            selected_mode,
+            AuthoredFailureCode.STRUCTURED_OUTPUT_REJECTED,
+        )
+    try:
         return validate_and_render_authored_response(structured, dossier, mode=selected_mode)
     except (AuthoredResponseContractError, TypeError, ValueError):
-        return _fallback_result(selected_mode, AuthoredFailureCode.INVALID_RESPONSE)
+        return _fallback_result(
+            selected_mode,
+            AuthoredFailureCode.LOCAL_CONTRACT_VALIDATION_FAILED,
+        )
 
 
 def _normalize_mode(mode: ArchivistMode | str) -> ArchivistMode:
@@ -741,6 +779,7 @@ __all__ = [
     "authored_response_prompt_metadata",
     "build_authored_response_input",
     "build_authored_response_instructions",
+    "authored_failure_code_for_exception",
     "generate_authored_response",
     "supported_authored_modes",
     "validate_and_render_authored_response",

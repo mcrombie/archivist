@@ -176,6 +176,13 @@ def _generated_result(mode, dossier, *, answer=None):
     )
 
 
+def test_v4_authoring_timeout_policy_preserves_one_shared_deadline():
+    assert AUTHORED_RESPONSE_POLICY_VERSION == "retrieval-authored-v4"
+    assert web_project.AUTHORED_TOTAL_PROVIDER_DEADLINE_SECONDS == 35.0
+    assert web_project.AUTHORED_EMBEDDING_TIMEOUT_SECONDS == 8.0
+    assert web_project.AUTHORED_AUTHORING_TIMEOUT_SECONDS == 30.0
+
+
 def test_essential_uses_one_no_retry_client_for_hybrid_retrieval_only(monkeypatch):
     harness = _install_pipeline(monkeypatch)
     checked_claims = []
@@ -393,8 +400,11 @@ def test_generated_modes_author_once_from_rich_dossier_and_preserve_followup(
         for call in harness.client.option_calls
         if "timeout" in call
     ]
-    assert timeout_calls[0] == web_project.AUTHORED_EMBEDDING_TIMEOUT_SECONDS
-    assert 0 < timeout_calls[1] <= web_project.AUTHORED_AUTHORING_TIMEOUT_SECONDS
+    assert timeout_calls == [
+        web_project.AUTHORED_EMBEDDING_TIMEOUT_SECONDS,
+        web_project.AUTHORED_AUTHORING_TIMEOUT_SECONDS,
+    ]
+    assert all(call["max_retries"] == 0 for call in harness.client.option_calls)
 
 
 def test_generated_mode_skips_author_when_provider_deadline_is_exhausted(monkeypatch):
@@ -429,7 +439,8 @@ def test_generated_mode_skips_author_when_provider_deadline_is_exhausted(monkeyp
     assert fallback.answer == essential.answer
     assert fallback.final_chunks == essential.final_chunks
     assert fallback.diagnostics["generation"]["structured_generation_called"] is False
-    assert fallback.diagnostics["generation"]["fallback_code"] == "provider_failure"
+    assert fallback.diagnostics["generation"]["fallback_code"] == "request_timeout"
+    assert answer_run_diagnostics(fallback)["validation_error_code"] == "request_timeout"
 
 
 def test_generated_mode_forwards_advanced_interpretive_overrides(monkeypatch):
@@ -504,7 +515,7 @@ def test_author_failure_falls_back_to_exact_essential_answer_over_same_dossier(
             follow_up_questions=(),
             used_unit_ids=(),
             used_source_numbers=(),
-            failure_code=AuthoredFailureCode.PROVIDER_FAILURE,
+            failure_code=AuthoredFailureCode.PROVIDER_EXCEPTION,
         )
 
     monkeypatch.setattr(web_project, "generate_authored_response", failed_author)
@@ -526,9 +537,14 @@ def test_author_failure_falls_back_to_exact_essential_answer_over_same_dossier(
     assert fallback.status == "retrieval_authored_fallback"
     assert fallback.answer == essential.answer
     assert fallback.final_chunks == essential.final_chunks
-    assert fallback.diagnostics["generation"]["fallback_code"] == "provider_failure"
+    assert fallback.diagnostics["generation"]["fallback_code"] == (
+        "provider_exception"
+    )
     diagnostics = answer_run_diagnostics(fallback)
     assert diagnostics["cohort"]["rag_policy_version"] == AUTHORED_RESPONSE_POLICY_VERSION
+    assert diagnostics["validation_error_code"] == (
+        "provider_exception"
+    )
     assert diagnostics["planner"]["status"] == "not_called"
 
 
