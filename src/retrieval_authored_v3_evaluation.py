@@ -447,6 +447,49 @@ AMBIGUITY_RECOVERY_DECLARATIONS: Mapping[str, Mapping[str, object]] = {
             "0380ca790638ca3f036c4542f1a541ad6b673e2614ee86b341ed7b229bcca11c"
         ),
     },
+    "H013:decomposition": {
+        "sequence": 9,
+        "turn_id": "H013:decomposition",
+        "phase": "decomposition",
+        "operation": "eval_claim_decomposition_v2",
+        "previous_recovery_harness_commit": (
+            "a9d53e7e83586b6b6bc79e5702662ec4163dc98e"
+        ),
+        "previous_continuation_file": (
+            "ambiguity-continuations/0008-H012-decomposition.json"
+        ),
+        "intent_file_sha256": (
+            "2b3307ce477ac994e5910621d541a56a837c007a0b0107fb01eab63714b10c2a"
+        ),
+        "intent_canonical_sha256": (
+            "3fc301319d7913de3f2a2f4496d015cf9a5b03ce944aa2d7a59c396ecb60858f"
+        ),
+        "outcome_file_sha256": (
+            "8ef5f44565f37468ca63146b415926405da5b823b211d7ec757391ad96ba8920"
+        ),
+        "outcome_canonical_sha256": (
+            "5faeddedea82df560fc726f16961b9f5a17bd984b1e8e535348a768c9620ab85"
+        ),
+        "previous_continuation_file_sha256": (
+            "53e98db329dbe5eb2bcadbdcc52ccb0b5290768e6be04a99b0f94ed3ec56d210"
+        ),
+        "provider_request_shape_sha256": (
+            "3080f88bd82f4598eca77b66b645cbeaa0be9ae424fd157922bd2fa7ba02fa38"
+        ),
+        "provider_request_serialized_bytes": 5_437,
+        "provider_request_token_overhead_upper_bound": 32_768,
+        "provider_input_token_upper_bound": 38_205,
+        "max_output_tokens": 4_000,
+        "projected_worst_case_reserved_nano_usd": 179_390_625,
+        "request_binding_sha256": (
+            "4a859757dfdc9d8d8343427be9ab5ce70f2d1a77dd1d6acaa12f1fa4f00610a1"
+        ),
+        "next_item_id": "H014",
+        "next_turn_id": "H014:decomposition",
+        "later_phase_turn_ids_sha256": (
+            "934860546994dfe27e96983456aa019f019e6f132ba8de42f14c419667cd5f9a"
+        ),
+    },
 }
 
 EXPECTED_GOLD_SHA256 = "72c4e8450a40dcf608757abd1244fe45cb57d3c1c1daccee10bedf4283e8f2f2"
