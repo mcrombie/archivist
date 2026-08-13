@@ -215,6 +215,7 @@ After formal lock:
 | **8B. V27 compact generation representation** | **Historical experiment; unpromoted and superseded** | Preserve the offline experiment and its proposed A/B in `docs/latency_optimization.md`. No paid candidate call ran, its old UI selector is gone, and it is not the current product path. |
 | **8C. Application-compiled answer path** | **Historical product iteration; superseded** | Preserve the closed-cue implementation history and its narrow three-call smoke. Its three 32-word cards overcorrected for structural safety and produced answers that were often too thin or off-target. Do not use its smoke as evidence about the current policy. |
 | **8D. Retrieval-authored answer path** | **Current v3 default implemented offline; live behavior unmeasured** | Preserve v1 and v2 as historical/manual behavior. In v3, manuscript turns retain one shared hybrid embedding/retrieval pass, the 4–8-unit rich dossier, one no-retry low-reasoning/medium-verbosity Sol prose call in every registered generated mode, local support-ID citation mapping, required follow-up questions, and direct-evidence fallback. Essential has no prose call but still has one embedding event. Narrow social turns in every registered generated mode instead use one compact no-retry Sol call with no retrieval or evidence and deterministic in-character local fallback. Ruthless Red Realist is the fifth selectable mode and uses Ember & Ink. A new cohort is required before any latency, quality, or reliability improvement claim. |
+| **8E. Conversational persona evaluation** | **Offline harness complete; live cohort not started** | Preserve this as a separate, non-gold development suite. Ask all four generated modes the identical fixed “How are you?” prompt through `character-conversation-v2`, with one no-retry Sol call per untouched item and no embedding, retrieval, manuscript, or gold input. Share the v3 master request ID, ledger, and cumulative `$7.00` ceiling rather than creating a persona allowance. Report status, latency, cost, manuscript-leading follow-ups, and transparent character-distinctness diagnostics. No provider call or result claim exists yet. |
 
 ## Next sequence
 
@@ -389,6 +390,8 @@ Current contract:
 - Ruthless Red Realist uses Ember & Ink and emphasizes cold-blooded calculation, power, leverage,
   incentives, tradeoffs, and statecraft without impersonating Machiavelli or Henry Kissinger or
   using either as a source of historical facts.
+- **Fey Fir-Green Folklorist** is an approved name for a possible future persona. It is dormant:
+  it has no registered mode contract, generated behavior, selectable control, or evaluation item.
 - Local code maps valid support IDs to citations, but does not claim to prove semantic entailment.
 - The input displays its active Perspective; its disclosure is Settings. Fine-grained lens, voice,
   worldview, and appearance overrides remain Advanced controls and label the active mode exactly

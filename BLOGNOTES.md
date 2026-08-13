@@ -135,6 +135,27 @@ anything that still requires measurement.
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
 
+## 2026-08-13 — Define the persona test before spending
+
+- Added a separate, non-gold development harness for the compact
+  `character-conversation-v2` route. Professional, Pretty Pink Princess, Baleful Black Baron, and
+  Ruthless Red Realist all receive the same fixed **“How are you?”** prompt, so differences are not
+  confounded by four different questions. The prepared request contains only that question and
+  registry-owned character instructions—no embedding, retrieval, manuscript, dossier, sources,
+  history, or held-out annotations.
+- The future cohort allows one no-retry Sol call per untouched mode. Intent is sealed before client
+  construction, completed outcomes resume without replay, and ambiguous usage stops the run. Its
+  exact item events share the v3 evaluation's `usage.sqlite3`, stable master request ID, and
+  cumulative `$7.00` request ceiling; it does not create a separate persona allowance.
+- The text-free report covers response status, latency, cost, manuscript-leading follow-up
+  questions, mode-signature hits, reply uniqueness, and pairwise token overlap. Those character
+  fields are transparent development diagnostics, not a semantic quality judge and not gold/RAG
+  evidence.
+- No provider call or paid evaluation ran while implementing and testing this harness. Therefore
+  there is no post-v3 persona reliability, latency, cost, or distinctness result yet.
+- **Fey Fir-Green Folklorist** is an approved possible future persona name, but remains deliberately
+  dormant: it is not registered, selectable, generated, or included in this fixed cohort.
+
 ## 2026-08-13 — Make social conversation a generated-mode capability
 
 - Professional still failed a basic “How are you?” turn after the first character-conversation
