@@ -1159,6 +1159,30 @@ def validate_ambiguity_continuation(paths: V3Paths, *, recovery_commit: str) -> 
         raise V3EvaluationError("ambiguity continuation is not bound to the current harness")
 
 
+def validate_terminal_closure_continuation(
+    paths: V3Paths,
+    *,
+    base_dir: Path,
+    closure_commit: str,
+) -> None:
+    """Allow only terminal closure from a clean descendant of the sealed tail."""
+
+    state = _ambiguity_chain_state(paths)
+    if not state["reservations"]:
+        raise V3EvaluationError("no zero-event ambiguity has been reconciled")
+    tail_commit = _required_string(state, "tail_recovery_harness_commit")
+    if tail_commit == closure_commit:
+        return
+    if not _git_is_ancestor(
+        base_dir,
+        ancestor=tail_commit,
+        descendant=closure_commit,
+    ):
+        raise V3EvaluationError(
+            "terminal closure harness is not a descendant of the ambiguity tail"
+        )
+
+
 def _legacy_h002_reservation(paths: V3Paths) -> dict[str, object] | None:
     if not paths.ambiguity_continuation.exists():
         return None
@@ -2189,6 +2213,7 @@ def _select_cohort_manifest(
     built_manifest: Mapping[str, object],
     base_dir: Path,
     reconcile_ambiguity: bool,
+    terminal_closure: bool = False,
 ) -> Mapping[str, object]:
     if not paths.cohort_manifest.exists():
         return built_manifest
@@ -2196,7 +2221,13 @@ def _select_cohort_manifest(
     if original_manifest == dict(built_manifest):
         return built_manifest
     _validate_original_manifest_identity(original_manifest, built_manifest)
-    if not reconcile_ambiguity:
+    if terminal_closure:
+        validate_terminal_closure_continuation(
+            paths,
+            base_dir=base_dir,
+            closure_commit=_git_commit(base_dir),
+        )
+    elif not reconcile_ambiguity:
         validate_ambiguity_continuation(
             paths,
             recovery_commit=_git_commit(base_dir),
@@ -2213,7 +2244,14 @@ def prepare_v3_cohort(
     require_clean: bool = True,
     persist_manifest: bool = False,
     reconcile_ambiguity: bool = False,
+    terminal_closure: bool = False,
 ) -> PreparedV3Cohort:
+    if terminal_closure and reconcile_ambiguity:
+        raise V3EvaluationError(
+            "terminal closure cannot share the ambiguity-reconciliation route"
+        )
+    if terminal_closure and not require_clean:
+        raise V3EvaluationError("terminal closure requires a clean working tree")
     if paths.root.resolve() != _private_evaluation_root(base_dir, paths.root):
         raise V3EvaluationError("v3 evaluation root did not resolve canonically")
     for path, expected, label in (
@@ -2297,6 +2335,7 @@ def prepare_v3_cohort(
         built_manifest=cohort_manifest,
         base_dir=base_dir,
         reconcile_ambiguity=reconcile_ambiguity,
+        terminal_closure=terminal_closure,
     )
     if persist_manifest and not paths.cohort_manifest.exists():
         paths.root.mkdir(parents=True, exist_ok=True)
@@ -4092,9 +4131,10 @@ def _validate_diagnostic_terminal_state(
 ) -> dict[str, object]:
     require_complete_generation(cohort)
     require_instrument_freeze(cohort.paths)
-    validate_ambiguity_continuation(
+    validate_terminal_closure_continuation(
         cohort.paths,
-        recovery_commit=_git_commit(base_dir),
+        base_dir=base_dir,
+        closure_commit=_git_commit(base_dir),
     )
     chain = _ambiguity_chain_state(cohort.paths)
     reservations = chain["reservations"]

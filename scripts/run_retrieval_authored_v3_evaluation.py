@@ -125,6 +125,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise V3EvaluationError(
                 "v3 cohort is closed as an incomplete diagnostic; paid phases are disabled"
             )
+        if args.command == "report" and paths.diagnostic_closure.exists():
+            summary = read_closed_diagnostic_summary(paths)
+            print("READ CLOSED RETRIEVAL-AUTHORED-V3 DIAGNOSTIC SUMMARY")
+            print(
+                "Generation outcomes: "
+                f"{summary['phase_completeness']['generation_outcomes']}"
+            )
+            print(
+                "Recorded total cost: $"
+                f"{summary['cost']['recorded_tracked_spend_usd_exact']}"
+            )
+            return 0
         cap = _paid_cap(args) if args.command in PAID_COMMANDS else None
         cohort = prepare_v3_cohort(
             base_dir=BASE_DIR,
@@ -132,6 +144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             require_clean=True,
             persist_manifest=args.command != "preflight",
             reconcile_ambiguity=args.command == "reconcile-ambiguity",
+            terminal_closure=args.command == "close-diagnostic",
         )
         if args.command == "preflight":
             readiness = preflight_all_cached_items(cohort)
@@ -222,11 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print("All later paid phases and ambiguity reconciliations are disabled.")
             return 0
-        summary = (
-            read_closed_diagnostic_summary(paths)
-            if paths.diagnostic_closure.exists()
-            else write_public_summary(cohort)
-        )
+        summary = write_public_summary(cohort)
         print("WROTE RETRIEVAL-AUTHORED-V3 PUBLIC-SAFE SUMMARY")
         print(
             "Generation outcomes: "

@@ -1097,11 +1097,6 @@ def test_diagnostic_terminal_state_requires_reconciled_h014(monkeypatch, tmp_pat
     cohort = SimpleNamespace(paths=paths)
     monkeypatch.setattr(v3, "require_complete_generation", lambda _cohort: None)
     monkeypatch.setattr(v3, "require_instrument_freeze", lambda _paths: None)
-    monkeypatch.setattr(
-        v3,
-        "validate_ambiguity_continuation",
-        lambda *_args, **_kwargs: None,
-    )
     monkeypatch.setattr(v3, "_git_commit", lambda _base: "9" * 40)
     monkeypatch.setattr(
         v3,
@@ -1109,8 +1104,139 @@ def test_diagnostic_terminal_state_requires_reconciled_h014(monkeypatch, tmp_pat
         lambda _paths: {
             "reservations": [{"turn_id": "H013:decomposition"}],
             "cumulative_reserved_nano_usd": 3_334_184_375,
+            "tail_recovery_harness_commit": "9" * 40,
         },
     )
 
     with pytest.raises(V3EvaluationError, match="requires the sealed H014"):
         v3._validate_diagnostic_terminal_state(cohort, base_dir=tmp_path)
+
+
+def _manifest_pair_for_continuation_test(monkeypatch, paths: V3Paths):
+    original = {
+        "schema": "manifest",
+        "system_under_test": {"harness_commit": v3.ORIGINAL_HARNESS_COMMIT},
+        "working_tree": {
+            "working_tree": "clean",
+            "git_commit": v3.ORIGINAL_HARNESS_COMMIT,
+            "dirty_fingerprint": None,
+        },
+        "sealed_identity": "unchanged",
+    }
+    current = json.loads(json.dumps(original))
+    current["system_under_test"]["harness_commit"] = "c" * 40
+    current["working_tree"]["git_commit"] = "c" * 40
+    paths.cohort_manifest.parent.mkdir(parents=True, exist_ok=True)
+    paths.cohort_manifest.write_text(
+        json.dumps(original, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3,
+        "EXPECTED_ORIGINAL_COHORT_MANIFEST_CANONICAL_SHA256",
+        v3.canonical_json_sha256(original),
+    )
+    return original, current
+
+
+def test_terminal_closure_accepts_clean_descendant_of_ambiguity_tail(
+    monkeypatch,
+    tmp_path,
+):
+    paths = _paths(tmp_path / "run")
+    original, current = _manifest_pair_for_continuation_test(monkeypatch, paths)
+    tail = "a" * 40
+    closing = "c" * 40
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: closing)
+    monkeypatch.setattr(
+        v3,
+        "_ambiguity_chain_state",
+        lambda _paths: {
+            "reservations": [{"turn_id": "H014:decomposition"}],
+            "tail_recovery_harness_commit": tail,
+        },
+    )
+    observed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        v3,
+        "_git_is_ancestor",
+        lambda _base, *, ancestor, descendant: (
+            observed.append((ancestor, descendant)) or True
+        ),
+    )
+
+    selected = v3._select_cohort_manifest(
+        paths=paths,
+        built_manifest=current,
+        base_dir=tmp_path,
+        reconcile_ambiguity=False,
+        terminal_closure=True,
+    )
+
+    assert selected == original
+    assert observed == [(tail, closing)]
+
+
+def test_terminal_closure_rejects_non_descendant_harness(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    _original, current = _manifest_pair_for_continuation_test(monkeypatch, paths)
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "c" * 40)
+    monkeypatch.setattr(
+        v3,
+        "_ambiguity_chain_state",
+        lambda _paths: {
+            "reservations": [{"turn_id": "H014:decomposition"}],
+            "tail_recovery_harness_commit": "a" * 40,
+        },
+    )
+    monkeypatch.setattr(v3, "_git_is_ancestor", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(V3EvaluationError, match="not a descendant"):
+        v3._select_cohort_manifest(
+            paths=paths,
+            built_manifest=current,
+            base_dir=tmp_path,
+            reconcile_ambiguity=False,
+            terminal_closure=True,
+        )
+
+
+def test_normal_route_keeps_exact_ambiguity_tail_binding(monkeypatch, tmp_path):
+    paths = _paths(tmp_path / "run")
+    _original, current = _manifest_pair_for_continuation_test(monkeypatch, paths)
+    monkeypatch.setattr(v3, "_git_commit", lambda _base: "c" * 40)
+    monkeypatch.setattr(
+        v3,
+        "_ambiguity_chain_state",
+        lambda _paths: {
+            "reservations": [{"turn_id": "H014:decomposition"}],
+            "tail_recovery_harness_commit": "a" * 40,
+        },
+    )
+    monkeypatch.setattr(
+        v3,
+        "_git_is_ancestor",
+        lambda *_args, **_kwargs: pytest.fail(
+            "normal route used terminal descendant allowance"
+        ),
+    )
+
+    with pytest.raises(V3EvaluationError, match="not bound to the current harness"):
+        v3._select_cohort_manifest(
+            paths=paths,
+            built_manifest=current,
+            base_dir=tmp_path,
+            reconcile_ambiguity=False,
+        )
+
+
+def test_terminal_closure_preparation_cannot_disable_clean_tree_requirement(tmp_path):
+    paths = _paths(tmp_path / "run")
+
+    with pytest.raises(V3EvaluationError, match="requires a clean working tree"):
+        v3.prepare_v3_cohort(
+            base_dir=tmp_path,
+            paths=paths,
+            require_clean=False,
+            terminal_closure=True,
+        )

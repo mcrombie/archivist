@@ -90,6 +90,12 @@ commands:
 Run the reconciliation only from the clean committed harness containing the exact H014 declaration.
 Verify that it seals `H014:decomposition`; then run `close-diagnostic`. After closure, the v3 run is
 terminal and must not be used as the root for the replacement evaluation.
+`close-diagnostic` may run from a clean descendant of the reconciled H014 tail so a narrowly scoped
+closure correction can be committed without fabricating another ambiguity. This descendant allowance
+exists only for terminal closure: paid phases retain exact continuation binding, reconciliation keeps
+its separate append-only contract, and an unrelated or non-descendant harness is rejected. The
+closure records the exact closing commit. Once closed, `report` validates and reads the sealed
+diagnostic artifacts directly, without reopening the evaluation.
 
 Run `reconcile-ambiguity` again after an exact zero-event stop in generation, decomposition, or
 rubric, from the newly committed recovery harness, before resuming that phase. The command discovers
