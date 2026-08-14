@@ -4,18 +4,25 @@ Working notes for the announcement and demonstration of Archivist. This file is 
 journal, not polished post copy. Keep claims here factual, dated when possible, and clearly mark
 anything that still requires measurement.
 
-## Current checkpoint — 2026-08-13
+## Current checkpoint — 2026-08-14
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
   built-in RAG default is now `retrieval-authored-v5` over 481 retrieval-eligible manuscript
   chunks: local high-confidence follow-up resolution, one query-embedding request, shared
   dense/BM25 reciprocal-rank fusion, and a rich four-to-eight-unit evidence dossier targeting about
   2,500 estimated evidence tokens under a hard 4,500-token evidence ceiling. Public runtime
-  source identity is `archivist.public_runtime_identity/4`. Render deploys remain manual, and live
-  parity for this redesign has not been verified. The earlier
+  source identity is `archivist.public_runtime_identity/4`. Render deploys remain manual. On
+  2026-08-14 the owner deployed commit `1679073d51ff6bfe961d3e91771d063366166595`; the canonical
+  and fallback services reported that exact commit and `retrieval-authored-v5`. The earlier
   production cohort bound deployed wrapper commit
   `e71d9b79a60a894cb38451c37e0d43b7f9149fa9`, one process epoch, policy, model, corpus manifest,
   and the versioned `$2.00` Complete-RAG request ceiling before sending any measured question.
+- **Deployment verification:** provider-free release checks passed for live/readiness, the 481-
+  chunk corpus identity, public configuration, canonical and fallback page loads, disabled private
+  and management routes, forbidden request controls, request-size enforcement, rate limiting with
+  `Retry-After`, security headers, and the expected Settings/Perspective/Custom and five-mode bundle
+  labels. The neutral live answer/source-card checks and post-v5 character behavior check were not
+  run because each invokes a provider and requires separate exact authorization.
 - **Public spend ceiling:** the owner raised the ongoing public-demo ceiling from `$5.00` to
   `$10.00` on 2026-08-12. The source configuration records that decision; Render's manual Blueprint
   sync must still make the live environment match it. The persistent August ledger retains the
@@ -128,12 +135,16 @@ anything that still requires measurement.
   `obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. This is reassuring for
   infrastructure observability but not for product reliability: the public response-contract
   completion rate was 29/33, or 87.9%.
-- **Next product step:** preserve every completed cohort unchanged and use the separate fixed three-
-  question, non-gold product latency smoke for a deliberately limited v5 check. Preparing the
-  harness makes no provider call; live execution requires a new exact authorization, no retries,
-  and isolated accounting. Three observations support minimum/median/maximum diagnostics only,
-  not p95, an SLA, a quality score, or a general latency claim. The narrow Edwin Sandys smoke and
-  sealed v4 cohort continue to measure their own superseded policies only.
+- **Next product step:** preserve the completed three-question `product-latency-smoke-v1`
+  unchanged. Its 3/3 Professional turns were authored with zero fallbacks/retries at
+  `$0.177749880`; wall time was 19.772 seconds minimum, 21.967 median, and 26.105 maximum. The two
+  ordinary turns took 19.772 and 21.967 seconds, the broad turn 26.105, and their generation stages
+  took 17.399, 18.929, and 25.449 seconds. These are three directional observations, not p95, an
+  SLA, quality evidence, or a general latency claim. The next narrow experiment is the unrun
+  six-attempt paired Standard-versus-Fast comparison. It needs new exact `$12.00` authorization;
+  its mechanical latency and integrity gates are frozen, while acceptable-cost promotion remains
+  owner-pending. The narrow Edwin Sandys smoke and sealed v4 cohort continue to measure their own
+  superseded policies only.
   Ruthless Red Realist reuses the Ember & Ink appearance and applies a cold strategic focus on
   power, leverage, incentives, bargaining, tradeoffs, credible commitments, and institutional
   capacity. Its Machiavelli/Kissinger inspiration is deliberately high-level: no outside text was
@@ -152,6 +163,60 @@ anything that still requires measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-14 — Make every visible perspective label useful
+
+- Reused the existing five-mode chooser wherever the reader sees an actionable selected-mode
+  label: the header, the Perspective note above both composers, Current mode in Settings, and each
+  response's mode badge. The inline entry points use a native modal dialog, expose expanded and
+  controlled state, support Escape, and return focus to the invoking label.
+- Kept response provenance immutable. A response badge displays that turn's snapshotted mode,
+  facets, and appearance, while the chooser itself reflects the current future-answer selection.
+  Selecting from a past response changes subsequent questions only; it does not relabel the old
+  answer or change retry behavior.
+- Left descriptive prose and the Advanced-settings reset status noninteractive. This was a
+  provider-free frontend/state-routing change: no prompt, retrieval, generation, or evaluation
+  cohort changed.
+
+## 2026-08-14 — Make the product legible before the first question
+
+- Reworked the permanent landing copy so a visitor can understand Archivist without accepting a
+  tutorial: it is a manuscript-grounded AI guide for questions about people, events, themes, and
+  arguments; it searches the selected manuscript rather than the open web; and manuscript answers
+  expose supporting passages.
+- Added an optional first-visit welcome and three-step spotlight orientation for the question
+  composer, Perspective, and Settings. Highlighted controls are visual context, not click-through
+  interactions. Skip, close, and Escape suppress automatic replay; a permanent **How Archivist
+  works** action can reopen the tour without changing that saved disposition.
+- Kept Sources out of the initial tour because no source control exists before a grounded answer.
+  Readers who complete the tour instead receive one non-modal explanation beside the first
+  source-bearing answer. Opening Sources, choosing **Got it**, or dismissing the note settles it.
+- The versioned browser state is defensive against malformed or unavailable storage. Native modal
+  focus behavior, explicit focus return, missing-target fallback, narrow-screen placement,
+  reduced-motion, and forced-colors rules are part of the contract. The orientation itself makes
+  no retrieval, embedding, authoring, or other provider request.
+
+## 2026-08-14 — Seal the small smoke and predeclare a Fast comparison
+
+- Completed `product-latency-smoke-v1` without retry: all three Professional turns were authored,
+  no fallback occurred, and recorded cost was `$0.177749880`. Wall-time minimum/median/maximum was
+  19.772/21.967/26.105 seconds. The ordinary turns measured 19.772 and 21.967 seconds and the broad
+  turn 26.105; answer generation itself measured 17.399, 18.929, and 25.449 seconds.
+- Kept that result small and honest. Three observations establish neither p95 nor an SLA, answer
+  quality, production behavior, or a general speed claim. The smoke root is sealed and will not be
+  resumed or rewritten.
+- Added the separate `product-fast-latency-comparison-v1` protocol for a paired service-tier test.
+  It reuses the same three questions as six counterbalanced fresh Professional turns: each question
+  receives one Standard (`default`) and one OpenAI Fast (`priority`) generation, while embeddings
+  remain on the untiered standard embedding path. Every turn must have exactly one embedding and one generation; there is no
+  retry, replacement, or resume.
+- Predeclared a median paired Fast/Standard generation-stage ratio at or below 0.70 and at least
+  two Fast wins out of three. A separate integrity gate requires six tier-correct, unambiguous,
+  fully accounted outcomes with no fallback or validation failure. The report remains text-free.
+- The implementation made no provider call. A live run requires a new exact `$12.00`
+  authorization. Because the owner has not specified what Fast's premium may acceptably cost, the
+  report will expose paired costs but leave the promotion decision `owner_pending`; that threshold
+  must not be invented after seeing results.
 
 ## 2026-08-13 — Adapt answer length and isolate a small latency check
 

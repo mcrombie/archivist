@@ -7,8 +7,11 @@ Big History of Virginia*. It searches the complete substantive manuscript, answe
 Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
 
 The source tree described below implements `retrieval-authored-v5`. Production deploys are manual;
-the live service must report runtime identity schema 4 before it can be described as running this
-policy. That live parity has not yet been verified.
+on 2026-08-14 Render deployed commit `1679073d51ff6bfe961d3e91771d063366166595`, and both the
+canonical and fallback services reported runtime identity schema 4, that exact commit, and the v5
+policy. The provider-free health, configuration, exposure, request-boundary, rate-limit, and
+frontend-label release checks passed. Provider-backed live answer checks remain separately
+authorized work and have not run for this deployment.
 
 Archivist is not a manuscript-upload service, a general-purpose chatbot, or an unrestricted source
 browser. The public application never exposes its private manuscript, vector store, full retrieved
@@ -585,11 +588,15 @@ Faithfulness, abstention, gold-claim recall, and related semantic measures remai
 The current product is `retrieval-authored-v5`, while keeping `retrieval-authored-v1` through v4,
 frozen V26, the superseded selector smoke, and all completed measurements unchanged. V5 changes
 the input schema and output-length policy, so v4 evaluation results remain v4 evidence and are not
-relabelled. The adaptive default has not completed a paid latency or quality cohort; no speed,
-quality, or reliability improvement is claimed. A separate fixed three-question, non-gold latency
-smoke provides a deliberately small full-product-path check without rerunning the held-out or
-semantic suites. Preparing it is provider-free; any live execution requires its own exact owner
-authorization. It reports the three observations and simple latency summaries, not a p95 or SLA.
+relabelled. The adaptive default's fixed three-question, non-gold
+`product-latency-smoke-v1` is now complete and sealed: 3/3 Professional responses were authored
+with zero fallbacks and zero retries at `$0.177749880` recorded cost. End-to-end wall time was
+19.772 seconds minimum, 21.967 seconds median, and 26.105 seconds maximum; ordinary observations
+were 19.772 and 21.967 seconds and the broad observation was 26.105. Answer generation accounted
+for 17.399 and 18.929 seconds on ordinary turns and 25.449 seconds on the broad turn. This tiny
+sample is not a p95, SLA, quality result, or general speed claim. A separate six-attempt paired
+Standard-versus-Fast protocol is implemented but unrun; it needs a new exact `$12.00`
+authorization, and its acceptable-cost promotion threshold remains owner-pending.
 
 ## Documentation map
 
@@ -607,7 +614,9 @@ authorization. It reports the three observations and simple latency summaries, n
 - [`docs/latency_optimization.md`](docs/latency_optimization.md) — historical, unpromoted V27
   compact-response experiment and its superseded promotion protocol.
 - [`docs/product_latency_smoke.md`](docs/product_latency_smoke.md) — bounded three-question,
-  non-gold latency-only product-path check for the current policy.
+  non-gold latency-only product-path check and its sealed current-policy result.
+- [`docs/product_fast_latency_comparison.md`](docs/product_fast_latency_comparison.md) — unrun,
+  authorization-gated paired Standard-versus-Fast protocol for the same three questions.
 - [`docs/public_demo_design.md`](docs/public_demo_design.md) — public exposure and citation design.
 - [`docs/public_deployment.md`](docs/public_deployment.md) — Render deployment and recovery runbook.
 - [`docs/production_performance.md`](docs/production_performance.md) — protocol and interpretation

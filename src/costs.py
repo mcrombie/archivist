@@ -31,7 +31,7 @@ from query_planning import safe_planner_validation_code
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_USAGE_DB = BASE_DIR / "runtime" / "usage.sqlite3"
-PRICING_VERSION = "2026-07-22"
+PRICING_VERSION = "2026-08-14-service-tiers"
 CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
 TOKENS_PER_MILLION = Decimal("1000000")
@@ -46,6 +46,8 @@ PROVIDER_REQUEST_TOKEN_OVERHEAD_UPPER_BOUND = 32_768
 LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000
 LONG_CONTEXT_INPUT_MULTIPLIER = Decimal("2")
 LONG_CONTEXT_OUTPUT_MULTIPLIER = Decimal("1.5")
+ANSWER_GENERATION_SERVICE_TIERS = frozenset({"default", "priority"})
+PRIORITY_SERVICE_TIER_MULTIPLIER = 2
 ANSWER_RUN_DIAGNOSTICS_SCHEMA = "archivist.answer_run_diagnostics/3"
 PUBLIC_REQUEST_OBSERVATION_SCHEMA = "archivist.public_request_observation/1"
 PLANNER_CALL_DIAGNOSTICS_SCHEMA = "archivist.planner_call_diagnostics/2"
@@ -220,6 +222,7 @@ class UsageContext:
     enforce_budget: bool = False
     allow_over_budget: bool = False
     request_cost_ceiling_nano_usd: int | None = None
+    answer_generation_service_tier: str | None = None
 
 
 class CostLimitExceeded(RuntimeError):
@@ -250,8 +253,16 @@ def usage_scope(
     enforce_budget: bool | None = None,
     allow_over_budget: bool | None = None,
     request_cost_ceiling_nano_usd: int | None = None,
+    answer_generation_service_tier: str | None = None,
 ) -> Iterator[UsageContext]:
     previous = current_usage_context()
+    if (
+        answer_generation_service_tier is not None
+        and answer_generation_service_tier not in ANSWER_GENERATION_SERVICE_TIERS
+    ):
+        raise ValueError(
+            "answer_generation_service_tier must be default or priority"
+        )
     context = UsageContext(
         project_id=project_id if project_id is not None else previous.project_id,
         conversation_id=(
@@ -267,6 +278,11 @@ def usage_scope(
             request_cost_ceiling_nano_usd
             if request_cost_ceiling_nano_usd is not None
             else previous.request_cost_ceiling_nano_usd
+        ),
+        answer_generation_service_tier=(
+            answer_generation_service_tier
+            if answer_generation_service_tier is not None
+            else previous.answer_generation_service_tier
         ),
     )
     token = _usage_context.set(context)
@@ -406,7 +422,18 @@ def pricing_for_model(model: str) -> ModelPricing | None:
     return None
 
 
-def calculate_cost_nano_usd(model: str, usage: TokenUsage) -> int | None:
+def calculate_cost_nano_usd(
+    model: str,
+    usage: TokenUsage,
+    *,
+    service_tier: str | None = None,
+) -> int | None:
+    if service_tier not in {None, "default", "priority"}:
+        return None
+    if service_tier == "priority" and not (
+        model == "gpt-5.6-sol" or model.startswith("gpt-5.6-sol-")
+    ):
+        return None
     pricing = pricing_for_model(model)
     if pricing is None:
         return None
@@ -442,7 +469,10 @@ def calculate_cost_nano_usd(model: str, usage: TokenUsage) -> int | None:
     )
     # Reasoning tokens are a subset of output tokens and are intentionally not added here.
     nano_usd = cost_usd_per_million * NANO_USD_PER_USD / TOKENS_PER_MILLION
-    return int(nano_usd.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    standard_cost = int(nano_usd.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    if service_tier == "priority":
+        return standard_cost * PRIORITY_SERVICE_TIER_MULTIPLIER
+    return standard_cost
 
 
 def _utc_now() -> str:
@@ -701,6 +731,8 @@ class UsageLedger:
                 request_id TEXT,
                 requested_model TEXT NOT NULL,
                 actual_model TEXT NOT NULL,
+                requested_service_tier TEXT,
+                actual_service_tier TEXT,
                 input_tokens INTEGER NOT NULL,
                 cached_tokens INTEGER NOT NULL,
                 cache_write_tokens INTEGER NOT NULL,
@@ -783,6 +815,14 @@ class UsageLedger:
         }
         if "request_id" not in usage_columns:
             connection.execute("ALTER TABLE usage_events ADD COLUMN request_id TEXT")
+        if "requested_service_tier" not in usage_columns:
+            connection.execute(
+                "ALTER TABLE usage_events ADD COLUMN requested_service_tier TEXT"
+            )
+        if "actual_service_tier" not in usage_columns:
+            connection.execute(
+                "ALTER TABLE usage_events ADD COLUMN actual_service_tier TEXT"
+            )
         if "request_id" not in diagnostic_columns:
             connection.execute(
                 "ALTER TABLE answer_run_diagnostics ADD COLUMN request_id TEXT"
@@ -854,13 +894,27 @@ class UsageLedger:
         requested_model: str,
         actual_model: str,
         usage: TokenUsage,
+        requested_service_tier: str | None = None,
+        actual_service_tier: str | None = None,
         project_id: str | None = None,
         conversation_id: str | None = None,
         turn_id: str | None = None,
         request_id: str | None = None,
         recorded_at: str | None = None,
     ) -> bool:
-        estimated_cost = calculate_cost_nano_usd(actual_model, usage)
+        if (
+            requested_service_tier is not None
+            and requested_service_tier not in ANSWER_GENERATION_SERVICE_TIERS
+        ):
+            raise ValueError("requested_service_tier must be default or priority")
+        if requested_service_tier is not None and actual_service_tier is None:
+            estimated_cost = None
+        else:
+            estimated_cost = calculate_cost_nano_usd(
+                actual_model,
+                usage,
+                service_tier=actual_service_tier,
+            )
         with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 """
@@ -869,10 +923,11 @@ class UsageLedger:
                     project_id, conversation_id, turn_id,
                     request_id,
                     requested_model, actual_model,
+                    requested_service_tier, actual_service_tier,
                     input_tokens, cached_tokens, cache_write_tokens,
                     output_tokens, reasoning_tokens, total_tokens,
                     estimated_cost_nano_usd, pricing_version, unpriced
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(response_id) DO NOTHING
                 """,
                 (
@@ -885,6 +940,8 @@ class UsageLedger:
                     request_id,
                     requested_model,
                     actual_model,
+                    requested_service_tier,
+                    actual_service_tier,
                     usage.input_tokens,
                     usage.cached_tokens,
                     usage.cache_write_tokens,
@@ -1278,6 +1335,47 @@ class UsageLedger:
             },
         }
 
+    def request_usage_events(self, request_id: str) -> list[dict[str, object]]:
+        """Return text-free, operation-level accounting rows for one request."""
+
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT operation, requested_model, actual_model,
+                       requested_service_tier, actual_service_tier,
+                       input_tokens, cached_tokens, cache_write_tokens,
+                       output_tokens, reasoning_tokens, total_tokens,
+                       estimated_cost_nano_usd, pricing_version, unpriced
+                FROM usage_events
+                WHERE request_id = ?
+                ORDER BY id ASC
+                """,
+                (request_id,),
+            ).fetchall()
+        return [
+            {
+                "operation": str(row["operation"]),
+                "requested_model": str(row["requested_model"]),
+                "actual_model": str(row["actual_model"]),
+                "requested_service_tier": row["requested_service_tier"],
+                "actual_service_tier": row["actual_service_tier"],
+                "input_tokens": int(row["input_tokens"]),
+                "cached_tokens": int(row["cached_tokens"]),
+                "cache_write_tokens": int(row["cache_write_tokens"]),
+                "output_tokens": int(row["output_tokens"]),
+                "reasoning_tokens": int(row["reasoning_tokens"]),
+                "total_tokens": int(row["total_tokens"]),
+                "estimated_cost_nano_usd": (
+                    int(row["estimated_cost_nano_usd"])
+                    if row["estimated_cost_nano_usd"] is not None
+                    else None
+                ),
+                "pricing_version": str(row["pricing_version"]),
+                "unpriced": bool(row["unpriced"]),
+            }
+            for row in rows
+        ]
+
     def request_usage_cost_state(self, request_id: str) -> dict[str, int]:
         """Return the exact request cost/accounting state used by strict admission."""
 
@@ -1619,6 +1717,7 @@ def record_openai_response(
     *,
     operation: str,
     requested_model: str,
+    requested_service_tier: str | None = None,
     ledger: UsageLedger | None = None,
 ) -> bool:
     usage = extract_token_usage(response)
@@ -1629,6 +1728,10 @@ def record_openai_response(
     if response_id is None:
         response_id = f"local-{uuid4()}"
     actual_model = _value(response, "model") or requested_model
+    raw_actual_service_tier = _value(response, "service_tier")
+    actual_service_tier = (
+        str(raw_actual_service_tier) if raw_actual_service_tier is not None else None
+    )
     context = current_usage_context()
     return (ledger or UsageLedger()).record(
         response_id=str(response_id),
@@ -1636,6 +1739,8 @@ def record_openai_response(
         requested_model=requested_model,
         actual_model=str(actual_model),
         usage=usage,
+        requested_service_tier=requested_service_tier,
+        actual_service_tier=actual_service_tier,
         project_id=context.project_id,
         conversation_id=context.conversation_id,
         turn_id=context.turn_id,
@@ -1716,7 +1821,16 @@ def projected_provider_operation_cost_nano_usd(
     else:
         max_output_tokens = 0
 
-    payload = _request_json_value(dict(request))
+    raw_service_tier = request.get("service_tier")
+    service_tier = str(raw_service_tier) if raw_service_tier is not None else None
+    if service_tier not in {None, "default", "priority"}:
+        raise ValueError("provider request service_tier is not priced")
+    # service_tier is a scheduling/billing control, not prompt material. The
+    # fixed transport overhead already covers it and keeps arm projections
+    # comparable byte-for-byte before the documented rate multiplier applies.
+    request_payload = dict(request)
+    request_payload.pop("service_tier", None)
+    payload = _request_json_value(request_payload)
     serialized = json.dumps(
         payload,
         ensure_ascii=False,
@@ -1737,6 +1851,7 @@ def projected_provider_operation_cost_nano_usd(
             output_tokens=max_output_tokens,
             total_tokens=input_token_upper_bound + max_output_tokens,
         ),
+        service_tier=service_tier,
     )
     if cost is None:
         raise ValueError("provider request model does not have pinned pricing")
@@ -1811,24 +1926,22 @@ def _track_without_breaking_response(
     *,
     operation: str,
     requested_model: str,
+    requested_service_tier: str | None = None,
 ) -> None:
     context = current_usage_context()
     strict = context.request_cost_ceiling_nano_usd is not None
     ledger = UsageLedger() if strict else None
+    metadata: dict[str, object] = {
+        "operation": operation,
+        "requested_model": requested_model,
+    }
+    if requested_service_tier is not None:
+        metadata["requested_service_tier"] = requested_service_tier
     try:
         if ledger is None:
-            recorded = record_openai_response(
-                response,
-                operation=operation,
-                requested_model=requested_model,
-            )
+            recorded = record_openai_response(response, **metadata)
         else:
-            recorded = record_openai_response(
-                response,
-                operation=operation,
-                requested_model=requested_model,
-                ledger=ledger,
-            )
+            recorded = record_openai_response(response, ledger=ledger, **metadata)
     except CostLimitExceeded:
         raise
     except Exception as exc:
@@ -1892,7 +2005,24 @@ def enforce_projected_usage_budget(
         raise CostLimitExceeded(blocked_budget)
 
 
+def _response_request_for_operation(
+    operation: str,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    prepared = dict(request)
+    tier = current_usage_context().answer_generation_service_tier
+    if operation == "answer_generation" and tier is not None:
+        existing_tier = prepared.get("service_tier")
+        if existing_tier is not None and existing_tier != tier:
+            raise ValueError(
+                "answer_generation service_tier conflicts with usage scope"
+            )
+        prepared["service_tier"] = tier
+    return prepared
+
+
 def tracked_responses_create(client: object, *, operation: str, **request: Any) -> object:
+    request = _response_request_for_operation(operation, request)
     enforce_usage_budget()
     enforce_request_operation_cost_ceiling(
         provider_kind="responses",
@@ -1903,6 +2033,7 @@ def tracked_responses_create(client: object, *, operation: str, **request: Any) 
         response,
         operation=operation,
         requested_model=str(request.get("model", "")),
+        requested_service_tier=request.get("service_tier"),
     )
     return response
 
@@ -1916,6 +2047,7 @@ def tracked_responses_parse(client: object, *, operation: str, **request: Any) -
     response first lets us record that usage before invoking the same parser,
     without issuing another request.
     """
+    request = _response_request_for_operation(operation, request)
     enforce_usage_budget()
     enforce_request_operation_cost_ceiling(
         provider_kind="responses",
@@ -1933,6 +2065,7 @@ def tracked_responses_parse(client: object, *, operation: str, **request: Any) -
             response,
             operation=operation,
             requested_model=requested_model,
+            requested_service_tier=request.get("service_tier"),
         )
         return response
 
@@ -1963,6 +2096,7 @@ def tracked_responses_parse(client: object, *, operation: str, **request: Any) -
             completed_response,
             operation=operation,
             requested_model=requested_model,
+            requested_service_tier=request.get("service_tier"),
         )
 
     # This is the SDK's normal parse step and preserves output_parsed as well
@@ -1973,6 +2107,7 @@ def tracked_responses_parse(client: object, *, operation: str, **request: Any) -
             response,
             operation=operation,
             requested_model=requested_model,
+            requested_service_tier=request.get("service_tier"),
         )
     return response
 
@@ -1998,6 +2133,7 @@ def tracked_responses_stream(
     never cancel or mutate the paid answer run.
     """
 
+    request = _response_request_for_operation(operation, request)
     enforce_usage_budget()
     enforce_request_operation_cost_ceiling(
         provider_kind="responses",
@@ -2085,6 +2221,7 @@ def tracked_responses_stream(
             terminal_response,
             operation=operation,
             requested_model=requested_model,
+            requested_service_tier=request.get("service_tier"),
         )
 
     if iteration_error is not None:

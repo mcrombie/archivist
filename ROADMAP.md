@@ -228,10 +228,13 @@ After formal lock:
 | **8A. Production observability and latency evidence** | **Complete for the first observed cohort** | Preserve the text-free public artifacts and private audit root. The 33-attempt run produced 29 latency-eligible successes, four request failures, zero instrumentation failures, 54.393-second server p50, 113.801-second server p95, and `$4.90594694` estimated cost. Treat these as one observed warm cohort, not an SLA. |
 | **8B. V27 compact generation representation** | **Historical experiment; unpromoted and superseded** | Preserve the offline experiment and its proposed A/B in `docs/latency_optimization.md`. No paid candidate call ran, its old UI selector is gone, and it is not the current product path. |
 | **8C. Application-compiled answer path** | **Historical product iteration; superseded** | Preserve the closed-cue implementation history and its narrow three-call smoke. Its three 32-word cards overcorrected for structural safety and produced answers that were often too thin or off-target. Do not use its smoke as evidence about the current policy. |
-| **8D. Retrieval-authored answer path** | **Current v5 default; adaptive policy implemented offline** | Preserve v1-v4 as historical identities. V5 keeps v4 retrieval, dossier, strict output schema, one no-retry Sol call, local citations, required follow-ups, generic fallback, diagnostics, and 35/8/30-second boundaries. `RouteTrait.BROAD_SYNTHESIS` in the existing `QuestionPlan.traits` selects advisory 900-1,100-token broad guidance and a 2,400-token API ceiling; other questions use 500-700 and 1,800. Input schema is `/2`; output and renderer remain `/1` and v1. Do not claim a v5 latency improvement before measurement. |
+| **8D. Retrieval-authored answer path** | **Current v5 default; adaptively sized and narrowly measured** | Preserve v1-v4 as historical identities. V5 keeps v4 retrieval, dossier, strict output schema, one no-retry Sol call, local citations, required follow-ups, generic fallback, diagnostics, and 35/8/30-second boundaries. `RouteTrait.BROAD_SYNTHESIS` in the existing `QuestionPlan.traits` selects advisory 900-1,100-token broad guidance and a 2,400-token API ceiling; other questions use 500-700 and 1,800. Input schema is `/2`; output and renderer remain `/1` and v1. Its sealed three-question smoke is directional only; do not turn it into a general latency claim. |
 | **8E. Retrieval-authored v4 evaluation** | **Complete and sealed historical cohort** | Preserve [`docs/retrieval_authored_v4_evaluation.md`](docs/retrieval_authored_v4_evaluation.md), its private root, report, and fixed-length product identity unchanged. It sealed 37 once-only generation outcomes (34 generated and three delivered Essential fallbacks), the repaired decomposition phase, and all 12 social outcomes. Its observations remain v4 evidence and may not be relabelled as v5. |
 | **8F. Conversational persona evaluation** | **Complete for the sealed v4 suite** | Preserve the separate twelve-outcome Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist social suite. It is exploratory non-gold v4 evidence, not a v5 or historical-answer quality claim. |
-| **8G. Adaptive-policy latency smoke** | **Implemented offline; live run not started** | Use the fixed three-question, non-gold [`product latency smoke`](docs/product_latency_smoke.md) for a small full-product-path diagnostic. Preparation makes no provider call. Live execution needs a new exact authorization, uses no retries, and reports the three observations plus minimum/median/maximum—not p95, an SLA, or a general latency claim. |
+| **8G. Adaptive-policy latency smoke** | **Complete and sealed** | Preserve the fixed three-question, non-gold [`product latency smoke`](docs/product_latency_smoke.md): 3/3 authored, zero fallbacks/retries, `$0.177749880` cost, and 19.772/21.967/26.105-second minimum/median/maximum wall time. Ordinary turns were 19.772 and 21.967 seconds and the broad turn 26.105; generation stages were 17.399, 18.929, and 25.449 seconds. This is directional diagnostic evidence, not p95, an SLA, quality proof, or a general latency claim. |
+| **8H. Paired Standard-versus-Fast latency comparison** | **Implemented offline; live run not started** | Use the same three questions for six counterbalanced fresh Professional turns under [`product-fast-latency-comparison-v1`](docs/product_fast_latency_comparison.md). Pair `default` Standard with the pinned `priority` alias for OpenAI Fast; keep embeddings on the untiered standard embedding path, require exactly one embedding and generation per attempt, and allow no retry/resume. A live run needs new exact `$12.00` authorization. Latency/integrity gates are predeclared; acceptable-cost promotion remains `owner_pending`. |
+| **8I. First-visit reader orientation** | **Implemented offline** | Keep the landing page independently explanatory, then offer one optional welcome plus three non-interactive spotlight steps for Ask, Perspective, and Settings. Completion and skip are versioned locally; replay remains available; after tour completion, a contextual Sources note waits for the first source-bearing answer. The flow is provider-free, keyboard-dismissable, responsive, reduced-motion aware, and documented in [`docs/reader_onboarding.md`](docs/reader_onboarding.md). |
+| **8J. Perspective labels as controls** | **Implemented offline** | Make the header, composer Perspective label, Settings current-mode label, and each turn mode badge open one shared accessible chooser. Selection changes future answers only; completed and pending turns retain their snapshotted label/settings, and retry remains bound to that snapshot. Preserve keyboard dismissal, focus return, modal containment for inline pickers, responsive layout, and clear future-answer copy. |
 
 ## Next sequence
 
@@ -353,17 +356,23 @@ top of the list.
     900-1,100 with 2,400. The target is advisory, special dispositions may be shorter, and padding
     is forbidden. The input schema advances to `/2`; output schema `/1`, renderer v1, retrieval,
     validation, fallback, no-retry, and 35/8/30-second boundaries remain unchanged.
-21. **Implemented offline; awaiting separate exact authorization — run the limited latency
-    smoke.** Exercise three fixed non-gold first turns through the current product path with no
-    retries and isolated accounting. Report each observation, fallback and cost status, plus
-    minimum/median/maximum. Do not report p95 from three items or treat the result as a quality
-    cohort, SLA, or general latency claim.
-22. **Later, after deployment identity verification and fresh authorization — open
+21. **Completed and sealed — preserve the limited latency smoke.** The three fixed non-gold
+    Professional first turns produced 3/3 authored responses, zero fallbacks/retries,
+    `$0.177749880` cost, and 19.772/21.967/26.105-second minimum/median/maximum wall time.
+    Preserve every artifact and do not report p95, an SLA, quality, or a general latency claim.
+22. **Implemented offline; awaiting new exact authorization — compare Standard with Fast.** Run
+    the same three questions once per arm as six counterbalanced fresh turns. The paired median
+    Fast/Standard generation-stage ratio must be at most 0.70 and Fast must win at least two of
+    three pairs; the independent mechanical gate requires no ambiguity, fallback, validation
+    failure, accounting failure, or tier mismatch. Live execution requires exact `$12.00`
+    authorization. Report cost, but leave promotion `owner_pending` until the owner supplies an
+    acceptable-cost threshold.
+23. **Later, after deployment identity verification and fresh authorization — open
     production-performance v2.** Preserve v1's
     54.393/113.801-second p50/p95 and all four failures unchanged. A v2 report must state that it
     measures a different answer policy and must remain an observed cohort comparison unless the
     required repeat/noise protocol supports a stronger claim.
-23. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+24. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
     subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
     technical failures are preserved, measure judge and decomposition agreement, and publish a
     hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes

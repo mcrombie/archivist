@@ -63,6 +63,61 @@ record of why that temporary contract existed.
 
 ---
 
+## [2026-08-14] Clickable perspective labels lacked historical-turn semantics
+Phase/Brief: Public reader perspective controls and answer provenance
+Symptom: the request to make the displayed perspective clickable did not specify which labels were
+controls, whether clicking a past answer should edit that answer or only future turns, whether the
+chooser should reflect the old turn or the current selection, or how Custom state, retry, focus,
+Escape, modal containment, and narrow layouts should behave.
+Cause: **reader-experience specification gap.** “Wherever” could have turned explanatory prose and
+reset status into accidental controls, while reusing a past turn's appearance as chooser state
+would have rewritten the global theme and obscured provenance.
+Resolution and verification: the actionable surfaces are frozen to the header, composer
+Perspective label, Settings current-mode label, and turn mode badges. They reuse one chooser and
+canonical mode-change callback. Turn triggers display the turn's immutable snapshot while chooser
+selection and appearance use current future-answer state; a change never relabels the turn and
+retry retains its snapshot. Inline triggers use native modal dialogs with explicit future-answer
+copy, Escape handling, focus return, backdrop containment, responsive styling, and forced-colors
+treatment. Source/SSR contract tests and the frontend production build verify the offline wiring;
+rendered keyboard, zoom, and multi-theme behavior remains a release-review check. No provider,
+prompt, retrieval, or evaluation call changed.
+
+## [2026-08-14] First-visit orientation mechanics were not specified
+Phase/Brief: Public reader onboarding and product comprehension
+Symptom: the requested spotlight tutorial established the visual idea and the ability to skip, but
+did not define which controls belong in the initial sequence, what must remain understandable after
+skipping, how source guidance behaves before sources exist, how completion and replay persist, or
+how a modal spotlight works for keyboard, assistive-technology, narrow-screen, reduced-motion, and
+missing-target users.
+Cause: **reader-experience specification gap.** Implementing the request required inventing product
+copy, step boundaries, persistence transitions, focus behavior, and a delayed-source mechanic.
+Resolution and verification: the landing page now carries the permanent product explanation. A
+provider-free native-modal orientation adds one welcome plus exactly three informational spotlight
+steps: Ask, Perspective, and Settings. Completion or skip is stored in a strict version-1 browser
+record; replay is always available and does not rewrite that disposition. Completing leaves one
+non-modal Sources explanation pending until a completed source-bearing answer exists, while skip
+suppresses it. Stable target attributes, safe missing-target fallback, focus return, responsive
+placement, reduced-motion, and forced-colors behavior are explicit contracts. Pure storage/state
+tests, static UI-wiring assertions, TypeScript compilation, and the frontend production build
+verify the offline contract. Rendered keyboard, zoom, and responsive behavior remains an explicit
+release-review check. No question, model, retrieval, embedding, or paid API call was made.
+
+## [2026-08-14] Fast comparison lacks an acceptable-cost promotion threshold
+Phase/Brief: `product-fast-latency-comparison-v1` paired service-tier experiment
+Symptom: the requested Standard-versus-Fast comparison defines the workload and latency objective,
+but does not state how much additional estimated cost is acceptable for the observed time saved.
+Without that boundary, a mechanically faster Fast arm cannot yield a predeclared overall promotion
+decision.
+Cause: **measurement-harness specification gap.** A cost ceiling limits exposure but is not a
+cost-effectiveness threshold. Inventing a percentage premium or dollars-per-second rule after the
+six outcomes exist would tune the decision to the result.
+Resolution and verification: the protocol freezes latency and integrity gates independently,
+reports paired and arm-level cost under an exact `$2.00` per-attempt and `$12.00` aggregate ceiling,
+and emits the cost/promotion state as `owner_pending`. The gap remains intentionally unresolved
+until the owner specifies an acceptable-cost threshold prospectively. Offline tests may verify that
+no successful latency result can silently convert `owner_pending` into promotion. No provider call
+was made while documenting or implementing this boundary.
+
 ## [2026-08-13] Adaptive answer length opens retrieval-authored v5
 Phase/Brief: Current retrieval-authored latency and answer-length policy
 Symptom: the sealed v4 Professional generation cohort used one 1,800-token API ceiling and no

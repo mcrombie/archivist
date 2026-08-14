@@ -67,11 +67,25 @@ platform](https://help.openai.com/en/articles/9186755-managing-projects-in-the-a
 ## Estimate versus invoice
 
 The local rate table is versioned so an event keeps the rate used when it was recorded. An unknown
-model is still logged but marked unpriced rather than assigned a guessed cost. Service tiers,
-credits, negotiated pricing, GPT-5.6's long-context surcharge, and later price changes can make the
+model is still logged but marked unpriced rather than assigned a guessed cost. Unsupported service
+tiers, credits, negotiated pricing, GPT-5.6's long-context surcharge, and later price changes can make the
 local estimate differ from the invoice. OpenAI recommends its Costs endpoint or the Costs tab in the
 Usage Dashboard for financial reconciliation: [Usage API
 reference](https://platform.openai.com/docs/api-reference/usage).
+
+The paired [`product-fast-latency-comparison-v1`](product_fast_latency_comparison.md) binds
+requested and returned service tiers and reports Standard/Fast costs separately. Its `$2.00` per-
+attempt and `$12.00` aggregate limits are defensive authorization ceilings, not an acceptable-cost
+promotion rule. Because no such threshold has been supplied, its cost decision must remain
+`owner_pending` even if its independent latency and integrity gates pass. OpenAI documents the
+service-tier behavior in the [Fast mode guide](https://developers.openai.com/api/docs/guides/fast-mode)
+and the premium in [Fast pricing](https://developers.openai.com/api/docs/pricing?latest-pricing=fast);
+the provider invoice remains authoritative.
+
+Pricing table `2026-08-14-service-tiers` prices and projects `gpt-5.6-sol` `priority` usage at twice
+the Standard rate. New ledger rows retain nullable requested and returned tier fields so historical
+rows remain unchanged. An explicit tier request with a missing or unknown returned tier is unpriced;
+strict evaluation scopes fail closed rather than silently treating it as Standard.
 
 For the clearest authoritative total, create an OpenAI API project named `Archivist`, generate a
 project-scoped key, and use that key as `OPENAI_API_KEY` in the local `.env`. This isolates

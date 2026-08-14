@@ -24,11 +24,16 @@ rule, retrieval, dossier, validation, and fallback contracts are unchanged.
 
 The completed V26 records, terminal v3 timeout-diagnostic cohort, and sealed v4 evaluation remain
 immutable historical evidence. The earlier Edwin Sandys smoke measured the superseded
-`application-compiled-v1` cue selector and cannot support a v5 claim. A separate fixed three-
-question, non-gold latency smoke is the next narrow product-path measurement; its implementation
-makes no provider call, and a live run still requires an exact new authorization. It reports a
-small diagnostic sample rather than a p95, SLA, quality score, or general latency claim. The
-objective is not "the answers
+`application-compiled-v1` cue selector and cannot support a v5 claim. The separate fixed three-
+question `product-latency-smoke-v1` is complete and sealed: 3/3 Professional answers were authored
+with zero fallbacks or retries, `$0.177749880` recorded cost, and end-to-end wall times of 19.772
+seconds minimum, 21.967 median, and 26.105 maximum. Ordinary turns measured 19.772 and 21.967
+seconds and the broad turn 26.105; their answer-generation stages were 17.399, 18.929, and 25.449
+seconds respectively. This is a small diagnostic sample rather than a p95, SLA, quality score, or
+general latency claim. The next narrow measurement is the separately versioned six-attempt
+`product-fast-latency-comparison-v1`, pairing Standard and OpenAI Fast for the same three questions.
+Its live run has not started and requires a new exact `$12.00` authorization; the missing acceptable-
+cost promotion threshold remains `owner_pending`. The objective is not "the answers
 look good." Retrieval, faithfulness, citation, abstention, release reliability, latency, and spend
 must be measured, bounded, reproducible, and have their failures written down. A system with
 mediocre but characterized numbers is better evidence than a system with excellent-looking answers
@@ -76,11 +81,11 @@ cohort. It attempted all 37 generations exactly once: 30 authored responses and 
 fallbacks. It stopped after 14 held-out decomposition attempts, ran zero rubric calls, and recorded
 `$1.591521500`; its provider-free closure made zero calls. Never resume, retry, or overwrite it.
 
-The next measurement priority is to measure v4 with the redesigned decomposition instrument in a
-new, explicitly separate measurement cohort. The V26 instrument's 27/37 technical-failure rate sharply limits how far
-the current claim-derived metrics can be interpreted. Never change, repair, or rerun this completed
-baseline to improve those denominators, and never treat the 27 instrument failures as empty claim
-sets or candidate-answer failures. A later low-priority calibration or semantic supplement may add
+The redesigned decomposition instrument and its separately versioned v4 cohort are complete and
+sealed. The V26 instrument's 27/37 technical-failure rate still sharply limits how far the earlier
+claim-derived metrics can be interpreted. Never change, repair, or rerun that completed baseline to
+improve its denominators, and never treat the 27 instrument failures as empty claim sets or
+candidate-answer failures. A later low-priority calibration or semantic supplement may add
 faithfulness and abstention results without overwriting the baseline. Once an H-item is run, never
 change the gold set or V26 in response to its result; any later system or instrument change opens a
 new cohort rather than repairing this one in place.

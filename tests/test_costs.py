@@ -2144,3 +2144,364 @@ def test_answer_strategy_is_optional_in_the_cohort_and_nullable_in_the_ledger(le
     assert stored is not None
     assert stored["answer_strategy"] == "full_context"
     assert stored["cohort"]["answer_strategy_version"] == "full-context-v1"
+
+
+def test_priority_service_tier_cost_and_projection_are_exactly_double_standard():
+    usage = TokenUsage(
+        input_tokens=1_000,
+        cached_tokens=200,
+        cache_write_tokens=100,
+        output_tokens=50,
+        total_tokens=1_050,
+    )
+    standard = calculate_cost_nano_usd(
+        "gpt-5.6-sol",
+        usage,
+        service_tier="default",
+    )
+    implicit_standard = calculate_cost_nano_usd("gpt-5.6-sol", usage)
+    priority = calculate_cost_nano_usd(
+        "gpt-5.6-sol",
+        usage,
+        service_tier="priority",
+    )
+
+    assert standard == implicit_standard
+    assert priority == standard * 2
+    assert calculate_cost_nano_usd(
+        "gpt-5.6-sol",
+        usage,
+        service_tier="future-tier",
+    ) is None
+    assert calculate_cost_nano_usd(
+        "gpt-5.6-terra",
+        usage,
+        service_tier="priority",
+    ) is None
+
+    request = {
+        "model": "gpt-5.6-sol",
+        "input": "bounded request",
+        "max_output_tokens": 1_000,
+    }
+    standard_projection = projected_provider_operation_cost_nano_usd(
+        provider_kind="responses",
+        request={**request, "service_tier": "default"},
+    )
+    priority_projection = projected_provider_operation_cost_nano_usd(
+        provider_kind="responses",
+        request={**request, "service_tier": "priority"},
+    )
+
+    assert priority_projection == standard_projection * 2
+    with pytest.raises(ValueError, match="service_tier is not priced"):
+        projected_provider_operation_cost_nano_usd(
+            provider_kind="responses",
+            request={**request, "service_tier": "future-tier"},
+        )
+
+
+def test_answer_generation_tier_override_is_operation_local_and_pre_call(
+    monkeypatch,
+):
+    projected = []
+    response_requests = []
+    embedding_requests = []
+
+    def inspect_projection(*, provider_kind, request, ledger=None):
+        projected.append((provider_kind, dict(request), ledger))
+
+    class FakeResponses:
+        def create(self, **request):
+            response_requests.append(dict(request))
+            return SimpleNamespace(id=f"response-{len(response_requests)}")
+
+    class FakeEmbeddings:
+        def create(self, **request):
+            embedding_requests.append(dict(request))
+            return SimpleNamespace(id="embedding-1")
+
+    monkeypatch.setattr(costs, "enforce_request_operation_cost_ceiling", inspect_projection)
+    monkeypatch.setattr(costs, "_track_without_breaking_response", lambda *_args, **_kwargs: None)
+    client = SimpleNamespace(responses=FakeResponses(), embeddings=FakeEmbeddings())
+
+    with usage_scope(answer_generation_service_tier="priority"):
+        tracked_responses_create(
+            client,
+            operation="answer_generation",
+            model="gpt-5.6-sol",
+            input="answer prompt",
+        )
+        tracked_responses_create(
+            client,
+            operation="query_planning",
+            model="gpt-5.6-sol",
+            input="planner prompt",
+        )
+        tracked_embeddings_create(
+            client,
+            operation="query_embedding",
+            model="text-embedding-3-small",
+            input=["query"],
+        )
+
+    assert response_requests[0]["service_tier"] == "priority"
+    assert "service_tier" not in response_requests[1]
+    assert "service_tier" not in embedding_requests[0]
+    assert projected[0][1]["service_tier"] == "priority"
+    assert "service_tier" not in projected[1][1]
+    assert "service_tier" not in projected[2][1]
+
+    response_call_count = len(response_requests)
+    projection_count = len(projected)
+    with usage_scope(answer_generation_service_tier="default"):
+        with pytest.raises(ValueError, match="conflicts with usage scope"):
+            tracked_responses_create(
+                client,
+                operation="answer_generation",
+                model="gpt-5.6-sol",
+                input="conflicting answer prompt",
+                service_tier="priority",
+            )
+    assert len(response_requests) == response_call_count
+    assert len(projected) == projection_count
+
+    with pytest.raises(ValueError, match="must be default or priority"):
+        with usage_scope(answer_generation_service_tier="fast"):
+            pass
+
+
+def test_parse_and_stream_apply_answer_generation_tier_override(monkeypatch):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    parse_requests = []
+    stream_requests = []
+
+    class FakeRawResponse:
+        def json(self):
+            return {}
+
+        def parse(self):
+            return SimpleNamespace(output_parsed={"result": "ok"})
+
+    parse_client = SimpleNamespace(
+        responses=SimpleNamespace(
+            with_raw_response=SimpleNamespace(
+                parse=lambda **request: parse_requests.append(dict(request))
+                or FakeRawResponse()
+            )
+        )
+    )
+    terminal = SimpleNamespace(id="tier-stream-terminal")
+    stream = _ScriptedResponseStream(
+        SimpleNamespace(type="response.completed", response=terminal)
+    )
+    stream_client = _scripted_stream_client(stream, stream_requests)
+    monkeypatch.setattr(costs, "_track_without_breaking_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        costs,
+        "_parse_streamed_response",
+        lambda **_kwargs: SimpleNamespace(output_parsed={"result": "ok"}),
+    )
+
+    with usage_scope(answer_generation_service_tier="default"):
+        tracked_responses_parse(
+            parse_client,
+            operation="answer_generation",
+            model="gpt-5.6-sol",
+            input="structured prompt",
+            text_format=StructuredPayload,
+        )
+        tracked_responses_stream(
+            stream_client,
+            operation="answer_generation",
+            model="gpt-5.6-sol",
+            input="structured prompt",
+            text_format=StructuredPayload,
+        )
+
+    assert parse_requests[0]["service_tier"] == "default"
+    assert stream_requests[0]["service_tier"] == "default"
+
+
+def test_raw_parse_failure_records_requested_and_actual_service_tiers(
+    monkeypatch,
+    ledger_path,
+):
+    class StructuredPayload(BaseModel):
+        result: str
+
+    monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(ledger_path))
+    raw_payload = {
+        "id": "raw-priority-parse-failure",
+        "model": "gpt-5.6-sol",
+        "service_tier": "priority",
+        "usage": {"input_tokens": 20, "output_tokens": 5, "total_tokens": 25},
+    }
+    requests = []
+
+    class FailingRawResponse:
+        def json(self):
+            return raw_payload
+
+        def parse(self):
+            raise RuntimeError("synthetic structured parse failure")
+
+    client = SimpleNamespace(
+        responses=SimpleNamespace(
+            with_raw_response=SimpleNamespace(
+                parse=lambda **request: requests.append(dict(request))
+                or FailingRawResponse()
+            )
+        )
+    )
+    request_id = "d" * 32
+
+    with usage_scope(
+        request_id=request_id,
+        request_cost_ceiling_nano_usd=4_000_000_000,
+        answer_generation_service_tier="priority",
+    ):
+        with pytest.raises(RuntimeError, match="structured parse failure"):
+            tracked_responses_parse(
+                client,
+                operation="answer_generation",
+                model="gpt-5.6-sol",
+                input="structured prompt",
+                text_format=StructuredPayload,
+                max_output_tokens=100,
+            )
+
+    assert requests[0]["service_tier"] == "priority"
+    events = UsageLedger(ledger_path).request_usage_events(request_id)
+    assert events == [
+        {
+            "operation": "answer_generation",
+            "requested_model": "gpt-5.6-sol",
+            "actual_model": "gpt-5.6-sol",
+            "requested_service_tier": "priority",
+            "actual_service_tier": "priority",
+            "input_tokens": 20,
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 5,
+            "reasoning_tokens": 0,
+            "total_tokens": 25,
+            "estimated_cost_nano_usd": 500_000,
+            "pricing_version": PRICING_VERSION,
+            "unpriced": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize("actual_service_tier", [None, "future-tier"])
+def test_explicit_tier_with_missing_or_unknown_actual_fails_closed_in_strict_scope(
+    monkeypatch,
+    ledger_path,
+    actual_service_tier,
+):
+    monkeypatch.setenv("ARCHIVIST_USAGE_DB", str(ledger_path))
+    calls = []
+
+    class FakeResponses:
+        def create(self, **request):
+            calls.append(dict(request))
+            return SimpleNamespace(
+                id=f"unpriced-tier-{actual_service_tier}",
+                model="gpt-5.6-sol",
+                service_tier=actual_service_tier,
+                usage=SimpleNamespace(
+                    input_tokens=20,
+                    output_tokens=5,
+                    total_tokens=25,
+                ),
+            )
+
+    request_id = "e" * 32
+    with usage_scope(
+        request_id=request_id,
+        request_cost_ceiling_nano_usd=4_000_000_000,
+        answer_generation_service_tier="priority",
+    ):
+        with pytest.raises(CostLimitExceeded) as exc_info:
+            tracked_responses_create(
+                SimpleNamespace(responses=FakeResponses()),
+                operation="answer_generation",
+                model="gpt-5.6-sol",
+                input="answer prompt",
+                max_output_tokens=100,
+            )
+
+    assert len(calls) == 1
+    assert exc_info.value.budget["request_cost_failure"] == "unpriced_request_usage"
+    event = UsageLedger(ledger_path).request_usage_events(request_id)[0]
+    assert event["requested_service_tier"] == "priority"
+    assert event["actual_service_tier"] == actual_service_tier
+    assert event["estimated_cost_nano_usd"] is None
+    assert event["unpriced"] is True
+
+
+def test_usage_event_tier_migration_preserves_historical_standard_row(ledger_path):
+    with closing(sqlite3.connect(ledger_path)) as connection, connection:
+        connection.executescript(
+            """
+            CREATE TABLE usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                response_id TEXT NOT NULL UNIQUE,
+                recorded_at TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                project_id TEXT,
+                conversation_id TEXT,
+                turn_id TEXT,
+                request_id TEXT,
+                requested_model TEXT NOT NULL,
+                actual_model TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL,
+                cached_tokens INTEGER NOT NULL,
+                cache_write_tokens INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL,
+                reasoning_tokens INTEGER NOT NULL,
+                total_tokens INTEGER NOT NULL,
+                estimated_cost_nano_usd INTEGER,
+                pricing_version TEXT NOT NULL,
+                unpriced INTEGER NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO usage_events (
+                response_id, recorded_at, operation, request_id,
+                requested_model, actual_model,
+                input_tokens, cached_tokens, cache_write_tokens,
+                output_tokens, reasoning_tokens, total_tokens,
+                estimated_cost_nano_usd, pricing_version, unpriced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "historical-standard-response",
+                "2026-07-22T00:00:00+00:00",
+                "answer_generation",
+                "f" * 32,
+                "gpt-5.6-sol",
+                "gpt-5.6-sol",
+                100,
+                0,
+                0,
+                10,
+                0,
+                110,
+                800_000,
+                "2026-07-22",
+                0,
+            ),
+        )
+
+    event = UsageLedger(ledger_path).request_usage_events("f" * 32)[0]
+
+    assert event["requested_service_tier"] is None
+    assert event["actual_service_tier"] is None
+    assert event["estimated_cost_nano_usd"] == 800_000
+    assert event["pricing_version"] == "2026-07-22"
+    assert event["unpriced"] is False

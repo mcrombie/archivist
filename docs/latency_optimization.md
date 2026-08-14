@@ -49,15 +49,22 @@ explicit local development `rag_policy_version` for compatibility and historical
 omitting that field selects `retrieval-authored-v5`, and the public API does not accept it. Frozen
 V26 remains immutable. Production-performance v1 and the sealed v4 evaluation remain unchanged.
 The v4 results measure its fixed 1,800-token policy and cannot be relabelled as adaptive v5
-evidence. No live/provider test, paid latency cohort, or quality cohort has run for v5. V3's
-37-item run remains a timeout diagnostic. This document therefore supports no claim that the
-current path is faster, better, or more reliable.
+evidence. The separate three-question [product latency smoke](product_latency_smoke.md) has now run
+and is sealed: 3/3 Professional answers were authored without fallback or retry at
+`$0.177749880`. Wall time was 19.772 seconds minimum, 21.967 median, and 26.105 maximum. The two
+ordinary observations were 19.772 and 21.967 seconds, the broad observation was 26.105, and their
+answer-generation stages were 17.399, 18.929, and 25.449 seconds. V3's 37-item run remains a timeout
+diagnostic. These three v5 observations support no p95, SLA, quality result, or claim that the
+current path is generally faster, better, or more reliable.
 
-A separate three-question [product latency smoke](product_latency_smoke.md) now provides a bounded,
-non-gold, full-product-path check without rerunning the held-out or semantic suites. Preparing that
-smoke is provider-free; live execution requires a new exact authorization. Three observations can
-support only transparent minimum/median/maximum diagnostics, not a p95, SLA, or general latency
-claim.
+A separate [paired Standard-versus-Fast comparison](product_fast_latency_comparison.md) is
+implemented but has made no provider call. It reuses the same questions as six counterbalanced
+fresh turns, changes only the generation service tier, keeps embeddings on the untiered standard
+embedding path, and forbids retry or resume. Its primary directional gate requires a median paired Fast/Standard generation-
+stage ratio at or below 0.70 and Fast wins on at least two of three questions, alongside an
+independent zero-failure/tier-correct accounting gate. Live execution requires new exact `$12.00`
+authorization. Cost will be reported, but promotion remains `owner_pending` because an acceptable-
+cost threshold has not been specified prospectively.
 
 The remainder of this document preserves the V27 hypothesis, offline measurements, and proposed
 protocol as historical design evidence. Its promotion instructions are no longer the active product
