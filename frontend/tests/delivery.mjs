@@ -168,6 +168,15 @@ try {
   const chatCss = readFileSync(new URL("../src/chat.css", import.meta.url), "utf8");
   const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const vibeControlSource = readFileSync(new URL("../src/VibeControl.tsx", import.meta.url), "utf8");
+  const vibeControlUses = [...appSource.matchAll(/<VibeControl\b[\s\S]*?\/>/g)]
+    .map((match) => match[0]);
+  const composerUses = [...appSource.matchAll(/<ConversationComposer\b[\s\S]*?\/>/g)]
+    .map((match) => match[0]);
+  const turnUses = [...appSource.matchAll(/<ConversationTurn\b[\s\S]*?\/>/g)]
+    .map((match) => match[0]);
+  const perspectiveControlUse = vibeControlUses.find((use) => use.includes('triggerVariant="perspective"')) ?? "";
+  const settingsControlUse = vibeControlUses.find((use) => use.includes('triggerVariant="settings"')) ?? "";
+  const turnControlUse = vibeControlUses.find((use) => use.includes('triggerVariant="turn"')) ?? "";
   assert.doesNotMatch(
     appSource,
     /V27 compact|Experimental latency settings/,
@@ -217,10 +226,13 @@ try {
     "a Custom perspective should still disclose its underlying character influence"
   );
   assert.match(
-    appSource,
-    /className="chat-perspective-note"[\s\S]*?aria-live="polite"[\s\S]*?<strong>\{activeModeLabel\}<\/strong>[\s\S]*?<p>\{perspectiveCopy\}<\/p>/,
-    "both composers should visibly disclose their current perspective"
+    perspectiveControlUse,
+    /mode=\{archivistModeId\}/,
+    "both composers should make their visible current-perspective disclosure a mode picker"
   );
+  assert.match(perspectiveControlUse, /onModeChange=\{onModeChange\}/);
+  assert.match(perspectiveControlUse, /triggerLabel=\{activeModeLabel\}/);
+  assert.match(perspectiveControlUse, /triggerEyebrow="Perspective"/);
   assert.match(
     appSource,
     /aria-describedby=\{`\$\{perspectiveId\} \$\{groundingId\}`\}/,
@@ -228,14 +240,106 @@ try {
   );
   assert.match(
     vibeControlSource,
-    /const displayLabel = custom \? "Custom" : current\.shortLabel/,
-    "the top-right control should show exactly Custom for an overridden preset"
+    /const displayLabel = triggerLabel \?\? \(custom \? "Custom" : current\.shortLabel\)/,
+    "an explicit inline label should override the header's exact Custom fallback"
   );
   assert.match(
     vibeControlSource,
-    /aria-label=\{`Archivist mode: \$\{displayLabel\}\. Choose a mode\.`\}/,
-    "the icon-only mobile mode control should retain an accessible name"
+    /const accessibleLabel = triggerAriaLabel[\s\S]*?Archivist mode: \$\{displayLabel\}\. Choose a perspective for future answers\./,
+    "every mode control, including the icon-only mobile trigger, should retain an explicit accessible name"
   );
+  assert.match(
+    vibeControlSource,
+    /type\s+VibeControlTriggerVariant\s*=\s*"header"\s*\|\s*"perspective"\s*\|\s*"settings"\s*\|\s*"turn"/,
+    "the shared mode picker should explicitly support every visible perspective-label context"
+  );
+  for (const optionalTriggerProp of [
+    "triggerLabel",
+    "triggerEyebrow",
+    "triggerAriaLabel",
+    "contextNote"
+  ]) {
+    assert.match(
+      vibeControlSource,
+      new RegExp(`${optionalTriggerProp}\\?:`),
+      `${optionalTriggerProp} should remain an optional shared-picker trigger customization`
+    );
+  }
+  assert.match(
+    vibeControlSource,
+    /triggerVariant\s*!==\s*"header"/,
+    "inline perspective labels should follow the picker dialog path instead of the header popover path"
+  );
+  assert.match(
+    vibeControlSource,
+    /<dialog[\s\S]*?ref=\{dialogRef\}[\s\S]*?className="vibe-menu/,
+    "inline perspective pickers should use the native dialog element"
+  );
+  assert.match(
+    vibeControlSource,
+    /dialog\.showModal\(\)/,
+    "opening an inline perspective picker should invoke the browser's native modal behavior"
+  );
+  assert.match(
+    vibeControlSource,
+    /aria-expanded=\{open\}[\s\S]*?aria-controls=\{pickerId\}/,
+    "every perspective trigger should expose its popup relationship and expanded state"
+  );
+  assert.match(
+    vibeControlSource,
+    /onCancel=\{[\s\S]*?closeAndRestoreFocus\(\)[\s\S]*?\}/,
+    "Escape should close native inline perspective dialogs"
+  );
+  assert.match(
+    vibeControlSource,
+    /function closeAndRestoreFocus\(\)[\s\S]*?setOpen\(false\)[\s\S]*?triggerRef\.current\?\.focus\(/,
+    "closing or selecting from an inline picker should restore focus to its invoking label"
+  );
+  assert.match(
+    vibeControlSource,
+    /future answers/i,
+    "the shared picker should announce that a perspective change applies to future answers"
+  );
+  assert.match(
+    composerUses.map((use) => use.match(/onModeChange=\{changeArchivistMode\}/)?.[0] ?? "").join(" "),
+    /^onModeChange=\{changeArchivistMode\} onModeChange=\{changeArchivistMode\}$/,
+    "landing and docked composers should both route perspective-label choices through the canonical mode change"
+  );
+  assert.match(
+    settingsControlUse,
+    /triggerLabel=\{activeModeLabel\}/,
+    "the current-mode label inside Settings should use the same mode changer"
+  );
+  assert.match(settingsControlUse, /mode=\{archivistModeId\}/);
+  assert.match(settingsControlUse, /onModeChange=\{onModeChange\}/);
+  assert.equal(turnUses.length, 1, "the conversation should have one shared completed-turn rendering path");
+  assert.match(
+    turnUses[0] ?? "",
+    /currentArchivistMode=\{archivistModeId\}/,
+    "completed-turn controls should receive the current future-answer selection separately from the turn snapshot"
+  );
+  assert.match(turnUses[0] ?? "", /currentAppearance=\{appearance\}/);
+  assert.match(turnUses[0] ?? "", /currentModeCustom=\{customMode\}/);
+  assert.match(turnUses[0] ?? "", /onModeChange=\{changeArchivistMode\}/);
+  assert.match(
+    turnControlUse,
+    /mode=\{currentArchivistMode\}/,
+    "a response picker should show the snapshotted response label while selecting the current future-answer mode"
+  );
+  assert.match(turnControlUse, /appearance=\{currentAppearance\}/);
+  assert.match(turnControlUse, /custom=\{currentModeCustom\}/);
+  assert.match(turnControlUse, /triggerLabel=\{modeSummary\}/);
+  assert.match(
+    turnControlUse,
+    /contextNote=/,
+    "response-picker copy should state that completed answers are immutable and a new perspective affects future answers"
+  );
+  assert.match(turnControlUse, /(?:completed answer|answer already given|this turn used)/i);
+  assert.match(
+    turnControlUse,
+    /(?:remain|does not change|won't change|will not change|will not rewrite|will not alter|keep the perspective)/i
+  );
+  assert.match(turnControlUse, /future answers/i);
   assert.match(
     appSource,
     /question:\s*questionForConversationHistory\(turn\)\.slice\(0, 4_000\)/,
@@ -270,6 +374,36 @@ try {
     chatCss,
     /\.chat-composer\.is-docked\s+\.chat-perspective-note\s*\{[^}]*grid-column:\s*1\s*\/\s*-1\s*;/s,
     "the docked perspective disclosure should span the input and control columns"
+  );
+  assert.match(
+    chatCss,
+    /\.vibe-trigger:focus-visible,[\s\S]*?outline:\s*3px solid var\(--chat-accent-bright\)/,
+    "every perspective-label trigger should have an explicit keyboard focus treatment"
+  );
+  assert.match(
+    chatCss,
+    /\.vibe-trigger\.is-perspective,[\s\S]*?\.vibe-trigger\.is-turn\s*\{[^}]*min-height:\s*30px;/s,
+    "inline perspective controls should retain a visible, compact hit area"
+  );
+  assert.match(
+    chatCss,
+    /\.vibe-picker-dialog\s*\{[^}]*max-height:\s*calc\(100dvh\s*-\s*32px\);/s,
+    "inline perspective pickers should remain bounded to the visible viewport"
+  );
+  assert.match(
+    chatCss,
+    /\.vibe-picker-dialog::backdrop\s*\{[^}]*background:/s,
+    "inline perspective pickers should visually and interactively isolate the chooser"
+  );
+  assert.match(
+    chatCss,
+    /@media \(forced-colors: active\)[\s\S]*?\.vibe-picker-dialog,/,
+    "the native perspective dialog should retain a boundary in forced-colors mode"
+  );
+  assert.match(
+    chatCss,
+    /@media \(forced-colors: active\)[\s\S]*?\.vibe-swatch,[\s\S]*?display:\s*none;[\s\S]*?\.vibe-options\s*>\s*button\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*18px;/s,
+    "hiding swatches in forced-colors mode must also remove their grid column so option text stays readable"
   );
   assert.match(
     chatCss,

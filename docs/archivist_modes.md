@@ -290,7 +290,12 @@ The composer labels its collapsed control **Settings** and keeps two secondary d
   restores the active mode's complete defaults. The only selectable appearances are the five that
   match the current modes.
 
-Above the text field, a **Perspective** note makes the current framing explicit. Preset copy is:
+Above the text field, a **Perspective** note makes the current framing explicit. Its label, the
+header control, **Current mode** inside Settings, and each turn's mode badge open the same shared
+chooser. The chooser always selects the current perspective for future answers. A historical turn
+continues to display its snapshotted mode, facets, and appearance; opening its badge does not
+retroactively relabel that answer, and retry continues to use the original turn settings. Preset
+copy is:
 
 - Professional: “Measured and diplomatic, with a present-minded focus on human agency,
   institutions, and material consequences.”
@@ -307,7 +312,8 @@ Any facet or appearance override makes the active top-right and Settings-panel l
 **Custom**. Facet-custom copy names its base preset, selected lens, voice, and worldview because
 advanced facets do not remove the preset's registered character or influence. An appearance-only
 override explicitly says that appearance is customized while the underlying preset perspective is
-unchanged. Completed-turn badges retain “{Preset} · Custom” so historical provenance stays clear.
+unchanged. Completed-turn badges retain “{Preset} · Custom” so historical provenance stays clear,
+even though the badge is an actionable entry point to the future-answer chooser.
 Custom is a resolved presentation/settings state, not a sixth server mode: character-social turns
 retain their registered generated-mode identity, while advanced interpretive facets shape generated
 historical/manuscript prose.

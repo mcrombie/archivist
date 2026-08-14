@@ -1009,6 +1009,13 @@ body {
   line-height: 1.4;
 }
 
+.chat-perspective-note > .archivist-vibe-control,
+.chat-mode-context > .archivist-vibe-control {
+  width: fit-content;
+  max-width: 100%;
+  grid-column: 1 / -1;
+}
+
 .chat-question-field {
   display: block;
 }
@@ -1993,6 +2000,10 @@ body {
   max-width: min(62vw, 430px);
 }
 
+.turn-facet-summary > .archivist-vibe-control {
+  min-width: 0;
+}
+
 .turn-facet-summary i {
   color: var(--chat-accent-bright);
   font-size: 8px;
@@ -2586,13 +2597,18 @@ body {
 
 .chat-composer.is-docked .chat-perspective-note {
   grid-column: 1 / -1;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
   margin: 0 4px 1px;
   border-left: 0;
   border-radius: 0;
   background: transparent;
   padding: 0 3px 3px;
+}
+
+.chat-composer.is-docked .chat-perspective-note > .archivist-vibe-control {
+  width: auto;
+  grid-column: auto;
 }
 
 .chat-composer.is-docked .chat-perspective-note > p {
@@ -2713,6 +2729,74 @@ body {
   white-space: nowrap;
 }
 
+.vibe-trigger:focus-visible,
+.vibe-options > button:focus-visible {
+  outline: 3px solid var(--chat-accent-bright);
+  outline-offset: 2px;
+}
+
+.vibe-trigger.is-perspective,
+.vibe-trigger.is-settings,
+.vibe-trigger.is-turn {
+  min-width: 0;
+  min-height: 30px;
+  max-width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  padding: 2px 6px;
+}
+
+.vibe-trigger.is-perspective > span,
+.vibe-trigger.is-settings > span,
+.vibe-trigger.is-turn > span {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.vibe-trigger.is-perspective small,
+.vibe-trigger.is-settings small,
+.vibe-trigger.is-turn small {
+  flex: 0 0 auto;
+  color: var(--chat-accent-bright);
+}
+
+.vibe-trigger.is-perspective strong,
+.vibe-trigger.is-settings strong,
+.vibe-trigger.is-turn strong {
+  min-width: 0;
+}
+
+.vibe-trigger.is-perspective:hover,
+.vibe-trigger.is-settings:hover,
+.vibe-trigger.is-turn:hover,
+.vibe-trigger.is-perspective[aria-expanded="true"],
+.vibe-trigger.is-settings[aria-expanded="true"],
+.vibe-trigger.is-turn[aria-expanded="true"] {
+  border-color: var(--chat-border-strong);
+  background: color-mix(in srgb, var(--chat-surface-raised) 86%, transparent);
+}
+
+.vibe-trigger.is-turn {
+  min-height: 28px;
+  border-color: var(--chat-border);
+  border-radius: 999px;
+  color: var(--chat-muted);
+  padding: 2px 7px;
+}
+
+.vibe-trigger.is-turn strong {
+  color: var(--chat-muted);
+  font-family: var(--chat-ui-font);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
 .vibe-trigger:hover,
 .vibe-trigger[aria-expanded="true"] {
   border-color: var(--chat-border-strong);
@@ -2737,6 +2821,38 @@ body {
   padding: 8px;
   backdrop-filter: blur(22px);
   animation: vibe-menu-arrive 180ms ease-out both;
+}
+
+.vibe-picker-dialog {
+  width: min(356px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  color: var(--chat-text);
+  padding: 0;
+  font-family: var(--chat-ui-font);
+}
+
+.vibe-picker-dialog::backdrop {
+  background: color-mix(in srgb, #070807 68%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.vibe-picker-dialog > .vibe-menu {
+  position: static;
+  inset: auto;
+  width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.vibe-picker-dialog .vibe-options {
+  max-height: none;
+  overflow-y: visible;
 }
 
 .vibe-menu-heading {
@@ -2781,6 +2897,23 @@ body {
   color: var(--chat-faint);
   font-size: 10px;
   line-height: 1.45;
+}
+
+.vibe-menu-future-note,
+.vibe-menu-context {
+  margin: 0 8px 8px;
+  color: var(--chat-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.vibe-menu-future-note {
+  border-left: 2px solid var(--chat-accent-bright);
+  padding-left: 8px;
+}
+
+.vibe-menu-context {
+  font-style: italic;
 }
 
 .vibe-appearance-override {
@@ -4190,6 +4323,19 @@ html[data-vibe="cromb"] .conversation-brand > span:first-child {
     right: 10px;
   }
 
+  .vibe-picker-dialog {
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    margin: auto 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .vibe-picker-dialog > .vibe-menu {
+    position: static;
+    inset: auto;
+    width: 100%;
+    max-height: calc(100dvh - 20px - env(safe-area-inset-bottom));
+  }
+
   .citation-preview {
     display: none !important;
   }
@@ -4271,6 +4417,7 @@ html[data-vibe="cromb"] .conversation-brand > span:first-child {
 @media (forced-colors: active) {
   .vibe-trigger,
   .vibe-menu,
+  .vibe-picker-dialog,
   .vibe-options > button,
   .chat-composer,
   .opening-suggestions button,
@@ -4304,6 +4451,10 @@ html[data-vibe="cromb"] .conversation-brand > span:first-child {
   .vibe-swatch,
   .chat-cover-vignette {
     display: none;
+  }
+
+  .vibe-options > button {
+    grid-template-columns: minmax(0, 1fr) 18px;
   }
 
   .progressive-caret {

@@ -35,6 +35,12 @@ The web API needs:
 ## Current Capabilities
 
 - Opens directly to the built-in *Cradle of the Empire* manuscript.
+- Explains its one-manuscript purpose on the landing page even when onboarding is skipped. On a
+  first public visit, it offers a skippable welcome plus three informational spotlights for Ask,
+  Perspective, and Settings. A permanent **How Archivist works** control replays the tour. After
+  tour completion, one non-modal Sources note waits until a source-bearing answer actually exists.
+  The tour cannot send a request or activate the highlighted controls. See
+  [Reader onboarding](reader_onboarding.md).
 - Presents the cover as a compact identity rail beside a composer-first, one-book introduction.
 - Offers two quiet example questions plus a local two-step guide. The guide asks what the reader
   wants to explore and what kind of treatment would help, then fills an editable question scaffold
@@ -92,12 +98,15 @@ The web API needs:
   for compatibility but are not selectable. Custom values apply to future turns, retries retain
   the settings that originally produced the turn, and Reset to mode restores the active preset.
 - Shows a live **Perspective** explanation above the text field so the reader sees the selected
-  interpretive bias before asking. Preset copy names the Professional, Essential, Princess,
+  interpretive bias before asking. The Perspective label, header mode control, Settings current-
+  mode label, and each response's mode badge all open the same chooser. A change applies only to
+  future answers: the response badge continues to show that turn's snapshotted mode and retries
+  retain its original settings. Preset copy names the Professional, Essential, Princess,
   Baron, or Ruthless Red Realist viewpoint. Any facet or appearance override makes both the top-right active label and the
   Settings-panel mode label exactly **Custom**. Facet-custom copy still names its base preset and
   chosen lens, voice, and worldview because the base character/influence remains active;
   appearance-only copy says the underlying perspective is unchanged. Completed-turn badges retain
-  “{Preset} · Custom” for provenance.
+  “{Preset} · Custom” for provenance even though clicking them can select a future perspective.
 
 The preset Perspective copy is fixed and reader-facing:
 

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDollarSign,
+  CircleHelp,
   Copy,
   ExternalLink,
   FileSearch,
@@ -72,6 +73,7 @@ import {
   type ResponseDelivery
 } from "./delivery";
 import { VibeControl } from "./VibeControl";
+import { OnboardingTour } from "./OnboardingTour";
 import {
   archivistModeSummary,
   archivistMode,
@@ -83,6 +85,17 @@ import {
   storedAppearance,
   storedArchivistMode
 } from "./modes";
+import {
+  completeOnboarding,
+  markSourcesTipSeen,
+  markSourcesTipSkipped,
+  persistOnboardingState,
+  shouldAutoStartOnboarding,
+  shouldShowSourcesTip,
+  skipOnboarding,
+  storedOnboardingState,
+  type OnboardingState
+} from "./onboarding";
 import { VIBES, type VibeId } from "./vibes";
 import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
 import openingQuestions from "./openingQuestions.json";
@@ -1572,8 +1585,17 @@ function QuestionMode({
   const [costSummaryLoading, setCostSummaryLoading] = useState(config.features.cost_ledger);
   const [costSummaryError, setCostSummaryError] = useState<string | null>(null);
   const [costDrawerOpen, setCostDrawerOpen] = useState(false);
+  const [onboardingState, setOnboardingState] = useState<OnboardingState>(
+    storedOnboardingState
+  );
+  const [onboardingOpen, setOnboardingOpen] = useState(() => (
+    publicDemo && shouldAutoStartOnboarding(storedOnboardingState())
+  ));
+  const [onboardingReplay, setOnboardingReplay] = useState(false);
   const conversationRef = useRef<HTMLElement>(null);
   const landingQuestionRef = useRef<HTMLTextAreaElement>(null);
+  const threadQuestionRef = useRef<HTMLTextAreaElement>(null);
+  const onboardingInvokerRef = useRef<HTMLElement | null>(null);
   const pending = turns.some((turn) => turn.status === "pending");
   const chatStarted = turns.length > 0;
   const customMode = modeHasOverrides(archivistModeId, facets)
@@ -1982,6 +2004,63 @@ function QuestionMode({
     focusLandingQuestion(candidateQuestion, selectPlaceholder);
   }
 
+  function persistNextOnboardingState(nextState: OnboardingState) {
+    const persisted = persistOnboardingState(nextState);
+    setOnboardingState(persisted);
+  }
+
+  function openOnboardingReplay(invoker: HTMLElement) {
+    onboardingInvokerRef.current = invoker;
+    setCostDrawerOpen(false);
+    setOnboardingReplay(true);
+    setOnboardingOpen(true);
+  }
+
+  function completeOnboardingTour() {
+    if (!onboardingReplay) {
+      persistNextOnboardingState(completeOnboarding(onboardingState));
+    }
+    setOnboardingOpen(false);
+    setOnboardingReplay(false);
+  }
+
+  function skipOnboardingTour() {
+    if (!onboardingReplay) {
+      persistNextOnboardingState(skipOnboarding(onboardingState));
+    }
+    setOnboardingOpen(false);
+    setOnboardingReplay(false);
+  }
+
+  function finishOnboardingFocus() {
+    window.requestAnimationFrame(() => {
+      const input = chatStarted ? threadQuestionRef.current : landingQuestionRef.current;
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      const bounds = input.getBoundingClientRect();
+      if (bounds.top < 24 || bounds.bottom > window.innerHeight - 24) {
+        input.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+          block: "center"
+        });
+      }
+    });
+  }
+
+  function markOnboardingSourcesTipSeen() {
+    persistNextOnboardingState(markSourcesTipSeen(onboardingState));
+  }
+
+  function skipOnboardingSourcesTip() {
+    persistNextOnboardingState(markSourcesTipSkipped(onboardingState));
+  }
+
+  const sourcesTipTurnId = shouldShowSourcesTip(onboardingState)
+    ? turns.find((turn) => turn.status === "complete" && turn.sources.length > 0)?.id ?? null
+    : null;
+
   return (
     <section
       className={`chat-page${chatStarted ? " has-conversation" : ""}`}
@@ -2036,11 +2115,12 @@ function QuestionMode({
           {!chatStarted ? (
             <div className="chat-start-hub">
               <div className="chat-intro-copy">
-                <p className="chat-kicker">A conversation grounded in one manuscript</p>
+                <p className="chat-kicker">A manuscript-grounded AI guide</p>
                 <h1 id="question-page-title">What would you like to uncover?</h1>
                 <p className="chat-intro-description">
-                  Ask <cite>{project.name}</cite> directly, or let Archivist help shape a
-                  useful first question.
+                  Ask about the people, events, themes, or arguments in <cite>{project.name}</cite>.
+                  Archivist searches this manuscript—not the open web—and shows supporting
+                  passages for manuscript answers.
                 </p>
               </div>
               <ConversationComposer
@@ -2057,11 +2137,13 @@ function QuestionMode({
                 pending={pending}
                 inputRef={landingQuestionRef}
                 onQuestionChange={setQuestion}
+                onModeChange={changeArchivistMode}
                 onFacetsChange={setFacets}
                 onAppearanceChange={changeAppearance}
                 onResetModeDefaults={resetModeOverrides}
                 onAnswerStrategyChange={setAnswerStrategy}
                 onResponseDeliveryChange={changeResponseDelivery}
+                onOpenOnboarding={openOnboardingReplay}
                 onSubmit={submit}
               />
               <OpeningGuidance
@@ -2069,10 +2151,19 @@ function QuestionMode({
                 onPrepareQuestion={prepareLandingQuestion}
                 onFocusQuestion={() => focusLandingQuestion()}
               />
-              <p className="chat-evidence-caveat">
-                Searches this manuscript · cites supporting passages · remembers follow-ups.
-                Nothing is sent until you press Ask.
-              </p>
+              <div className="chat-evidence-caveat">
+                <p>
+                  Perspectives change voice and emphasis—not the manuscript being searched.
+                  Follow-ups stay in this conversation. Your question is not sent until you press Ask.
+                </p>
+                <button
+                  type="button"
+                  onClick={(event) => openOnboardingReplay(event.currentTarget)}
+                >
+                  <CircleHelp size={14} aria-hidden="true" />
+                  How Archivist works
+                </button>
+              </div>
             </div>
           ) : (
             <div className="chat-start-hub is-conversation-open">
@@ -2127,6 +2218,13 @@ function QuestionMode({
                   onCopy={() => copyAnswer(turn)}
                   onRetry={() => retryTurn(turn.id)}
                   onApprove={() => approveTurn(turn.id)}
+                  showSourcesTip={turn.id === sourcesTipTurnId}
+                  onSourcesTipSeen={markOnboardingSourcesTipSeen}
+                  onSourcesTipSkipped={skipOnboardingSourcesTip}
+                  currentArchivistMode={archivistModeId}
+                  currentAppearance={appearance}
+                  currentModeCustom={customMode}
+                  onModeChange={changeArchivistMode}
                   publicDemo={publicDemo}
                 />
               </li>
@@ -2146,12 +2244,15 @@ function QuestionMode({
               responseDelivery={responseDelivery}
               progressiveAvailable={progressiveAvailable}
               pending={pending}
+              inputRef={threadQuestionRef}
               onQuestionChange={setQuestion}
+              onModeChange={changeArchivistMode}
               onFacetsChange={setFacets}
               onAppearanceChange={changeAppearance}
               onResetModeDefaults={resetModeOverrides}
               onAnswerStrategyChange={setAnswerStrategy}
               onResponseDeliveryChange={changeResponseDelivery}
+              onOpenOnboarding={openOnboardingReplay}
               onSubmit={submit}
             />
           </div>
@@ -2168,6 +2269,15 @@ function QuestionMode({
           onRefresh={refreshCostSummary}
         />
       ) : null}
+      <OnboardingTour
+        open={onboardingOpen}
+        projectName={project.name}
+        replay={onboardingReplay}
+        replayInvoker={onboardingInvokerRef.current}
+        onComplete={completeOnboardingTour}
+        onSkip={skipOnboardingTour}
+        onFinishFocus={finishOnboardingFocus}
+      />
     </section>
   );
 }
@@ -2186,11 +2296,13 @@ function ConversationComposer({
   pending,
   inputRef,
   onQuestionChange,
+  onModeChange,
   onFacetsChange,
   onAppearanceChange,
   onResetModeDefaults,
   onAnswerStrategyChange,
   onResponseDeliveryChange,
+  onOpenOnboarding,
   onSubmit
 }: {
   location: "landing" | "thread";
@@ -2206,11 +2318,13 @@ function ConversationComposer({
   pending: boolean;
   inputRef?: RefObject<HTMLTextAreaElement>;
   onQuestionChange: (question: string) => void;
+  onModeChange: (mode: ArchivistModeId) => void;
   onFacetsChange: (facets: AnswerFacets) => void;
   onAppearanceChange: (appearance: VibeId) => void;
   onResetModeDefaults: () => void;
   onAnswerStrategyChange: (strategy: AnswerStrategy) => void;
   onResponseDeliveryChange: (delivery: ResponseDelivery) => void;
+  onOpenOnboarding: (invoker: HTMLElement) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const settingsDisclosureRef = useRef<HTMLDetailsElement>(null);
@@ -2395,6 +2509,7 @@ function ConversationComposer({
   return (
     <form
       className={`chat-composer ${location === "thread" ? "is-docked" : "is-landing"}`}
+      data-onboarding-target="ask"
       aria-label={`Ask a question about ${project.name}`}
       aria-busy={pending}
       onSubmit={(event) => {
@@ -2404,13 +2519,21 @@ function ConversationComposer({
     >
       <div
         className="chat-perspective-note"
-        id={perspectiveId}
-        aria-live="polite"
-        aria-atomic="true"
+        data-onboarding-target="perspective"
       >
-        <span>Perspective</span>
-        <strong>{activeModeLabel}</strong>
-        <p>{perspectiveCopy}</p>
+        <VibeControl
+          mode={archivistModeId}
+          appearance={appearance}
+          custom={customMode}
+          onModeChange={onModeChange}
+          triggerVariant="perspective"
+          triggerEyebrow="Perspective"
+          triggerLabel={activeModeLabel}
+          triggerAriaLabel={`Change perspective. Current perspective: ${activeModeLabel}. Applies to future answers.`}
+        />
+        <p id={perspectiveId} aria-live="polite" aria-atomic="true">
+          {perspectiveCopy}
+        </p>
       </div>
       <label className="chat-question-field" htmlFor={questionId}>
         <span>{location === "landing" ? "Begin the conversation" : "Your next question"}</span>
@@ -2437,7 +2560,10 @@ function ConversationComposer({
 
       <div className="chat-composer-options">
         <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
-          <summary aria-label={`Settings. Current mode: ${activeModeLabel}; ${responseDelivery === "progressive" ? "Progressive response, experimental" : "Complete answer"}`}>
+          <summary
+            data-onboarding-target="settings"
+            aria-label={`Settings. Current mode: ${activeModeLabel}; ${responseDelivery === "progressive" ? "Progressive response, experimental" : "Complete answer"}`}
+          >
             <SlidersHorizontal size={16} aria-hidden="true" />
             <span>
               <strong>Settings</strong>
@@ -2446,8 +2572,16 @@ function ConversationComposer({
           </summary>
           <div className="chat-answer-settings-panel">
             <div className="chat-mode-context">
-              <span>Current mode</span>
-              <strong>{activeModeLabel}</strong>
+              <VibeControl
+                mode={archivistModeId}
+                appearance={appearance}
+                custom={customMode}
+                onModeChange={onModeChange}
+                triggerVariant="settings"
+                triggerEyebrow="Current mode"
+                triggerLabel={activeModeLabel}
+                triggerAriaLabel={`Change perspective. Current perspective: ${activeModeLabel}. Applies to future answers.`}
+              />
               <p>
                 {customMode
                   ? `Based on ${selectedMode.label}. Advanced settings override this preset for future answers.`
@@ -2508,6 +2642,17 @@ function ConversationComposer({
                 </div>
               </div>
             </details>
+            <button
+              type="button"
+              className="chat-onboarding-replay"
+              onClick={(event) => onOpenOnboarding(event.currentTarget)}
+            >
+              <CircleHelp size={16} aria-hidden="true" />
+              <span>
+                <strong>How Archivist works</strong>
+                <small>Replay the short product tour</small>
+              </span>
+            </button>
           </div>
         </details>
 
@@ -2588,6 +2733,13 @@ function ConversationTurn({
   onCopy,
   onRetry,
   onApprove,
+  showSourcesTip,
+  onSourcesTipSeen,
+  onSourcesTipSkipped,
+  currentArchivistMode,
+  currentAppearance,
+  currentModeCustom,
+  onModeChange,
   publicDemo
 }: {
   turn: ChatTurn;
@@ -2596,6 +2748,13 @@ function ConversationTurn({
   onCopy: () => void;
   onRetry: () => void;
   onApprove: () => void;
+  showSourcesTip: boolean;
+  onSourcesTipSeen: () => void;
+  onSourcesTipSkipped: () => void;
+  currentArchivistMode: ArchivistModeId;
+  currentAppearance: VibeId;
+  currentModeCustom: boolean;
+  onModeChange: (mode: ArchivistModeId) => void;
   publicDemo: boolean;
 }) {
   const headingId = `turn-${turn.id}-question`;
@@ -2642,8 +2801,18 @@ function ConversationTurn({
             <div>
               <strong>Archivist</strong>
               <small className="sr-only">Turn {turnNumber}</small>
-              <span className="turn-facet-summary">
-                <span><i>Mode</i>{modeSummary}</span>
+              <div className="turn-facet-summary">
+                <VibeControl
+                  mode={currentArchivistMode}
+                  appearance={currentAppearance}
+                  custom={currentModeCustom}
+                  onModeChange={onModeChange}
+                  triggerVariant="turn"
+                  triggerEyebrow="Mode"
+                  triggerLabel={modeSummary}
+                  triggerAriaLabel={`This turn was requested with ${modeSummary}. Choose a perspective for future answers.`}
+                  contextNote={`This turn used ${modeSummary}. Changing the current perspective will not alter it.`}
+                />
                 {customMode ? <span><i>Overrides</i>{facetSummary}</span> : null}
                 {turn.requestedDelivery === "progressive" ? (
                   <span>
@@ -2653,7 +2822,7 @@ function ConversationTurn({
                       : "Complete · Fallback"}
                   </span>
                 ) : null}
-              </span>
+              </div>
             </div>
           </div>
         </header>
@@ -2836,28 +3005,63 @@ function ConversationTurn({
             </div>
             <div className="archivist-response-footer">
               {sourceCount ? (
-                <details className="turn-sources-disclosure">
-                  <summary>
-                    <span>
-                      <BookOpen size={15} aria-hidden="true" />
-                      <strong>Sources</strong>
-                      <small>{sourceCount} {sourceCount === 1 ? "passage" : "passages"}</small>
-                    </span>
-                    <ChevronDown size={15} aria-hidden="true" />
-                  </summary>
-                  {publicDemo ? (
-                    <PublicSources
-                      sources={turn.sources.filter(isPublicSource)}
-                      sourceScopeId={sourceScopeId}
-                    />
-                  ) : (
-                    <DisplayGroups
-                      title="Manuscript sources"
-                      groups={turn.displayGroups}
-                      sourceScopeId={sourceScopeId}
-                    />
-                  )}
-                </details>
+                <div className="turn-sources-onboarding">
+                  {showSourcesTip ? (
+                    <aside
+                      className="sources-onboarding-tip"
+                      aria-labelledby={`turn-${turn.id}-sources-tip-title`}
+                    >
+                      <div>
+                        <span>How Archivist works</span>
+                        <strong id={`turn-${turn.id}-sources-tip-title`}>
+                          See what supports the answer
+                        </strong>
+                        <p>
+                          Numbered citations open supporting passages. Expand Sources to inspect
+                          the excerpts and manuscript locations yourself.
+                        </p>
+                      </div>
+                      <div className="sources-onboarding-tip-actions">
+                        <button type="button" onClick={onSourcesTipSeen}>Got it</button>
+                        <button
+                          type="button"
+                          aria-label="Dismiss the Sources tip"
+                          onClick={onSourcesTipSkipped}
+                        >
+                          <X size={15} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </aside>
+                  ) : null}
+                  <details
+                    className="turn-sources-disclosure"
+                    data-onboarding-target="sources"
+                    onToggle={(event) => {
+                      if (showSourcesTip && event.currentTarget.open) onSourcesTipSeen();
+                    }}
+                  >
+                    <summary>
+                      <span>
+                        <BookOpen size={15} aria-hidden="true" />
+                        <strong>Sources</strong>
+                        <small>{sourceCount} {sourceCount === 1 ? "passage" : "passages"}</small>
+                      </span>
+                      <ChevronDown size={15} aria-hidden="true" />
+                    </summary>
+                    {publicDemo ? (
+                      <PublicSources
+                        sources={turn.sources.filter(isPublicSource)}
+                        sourceScopeId={sourceScopeId}
+                      />
+                    ) : (
+                      <DisplayGroups
+                        title="Manuscript sources"
+                        groups={turn.displayGroups}
+                        sourceScopeId={sourceScopeId}
+                      />
+                    )}
+                  </details>
+                </div>
               ) : null}
               <div className="turn-response-actions">
                 {!publicDemo && turn.answerStrategyVersion ? (

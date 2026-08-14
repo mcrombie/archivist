@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test:modes": "node tests/modes.mjs",
-    "test:delivery": "node tests/delivery.mjs"
+    "test:delivery": "node tests/delivery.mjs",
+    "test:onboarding": "node tests/onboarding.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
