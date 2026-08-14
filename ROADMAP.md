@@ -411,6 +411,10 @@ and its prose modes have no paid comparative evaluation.
 
 Current contract:
 
+- A new reader can understand the one-manuscript scope without opening a modal. The public reader
+  additionally offers one skippable first-visit orientation, a permanent replay control, and a
+  deferred explanation when Sources first become available. The tour is explanatory only and
+  cannot submit a question or change answer, mode, or Settings state.
 - Professional is the new-reader default.
 - Essential is the direct, evidence-first product path; frozen V26 Essential remains the evaluated
   baseline.
@@ -436,9 +440,11 @@ Current contract:
 - **Fey Fir-Green Folklorist** is an approved name for a possible future persona. It is dormant:
   it has no registered mode contract, generated behavior, selectable control, or evaluation item.
 - Local code maps valid support IDs to citations, but does not claim to prove semantic entailment.
-- The input displays its active Perspective; its disclosure is Settings. Fine-grained lens, voice,
-  worldview, and appearance overrides remain Advanced controls and label the active mode exactly
-  Custom while disclosing the base preset and whether only appearance changed.
+- The input displays its active Perspective; its disclosure is Settings. Every selected-mode label
+  in the header, composer, Settings, and turn provenance opens the same chooser, but changes apply
+  only to future answers and never rewrite an existing turn. Fine-grained lens, voice, worldview,
+  and appearance overrides remain Advanced controls and label the active mode exactly Custom while
+  disclosing the base preset and whether only appearance changed.
 - Complete answer is the recommended default.
 - Progressive response is experimental. It may show locally compiled direct evidence in Essential;
   generated prose remains terminal because support-ID validation is structural rather than a

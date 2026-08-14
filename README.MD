@@ -29,11 +29,15 @@ retrieval.
 
 The reader experience includes:
 
+- a permanent first-page explanation of what Archivist is, what it searches, and how Perspectives
+  affect a reading, plus a skippable first-visit spotlight tour with replay and, after tour
+  completion, a deferred Sources explanation beside the first source-bearing answer;
 - a one-page, multi-turn conversation with contextual follow-up resolution;
 - local follow-up resolution, hybrid dense/BM25 retrieval, rich evidence-dossier compilation, and
   inline source citations;
 - **5 reader-selectable modes**: Professional, Essential, Pretty Pink Princess, Baleful Black
-  Baron, and Ruthless Red Realist;
+  Baron, and Ruthless Red Realist; every displayed current/turn Perspective label opens the shared
+  chooser, while completed answers retain the perspective that produced them;
 - **5 mode-linked visual appearances**; dormant appearance assets are hidden compatibility data;
 - Professional as the new-visitor default and Essential as the neutral evidence-first baseline for
   API, CLI, and evaluation callers that omit a mode;
@@ -96,12 +100,15 @@ associated with Machiavelli and Henry Kissinger, but no outside work was ingeste
 not impersonate, imitate, quote, or attribute claims to either person. Historical claims still
 come only from Archivist's retrieved manuscript dossier.
 
-The composer explains the active **Perspective** above the text field. Its collapsed control is
-labeled **Settings**. Changing any advanced facet or appearance makes the active top and Settings
-labels exactly **Custom**. The perspective explanation still names the underlying preset because
-its character/influence remains active. An appearance-only override explicitly says the underlying
+The composer explains the active **Perspective** above the text field. That label, the header
+control, **Current mode** in Settings, and every response's mode badge open the same five-mode
+chooser. A selection changes the perspective for future answers only; an existing response keeps
+its snapshotted label and retry settings. The collapsed composer control is labeled **Settings**.
+Changing any advanced facet or appearance makes the active top and Settings labels exactly
+**Custom**. The perspective explanation still names the underlying preset because its
+character/influence remains active. An appearance-only override explicitly says the underlying
 perspective is unchanged. Completed-turn badges retain the preset plus Custom so their provenance
-remains legible.
+remains legible even though the badge is actionable.
 
 Progressive response is not chain-of-thought and does not make a second answer-model call. It may
 show locally compiled direct evidence in Essential, but generated prose remains terminal because
@@ -348,12 +355,13 @@ Run the focused frontend suites and production build:
 Set-Location frontend
 npm run test:delivery
 npm run test:modes
+npm run test:onboarding
 npm run build
 ```
 
-**Verification snapshot — August 13, 2026:** repository-wide Ruff passed; **1,426 Python tests passed
-and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
-built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
+**Verification snapshot — August 14, 2026:** repository-wide Ruff passed; **1,444 Python tests passed
+and 1 was intentionally skipped**; the delivery, mode, and onboarding frontend suites passed; and
+the production frontend built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
 
 ## Evaluation status
@@ -611,6 +619,8 @@ authorization. It reports the three observations and simple latency summaries, n
 - [`docs/cost_tracking.md`](docs/cost_tracking.md) — local estimates, budgets, and billing caveats.
 - [`BLOGNOTES.md`](BLOGNOTES.md) and [`DEFECTS.md`](DEFECTS.md) — development narrative and defect
   history.
+- [`docs/reader_onboarding.md`](docs/reader_onboarding.md) — permanent product explanation,
+  first-visit spotlight tour, replay, persistence, accessibility, and deferred Sources guidance.
 
 ## Author
 

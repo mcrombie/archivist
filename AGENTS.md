@@ -532,5 +532,9 @@ These are decided. A brief may note a consequence, but may not reopen the questi
   character-social route has no evidence or citations; explicit v1/V26/V27 generation retains its historical model-facing form;
   `full-context-v2` uses validated stable chunk IDs internally and remaps them locally.
   Human-readable labels remain presentation.
+- **Perspective changes are prospective.** The header, composer, Settings, and turn mode labels
+  reuse one chooser, but selecting from any of them changes only future answers. A turn's displayed
+  mode/facets/appearance and retry behavior remain bound to the snapshot that produced it; never
+  rewrite historical provenance to mirror the current chooser state.
 - **The generic multi-project stack is deferred**, not deleted. Do not extend it incidentally while
   working on the single-corpus product or its evaluation.

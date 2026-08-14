@@ -62,7 +62,9 @@ anything that still requires measurement.
   Essential, and uncertain turns remain grounded. The composer now says
   **Settings**, explains the active **Perspective** above the input, and labels every advanced
   override exactly **Custom** while naming the underlying preset and distinguishing appearance
-  from interpretive bias.
+  from interpretive bias. The header, composer Perspective label, Settings current-mode label, and
+  each turn's snapshotted mode badge now open one shared chooser. A new choice applies only to
+  future answers; the triggering turn keeps the mode and settings that produced it.
 - **Generated-mode reliability repair:** inspection of recent completed responses found a precise
   contract mismatch rather than a Baron-specific provider outage. Three of three observed Baron
   calls and one of three observed Princess calls returned completed API output but included a
@@ -139,9 +141,9 @@ anything that still requires measurement.
   Frozen V26 remains callable and immutable; V27 compact remains unpromoted historical evidence.
   If stronger claim-derived scoring is still useful, decomposition redesign remains a later,
   separate cohort; semantic calibration remains optional supplemental work.
-- **Current v5 offline verification:** repository-wide Ruff passed; 1,426 Python tests passed with
-  one intentional skip; both frontend contract suites passed; and the production frontend build
-  succeeded. These checks made no provider call and cannot substitute for a live latency or answer-
+- **Current v5 offline verification:** repository-wide Ruff passed; 1,444 Python tests passed with
+  one intentional skip; the delivery, mode, and onboarding frontend contract suites passed; and
+  the production frontend build succeeded. These checks made no provider call and cannot substitute for a live latency or answer-
   quality measurement. The earlier full v3 gate remains historical evidence for that version.
 - **Previous v2 offline verification:** repository-wide Ruff passed; 1,258 Python tests passed with
   one intentional skip; both frontend delivery and mode suites passed; and the production frontend
