@@ -7,7 +7,7 @@ anything that still requires measurement.
 ## Current checkpoint — 2026-08-13
 
 - **Product:** the public, book-specific reader is live at `https://archivist.mcrombie.com`. The
-  built-in RAG default is now `retrieval-authored-v4` over 481 retrieval-eligible manuscript
+  built-in RAG default is now `retrieval-authored-v5` over 481 retrieval-eligible manuscript
   chunks: local high-confidence follow-up resolution, one query-embedding request, shared
   dense/BM25 reciprocal-rank fusion, and a rich four-to-eight-unit evidence dossier targeting about
   2,500 estimated evidence tokens under a hard 4,500-token evidence ceiling. Public runtime
@@ -25,12 +25,16 @@ anything that still requires measurement.
   advanced setting. Five modes are reader-selectable: Professional, Essential, Pretty Pink
   Princess, Baleful Black Baron, and Ruthless Red Realist. Essential RAG makes no prose-generation call and returns direct
   cited evidence, but its hybrid retrieval still makes one embedding request; Essential plus Full
-  Context is rejected. Each other mode adds one no-retry low-reasoning, medium-verbosity Sol call
-  with a 1,800 output-token ceiling. It authors free prose over the rich dossier and one to three
-  in-character follow-up questions. Retrieval and authoring share one 35-second provider deadline;
+  Context is rejected. Each other mode adds one no-retry low-reasoning, medium-verbosity Sol call.
+  The existing `QuestionPlan` selects an ordinary 500-700 visible-answer-token target with a 1,800-
+  token API ceiling, or 900-1,100 with a 2,400-token ceiling for `BROAD_SYNTHESIS`. These targets are
+  advisory: concise special dispositions may be shorter, and padding, repetition, or invention is
+  forbidden. It authors free prose over the rich dossier and one to three in-character follow-up
+  questions. Retrieval and authoring share one 35-second provider deadline;
   retrieval receives at most eight seconds and authoring at most thirty seconds of the remaining
-  time. Sol, strict `/1` Structured Outputs, the 1,800-token ceiling, one shared client, and zero
-  retries are unchanged. Local
+  time. Input schema `archivist.authored_response_input/2` carries the profile; output schema
+  `archivist.retrieval_authored_answer/1`, renderer v1, one shared client, and zero retries remain.
+  Local
   code validates opaque support IDs and maps them to citations. When an accepted generated-mode
   turn uses that fallback, the reader now sees a nonfatal notice that the requested mode could not
   be completed and Essential evidence was returned; ordinary Essential and successfully authored
@@ -84,14 +88,11 @@ anything that still requires measurement.
   decomposition attempts, ran zero rubric and persona calls, and recorded `$1.591521500`.
   Reconciliation and terminal closure were provider-free. These are v3 observations, not v4
   quality or latency claims.
-- **V4 measurement adapter:** the isolated offline adapter binds product commit `536acc8`, a new
-  root/ledger/request scope, and the already validated cached embeddings for all 37 questions.
-  H001–H010 form a once-only mechanical sentinel; a continuation begins at H011 and cannot replay
-  the prefix. Each provider boundary seals its request hash and exact worst-case projection first;
-  a zero-event ambiguity automatically consumes that reserve without replay. Decomposition retains
-  the frozen text-anchor-v2 instrument but receives a 60-second evaluation-only timeout and
-  explicit latency. The four generated modes run in a separate social suite. No v4 live call has
-  run; every paid command still needs fresh explicit authorization and the exact matching cap.
+- **V4 measurement:** the isolated cohort bound product commit `536acc8`, reused the validated
+  cached embeddings for all 37 questions, and is complete and sealed. It preserves 37 once-only
+  generation outcomes (34 generated and three delivered Essential fallbacks), the repaired
+  decomposition and rubric phases, twelve generated social outcomes, exact accounting, and a final
+  text-free report. It remains fixed-length v4 evidence and cannot be relabelled as adaptive v5.
 - **Gold-set status:** the private workbook retains 37 questions across all six contracted strata:
   8 focused biographical, 8 focused analytical, 5 conceptual, 10 broad thematic, 4 out-of-corpus,
   and 2 adversarial-premise items. H020, H039, and H040 are intentionally absent. The owner source
@@ -125,16 +126,12 @@ anything that still requires measurement.
   `obligation_role_mismatch`, and one `unsupported_requirement_has_unit`. This is reassuring for
   infrastructure observability but not for product reliability: the public response-contract
   completion rate was 29/33, or 87.9%.
-- **Next product step:** preserve the descriptive, production, and v3 diagnostic cohorts unchanged, then obtain
-  separate authorization for any live
-  smoke or measurement. The narrow Edwin Sandys smoke made exactly three no-retry calls against the
-  superseded closed-cue selector in 8.357, 6.839, and 5.162 seconds, for 6,292 tokens and
-  `$0.060071250`; it does not measure this new path. Ad hoc current-policy turns diagnosed the
-  provider-schema mismatch described above. The declared v4 cohort has now sealed its ten-item
-  Professional sentinel: ten generated outcomes, ten priced events, zero embedding calls, and
-  `$0.458209000` recorded cost. It stopped before H011 on a trace-identifier defect, so the cohort
-  is incomplete and the new default and its character-social branch still carry no speed, quality,
-  or reliability claim.
+- **Next product step:** preserve every completed cohort unchanged and use the separate fixed three-
+  question, non-gold product latency smoke for a deliberately limited v5 check. Preparing the
+  harness makes no provider call; live execution requires a new exact authorization, no retries,
+  and isolated accounting. Three observations support minimum/median/maximum diagnostics only,
+  not p95, an SLA, a quality score, or a general latency claim. The narrow Edwin Sandys smoke and
+  sealed v4 cohort continue to measure their own superseded policies only.
   Ruthless Red Realist reuses the Ember & Ink appearance and applies a cold strategic focus on
   power, leverage, incentives, bargaining, tradeoffs, credible commitments, and institutional
   capacity. Its Machiavelli/Kissinger inspiration is deliberately high-level: no outside text was
@@ -142,10 +139,10 @@ anything that still requires measurement.
   Frozen V26 remains callable and immutable; V27 compact remains unpromoted historical evidence.
   If stronger claim-derived scoring is still useful, decomposition redesign remains a later,
   separate cohort; semantic calibration remains optional supplemental work.
-- **Current v4 offline verification:** focused product, public-contract, historical-manifest, and
-  frontend delivery checks pass; the closed v3 report still validates. No offline check made a
-  provider call or substitutes for a live latency or answer-quality measurement. The earlier full
-  v3 gate remains historical evidence for that version.
+- **Current v5 offline verification:** repository-wide Ruff passed; 1,426 Python tests passed with
+  one intentional skip; both frontend contract suites passed; and the production frontend build
+  succeeded. These checks made no provider call and cannot substitute for a live latency or answer-
+  quality measurement. The earlier full v3 gate remains historical evidence for that version.
 - **Previous v2 offline verification:** repository-wide Ruff passed; 1,258 Python tests passed with
   one intentional skip; both frontend delivery and mode suites passed; and the production frontend
   build succeeded. No offline check made a provider call or substitutes for a live latency or
@@ -153,6 +150,26 @@ anything that still requires measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-13 — Adapt answer length and isolate a small latency check
+
+- Opened `retrieval-authored-v5` as a new product identity rather than changing sealed v4 in place.
+  `RouteTrait.BROAD_SYNTHESIS` in the existing local `QuestionPlan.traits` supplies the only scope decision:
+  ordinary questions target 500-700 reader-visible answer tokens and broad questions target
+  900-1,100. The corresponding Structured Outputs ceilings are 1,800 and 2,400 tokens. The larger
+  ceilings are headroom for reasoning, JSON, support IDs, and validation—not reader-visible length
+  goals.
+- Made the target explicitly advisory. Partial, insufficient, refused, and naturally concise
+  answers may be shorter; the model must not pad, repeat itself, or invent unsupported detail.
+  Input schema advances to `archivist.authored_response_input/2` so each request carries the closed
+  length profile. Output schema `/1`, renderer v1, retrieval, dossier, support validation, one-call/
+  no-retry behavior, fallback, and the 35/8/30-second boundaries remain unchanged.
+- Added a separate fixed three-question, non-gold product latency smoke instead of rerunning the
+  held-out, claim, citation, and social evaluations. Its implementation and preparation are
+  provider-free. A live run needs its own exact owner authorization and reports each observation,
+  status, cost, and simple minimum/median/maximum latency. With three items it cannot support p95,
+  an SLA, a quality finding, or a general performance claim. The sealed v4 cohort remains
+  unchanged historical evidence.
 
 ## 2026-08-13 — The v4 sentinel stopped on its own trace identifier
 

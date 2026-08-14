@@ -1,7 +1,7 @@
 """One-call, model-authored reader responses over a rich retrieval dossier.
 
-The model is free to synthesize, paraphrase, and choose an answer's useful
-length.  Archivist retains the smaller but important mechanical boundary: each
+The model is free to synthesize and paraphrase inside a deterministic adaptive
+length profile.  Archivist retains the smaller but important mechanical boundary: each
 historical run names the dossier units that support it, and local code resolves
 those opaque IDs into display citations.  Persona runs are deliberately
 uncited and may contain voice, metaphor, and fictional character business, but
@@ -63,12 +63,22 @@ from perspectives import (
 from public_sources import answer_has_extended_verbatim_overlap
 
 
-AUTHORED_RESPONSE_INPUT_SCHEMA = "archivist.authored_response_input/1"
-AUTHORED_RESPONSE_POLICY_VERSION = "retrieval-authored-v4"
+AUTHORED_RESPONSE_INPUT_SCHEMA = "archivist.authored_response_input/2"
+AUTHORED_RESPONSE_POLICY_VERSION = "retrieval-authored-v5"
 AUTHORED_RESPONSE_SCHEMA = "archivist.retrieval_authored_answer/1"
 AUTHORED_RESPONSE_OUTPUT_SCHEMA = AUTHORED_RESPONSE_SCHEMA
 AUTHORED_RESPONSE_RENDERER_VERSION = "retrieval-authored-renderer-v1"
-MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS = 1_800
+AUTHORED_ANSWER_LENGTH_POLICY_VERSION = "adaptive-answer-length-v1"
+ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS = 1_800
+BROAD_AUTHORED_RESPONSE_OUTPUT_TOKENS = 2_400
+# Historical v1-v4 evaluation adapters import this legacy fixed-ceiling symbol.
+# Keep it frozen at their 1,800-token contract; v5 requests use the selected
+# AuthoredAnswerLengthTarget.max_output_tokens instead.
+MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS = ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS
+ORDINARY_TARGET_OUTPUT_TOKEN_MINIMUM = 500
+ORDINARY_TARGET_OUTPUT_TOKEN_MAXIMUM = 700
+BROAD_TARGET_OUTPUT_TOKEN_MINIMUM = 900
+BROAD_TARGET_OUTPUT_TOKEN_MAXIMUM = 1_100
 MAX_RESPONSE_PARAGRAPHS = 12
 MAX_RUNS_PER_PARAGRAPH = 12
 MAX_SUPPORT_UNITS_PER_RUN = 8
@@ -134,8 +144,64 @@ class AuthoredResponseStatus(StrEnum):
     FALLBACK_REQUIRED = "fallback_required"
 
 
+class AuthoredAnswerScope(StrEnum):
+    """Deterministic answer-length class selected before the provider call."""
+
+    ORDINARY = "ordinary"
+    BROAD = "broad"
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoredAnswerLengthTarget:
+    scope: AuthoredAnswerScope
+    rationale_code: str
+    target_output_token_minimum: int
+    target_output_token_maximum: int
+    max_output_tokens: int
+
+    def as_input_payload(self) -> dict[str, object]:
+        return {
+            "policy": AUTHORED_ANSWER_LENGTH_POLICY_VERSION,
+            "scope": self.scope.value,
+            "rationale_code": self.rationale_code,
+            "target_answer_tokens": {
+                "minimum": self.target_output_token_minimum,
+                "maximum": self.target_output_token_maximum,
+            },
+            "max_output_tokens": self.max_output_tokens,
+        }
+
+
+def authored_answer_length_target(
+    scope: AuthoredAnswerScope | str = AuthoredAnswerScope.ORDINARY,
+) -> AuthoredAnswerLengthTarget:
+    """Return the closed request budget for an application-selected scope."""
+
+    try:
+        selected_scope = (
+            scope if isinstance(scope, AuthoredAnswerScope) else AuthoredAnswerScope(scope)
+        )
+    except (TypeError, ValueError) as exc:
+        raise AuthoredResponseContractError("unsupported authored answer scope") from exc
+    if selected_scope is AuthoredAnswerScope.BROAD:
+        return AuthoredAnswerLengthTarget(
+            scope=selected_scope,
+            rationale_code="question_plan_broad_synthesis",
+            target_output_token_minimum=BROAD_TARGET_OUTPUT_TOKEN_MINIMUM,
+            target_output_token_maximum=BROAD_TARGET_OUTPUT_TOKEN_MAXIMUM,
+            max_output_tokens=BROAD_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+        )
+    return AuthoredAnswerLengthTarget(
+        scope=selected_scope,
+        rationale_code="question_plan_ordinary",
+        target_output_token_minimum=ORDINARY_TARGET_OUTPUT_TOKEN_MINIMUM,
+        target_output_token_maximum=ORDINARY_TARGET_OUTPUT_TOKEN_MAXIMUM,
+        max_output_tokens=ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    )
+
+
 class AuthoredFailureCode(StrEnum):
-    # Retained for deserializing and reporting sealed v1-v3 artifacts. The v4
+    # Retained for deserializing and reporting sealed v1-v3 artifacts. The v5
     # authoring path emits the granular codes below instead.
     PROVIDER_FAILURE = "provider_failure"
     INVALID_RESPONSE = "invalid_response"
@@ -151,8 +217,20 @@ class AuthoredResponseContractError(ValueError):
     """Raised when authored output cannot be safely resolved to the dossier."""
 
 
+def _validated_answer_length_target(
+    target: AuthoredAnswerLengthTarget | None,
+) -> AuthoredAnswerLengthTarget:
+    selected = target or authored_answer_length_target()
+    if not isinstance(selected, AuthoredAnswerLengthTarget):
+        raise AuthoredResponseContractError("answer length target must be application-owned")
+    canonical = authored_answer_length_target(selected.scope)
+    if selected != canonical:
+        raise AuthoredResponseContractError("answer length target must match a closed profile")
+    return selected
+
+
 def authored_failure_code_for_exception(exc: Exception) -> AuthoredFailureCode:
-    """Map an exception to a stable, text-free v4 authoring failure class."""
+    """Map an exception to the stable, text-free authored failure classes."""
 
     if isinstance(exc, (APITimeoutError, httpx.TimeoutException, TimeoutError)):
         return AuthoredFailureCode.REQUEST_TIMEOUT
@@ -290,13 +368,18 @@ class AuthoredResponseResult:
 _COMMON_INSTRUCTIONS = """
 You are the conversational Archivist for *Cradle of the Empire: A Big History of Virginia*.
 Archivist has already retrieved and packaged the manuscript evidence. Write the actual answer: you
-may freely synthesize, paraphrase, explain relationships, choose structure, and choose the useful
-length. Do not merely repeat the passages or discuss the retrieval process.
+may freely synthesize, paraphrase, explain relationships, and choose structure. Do not merely
+repeat the passages or discuss the retrieval process.
 
-Answer the user's specific question directly. Let complexity determine length: a simple identity or
-date question may need only a compact answer, while a causal, comparative, or multipart question
-deserves a substantive explanation. Honor an explicit request for brevity or depth. The output-token
-limit is an operational latency ceiling, not a target.
+Answer the user's specific question directly. The input's `answer_length` object is application-owned
+length guidance. Its `target_answer_tokens` range applies approximately to all reader-visible prose
+across paragraph and follow-up text fields; it excludes JSON syntax, support IDs, and citations that
+the application adds later. For an `ordinary` turn, normally target 500-700 answer tokens. For a
+genuinely `broad` turn, use the longer stated range to preserve useful coverage. This is a target,
+not a reason to pad weak evidence, repeat yourself, invent detail, or omit a necessary qualification.
+Honor an explicit request for greater brevity or depth when the evidence permits. Short partial,
+insufficient, or refusal responses remain valid. `max_output_tokens` is structured-response and
+reasoning headroom, not the answer-length target.
 
 Grounding contract:
 - Put historical claims, manuscript-derived explanations, and factual synthesis in `grounded` runs.
@@ -429,7 +512,8 @@ def build_authored_response_instructions(
             "\n\nAdvanced interpretive settings:\n"
             "Apply these through selection, emphasis, interpretation, and prose texture. They "
             "never override the grounding contract or the selected character's identity. Choose "
-            "the answer's organization and length naturally; no fixed preface, middle, or coda is "
+            "the answer's organization naturally within the selected length profile; no fixed "
+            "preface, middle, or coda is "
             "required.\n"
             f"{facet_block}"
         )
@@ -446,11 +530,13 @@ def build_authored_response_input(
     resolved_turn: ResolvedTurnLike,
     dossier: RetrievalDossier,
     mode: ArchivistMode | str,
+    answer_length_target: AuthoredAnswerLengthTarget | None = None,
 ) -> str:
     """Serialize the user turn and rich dossier without local citation numbers."""
 
     selected_mode = _normalize_mode(mode)
     normalized_question, standalone_question = _validate_turn(question, resolved_turn)
+    selected_length_target = _validated_answer_length_target(answer_length_target)
     dossier_payload = json.loads(serialize_retrieval_dossier(dossier))
     if not isinstance(dossier_payload, dict):
         raise AuthoredResponseContractError("serialized dossier must be an object")
@@ -458,6 +544,7 @@ def build_authored_response_input(
         {
             "schema": AUTHORED_RESPONSE_INPUT_SCHEMA,
             "mode": selected_mode.value,
+            "answer_length": selected_length_target.as_input_payload(),
             "user_question": normalized_question,
             "resolved_turn": {
                 "standalone_question": standalone_question,
@@ -479,7 +566,7 @@ def authored_response_prompt_metadata(
     historiographical_lens: HistoriographicalLens | str | None = None,
     voice: AnswerVoice | str | None = None,
     worldview: Worldview | str | None = None,
-) -> dict[str, str]:
+) -> dict[str, object]:
     selected_mode = _normalize_mode(mode)
     instructions = build_authored_response_instructions(
         selected_mode,
@@ -490,6 +577,12 @@ def authored_response_prompt_metadata(
     influence_prompt = load_influence_profile_prompt(selected_mode)
     return {
         "authored_response_renderer_version": AUTHORED_RESPONSE_RENDERER_VERSION,
+        "authored_response_input_schema": AUTHORED_RESPONSE_INPUT_SCHEMA,
+        "authored_answer_length_policy_version": AUTHORED_ANSWER_LENGTH_POLICY_VERSION,
+        "authored_response_ordinary_max_output_tokens": (
+            ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS
+        ),
+        "authored_response_broad_max_output_tokens": BROAD_AUTHORED_RESPONSE_OUTPUT_TOKENS,
         "authored_response_prompt_sha256": hashlib.sha256(instructions.encode("utf-8")).hexdigest(),
         "authored_response_mode_instruction_sha256": hashlib.sha256(
             generated_mode_definition(selected_mode)
@@ -582,15 +675,18 @@ def generate_authored_response(
     historiographical_lens: HistoriographicalLens | str | None = None,
     voice: AnswerVoice | str | None = None,
     worldview: Worldview | str | None = None,
+    answer_length_target: AuthoredAnswerLengthTarget | None = None,
 ) -> AuthoredResponseResult:
     """Make exactly one no-retry authoring call or return a typed fallback."""
 
     selected_mode = _normalize_mode(mode)
+    selected_length_target = _validated_answer_length_target(answer_length_target)
     request_input = build_authored_response_input(
         question=question,
         resolved_turn=resolved_turn,
         dossier=dossier,
         mode=selected_mode,
+        answer_length_target=selected_length_target,
     )
     try:
         response = tracked_responses_parse(
@@ -604,7 +700,7 @@ def generate_authored_response(
             ),
             input=request_input,
             text_format=AuthoredResponse,
-            max_output_tokens=MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+            max_output_tokens=selected_length_target.max_output_tokens,
             **AUTHORED_RESPONSE_SETTINGS.responses_create_kwargs(),
         )
     except CostLimitExceeded:
@@ -756,12 +852,18 @@ def _fallback_result(
 
 
 __all__ = [
+    "AUTHORED_ANSWER_LENGTH_POLICY_VERSION",
     "AUTHORED_RESPONSE_INPUT_SCHEMA",
     "AUTHORED_RESPONSE_OUTPUT_SCHEMA",
     "AUTHORED_RESPONSE_POLICY_VERSION",
     "AUTHORED_RESPONSE_RENDERER_VERSION",
     "AUTHORED_RESPONSE_SCHEMA",
     "AUTHORED_RESPONSE_SETTINGS",
+    "BROAD_AUTHORED_RESPONSE_OUTPUT_TOKENS",
+    "BROAD_TARGET_OUTPUT_TOKEN_MAXIMUM",
+    "BROAD_TARGET_OUTPUT_TOKEN_MINIMUM",
+    "AuthoredAnswerLengthTarget",
+    "AuthoredAnswerScope",
     "AuthoredDisposition",
     "AuthoredFailureCode",
     "AuthoredFollowUp",
@@ -775,8 +877,12 @@ __all__ = [
     "AuthoredRunKind",
     "PersonaAuthoredRun",
     "MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS",
+    "ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS",
+    "ORDINARY_TARGET_OUTPUT_TOKEN_MAXIMUM",
+    "ORDINARY_TARGET_OUTPUT_TOKEN_MINIMUM",
     "ResolvedTurnLike",
     "authored_response_prompt_metadata",
+    "authored_answer_length_target",
     "build_authored_response_input",
     "build_authored_response_instructions",
     "authored_failure_code_for_exception",

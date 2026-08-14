@@ -371,7 +371,7 @@ def test_closed_selection_is_exact_answerable_file_order_and_text_free_on_disk()
     assert len(items) == protocol.PLANNED_ATTEMPT_COUNT == 33
     assert manifest["schema"] == "archivist.production_performance_manifest/3"
     assert manifest["protocol_version"] == "production-performance-v2"
-    assert manifest["answer_policy_version_expected"] == "retrieval-authored-v4"
+    assert manifest["answer_policy_version_expected"] == "retrieval-authored-v5"
     assert manifest["evidence_retrieval_kind_expected"] == "hybrid_bm25_rrf"
     assert manifest["embedding_model_expected"] == "text-embedding-3-small"
     assert manifest["generated_prose_model_expected"] == "gpt-5.6-sol"
@@ -410,7 +410,7 @@ def test_closed_selection_is_exact_answerable_file_order_and_text_free_on_disk()
     }
 
 
-def test_runtime_identity_requires_retrieval_authored_v4_contract():
+def test_runtime_identity_requires_current_retrieval_authored_v5_contract():
     manifest, _items = _prepared()
     identity = _runtime_identity(manifest)
 
@@ -424,10 +424,17 @@ def test_runtime_identity_requires_retrieval_authored_v4_contract():
         protocol.validate_runtime_identity(obsolete_identity, manifest=manifest)
 
 
-def test_current_loader_preserves_a_self_bound_v3_manifest(tmp_path):
+@pytest.mark.parametrize(
+    "historical_policy",
+    ("retrieval-authored-v3", "retrieval-authored-v4"),
+)
+def test_current_loader_preserves_a_self_bound_historical_manifest(
+    tmp_path,
+    historical_policy,
+):
     current, _items = _prepared()
     historical = dict(current)
-    historical["answer_policy_version_expected"] = "retrieval-authored-v3"
+    historical["answer_policy_version_expected"] = historical_policy
     historical = protocol.sealed_artifact(historical)
     path = tmp_path / "prepared-manifest.json"
     protocol.write_json_no_overwrite(path, historical)
@@ -437,7 +444,7 @@ def test_current_loader_preserves_a_self_bound_v3_manifest(tmp_path):
 
     assert loaded == historical
     assert loaded["artifact_sha256"] == historical["artifact_sha256"]
-    assert identity["answer_policy_version"] == "retrieval-authored-v3"
+    assert identity["answer_policy_version"] == historical_policy
     assert protocol.validate_runtime_identity(identity, manifest=loaded) == identity
 
 

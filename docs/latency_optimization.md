@@ -9,8 +9,9 @@ V27 compact completed its offline representation gate but never received the pai
 and was never promoted. It was first superseded by `application-compiled-v1`, whose three bounded
 32-word cards and closed cue selector were then themselves superseded by
 `retrieval-authored-v1`, followed by the narrow two-character `retrieval-authored-v2` candidate;
-both are now preserved as historical/manual predecessors to `retrieval-authored-v3`, which is in
-turn the predecessor to current `retrieval-authored-v4`. The cue-selector boundary overcorrected for structural control and hurt
+both are now preserved as historical/manual predecessors to `retrieval-authored-v3`, followed by
+the fixed-length `retrieval-authored-v4` evaluation identity and current adaptive
+`retrieval-authored-v5`. The cue-selector boundary overcorrected for structural control and hurt
 question relevance and answer substance; its narrow Edwin Sandys smoke remains historical evidence
 for that exact policy only.
 
@@ -20,9 +21,13 @@ eight whole chunks or complete paragraph ranges, targeting about 2,500 estimated
 under a hard 4,500-token ceiling. Essential returns direct cited evidence without a prose-generation
 call, but is no longer providerless. Every registered generated mode -- currently Professional,
 Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- adds exactly one no-retry
-`gpt-5.6-sol` authored-response call with low reasoning, medium verbosity,
-and a 1,800 output-token ceiling. The model writes free prose and one to three in-character follow-
-up questions. Current v4 retrieval and authoring share a 35-second provider deadline: the embedding operation
+`gpt-5.6-sol` authored-response call with low reasoning and medium verbosity. The existing local
+`QuestionPlan` selects the `retrieval-authored-v5` answer-length profile: ordinary questions target
+500-700 reader-visible answer tokens with a 1,800-token API ceiling, while plans carrying
+`BROAD_SYNTHESIS` target 900-1,100 with a 2,400-token ceiling. Targets are advisory and never
+permit padding, repetition, or unsupported detail; concise special dispositions may be shorter.
+The model writes free prose and one to three in-character follow-up questions. Current retrieval
+and authoring share a 35-second provider deadline: the embedding operation
 gets at most eight seconds and the prose call gets at most thirty seconds of the remaining time.
 Local code maps valid opaque support IDs to citations and falls back to Essential on
 timeout, transport, provider exception/refusal, structured-output rejection, or local contract-
@@ -41,12 +46,18 @@ questions and not evidence that v2 is faster.
 
 The former V26/V27 browser selector has been removed. Both policies remain callable only through an
 explicit local development `rag_policy_version` for compatibility and historical investigation;
-omitting that field selects `retrieval-authored-v4`, and the public API does not accept it. Frozen
-V26 remains immutable. Production-performance v1 remains unchanged. No live/provider test, paid
-latency cohort, or quality cohort has run for `retrieval-authored-v4` or its character-conversation
-branch. V3's 37-item run closed as a timeout diagnostic with 30 authored responses and seven
-fallbacks; it is not evidence about v4. This document therefore supports no
-claim that the current path is faster, better, or more reliable.
+omitting that field selects `retrieval-authored-v5`, and the public API does not accept it. Frozen
+V26 remains immutable. Production-performance v1 and the sealed v4 evaluation remain unchanged.
+The v4 results measure its fixed 1,800-token policy and cannot be relabelled as adaptive v5
+evidence. No live/provider test, paid latency cohort, or quality cohort has run for v5. V3's
+37-item run remains a timeout diagnostic. This document therefore supports no claim that the
+current path is faster, better, or more reliable.
+
+A separate three-question [product latency smoke](product_latency_smoke.md) now provides a bounded,
+non-gold, full-product-path check without rerunning the held-out or semantic suites. Preparing that
+smoke is provider-free; live execution requires a new exact authorization. Three observations can
+support only transparent minimum/median/maximum diagnostics, not a p95, SLA, or general latency
+claim.
 
 The remainder of this document preserves the V27 hypothesis, offline measurements, and proposed
 protocol as historical design evidence. Its promotion instructions are no longer the active product

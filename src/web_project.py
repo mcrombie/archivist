@@ -42,15 +42,19 @@ from costs import (
 )
 from filters import should_skip_document
 from authored_response import (
+    AUTHORED_ANSWER_LENGTH_POLICY_VERSION,
     AUTHORED_RESPONSE_POLICY_VERSION,
     AUTHORED_RESPONSE_RENDERER_VERSION,
     AUTHORED_RESPONSE_SETTINGS,
+    AuthoredAnswerLengthTarget,
+    AuthoredAnswerScope,
     AuthoredDisposition,
     AuthoredFailureCode,
     AuthoredResponse,
     AuthoredResponseResult,
     AuthoredResponseStatus,
     authored_failure_code_for_exception,
+    authored_answer_length_target,
     authored_response_prompt_metadata,
     generate_authored_response,
 )
@@ -92,7 +96,7 @@ from perspectives import (
     settings_for_legacy_perspective,
 )
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
-from query_planning import ResolvedTurn, build_question_plan
+from query_planning import ResolvedTurn, RouteTrait, build_question_plan
 from full_context_pipeline import run_full_context_answer
 from rag_pipeline import (
     AnswerModeResult,
@@ -874,7 +878,40 @@ def _retrieval_authored_generation_trace(
     worldview: Worldview | None = None,
     fallback_code: str | None = None,
     content_outcome: str | None = None,
+    answer_length_target: AuthoredAnswerLengthTarget | None = None,
 ) -> dict[str, object]:
+    length_trace: dict[str, object] = {
+        "answer_length_policy_version": (
+            AUTHORED_ANSWER_LENGTH_POLICY_VERSION
+            if answer_length_target is not None
+            else "not-applicable"
+        ),
+        "answer_length_profile": (
+            answer_length_target.scope.value
+            if answer_length_target is not None
+            else "not-applicable"
+        ),
+        "answer_length_rationale_code": (
+            answer_length_target.rationale_code
+            if answer_length_target is not None
+            else "not-applicable"
+        ),
+        "target_answer_tokens_minimum": (
+            answer_length_target.target_output_token_minimum
+            if answer_length_target is not None
+            else None
+        ),
+        "target_answer_tokens_maximum": (
+            answer_length_target.target_output_token_maximum
+            if answer_length_target is not None
+            else None
+        ),
+        "requested_max_output_tokens": (
+            answer_length_target.max_output_tokens
+            if answer_length_target is not None
+            else None
+        ),
+    }
     if not generation_called:
         failed_before_call = fallback_code is not None
         return {
@@ -905,6 +942,7 @@ def _retrieval_authored_generation_trace(
             "generator_verbosity": "not-applicable",
             "structured_generation_called": False,
             "fallback_code": fallback_code,
+            **length_trace,
         }
 
     metadata = authored_response_prompt_metadata(
@@ -936,7 +974,20 @@ def _retrieval_authored_generation_trace(
         "generator_verbosity": AUTHORED_RESPONSE_SETTINGS.verbosity,
         "structured_generation_called": True,
         "fallback_code": fallback_code,
+        **length_trace,
     }
+
+
+def _authored_answer_length_target_for_plan(
+    plan: object,
+) -> AuthoredAnswerLengthTarget:
+    traits = tuple(getattr(plan, "traits", ()) or ())
+    scope = (
+        AuthoredAnswerScope.BROAD
+        if RouteTrait.BROAD_SYNTHESIS in traits
+        else AuthoredAnswerScope.ORDINARY
+    )
+    return authored_answer_length_target(scope)
 
 
 def _character_conversation_generation_trace(
@@ -1003,6 +1054,11 @@ def _run_application_compiled_answer(
     pipeline_started_ns = perf_counter_ns()
     timings: dict[str, float] = {}
     plan = build_question_plan(resolved_turn)
+    answer_length_target = (
+        None
+        if archivist_mode is ArchivistMode.ESSENTIAL
+        else _authored_answer_length_target_for_plan(plan)
+    )
     if not bool(getattr(integrity, "passed", False)):
         return AnswerModeResult(
             answer=(
@@ -1020,6 +1076,7 @@ def _run_application_compiled_answer(
                     mode=archivist_mode,
                     generation_called=False,
                     generation_valid=False,
+                    answer_length_target=answer_length_target,
                 ),
                 "stage_timings_ms": {"pipeline_total": _elapsed_ms(pipeline_started_ns)},
             },
@@ -1129,6 +1186,7 @@ def _run_application_compiled_answer(
                     generation_called=False,
                     generation_valid=False,
                     fallback_code="retrieval_failure",
+                    answer_length_target=answer_length_target,
                 ),
                 "stage_timings_ms": timings,
             },
@@ -1178,6 +1236,7 @@ def _run_application_compiled_answer(
             mode=archivist_mode,
             generation_called=False,
             generation_valid=False,
+            answer_length_target=answer_length_target,
         )
         answer = direct.answer
         status = "retrieval_authored_direct"
@@ -1201,6 +1260,7 @@ def _run_application_compiled_answer(
             mode=archivist_mode,
             generation_called=False,
             generation_valid=True,
+            answer_length_target=answer_length_target,
         )
         answer = direct.answer
         status = "retrieval_authored_direct"
@@ -1244,6 +1304,7 @@ def _run_application_compiled_answer(
                     historiographical_lens=historiographical_lens,
                     voice=voice,
                     worldview=worldview,
+                    answer_length_target=answer_length_target,
                 )
             except CostLimitExceeded:
                 raise
@@ -1280,6 +1341,7 @@ def _run_application_compiled_answer(
                 authored.failure_code.value if authored.failure_code is not None else None
             ),
             content_outcome=authored_content_outcome,
+            answer_length_target=answer_length_target,
         )
         answer = authored.answer if generated else direct.answer
         status = "retrieval_authored" if generated else "retrieval_authored_fallback"

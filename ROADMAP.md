@@ -19,7 +19,7 @@ must not be conflated.
 
 ## Current checkpoint — 2026-08-13
 
-The built-in retrieval product now defaults to `retrieval-authored-v4`. High-confidence follow-up
+The built-in retrieval product now defaults to `retrieval-authored-v5`. High-confidence follow-up
 resolution is local. One `text-embedding-3-small` request supplies dense query scores; the shared
 dense/BM25 reciprocal-rank-fusion retriever and context finalizer then package four to eight
 source-bound units, targeting about 2,500 estimated evidence tokens under a hard 4,500-token
@@ -40,11 +40,16 @@ The reader-facing application now implements:
 
 Essential returns direct cited evidence and makes no prose-generation call, but it is not
 providerless: it uses the shared query-embedding request. Each of the other four modes adds exactly
-one no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
-output-token ceiling. That model writes free, question-responsive prose over the rich dossier and
-ends with one to three in-character follow-up questions. Grounded runs name opaque dossier-unit
-IDs; local code validates and maps those IDs to `[Source N]`. The strict `/1` schema, 1,800-token
-ceiling, one-call rule, and zero retries are unchanged. Retrieval and authoring share 35 seconds:
+one no-retry `gpt-5.6-sol` authored-response call with low reasoning and medium verbosity. The
+existing `QuestionPlan` selects ordinary 500-700 reader-visible-token guidance with a 1,800-token
+API ceiling, or 900-1,100 with a 2,400-token ceiling when `BROAD_SYNTHESIS` is present. These
+targets are advisory and never justify padding, repetition, or invention; concise special
+dispositions may be shorter. That model writes free, question-responsive prose over the rich
+dossier and ends with one to three in-character follow-up questions. Grounded runs name opaque
+dossier-unit IDs; local code validates and maps those IDs to `[Source N]`. Input schema
+`archivist.authored_response_input/2` carries the length profile; output schema
+`archivist.retrieval_authored_answer/1`, renderer `retrieval-authored-renderer-v1`, one-call rule,
+and zero retries remain unchanged. Retrieval and authoring share 35 seconds:
 embedding is capped at eight seconds and authoring at thirty. Timeout, transport failure, provider
 exception/refusal, structured-output rejection, and local contract-validation failure receive
 distinct text-free diagnostics while the reader sees the same generic Essential fallback. Advanced lens, voice, and worldview settings affect
@@ -72,7 +77,7 @@ bound Render's authoritative `RENDER_GIT_COMMIT`, one unchanged process epoch, t
 RAG identities, and the versioned `$2.00` public Complete-RAG request ceiling before any measured
 question was sent. That production-performance v1 identity and every result below remain unchanged.
 The next source release's public runtime identity schema is
-`archivist.public_runtime_identity/4`; it separately binds `retrieval-authored-v4`, hybrid
+`archivist.public_runtime_identity/4`; it separately binds `retrieval-authored-v5`, hybrid
 BM25/RRF retrieval, `text-embedding-3-small`, and the generated-prose model while retaining the
 frozen V26 identity. Manual deployment and live identity parity have not yet been verified.
 
@@ -223,9 +228,10 @@ After formal lock:
 | **8A. Production observability and latency evidence** | **Complete for the first observed cohort** | Preserve the text-free public artifacts and private audit root. The 33-attempt run produced 29 latency-eligible successes, four request failures, zero instrumentation failures, 54.393-second server p50, 113.801-second server p95, and `$4.90594694` estimated cost. Treat these as one observed warm cohort, not an SLA. |
 | **8B. V27 compact generation representation** | **Historical experiment; unpromoted and superseded** | Preserve the offline experiment and its proposed A/B in `docs/latency_optimization.md`. No paid candidate call ran, its old UI selector is gone, and it is not the current product path. |
 | **8C. Application-compiled answer path** | **Historical product iteration; superseded** | Preserve the closed-cue implementation history and its narrow three-call smoke. Its three 32-word cards overcorrected for structural safety and produced answers that were often too thin or off-target. Do not use its smoke as evidence about the current policy. |
-| **8D. Retrieval-authored answer path** | **Current v4 default; formal cohort in progress** | Preserve v1–v3 as historical behavior. V4 retains the hybrid retrieval, rich dossier, strict authored schema, one no-retry Sol call, local citations, required follow-ups, and generic direct-evidence fallback. It raises the shared provider boundary to 35 seconds and authoring cap to thirty, and adds granular text-free failure diagnostics. Essential still uses one embedding and no prose call. Do not claim a v4 latency, quality, or reliability improvement before the cohort closes. |
-| **8E. Retrieval-authored v4 evaluation** | **H001–H010 sealed; provider-free trace reconciliation required before H011** | Follow [`docs/retrieval_authored_v4_evaluation.md`](docs/retrieval_authored_v4_evaluation.md). The authorized sentinel sealed ten generated outcomes for `$0.458209000` with zero embedding calls, then stopped before H011 because its colon-delimited ledger key violated the trace identifier grammar. Reconcile only that field through the hash-bound, zero-call continuation; never repeat H001–H010. Persist intent and exact worst-case projection before every later boundary; automatically reserve a zero-event ambiguity without replay. Decompose only after generation with the frozen text-anchor-v2 instrument and a 60-second evaluation-only timeout, then rubric. |
-| **8F. Conversational persona evaluation** | **Integrated v4 suite; live cohort not started** | Run Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist as a separate four-mode social suite. Report status, latency, cost, manuscript-leading follow-ups, and transparent character-distinctness diagnostics. No provider call or result claim exists yet. |
+| **8D. Retrieval-authored answer path** | **Current v5 default; adaptive policy implemented offline** | Preserve v1-v4 as historical identities. V5 keeps v4 retrieval, dossier, strict output schema, one no-retry Sol call, local citations, required follow-ups, generic fallback, diagnostics, and 35/8/30-second boundaries. `RouteTrait.BROAD_SYNTHESIS` in the existing `QuestionPlan.traits` selects advisory 900-1,100-token broad guidance and a 2,400-token API ceiling; other questions use 500-700 and 1,800. Input schema is `/2`; output and renderer remain `/1` and v1. Do not claim a v5 latency improvement before measurement. |
+| **8E. Retrieval-authored v4 evaluation** | **Complete and sealed historical cohort** | Preserve [`docs/retrieval_authored_v4_evaluation.md`](docs/retrieval_authored_v4_evaluation.md), its private root, report, and fixed-length product identity unchanged. It sealed 37 once-only generation outcomes (34 generated and three delivered Essential fallbacks), the repaired decomposition phase, and all 12 social outcomes. Its observations remain v4 evidence and may not be relabelled as v5. |
+| **8F. Conversational persona evaluation** | **Complete for the sealed v4 suite** | Preserve the separate twelve-outcome Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist social suite. It is exploratory non-gold v4 evidence, not a v5 or historical-answer quality claim. |
+| **8G. Adaptive-policy latency smoke** | **Implemented offline; live run not started** | Use the fixed three-question, non-gold [`product latency smoke`](docs/product_latency_smoke.md) for a small full-product-path diagnostic. Preparation makes no provider call. Live execution needs a new exact authorization, uses no retries, and reports the three observations plus minimum/median/maximum—not p95, an SLA, or a general latency claim. |
 
 ## Next sequence
 
@@ -337,21 +343,27 @@ top of the list.
     reader fallback. The isolated adapter binds product commit `536acc8`, the validated cached
     embeddings, once-only H001–H010 prefix, automatic exact ambiguity reserve, 60-second
     decomposition timeout, and separate four-mode social suite.
-19. **In progress under explicit authorization and the exact cumulative cap — run v4.** H001-H010
-    sealed once as generated outcomes for `$0.458209000`; cached vectors made zero embedding calls.
-    The remaining command stopped before H011 because the trace copied a colon-delimited ledger
-    turn key. Commit and seal the provider-free, hash-bound trace-scope continuation, never repeat
-    the prefix, and only then start remaining generation at H011.
-    Sentinel answer quality, latency, and cost are report-only, not promotion vetoes. Decompose only
-    after all 37 generation dispositions, then rubric, then the separate Professional/Princess/
-    Baron/Red Realist social suite. A zero-event boundary consumes its exact projected reserve and
-    is never replayed.
-20. **Later, after deployment identity verification and fresh authorization — open
+19. **Completed and sealed — run v4.** Preserve all 37 once-only generation outcomes (34 generated
+    and three delivered Essential fallbacks), repaired decomposition outcomes, rubric results,
+    twelve separate social outcomes, exact usage, and final text-free report. Never replay or
+    rewrite the cohort, and never use its fixed 1,800-token results as v5 evidence.
+20. **Completed for offline implementation — open `retrieval-authored-v5`.** Reuse the existing
+    `RouteTrait.BROAD_SYNTHESIS` in the existing `QuestionPlan.traits` instead of inventing a second classifier. Ordinary answers
+    target 500-700 visible answer tokens with 1,800 tokens of API headroom; broad answers target
+    900-1,100 with 2,400. The target is advisory, special dispositions may be shorter, and padding
+    is forbidden. The input schema advances to `/2`; output schema `/1`, renderer v1, retrieval,
+    validation, fallback, no-retry, and 35/8/30-second boundaries remain unchanged.
+21. **Implemented offline; awaiting separate exact authorization — run the limited latency
+    smoke.** Exercise three fixed non-gold first turns through the current product path with no
+    retries and isolated accounting. Report each observation, fallback and cost status, plus
+    minimum/median/maximum. Do not report p95 from three items or treat the result as a quality
+    cohort, SLA, or general latency claim.
+22. **Later, after deployment identity verification and fresh authorization — open
     production-performance v2.** Preserve v1's
     54.393/113.801-second p50/p95 and all four failures unchanged. A v2 report must state that it
     measures a different answer policy and must remain an observed cohort comparison unless the
     required repeat/noise protocol supports a stronger claim.
-21. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+23. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
     subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
     technical failures are preserved, measure judge and decomposition agreement, and publish a
     hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes
@@ -407,8 +419,10 @@ Current contract:
 - Essential is direct cited evidence with no prose-generation call in current RAG; it still uses
   the shared query-embedding provider call. Essential plus Full Context is rejected.
 - The other four modes author free prose over the same rich dossier and end with one to three
-  in-character follow-up questions. They retain one strict no-retry Sol call and 1,800 output-token
-  ceiling. The shared provider boundary is 35 seconds: embedding is capped at eight seconds and
+  in-character follow-up questions. They retain one strict no-retry Sol call. Ordinary questions
+  target 500-700 visible answer tokens with a 1,800-token API ceiling; `BROAD_SYNTHESIS` questions
+  target 900-1,100 with a 2,400-token ceiling. The targets are advisory and never justify padding.
+  The shared provider boundary is 35 seconds: embedding is capped at eight seconds and
   authoring at thirty. A failed call falls back to direct evidence without retry; text-free
   diagnostics distinguish timeout, transport, provider exception/refusal, structured-output
   rejection, and local validation while reader copy remains generic.

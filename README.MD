@@ -6,7 +6,7 @@ Big History of Virginia*. It searches the complete substantive manuscript, answe
 
 Public demo: [https://archivist.mcrombie.com](https://archivist.mcrombie.com)
 
-The source tree described below implements `retrieval-authored-v4`. Production deploys are manual;
+The source tree described below implements `retrieval-authored-v5`. Production deploys are manual;
 the live service must report runtime identity schema 4 before it can be described as running this
 policy. That live parity has not yet been verified.
 
@@ -16,7 +16,7 @@ chunks, internal traces, or arbitrary file paths.
 
 ## Current product
 
-The built-in RAG product now defaults to `retrieval-authored-v4` over **481
+The built-in RAG product now defaults to `retrieval-authored-v5` over **481
 retrieval-eligible chunks**. Archivist resolves high-confidence ordinary follow-ups locally, makes
 one `text-embedding-3-small` query-embedding request, and uses the shared dense/BM25
 reciprocal-rank-fusion retriever and context finalizer. It packages four to eight evidence units,
@@ -46,10 +46,14 @@ The reader experience includes:
 In current RAG, Essential returns direct cited manuscript evidence and makes **no
 prose-generation call**. It is not providerless: the shared hybrid search still makes one query-
 embedding request. Every registered generated mode -- currently Professional, Pretty Pink Princess,
-Baleful Black Baron, and Ruthless Red Realist -- adds exactly one
-no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
-output-token ceiling. The model receives the question, locally resolved turn, and rich dossier; it
-may freely synthesize, paraphrase, choose useful length, and write in the selected character.
+Baleful Black Baron, and Ruthless Red Realist -- adds exactly one no-retry `gpt-5.6-sol`
+authored-response call with low reasoning and medium verbosity. The existing local `QuestionPlan`
+selects an adaptive length profile: ordinary questions target 500-700 reader-visible answer tokens
+with a 1,800-token API ceiling; plans carrying `BROAD_SYNTHESIS` target 900-1,100 with a 2,400-token
+ceiling. These are advisory targets, not local minimums. Concise partial, insufficient, refusal, or
+otherwise complete answers may be shorter, and the model must not pad, repeat, or invent material
+to fill a range. The model receives the question, locally resolved turn, and rich dossier; it may
+synthesize, paraphrase, and write in the selected character.
 Generated modes end with one to three in-character follow-up questions. A timeout, transport or
 provider exception, provider refusal, structured-output rejection, or local contract-validation
 failure is recorded with a text-free diagnostic code and falls back to direct Essential evidence
@@ -77,8 +81,9 @@ reply in the same character instead of unrelated Essential evidence. Essential, 
 questions, manuscript questions, and mixed social-plus-historical questions continue through
 their normal grounded path; this is not a general-purpose chatbot route.
 
-The v4 authored-response policy retains input/output schemas
-`archivist.authored_response_input/1` and `archivist.retrieval_authored_answer/1` plus renderer
+The v5 authored-response policy uses input schema `archivist.authored_response_input/2` to carry
+the closed adaptive-length profile. Its output schema remains
+`archivist.retrieval_authored_answer/1` and its renderer remains
 `retrieval-authored-renderer-v1`. Character conversation likewise retains schemas
 `archivist.character_conversation_input/1` and `archivist.character_conversation_answer/1` plus
 renderer `character-conversation-renderer-v1`; its v2 policy name records registry-generalized
@@ -203,8 +208,9 @@ published to the internet.
 
 ### Explicit legacy development policies
 
-Omitting `rag_policy_version` uses `retrieval-authored-v4`. The superseded
-`retrieval-authored-v1`, `retrieval-authored-v2`, and `retrieval-authored-v3` candidates remain historical/manual evidence
+Omitting `rag_policy_version` uses `retrieval-authored-v5`. The superseded
+`retrieval-authored-v1`, `retrieval-authored-v2`, `retrieval-authored-v3`, and
+`retrieval-authored-v4` candidates remain historical/manual or sealed evaluation evidence
 rather than selectable API policies. A local development API caller may still explicitly request `evidence-planned-v26` or
 `evidence-planned-v27` for compatibility and
 historical investigation. The browser no longer exposes that selector, and the public request
@@ -256,7 +262,7 @@ correlates a public request with its text-free server record; successful answer 
 pipeline-stage timings, returned token usage, and estimated API cost; and safe failure records keep
 the HTTP outcome without storing the question, answer, manuscript passage, prompt, or source text.
 The current source version endpoint reports `archivist.public_runtime_identity/4`, binding a
-running process to Render's `RENDER_GIT_COMMIT`, `retrieval-authored-v4`, hybrid BM25/RRF retrieval,
+running process to Render's `RENDER_GIT_COMMIT`, `retrieval-authored-v5`, hybrid BM25/RRF retrieval,
 `text-embedding-3-small`, the generated-prose model, the corpus manifest, the frozen V26 candidate
 identity, and the versioned public request-cost contract. On Render, its automatic commit identity
 is authoritative. Manual deployment and live identity parity for this redesign remain unverified.
@@ -295,9 +301,9 @@ or latency guarantee. This sealed production-performance v1 cohort exercised fro
 either later product policy. Its identities, results, and interpretation are unchanged. The narrow
 Edwin Sandys smoke subsequently exercised the superseded `application-compiled-v1` cue selector:
 three no-retry calls passed in 8.357, 6.839, and 5.162 seconds for `$0.060071250`. It does not
-measure `retrieval-authored-v1`, `retrieval-authored-v2`, `retrieval-authored-v3`, or
-`retrieval-authored-v4`. No paid or live test has run for the
-current policy, so there is no
+measure `retrieval-authored-v1`, `retrieval-authored-v2`, `retrieval-authored-v3`,
+`retrieval-authored-v4`, or `retrieval-authored-v5`. No paid or live test has run for the adaptive
+v5 policy, so there is no
 current latency, quality, or reliability improvement claim.
 
 The later `retrieval-authored-v3` Professional run is terminally preserved as a **timeout-
@@ -345,7 +351,7 @@ npm run test:modes
 npm run build
 ```
 
-**Verification snapshot — August 13, 2026:** repository-wide Ruff passed; **1,298 Python tests passed
+**Verification snapshot — August 13, 2026:** repository-wide Ruff passed; **1,426 Python tests passed
 and 1 was intentionally skipped**; both focused frontend suites passed; and the production frontend
 built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
@@ -568,19 +574,14 @@ commit in a detached worktree rather than the later documentation-only head.
 
 This is a complete **descriptive baseline**, not yet a full semantic answer-quality scorecard.
 Faithfulness, abstention, gold-claim recall, and related semantic measures remain pending by design.
-The current product is `retrieval-authored-v4`, while keeping `retrieval-authored-v1`,
-`retrieval-authored-v2`, `retrieval-authored-v3`, frozen V26, the superseded selector
-smoke, and all completed
-measurements unchanged. The new default has not completed a paid latency or quality cohort, so no
-speed, quality, or reliability improvement is claimed. Its authorized v4 sentinel sealed ten
-generated H001-H010 outcomes for `$0.458209000` with zero embedding calls, then stopped before H011
-because a colon-delimited private ledger key violated the trace identifier grammar. The
-provider-free continuation preserves those outcomes and certifies only a colon-to-hyphen trace
-normalization. The remaining run retains the matching cumulative cap, reuses the validated
-37-question embedding cache, never repeats H001-H010, automatically reserves exact worst-case cost
-for a zero-event ambiguity without replay, gives decomposition a 60-second evaluation-only
-timeout, and runs the four generated modes in a separate conversational suite. An optional
-calibration/semantic supplement remains lower priority.
+The current product is `retrieval-authored-v5`, while keeping `retrieval-authored-v1` through v4,
+frozen V26, the superseded selector smoke, and all completed measurements unchanged. V5 changes
+the input schema and output-length policy, so v4 evaluation results remain v4 evidence and are not
+relabelled. The adaptive default has not completed a paid latency or quality cohort; no speed,
+quality, or reliability improvement is claimed. A separate fixed three-question, non-gold latency
+smoke provides a deliberately small full-product-path check without rerunning the held-out or
+semantic suites. Preparing it is provider-free; any live execution requires its own exact owner
+authorization. It reports the three observations and simple latency summaries, not a p95 or SLA.
 
 ## Documentation map
 
@@ -597,6 +598,8 @@ calibration/semantic supplement remains lower priority.
   v4 cohort identity, once-only sequence, ambiguity accounting, and authorization interlocks.
 - [`docs/latency_optimization.md`](docs/latency_optimization.md) — historical, unpromoted V27
   compact-response experiment and its superseded promotion protocol.
+- [`docs/product_latency_smoke.md`](docs/product_latency_smoke.md) — bounded three-question,
+  non-gold latency-only product-path check for the current policy.
 - [`docs/public_demo_design.md`](docs/public_demo_design.md) — public exposure and citation design.
 - [`docs/public_deployment.md`](docs/public_deployment.md) — Render deployment and recovery runbook.
 - [`docs/production_performance.md`](docs/production_performance.md) — protocol and interpretation

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
@@ -8,7 +9,17 @@ from openai.lib._pydantic import to_strict_json_schema
 import authored_response
 from archivist_modes import ArchivistMode
 from authored_response import (
+    AUTHORED_ANSWER_LENGTH_POLICY_VERSION,
+    AUTHORED_RESPONSE_INPUT_SCHEMA,
     AUTHORED_RESPONSE_OUTPUT_SCHEMA,
+    BROAD_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    BROAD_TARGET_OUTPUT_TOKEN_MAXIMUM,
+    BROAD_TARGET_OUTPUT_TOKEN_MINIMUM,
+    MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    ORDINARY_TARGET_OUTPUT_TOKEN_MAXIMUM,
+    ORDINARY_TARGET_OUTPUT_TOKEN_MINIMUM,
+    AuthoredAnswerScope,
     AuthoredDisposition,
     AuthoredFailureCode,
     AuthoredFollowUp,
@@ -19,6 +30,8 @@ from authored_response import (
     AuthoredRunKind,
     GroundedAuthoredRun,
     PersonaAuthoredRun,
+    authored_answer_length_target,
+    authored_response_prompt_metadata,
     build_authored_response_input,
     build_authored_response_instructions,
     generate_authored_response,
@@ -222,6 +235,17 @@ def test_input_sends_rich_full_passages_but_not_local_source_numbers():
         mode=ArchivistMode.PROFESSIONAL,
     )
     payload = json.loads(serialized)
+    assert payload["schema"] == AUTHORED_RESPONSE_INPUT_SCHEMA
+    assert payload["answer_length"] == {
+        "policy": AUTHORED_ANSWER_LENGTH_POLICY_VERSION,
+        "scope": "ordinary",
+        "rationale_code": "question_plan_ordinary",
+        "target_answer_tokens": {
+            "minimum": ORDINARY_TARGET_OUTPUT_TOKEN_MINIMUM,
+            "maximum": ORDINARY_TARGET_OUTPUT_TOKEN_MAXIMUM,
+        },
+        "max_output_tokens": ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    }
     assert payload["retrieval_dossier"]["units"][0]["text"] == long_text
     assert payload["retrieval_dossier"]["units"][0]["source"]["chapter_title"]
     assert payload["resolved_turn"]["entities"] == ["Edwin Sandys"]
@@ -242,10 +266,70 @@ def test_distinct_prompts_allow_real_authoring_and_require_engagement(mode, expe
     instructions = build_authored_response_instructions(mode)
     assert expected in instructions
     assert "freely synthesize, paraphrase" in instructions
-    assert "choose the useful\nlength" in instructions
+    assert "normally target 500-700 answer tokens" in instructions
+    assert "Short partial,\ninsufficient, or refusal responses remain valid" in instructions
     assert "one to three original follow-up questions" in instructions
     assert "sentence does not need to quote or exactly match" in instructions
     assert "Registered editorial influence profile" in instructions
+
+
+def test_answer_length_profiles_are_closed_and_broad_input_is_explicit():
+    ordinary = authored_answer_length_target(AuthoredAnswerScope.ORDINARY)
+    broad = authored_answer_length_target(AuthoredAnswerScope.BROAD)
+    assert MAX_AUTHORED_RESPONSE_OUTPUT_TOKENS == 1_800
+
+    assert (
+        ordinary.target_output_token_minimum,
+        ordinary.target_output_token_maximum,
+        ordinary.max_output_tokens,
+    ) == (
+        ORDINARY_TARGET_OUTPUT_TOKEN_MINIMUM,
+        ORDINARY_TARGET_OUTPUT_TOKEN_MAXIMUM,
+        ORDINARY_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    ) == (500, 700, 1_800)
+    assert (
+        broad.target_output_token_minimum,
+        broad.target_output_token_maximum,
+        broad.max_output_tokens,
+    ) == (
+        BROAD_TARGET_OUTPUT_TOKEN_MINIMUM,
+        BROAD_TARGET_OUTPUT_TOKEN_MAXIMUM,
+        BROAD_AUTHORED_RESPONSE_OUTPUT_TOKENS,
+    ) == (900, 1_100, 2_400)
+
+    payload = json.loads(
+        build_authored_response_input(
+            question="How did the institution change over time?",
+            resolved_turn=TURN,
+            dossier=_dossier(),
+            mode=ArchivistMode.PROFESSIONAL,
+            answer_length_target=broad,
+        )
+    )
+    assert payload["answer_length"] == broad.as_input_payload()
+    assert "word" not in json.dumps(payload["answer_length"]).lower()
+    with pytest.raises(AuthoredResponseContractError, match="unsupported authored answer scope"):
+        authored_answer_length_target("verbose")
+    with pytest.raises(AuthoredResponseContractError, match="closed profile"):
+        build_authored_response_input(
+            question="How did the institution change over time?",
+            resolved_turn=TURN,
+            dossier=_dossier(),
+            mode=ArchivistMode.PROFESSIONAL,
+            answer_length_target=replace(broad, max_output_tokens=9_999),
+        )
+
+
+def test_prompt_metadata_identifies_v5_adaptive_length_contract():
+    metadata = authored_response_prompt_metadata(ArchivistMode.PROFESSIONAL)
+
+    assert metadata["authored_response_input_schema"] == "archivist.authored_response_input/2"
+    assert (
+        metadata["authored_answer_length_policy_version"]
+        == AUTHORED_ANSWER_LENGTH_POLICY_VERSION
+    )
+    assert metadata["authored_response_ordinary_max_output_tokens"] == 1_800
+    assert metadata["authored_response_broad_max_output_tokens"] == 2_400
 
 
 def test_ruthless_red_realist_is_inspired_without_impersonating_or_adding_facts():
@@ -462,7 +546,18 @@ class RecordingClient:
         return self
 
 
-def test_generation_is_exactly_one_low_reasoning_medium_verbosity_call(monkeypatch):
+@pytest.mark.parametrize(
+    ("scope", "expected_max_output_tokens"),
+    (
+        (AuthoredAnswerScope.ORDINARY, 1_800),
+        (AuthoredAnswerScope.BROAD, 2_400),
+    ),
+)
+def test_generation_is_exactly_one_low_reasoning_medium_verbosity_call(
+    monkeypatch,
+    scope,
+    expected_max_output_tokens,
+):
     calls = []
     client = RecordingClient()
     structured = _response(
@@ -483,6 +578,7 @@ def test_generation_is_exactly_one_low_reasoning_medium_verbosity_call(monkeypat
         historiographical_lens="tragic",
         voice="romantic",
         worldview="pious",
+        answer_length_target=authored_answer_length_target(scope),
     )
     assert result.status is AuthoredResponseStatus.GENERATED
     assert client.max_retries == 0
@@ -491,7 +587,13 @@ def test_generation_is_exactly_one_low_reasoning_medium_verbosity_call(monkeypat
     assert calls[0][2]["model"] == "gpt-5.6-sol"
     assert calls[0][2]["reasoning"] == {"effort": "low"}
     assert calls[0][2]["text"] == {"verbosity": "medium"}
-    assert calls[0][2]["max_output_tokens"] == 1_800
+    assert calls[0][2]["max_output_tokens"] == expected_max_output_tokens
+    request_payload = json.loads(calls[0][2]["input"])
+    assert request_payload["answer_length"]["scope"] == scope.value
+    assert (
+        request_payload["answer_length"]["max_output_tokens"]
+        == expected_max_output_tokens
+    )
     assert calls[0][2]["text_format"] is AuthoredResponse
     assert "Selected advanced voice" in calls[0][2]["instructions"]
 

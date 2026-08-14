@@ -80,6 +80,7 @@ export type AppConfig = {
 export type AnswerStrategy = "rag" | "full_context";
 
 export function answerPolicyLabel(version: string | null | undefined) {
+  if (version === "retrieval-authored-v5") return "Retrieval-authored v5";
   if (version === "retrieval-authored-v4") return "Retrieval-authored v4";
   if (version === "retrieval-authored-v3") return "Retrieval-authored v3";
   if (version === "retrieval-authored-v2") return "Retrieval-authored v2";

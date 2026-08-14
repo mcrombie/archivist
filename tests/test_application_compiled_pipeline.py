@@ -8,6 +8,7 @@ from answer_progress import AnswerProgressStage
 from archivist_modes import ArchivistMode
 from authored_response import (
     AUTHORED_RESPONSE_POLICY_VERSION,
+    AuthoredAnswerScope,
     AuthoredDisposition,
     AuthoredFailureCode,
     AuthoredResponseResult,
@@ -20,6 +21,7 @@ from character_conversation import (
     CharacterConversationStatus,
 )
 from rag_pipeline import answer_run_diagnostics
+from query_planning import RouteTrait
 
 
 CHUNKS = [
@@ -176,8 +178,8 @@ def _generated_result(mode, dossier, *, answer=None):
     )
 
 
-def test_v4_authoring_timeout_policy_preserves_one_shared_deadline():
-    assert AUTHORED_RESPONSE_POLICY_VERSION == "retrieval-authored-v4"
+def test_v5_authoring_timeout_policy_preserves_one_shared_deadline():
+    assert AUTHORED_RESPONSE_POLICY_VERSION == "retrieval-authored-v5"
     assert web_project.AUTHORED_TOTAL_PROVIDER_DEADLINE_SECONDS == 35.0
     assert web_project.AUTHORED_EMBEDDING_TIMEOUT_SECONDS == 8.0
     assert web_project.AUTHORED_AUTHORING_TIMEOUT_SECONDS == 30.0
@@ -223,6 +225,8 @@ def test_essential_uses_one_no_retry_client_for_hybrid_retrieval_only(monkeypatc
     ]
     assert timeout_calls == [web_project.AUTHORED_EMBEDDING_TIMEOUT_SECONDS]
     assert result.diagnostics["generation"]["structured_generation_called"] is False
+    assert result.diagnostics["generation"]["answer_length_profile"] == "not-applicable"
+    assert result.diagnostics["generation"]["requested_max_output_tokens"] is None
     assert checked_claims
     assert AnswerProgressStage.GENERATING_ANSWER in stages
 
@@ -384,6 +388,10 @@ def test_generated_modes_author_once_from_rich_dossier_and_preserve_followup(
     assert kwargs["resolved_turn"].standalone_question == "When did Edwin Sandys live?"
     assert kwargs["dossier"].question == "When did Edwin Sandys live?"
     assert kwargs["mode"] is mode
+    assert kwargs["answer_length_target"].scope is AuthoredAnswerScope.ORDINARY
+    assert kwargs["answer_length_target"].target_output_token_minimum == 500
+    assert kwargs["answer_length_target"].target_output_token_maximum == 700
+    assert kwargs["answer_length_target"].max_output_tokens == 1_800
     assert len(kwargs["dossier"].units) == 4
     assert all(unit.text_scope == "full_chunk" for unit in kwargs["dossier"].units)
     assert sum(len(unit.text.split()) for unit in kwargs["dossier"].units) > 150
@@ -394,6 +402,10 @@ def test_generated_modes_author_once_from_rich_dossier_and_preserve_followup(
         "Would you like to trace how Sandys's policies shaped the assembly?"
     )
     assert result.diagnostics["generation"]["structured_generation_called"] is True
+    assert result.diagnostics["generation"]["answer_length_profile"] == "ordinary"
+    assert result.diagnostics["generation"]["target_answer_tokens_minimum"] == 500
+    assert result.diagnostics["generation"]["target_answer_tokens_maximum"] == 700
+    assert result.diagnostics["generation"]["requested_max_output_tokens"] == 1_800
     assert result.evidence_decision == "direct_answer"
     timeout_calls = [
         call["timeout"]
@@ -405,6 +417,37 @@ def test_generated_modes_author_once_from_rich_dossier_and_preserve_followup(
         web_project.AUTHORED_AUTHORING_TIMEOUT_SECONDS,
     ]
     assert all(call["max_retries"] == 0 for call in harness.client.option_calls)
+
+
+def test_broad_synthesis_trait_selects_and_forwards_longer_answer_profile(monkeypatch):
+    _install_pipeline(monkeypatch)
+    broad_plan = SimpleNamespace(traits=(RouteTrait.BROAD_SYNTHESIS,))
+    monkeypatch.setattr(web_project, "build_question_plan", lambda _turn: broad_plan)
+    captured = {}
+
+    def fake_author(_client, **kwargs):
+        captured.update(kwargs)
+        return _generated_result(kwargs["mode"], kwargs["dossier"])
+
+    monkeypatch.setattr(web_project, "generate_authored_response", fake_author)
+    result = web_project.answer_project_question_result(
+        "current",
+        "How did Virginia's institutions change across the manuscript?",
+        archivist_mode=ArchivistMode.PROFESSIONAL,
+        application_compiled=True,
+    )
+
+    target = captured["answer_length_target"]
+    assert target.scope is AuthoredAnswerScope.BROAD
+    assert target.rationale_code == "question_plan_broad_synthesis"
+    assert target.target_output_token_minimum == 900
+    assert target.target_output_token_maximum == 1_100
+    assert target.max_output_tokens == 2_400
+    assert result.plan is broad_plan
+    assert result.diagnostics["generation"]["answer_length_profile"] == "broad"
+    assert result.diagnostics["generation"]["target_answer_tokens_minimum"] == 900
+    assert result.diagnostics["generation"]["target_answer_tokens_maximum"] == 1_100
+    assert result.diagnostics["generation"]["requested_max_output_tokens"] == 2_400
 
 
 def test_generated_mode_skips_author_when_provider_deadline_is_exhausted(monkeypatch):
@@ -440,6 +483,8 @@ def test_generated_mode_skips_author_when_provider_deadline_is_exhausted(monkeyp
     assert fallback.final_chunks == essential.final_chunks
     assert fallback.diagnostics["generation"]["structured_generation_called"] is False
     assert fallback.diagnostics["generation"]["fallback_code"] == "request_timeout"
+    assert fallback.diagnostics["generation"]["answer_length_profile"] == "ordinary"
+    assert fallback.diagnostics["generation"]["requested_max_output_tokens"] == 1_800
     assert answer_run_diagnostics(fallback)["validation_error_code"] == "request_timeout"
 
 

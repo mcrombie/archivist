@@ -12,21 +12,23 @@ The corpus is also the moat. Rigorous evaluation depends on knowing the source m
 
 ## Current priorities and answer surfaces
 
-The source tree now implements `retrieval-authored-v4`; the highest-leverage unfinished product
-work is a separately authorized measurement of that new default without altering the completed
-V26 records or the terminal v3 timeout-diagnostic cohort. Recent ad hoc manual turns exposed and diagnosed a
-provider-schema defect and a missing personal-conversation contract, but they are not a declared
-smoke, latency cohort, or quality cohort and do not prove either repair in live behavior. The
-earlier authorized
-three-mode Edwin Sandys smoke measured the now-superseded `application-compiled-v1` cue selector;
-its 8.357, 6.839, and 5.162-second calls and `$0.060071250` estimated cost are historical
-compatibility evidence only and are not evidence about the current authored-response path. The highest-leverage unfinished
-measurement work is now encoded in a v4-specific adapter. Its authorized once-only H001-H010
-Professional sentinel sealed ten generated outcomes for `$0.458209000` with zero embedding calls,
-then stopped before H011 because a private ledger colon had entered the trace identifier. A
-provider-free, hash-bound continuation must reconcile only that mechanical trace field before the
-remaining 27 may run; claim decomposition and the four-mode social suite remain separate phases. The
-completed baselines and production cohort must stay unchanged. The objective is not "the answers
+The source tree now implements `retrieval-authored-v5`. Its only manuscript-answering policy change
+is adaptive answer length: the existing local `QuestionPlan` decides whether a question carries
+`BROAD_SYNTHESIS`; ordinary generated answers target 500-700 reader-visible answer tokens, while
+broad generated answers target 900-1,100. These ranges are advisory rather than local minimums:
+partial, insufficient, refused, or naturally concise answers may be shorter, and the model must
+never pad, repeat, or invent material to fill a range. The corresponding Structured Outputs
+headroom is 1,800 output tokens for ordinary turns and 2,400 for broad turns. The shared 35-second
+provider allowance, eight-second embedding cap, thirty-second authoring cap, one-call/no-retry
+rule, retrieval, dossier, validation, and fallback contracts are unchanged.
+
+The completed V26 records, terminal v3 timeout-diagnostic cohort, and sealed v4 evaluation remain
+immutable historical evidence. The earlier Edwin Sandys smoke measured the superseded
+`application-compiled-v1` cue selector and cannot support a v5 claim. A separate fixed three-
+question, non-gold latency smoke is the next narrow product-path measurement; its implementation
+makes no provider call, and a live run still requires an exact new authorization. It reports a
+small diagnostic sample rather than a p95, SLA, quality score, or general latency claim. The
+objective is not "the answers
 look good." Retrieval, faithfulness, citation, abstention, release reliability, latency, and spend
 must be measured, bounded, reproducible, and have their failures written down. A system with
 mediocre but characterized numbers is better evidence than a system with excellent-looking answers
@@ -88,9 +90,9 @@ appearance and interpretive modes are implemented and public; they are no longer
 Index Assistant Mode remains deferred and requires its own measurement before repair or promotion.
 Do not mistake a shipped reader feature for completion of the evaluation.
 
-Archivist currently documents seven answer-policy families, including superseded product paths:
+Archivist currently documents these answer-policy families, including superseded product paths:
 
-- **`retrieval-authored-v4`.** This is the default for current built-in RAG. For manuscript and
+- **`retrieval-authored-v5`.** This is the default for current built-in RAG. For manuscript and
   historical questions, Archivist retains the v1 evidence path: it resolves
   high-confidence ordinary follow-ups locally, makes one `text-embedding-3-small` query-embedding
   request, and runs the shared dense/BM25 reciprocal-rank-fusion retrieval and context finalizer.
@@ -99,17 +101,23 @@ Archivist currently documents seven answer-policy families, including superseded
   range of complete paragraphs may be used when the hard ceiling requires shortening. Essential
   makes no prose-generation call, but it is not providerless because it uses the shared embedding
   request. Every registered generated mode -- currently Professional, Pretty Pink Princess,
-  Baleful Black Baron, and Ruthless Red Realist -- adds exactly one
-  no-retry `gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800
-  output-token ceiling. The embedding and authoring operations share one 35-second provider
+  Baleful Black Baron, and Ruthless Red Realist -- adds exactly one no-retry `gpt-5.6-sol`
+  authored-response call with low reasoning and medium verbosity. The already-built local
+  `QuestionPlan` selects one of two answer-length profiles: absence of `BROAD_SYNTHESIS` means an
+  ordinary target of 500-700 reader-visible answer tokens with 1,800 Structured Outputs tokens of
+  API headroom; presence of that trait means a broad target of 900-1,100 reader-visible answer
+  tokens with 2,400 tokens of API headroom. The targets cover answer and follow-up prose, not JSON
+  syntax, support IDs, or locally rendered citations. They are advisory: concise special
+  dispositions may be shorter, and neither profile permits padding, repetition, or unsupported
+  content. The embedding and authoring operations share one 35-second provider
   deadline: retrieval receives at most eight seconds and authoring receives at most thirty seconds
   of whatever time remains; exhausted headroom returns direct Essential evidence rather than
-  starting another call. The model may freely synthesize and choose useful length. It returns typed
+  starting another call. The model may freely synthesize within the selected length guidance. It returns typed
   grounded and persona runs plus one to three in-character follow-up questions. The provider-visible
-  input/output schemas remain `archivist.authored_response_input/1` and
+  input/output schemas are `archivist.authored_response_input/2` and
   `archivist.retrieval_authored_answer/1`; rendering remains `retrieval-authored-renderer-v1`.
-  The v4 policy identity records the longer authoring deadline and granular diagnostics, not changed
-  wire shapes. The
+  The v5 input shape records the closed length profile; the output and renderer shapes remain
+  unchanged. The
   schema exposes grounded and persona runs as mutually exclusive object variants: every grounded
   run requires at least one opaque dossier-unit ID, while persona runs cannot carry support IDs.
   Local code validates grounded IDs and maps them to `[Source N]`. Timeout, transport failure,
@@ -137,7 +145,12 @@ Archivist currently documents seven answer-policy families, including superseded
   `archivist.character_conversation_answer/1`, and its renderer remains
   `character-conversation-renderer-v1`; `character-conversation-v2` records the generalized routing
   contract rather than a changed wire shape.
-- **`retrieval-authored-v3`.** This is the immediately preceding generated-mode policy. It used the
+- **`retrieval-authored-v4`.** This is the immediately preceding fixed-length policy and the
+  identity of its sealed evaluation. It used the same retrieval, dossier, Sol settings, strict
+  output schema, 35/8/30-second boundaries, 1,800-token output ceiling for every question, shared
+  client, and no-retry contract. Preserve its adapter, artifacts, and results as v4 evidence; do
+  not relabel or regenerate them under v5.
+- **`retrieval-authored-v3`.** This is the predecessor to v4. It used the
   same Sol prompt, strict `/1` schemas, 1,800-token ceiling, single client, and no-retry contract,
   but shared a 25-second provider deadline and capped authoring at twenty seconds. Its terminal
   diagnostic cohort observed 30 authored responses and seven Essential fallbacks across 37
@@ -254,7 +267,7 @@ by a public upload-anything surface.**
 
 ## The citation contract
 
-**In the historical/manuscript branch of `retrieval-authored-v4`, the generated modes own their
+**In the historical/manuscript branch of `retrieval-authored-v5`, the generated modes own their
 prose and local code owns citation resolution.** The model may synthesize and paraphrase the
 dossier rather than copy fixed excerpts.
 It must classify each output run as grounded or persona material and attach existing opaque
@@ -266,7 +279,7 @@ mechanically assigned `[Source N]` citations. This proves that the referenced do
 it does **not** mechanically prove that each sentence is semantically entailed by those units or
 that the model classified every sentence correctly. Never describe local ID resolution as a
 faithfulness or semantic-entailment judge. Essential displays locally compiled direct evidence
-from the same retrieval result. The v4 character-social branch is deliberately outside this
+from the same retrieval result. The v5 character-social branch is deliberately outside this
 citation contract: it receives no evidence and may emit only fictional persona conversation plus
 manuscript-leading questions, not uncited historical claims. Explicit v1/V26/V27 retrieval-backed
 generation retains its historical model-facing
@@ -445,7 +458,7 @@ Use the entry format at the top of that file.
 | Lint & format | **ruff** | |
 | Vector store | **ChromaDB, persistent; HNSW `l2`** | The corpus manifest pins the store contract. |
 | Embeddings | **`text-embedding-3-small`** | Current, not deprecated, and re-embedding is expensive — no reason to move. |
-| Interactive authored response | **`gpt-5.6-sol`, low reasoning, medium verbosity, at most 1,800 output tokens, exactly one no-retry call** | Applies to every registered generated mode after one shared query-embedding call: currently Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist. It writes the answer and follow-up questions over the rich dossier. Essential omits this prose call but still uses the embedding provider. |
+| Interactive authored response | **`gpt-5.6-sol`, low reasoning, medium verbosity, exactly one no-retry call; ordinary target 500-700 visible answer tokens / 1,800-token API ceiling; broad target 900-1,100 / 2,400-token ceiling** | Applies to every registered generated mode after one shared query-embedding call: currently Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist. `RouteTrait.BROAD_SYNTHESIS` in the existing `QuestionPlan.traits` selects the broad profile; all other plans use ordinary. Targets are advisory and never justify padding. Essential omits this prose call but still uses the embedding provider. |
 | Character conversation | **`gpt-5.6-sol`, low reasoning, low verbosity, 12-second timeout, at most 576 output tokens, exactly one no-retry call** | Applies to narrowly classified social/personal turns in every registered generated mode, including future modes added through that registry. Essential is excluded. It receives no manuscript or evidence, writes no historical claims or citations, and falls back locally in the selected character. |
 | Formal generation/judging | **Dated snapshots when exposed; otherwise catalog-bound canonical IDs** | Bind the catalog observation plus requested/returned IDs, report the limitation, and keep generator and judge independent. |
 
@@ -507,7 +520,7 @@ These are decided. A brief may note a consequence, but may not reopen the questi
 - **Optimize for this manuscript; keep the plumbing corpus-agnostic.**
 - **Answer Mode reaches done without Index Mode.**
 - **Frozen V26 Essential is the neutral evaluated retrieval baseline.** Current RAG
-  `retrieval-authored-v4` Essential is the direct-evidence product default and omits prose
+  `retrieval-authored-v5` Essential is the direct-evidence product default and omits prose
   generation, but its shared hybrid retrieval makes one embedding call. It has no paid quality or
   performance cohort. Reader-mode or new-policy results do not become evidence for the frozen
   baseline without their own declared cohorts and checks.

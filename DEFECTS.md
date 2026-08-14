@@ -63,6 +63,27 @@ record of why that temporary contract existed.
 
 ---
 
+## [2026-08-13] Adaptive answer length opens retrieval-authored v5
+Phase/Brief: Current retrieval-authored latency and answer-length policy
+Symptom: the sealed v4 Professional generation cohort used one 1,800-token API ceiling and no
+explicit reader-visible answer-length target for every question. Its generation latency varied
+substantially, ordinary answers often ran beyond the newly desired ordinary range, and genuinely
+broad synthesis questions still needed room for useful coverage.
+Cause: **cohort opening and policy-contract change, not a defect in the sealed v4 record.** The
+product needed one deterministic way to request shorter ordinary answers without imposing the same
+constraint on broad questions or inventing a second scope classifier.
+Resolution and verification: `retrieval-authored-v5` reuses `RouteTrait.BROAD_SYNTHESIS` in the
+existing local `QuestionPlan.traits`. Ordinary questions carry an advisory 500-700 reader-visible-
+answer-token target and 1,800-token API ceiling; broad questions carry 900-1,100 and 2,400. Concise
+partial, insufficient, refusal, and otherwise complete answers may be shorter, and padding,
+repetition, or invention is forbidden. The input schema advances to
+`archivist.authored_response_input/2`; output schema `archivist.retrieval_authored_answer/1`,
+renderer v1, retrieval, dossier, citation validation, fallback, no-retry behavior, and 35/8/30-
+second boundaries remain unchanged. A separate three-question non-gold latency smoke is
+implemented provider-free and requires a new exact authorization before any live call. It may
+report only its small diagnostic sample, not p95, an SLA, quality, or a general latency claim. The
+v4 adapter, artifacts, report, and every earlier cohort remain unchanged.
+
 ## [2026-08-13] V4 sentinel traces inherited a ledger-only colon in `turn_id`
 Phase/Brief: Retrieval-authored v4 evaluation, once-only H001-H010 sentinel
 Symptom: all ten Professional sentinel outcomes were generated and sealed, but the first

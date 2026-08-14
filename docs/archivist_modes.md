@@ -1,6 +1,6 @@
 # Archivist modes and interpretive influence contract
 
-**Status:** current retrieval-authored candidate; no declared post-repair live cohort as of 2026-08-13
+**Status:** current retrieval-authored-v5 candidate; no declared v5 live cohort as of 2026-08-13
 **Scope:** reader-facing modes, interpretive influence provenance, advanced overrides, and the
 boundary between influence and evidence
 
@@ -14,7 +14,7 @@ An Archivist mode is a versioned preset that joins three reader-visible choices:
 
 It does **not** change the evidence corpus. Historical assertions and numbered citations in every
 mode remain grounded in the retrieval-eligible text of *Cradle of the Empire*. The current
-`retrieval-authored-v4` historical/manuscript path makes one query-embedding request, runs shared dense/BM25 reciprocal-
+`retrieval-authored-v5` historical/manuscript path makes one query-embedding request, runs shared dense/BM25 reciprocal-
 rank fusion, and compiles a rich source-bound dossier before any generated prose call.
 
 The application recognizes three different source roles:
@@ -45,14 +45,20 @@ when no mode is supplied. In current RAG it makes no prose-generation call, but 
 `text-embedding-3-small` query request before direct evidence is compiled.
 
 Every registered generated mode -- currently Professional, Pretty Pink Princess, Baleful Black
-Baron, and Ruthless Red Realist -- makes exactly one no-retry
-`gpt-5.6-sol` authored-response call with low reasoning, medium verbosity, and a 1,800 output-token
-ceiling. The call receives the question, locally resolved turn, and four-to-eight-unit rich dossier.
-It may synthesize, paraphrase, adapt useful length, and write in character. Every answer ends with
+Baron, and Ruthless Red Realist -- makes exactly one no-retry `gpt-5.6-sol` authored-response call
+with low reasoning and medium verbosity. The existing local `QuestionPlan` selects its length
+profile: ordinary questions target 500-700 reader-visible answer tokens with a 1,800-token API
+ceiling, while `BROAD_SYNTHESIS` plans target 900-1,100 with a 2,400-token ceiling. Targets are
+advisory, concise special dispositions may be shorter, and padding, repetition, or invention is
+forbidden. The call receives the question, locally resolved turn, and four-to-eight-unit rich
+dossier. It may synthesize, paraphrase, and write in character. Every answer ends with
 one to three in-character follow-up questions. Grounded prose names opaque dossier-unit IDs;
 persona prose carries no evidence ID. The provider-visible schema makes these mutually exclusive
 object variants: grounded requires one to eight IDs, and persona permits none. Application code
 verifies grounded IDs and maps them to `[Source N]`.
+The adaptive profile advances only the authored input to `archivist.authored_response_input/2`;
+output remains `archivist.retrieval_authored_answer/1` and rendering remains
+`retrieval-authored-renderer-v1`.
 The shared provider allowance is 35 seconds, with embedding capped at eight seconds and authoring
 at thirty. Timeout, transport failure, provider exception/refusal, structured-output rejection, or
 local contract-validation failure falls back to the same direct Essential evidence without retry.
@@ -336,8 +342,8 @@ entailment. Failures fall closed to Essential without retry.
 ## Evaluation gates
 
 Frozen V26 evaluation results remain historical results for that explicit candidate. They are not
-results for `retrieval-authored-v1`, `retrieval-authored-v2`, `retrieval-authored-v3`, or
-`retrieval-authored-v4`, and the current product must be measured in a separately
+results for `retrieval-authored-v1`, `retrieval-authored-v2`, `retrieval-authored-v3`,
+`retrieval-authored-v4`, or `retrieval-authored-v5`, and the current product must be measured in a separately
 declared cohort. Professional becoming the public frontend default does not turn an Essential
 evaluation into evidence about an interpretive mode.
 
@@ -352,7 +358,7 @@ Offline tests must establish:
    support-ID list only for grounded runs, and requires one to three follow-up questions;
 5. unknown support IDs, forged citations, malformed structures, and extended copying fail closed;
 6. local rendering maps support IDs to citations without claiming semantic entailment;
-7. each v4 timeout, transport, provider, refusal, structured-output, or local-validation failure
+7. each v5 timeout, transport, provider, refusal, structured-output, or local-validation failure
    receives its stable text-free code and returns direct Essential evidence without replay;
 8. only five mode IDs and five appearances are selectable, while dormant definitions remain hidden;
 9. no V26/V27 selector appears in the UI, while explicit development API compatibility remains;
@@ -369,6 +375,6 @@ Baron calls and one of three observed Princess calls completed at the API but re
 run with no support ID and therefore fell back locally. Those observations diagnose the old schema;
 they do not prove the repair or the new social route. The narrowly authorized three-mode compatibility smoke belongs to
 superseded `application-compiled-v1`, not to this authored-response policy. Any formal evaluation of
-`retrieval-authored-v3` belongs to its terminal timeout-diagnostic cohort. V4 belongs to a new,
-explicitly declared cohort; v1–v3 and the frozen V26 record remain unchanged. No live v4 call has
-run.
+`retrieval-authored-v3` belongs to its terminal timeout-diagnostic cohort. The v4 evaluation is
+sealed under its fixed-length identity; v1-v3 and the frozen V26 record remain unchanged. No live
+v5 call or v5 persona cohort has run, so v4 results cannot support an adaptive-policy claim.

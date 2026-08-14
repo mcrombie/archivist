@@ -38,7 +38,7 @@ preceding 488-vector store and its manifest remain recoverable under
 
 ## Current retrieval-authored release
 
-Current built-in RAG uses `retrieval-authored-v4`. High-confidence follow-up resolution is local.
+Current built-in RAG uses `retrieval-authored-v5`. High-confidence follow-up resolution is local.
 Every historical/manuscript RAG turn makes one `text-embedding-3-small` query request, then uses the shared dense/BM25
 reciprocal-rank-fusion retriever and context finalizer. A deterministic builder packages four to
 eight source-bound units in retrieval order, targeting about 2,500 estimated evidence tokens under
@@ -48,12 +48,17 @@ uses only a range of complete paragraphs.
 Essential returns direct cited evidence without a prose-generation call, but it is not
 providerless because it uses the embedding request. Every registered generated mode -- currently
 Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- adds exactly
-one no-retry `gpt-5.6-sol` authored-response call with low
-reasoning, medium verbosity, and a 1,800 output-token ceiling. The model may synthesize, paraphrase,
-choose useful length, and write in character. It returns typed grounded/persona runs and one to
-three follow-up questions. Grounded runs name opaque dossier-unit IDs; local code verifies those
-IDs and maps them to `[Source N]`. The strict `/1` schema, 1,800-token ceiling, one shared client,
-and zero retries remain unchanged. The provider allowance is 35 seconds, with embedding capped at
+one no-retry `gpt-5.6-sol` authored-response call with low reasoning and medium verbosity. The
+existing `QuestionPlan` selects one closed answer-length profile. Ordinary questions target
+500-700 reader-visible answer tokens with a 1,800-token API ceiling; questions carrying
+`BROAD_SYNTHESIS` target 900-1,100 with a 2,400-token ceiling. Targets are advisory and never
+authorize padding, repetition, or invention; concise special dispositions may be shorter. The
+model may synthesize, paraphrase, and write in character. It returns typed grounded/persona runs
+and one to three follow-up questions. Grounded runs name opaque dossier-unit IDs; local code
+verifies those IDs and maps them to `[Source N]`. Input schema
+`archivist.authored_response_input/2` carries the profile; output schema
+`archivist.retrieval_authored_answer/1`, renderer `retrieval-authored-renderer-v1`, one shared
+client, and zero retries remain unchanged. The provider allowance is 35 seconds, with embedding capped at
 eight seconds and authoring at thirty. Timeout, transport failure, provider exception/refusal,
 structured-output rejection, or local contract-validation failure falls back to Essential without
 retry and receives a text-free internal code. ID resolution is not proof of semantic entailment.
@@ -72,7 +77,7 @@ eligibility covers Professional, Princess, Baron, and Ruthless Red Realist now a
 modes automatically; Essential is excluded.
 
 The current source reports this boundary through `archivist.public_runtime_identity/4`, including
-`answer_policy_version=retrieval-authored-v4`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
+`answer_policy_version=retrieval-authored-v5`, `evidence_retrieval_kind=hybrid_bm25_rrf`,
 `embedding_model=text-embedding-3-small`, and `generated_prose_model=gpt-5.6-sol`. Frozen V26 and
 the V27 experiment remain explicit development API compatibility policies; neither is selectable
 in the reader UI. Results from their historical cohorts, and the narrow smoke for superseded
@@ -80,8 +85,9 @@ in the reader UI. Results from their historical cohorts, and the narrow smoke fo
 parity for this redesign remain unverified.
 `retrieval-authored-v1` lacked the narrow character-conversation branch; `retrieval-authored-v2`
 hard-coded that branch for Princess and Baron; v3 generalized it but used the shorter authoring
-boundary. All three are preserved as historical/manual development
-candidates rather than exposed as API policies.
+boundary; and v4 retained one fixed 1,800-token authoring ceiling. All four are preserved as
+historical/manual development or sealed evaluation identities rather than exposed as API
+policies.
 
 ## Historical snapshot: candidate hold before the completed gold lock
 
@@ -103,16 +109,23 @@ snapshot is not the current product architecture or current next-step list.
 ## Current provider configuration
 
 Current historical/manuscript RAG uses `text-embedding-3-small` for exactly one query-embedding request in every mode.
-The four generated modes add `gpt-5.6-sol` with explicit low reasoning, medium verbosity, a 1,800
-output-token ceiling, and no automatic retry. Essential omits that prose-generation call. The
+The four generated modes add `gpt-5.6-sol` with explicit low reasoning, medium verbosity, adaptive
+ordinary/broad output guidance and corresponding 1,800/2,400-token API ceilings, and no automatic
+retry. Essential omits that prose-generation call. The
 current high-confidence follow-up resolver, fusion, and dossier builder are local. Narrow
 Social turns in any registered generated mode instead make one compact Sol call and no embedding
 or retrieval call.
 
 This interactive authored-response configuration is not a formal evaluation result or a
 retrospective pin for V26. Model identities, settings, prompt hashes, and dossier identity for a
-future `retrieval-authored-v4` measurement belong in that separately declared cohort's run
+future `retrieval-authored-v5` measurement belong in that separately declared cohort's run
 identity.
+
+The bounded [product latency smoke](product_latency_smoke.md) is a separate three-question,
+non-gold first-turn check of this full current path. Building or preparing it makes no provider
+call. A live run needs its own exact authorization, never retries, and reports only its three
+observations plus minimum, median, and maximum. It is not a p95 estimate, quality evaluation, SLA,
+or substitute for a declared cohort.
 
 ## Current UI scope
 

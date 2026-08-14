@@ -1,0 +1,24 @@
+{
+  "schema": "archivist.product_latency_smoke_questions/1",
+  "development_registry_version": "1.1.0",
+  "questions": [
+    {
+      "id": "DEV-OPENING-001",
+      "question": "Who was Edwin Sandys, and what did he do?",
+      "normalized_sha256": "5a8d8bf8194f8f83a17af0ea55cc4097ba931e354f42760cef824e570c1457d7",
+      "expected_answer_length_profile": "ordinary"
+    },
+    {
+      "id": "DEV-OPENING-002",
+      "question": "How does the manuscript connect tobacco to labor?",
+      "normalized_sha256": "5d2debec806e58ad28df1118c5083bff4f89aa6b037e14807bab6bd8b9017e96",
+      "expected_answer_length_profile": "ordinary"
+    },
+    {
+      "id": "DEV-PRACTICAL-G006",
+      "question": "Trace the institutional lineage the book draws from the Virginia Company to the federal-corporate world of modern Northern Virginia.",
+      "normalized_sha256": "c074095add6fb83eda94d2bd8b65b5b9f7d347d75e66e72103fa6f25f07505b5",
+      "expected_answer_length_profile": "broad"
+    }
+  ]
+}

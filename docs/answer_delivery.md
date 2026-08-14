@@ -1,6 +1,6 @@
 # Answer Delivery Modes
 
-Archivist offers two delivery contracts over the same `retrieval-authored-v4` answer pipeline.
+Archivist offers two delivery contracts over the same `retrieval-authored-v5` answer pipeline.
 Delivery changes when eligible material crosses the server boundary; it does not select another
 corpus, retrieval policy, evidence scope, or interpretive setting. The browser exposes no V26/V27
 policy or latency selector.
@@ -17,19 +17,25 @@ paragraphs when the hard ceiling requires it.
 Essential renders direct cited evidence and makes no prose-generation call. It is not a zero-
 provider path because retrieval uses the embedding request. Every registered generated mode --
 currently Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- adds
-exactly one no-retry `gpt-5.6-sol` authored-response call with low
-reasoning, medium verbosity, and a 1,800 output-token ceiling. The model receives the question,
-locally resolved turn, and rich dossier. It may synthesize, paraphrase, choose useful length, and
-write in character; each generated answer must end with one to three in-character questions that
-invite continued engagement.
+exactly one no-retry `gpt-5.6-sol` authored-response call with low reasoning and medium verbosity.
+The existing local `QuestionPlan` selects its answer-length profile. An ordinary plan targets
+500-700 reader-visible answer tokens and uses a 1,800-token API ceiling. A plan carrying
+`BROAD_SYNTHESIS` targets 900-1,100 reader-visible answer tokens and uses a 2,400-token API ceiling.
+The visible target covers answer and follow-up prose, not JSON syntax, opaque support IDs, or
+locally rendered citations. It is advisory, not a local minimum: partial, insufficient, refused,
+or naturally concise answers may be shorter, and the model must never pad, repeat, or invent
+material to fill a range. The model receives the question, locally resolved turn, and rich dossier;
+each generated answer must end with one to three in-character questions that invite continued
+engagement.
 
 The generated response separates grounded runs from persona runs. Grounded runs name opaque
 dossier-unit IDs; local code verifies that those IDs exist and maps them to `[Source N]`. Persona
 runs may contain only voice, metaphor, reactions, and fictional character business. The model does
 not write citation labels. Unknown IDs, forged labels, malformed structure, links, HTML, or
 extended manuscript copying fail closed to the direct Essential answer without a retry.
-The v4 policy keeps authored input/output schemas `archivist.authored_response_input/1` and
-`archivist.retrieval_authored_answer/1` and renderer `retrieval-authored-renderer-v1`.
+The v5 policy uses authored input schema `archivist.authored_response_input/2` to carry that closed
+length profile. The output schema remains `archivist.retrieval_authored_answer/1`, and the renderer
+remains `retrieval-authored-renderer-v1`.
 
 This is a structural provenance boundary, not a semantic judge. Local support-ID resolution does
 not prove that a sentence is entailed by the cited passage or that the model classified every run
@@ -116,10 +122,15 @@ A character-social turn has one provider operation total: the compact Sol answer
 It does not enter the embedding/retrieval deadline path and never starts a second provider call.
 Its 576-token ceiling and low verbosity are latency-oriented design choices, not measured speed.
 
-These choices are latency hypotheses, not measurements. No live smoke, paid latency cohort, or
-quality cohort has run for `retrieval-authored-v4` or `character-conversation-v2`. The terminal v3
-run is a timeout diagnostic—30 authored generations and seven fallbacks—not v4 evidence. The earlier Edwin Sandys timings measured the
-superseded `application-compiled-v1` cue selector and cannot be attributed to this design.
+Adaptive output length is a latency hypothesis, not a measurement. No live smoke or paid latency
+or quality cohort has run for `retrieval-authored-v5`. The sealed v4 evaluation remains evidence
+for its fixed 1,800-token policy only; it cannot be relabelled as an adaptive-policy result. The
+terminal v3 run and earlier Edwin Sandys cue-selector smoke are older historical evidence and
+cannot be attributed to this design. A separate fixed three-question, non-gold
+[latency smoke](product_latency_smoke.md) is
+available as a deliberately small product-path check. Its implementation makes no provider call,
+and a live run requires separate exact authorization. With only three observations it reports
+minimum, median, and maximum rather than p95 and makes no SLA or general performance claim.
 
 ## Public NDJSON protocol
 
