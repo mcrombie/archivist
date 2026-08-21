@@ -57,7 +57,7 @@ the generated prose. Dormant mode
 definitions and assets are compatibility-only, not current UI/API choices.
 
 Before retrieval, every registered generated mode recognizes only a narrow, conservatively
-classified set of social or personal questions. `character-conversation-v2` makes
+classified set of social or personal questions. `character-conversation-v3` makes
 one no-retry `gpt-5.6-sol` call with low reasoning, low verbosity, a 12-second timeout, and a
 576-token ceiling; it sends
 the question and character instructions but no embedding, manuscript text, retrieved evidence,
@@ -367,12 +367,27 @@ top of the list.
     failure, accounting failure, or tier mismatch. Live execution requires exact `$12.00`
     authorization. Report cost, but leave promotion `owner_pending` until the owner supplies an
     acceptable-cost threshold.
-23. **Later, after deployment identity verification and fresh authorization — open
+23. **Completed offline — repair present-time social routing and truthful waiting copy.** Advance
+    the current social route to `character-conversation-v3`, accepting only anchored `now` and
+    `right now` variants of the existing “How are you?” family while preserving historical,
+    compound, and multiline rejections. Complete-answer waiting copy and progress stages shared by
+    social and manuscript routes are route-neutral; manuscript-specific wording begins only at a
+    retrieval-only stage. This change makes no provider call and creates no performance claim.
+24. **Completed offline — answer direct product-help questions locally.** Add `product-help-v1`
+    for a closed capability/how-to phrase set such as “What do you do?” across every reader mode.
+    Exact-match the whole normalized question, then compare it with the closed phrase set using
+    bounded nearest-phrase optimal-string-alignment distance. Permit one ordinary edit per token,
+    same-letter scrambles, up to three total edits, and narrowly bounded spacing errors, while explicit collision guards preserve
+    meaning-changing alternatives and appended context remains ineligible. This is typo recovery,
+    not open-ended fuzzy intent routing. Return fixed product-truth copy before corpus loading or spend enforcement, with no
+    provider call or sources; keep historical, manuscript, compound, multiline, and contextual
+    near-misses grounded.
+25. **Later, after deployment identity verification and fresh authorization — open
     production-performance v2.** Preserve v1's
     54.393/113.801-second p50/p95 and all four failures unchanged. A v2 report must state that it
     measures a different answer policy and must remain an observed cohort comparison unless the
     required repeat/noise protocol supports a stronger claim.
-24. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
+26. **Later — calibrate semantic scoring if it remains useful.** Hand-label the predeclared ten-item
     subset only after all 37 answers, all 37 canonical attempts, every usable decomposition, and the
     technical failures are preserved, measure judge and decomposition agreement, and publish a
     hash-bound scoring supplement. Judge failure selects manual/pending dimensions and never changes

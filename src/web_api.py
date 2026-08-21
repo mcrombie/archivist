@@ -85,11 +85,13 @@ from public_request_gate import (
     PublicRequestGate,
 )
 from public_sources import (
+    PUBLIC_SOURCE_SCHEMA,
     PublicSourceError,
     answer_has_extended_verbatim_overlap,
     load_locator_index,
     public_source_payload,
 )
+from product_help import is_product_help_question
 from web_project import (
     BASE_DIR,
     answer_project_question_result,
@@ -348,6 +350,25 @@ def _uses_application_compiled_answer(
     )
 
 
+def _is_application_product_help_request(
+    request: QuestionRequest | PublicQuestionRequest,
+    *,
+    project_id: str = "current",
+) -> bool:
+    """Identify the provider-free product-help route before spend gates."""
+
+    return (
+        project_id == "current"
+        and is_product_help_question(request.question, has_history=bool(request.history))
+        and _uses_application_compiled_answer(
+            archivist_mode=request.archivist_mode,
+            answer_strategy=request.answer_strategy,
+            legacy_perspective=getattr(request, "perspective", None) is not None,
+            rag_policy_version=getattr(request, "rag_policy_version", None),
+        )
+    )
+
+
 def _answer_mode_metadata(
     *,
     archivist_mode: ArchivistMode,
@@ -360,7 +381,16 @@ def _answer_mode_metadata(
     """Bind compatibility metadata to the exact authored prompt in use."""
 
     metadata = dict(archivist_mode_metadata(archivist_mode))
-    if application_compiled and answer_status in {
+    if application_compiled and answer_status == "product_help":
+        metadata.update(
+            {
+                "prose_renderer_version": None,
+                "prose_renderer_prompt_sha256": None,
+                "prose_renderer_mode_instruction_sha256": None,
+                "prose_renderer_influence_prompt_sha256": None,
+            }
+        )
+    elif application_compiled and answer_status in {
         "character_conversation",
         "character_conversation_fallback",
     }:
@@ -606,6 +636,8 @@ def _development_question_preflight(
 ) -> UsageLedger:
     _require_full_context_available(EXPOSURE_SETTINGS, request.answer_strategy)
     ledger = UsageLedger()
+    if _is_application_product_help_request(request, project_id=project_id):
+        return ledger
     budget = ledger.budget_state()
     if budget["hard_limit_enabled"] and budget["exceeded"] and not request.allow_over_budget:
         raise HTTPException(
@@ -1487,6 +1519,8 @@ def _preflight_public_progressive_question(
                 "request_id": request_id,
             },
         )
+    if _is_application_product_help_request(request):
+        return
     try:
         ledger = UsageLedger()
         _configure_public_budget(ledger, settings)
@@ -1526,11 +1560,12 @@ def _run_public_question(
     request_id: str | None = None,
 ) -> dict[str, object]:
     request_id = request_id or _PUBLIC_REQUEST_ID.get() or uuid4().hex
-    ledger = UsageLedger()
+    ledger: UsageLedger | None = None
     application_compiled = _uses_application_compiled_answer(
         archivist_mode=request.archivist_mode,
         answer_strategy=request.answer_strategy,
     )
+    product_help = _is_application_product_help_request(request)
     answer_result: object | None = None
     released_claims: list[CheckedClaimCandidate] = []
     claim_release_failed = False
@@ -1587,31 +1622,7 @@ def _run_public_question(
             },
         )
     try:
-        _configure_public_budget(ledger, settings)
-        budget = ledger.budget_state()
-        if budget["exceeded"]:
-            raise CostLimitExceeded(budget)
-
-        with usage_scope(
-            project_id="current",
-            conversation_id=request.conversation_id,
-            turn_id=request.turn_id,
-            request_id=request_id,
-            enforce_budget=True,
-            allow_over_budget=False,
-            request_cost_ceiling_nano_usd=(
-                PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD
-                if request.answer_strategy is AnswerStrategy.RAG
-                else None
-            ),
-        ):
-            if request.answer_strategy is AnswerStrategy.RAG:
-                # Reserve a whole conservative request before Answer Mode can
-                # construct a provider client or issue its first operation.
-                enforce_projected_usage_budget(
-                    PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
-                    ledger,
-                )
+        if product_help:
             answer_kwargs: dict[str, object] = {
                 "n_results": settings.public_n_results,
                 "historiographical_lens": request.historiographical_lens,
@@ -1619,46 +1630,95 @@ def _run_public_question(
                 "worldview": request.worldview,
                 "history": [turn.model_dump(exclude_none=True) for turn in request.history],
                 "answer_strategy": request.answer_strategy,
+                "application_compiled": True,
             }
             if "archivist_mode" in request.model_fields_set:
                 answer_kwargs["archivist_mode"] = request.archivist_mode
             if progress_callback is not None:
                 answer_kwargs["progress_callback"] = progress_callback
-            if checked_claim_callback is not None:
-                answer_kwargs["checked_claim_callback"] = release_checked_claim
-            if stream_milestone_callback is not None:
-                answer_kwargs["stream_milestone_callback"] = stream_milestone_callback
-            if application_compiled:
-                answer_kwargs["application_compiled"] = True
             answer_result = answer_project_question_result(
                 "current",
                 request.question,
                 **answer_kwargs,
             )
             emit_progress(progress_callback, AnswerProgressStage.CHECKING_RELEASE)
-            if claim_release_failed:
-                raise PublicSourceError("provisional claim did not pass release gate")
-            if answer_result.status in {
-                "generation_contract_failed",
-                "corpus_integrity_failed",
-                "retrieval_unavailable",
-            }:
-                raise PublicSourceError("answer did not pass the public release gate")
-            audit_chunks = _public_verbatim_audit_chunks(
-                answer_strategy=request.answer_strategy,
-                final_chunks=answer_result.final_chunks,
-            )
-            if answer_has_extended_verbatim_overlap(
-                answer_result.answer,
-                audit_chunks,
+            sources = {"source_schema": PUBLIC_SOURCE_SCHEMA, "sources": []}
+        else:
+            ledger = UsageLedger()
+            _configure_public_budget(ledger, settings)
+            budget = ledger.budget_state()
+            if budget["exceeded"]:
+                raise CostLimitExceeded(budget)
+
+            with usage_scope(
+                project_id="current",
+                conversation_id=request.conversation_id,
+                turn_id=request.turn_id,
+                request_id=request_id,
+                enforce_budget=True,
+                allow_over_budget=False,
+                request_cost_ceiling_nano_usd=(
+                    PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD
+                    if request.answer_strategy is AnswerStrategy.RAG
+                    else None
+                ),
             ):
-                raise PublicSourceError("answer exceeded the public quotation boundary")
-            sources = public_source_payload(
-                answer_result.answer,
-                answer_result.final_chunks,
-                locator_path=settings.locator_artifact,
-                manifest_path=BASE_DIR / "fixtures" / "corpus_manifest.json",
-            )
+                if request.answer_strategy is AnswerStrategy.RAG:
+                    # Reserve a whole conservative request before Answer Mode can
+                    # construct a provider client or issue its first operation.
+                    enforce_projected_usage_budget(
+                        PUBLIC_RAG_REQUEST_COST_CEILING_NANO_USD,
+                        ledger,
+                    )
+                answer_kwargs = {
+                    "n_results": settings.public_n_results,
+                    "historiographical_lens": request.historiographical_lens,
+                    "voice": request.voice,
+                    "worldview": request.worldview,
+                    "history": [
+                        turn.model_dump(exclude_none=True) for turn in request.history
+                    ],
+                    "answer_strategy": request.answer_strategy,
+                }
+                if "archivist_mode" in request.model_fields_set:
+                    answer_kwargs["archivist_mode"] = request.archivist_mode
+                if progress_callback is not None:
+                    answer_kwargs["progress_callback"] = progress_callback
+                if checked_claim_callback is not None:
+                    answer_kwargs["checked_claim_callback"] = release_checked_claim
+                if stream_milestone_callback is not None:
+                    answer_kwargs["stream_milestone_callback"] = stream_milestone_callback
+                if application_compiled:
+                    answer_kwargs["application_compiled"] = True
+                answer_result = answer_project_question_result(
+                    "current",
+                    request.question,
+                    **answer_kwargs,
+                )
+                emit_progress(progress_callback, AnswerProgressStage.CHECKING_RELEASE)
+                if claim_release_failed:
+                    raise PublicSourceError("provisional claim did not pass release gate")
+                if answer_result.status in {
+                    "generation_contract_failed",
+                    "corpus_integrity_failed",
+                    "retrieval_unavailable",
+                }:
+                    raise PublicSourceError("answer did not pass the public release gate")
+                audit_chunks = _public_verbatim_audit_chunks(
+                    answer_strategy=request.answer_strategy,
+                    final_chunks=answer_result.final_chunks,
+                )
+                if answer_has_extended_verbatim_overlap(
+                    answer_result.answer,
+                    audit_chunks,
+                ):
+                    raise PublicSourceError("answer exceeded the public quotation boundary")
+                sources = public_source_payload(
+                    answer_result.answer,
+                    answer_result.final_chunks,
+                    locator_path=settings.locator_artifact,
+                    manifest_path=BASE_DIR / "fixtures" / "corpus_manifest.json",
+                )
 
         mode_metadata = _answer_mode_metadata(
             archivist_mode=request.archivist_mode,
@@ -1732,7 +1792,7 @@ def _run_public_question(
             },
         ) from None
     finally:
-        if answer_result is not None:
+        if answer_result is not None and ledger is not None:
             try:
                 ledger.record_answer_run_diagnostics(
                     project_id="current",

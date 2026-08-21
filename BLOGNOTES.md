@@ -56,7 +56,7 @@ anything that still requires measurement.
   policies, but their former browser selector has been removed.
 - **Character conversation and perspective clarity:** every registered generated mode now answers
   a narrow set of direct social/personal questions before retrieval through
-  `character-conversation-v2`. Professional, Pretty Pink Princess, Baleful Black Baron, and
+  `character-conversation-v3`. Professional, Pretty Pink Princess, Baleful Black Baron, and
   Ruthless Red Realist are covered now; a future mode inherits the route when it registers its
   authored and conversational behavior. Essential remains excluded. The branch sends only the
   question and character instructions to
@@ -163,6 +163,35 @@ anything that still requires measurement.
 
 This checkpoint is the source of truth for current blog drafting. Entries below preserve what was
 known at the time they were written and should not be silently rewritten into present-tense claims.
+
+## 2026-08-21 — Treat present-time greetings as conversation and make waiting copy truthful
+
+- A live reader report exposed two distinct problems around “How are you now?” The conservative
+  social classifier recognized “How are you?” and optional “today,” but the anchored pattern did
+  not include `now`; the question therefore entered manuscript retrieval and could surface
+  irrelevant Essential evidence. The current route is now `character-conversation-v3`: it accepts
+  only `now` and `right now` variants of the existing “How are you?” family, while historical,
+  compound, ambiguous, and multiline near-misses remain on the grounded path. Wire schemas,
+  renderer, one-call/no-retry behavior, and the sealed v2 evaluation remain unchanged.
+- The same report showed “Searching the manuscript for relevant passages…” even when the original
+  greeting routed correctly. That sentence came from a frontend timer shared by every pending
+  complete answer, not from retrieval telemetry. Complete-answer waiting copy is now route-neutral,
+  as are progressive stages shared by social and manuscript answers; genuinely retrieval-only
+  stages keep their manuscript-specific wording. No provider call was made for this repair.
+- A second live report showed the first-turn question “What do you do?” entering manuscript RAG
+  and failing into irrelevant Essential copy. That is a product-capability question, not a request
+  for manuscript evidence or a fictional mood. `product-help-v1` now answers a closed set of such
+  direct questions with fixed application-owned copy in all five modes, before corpus loading or
+  spend enforcement. It makes no provider call or source claim; grounded and compound near-misses
+  remain on the RAG path.
+- Follow-up checks showed that both exact matching and a curated misspelling list were the wrong
+  abstraction: “How can you helpe me?” and then “what dop youd do>?” still made users depend on
+  spellings the application anticipated. The closed product-help phrase set now uses bounded
+  nearest-phrase optimal-string-alignment distance, accepting one ordinary edit per token,
+  same-letter scrambles, up to three total edits, and limited spacing/punctuation noise. Only the closest phrase may win, and narrow guards preserve
+  meaning-changing collisions such as “What did you do?”, “How does his work?”, and “What is
+  archivism?”. This favors a harmless, truthful product explanation over an expensive and visibly
+  irrelevant RAG fallback without pretending to be an open-ended semantic classifier.
 
 ## 2026-08-14 — Make every visible perspective label useful
 

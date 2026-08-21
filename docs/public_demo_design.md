@@ -94,9 +94,14 @@ The separate three-question [product latency smoke](product_latency_smoke.md) is
 product-path diagnostic. Its implementation makes no provider call; live execution requires a new
 exact authorization and cannot establish a public p95, SLA, or general performance claim.
 
+A separate local `product-help-v1` route precedes corpus loading and spend enforcement. It answers
+only a closed set of direct questions about what Archivist does and how to use it, in every reader
+mode, with fixed application-owned copy. It makes no provider call, returns no manuscript sources,
+and cannot be widened by historical, manuscript, compound, multiline, or contextual wording.
+
 The public server applies one narrow exception before retrieval. A conservatively classified
 social or personal question in any registered generated mode uses
-`character-conversation-v2`: one compact, no-retry, low-reasoning/low-verbosity `gpt-5.6-sol`
+`character-conversation-v3`: one compact, no-retry, low-reasoning/low-verbosity `gpt-5.6-sol`
 answer-generation call with a 12-second timeout and a 576-token output ceiling. Its payload contains only the question,
 selected character, and instructions—no embedding, history, manuscript, retrieved evidence,
 dossier, source metadata, or citation. The reply is explicitly fictional persona conversation and

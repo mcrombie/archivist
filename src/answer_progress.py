@@ -106,14 +106,17 @@ class ProviderStreamMilestone(StrEnum):
 
 PROGRESS_MESSAGES: dict[AnswerProgressStage, str] = {
     AnswerProgressStage.ACCEPTED: "Request accepted.",
-    AnswerProgressStage.CHECKING_CORPUS: "Checking manuscript availability.",
+    AnswerProgressStage.CHECKING_CORPUS: "Preparing Archivist's response.",
     AnswerProgressStage.RESOLVING_QUESTION: "Resolving conversation context.",
     AnswerProgressStage.PLANNING_SEARCH: "Planning a source search.",
     AnswerProgressStage.RETRIEVING_SOURCES: "Retrieving manuscript evidence.",
     AnswerProgressStage.CHECKING_EVIDENCE: "Checking evidence sufficiency.",
     AnswerProgressStage.PREPARING_CONTEXT: "Preparing source context.",
-    AnswerProgressStage.GENERATING_ANSWER: "Drafting a source-grounded answer.",
-    AnswerProgressStage.VALIDATING_ANSWER: "Validating grounding and citations.",
+    # These stages are shared by manuscript and character-conversation routes.
+    # Retrieval-only stages remain explicit above; shared stages must not claim
+    # that a social turn searched or cited the manuscript.
+    AnswerProgressStage.GENERATING_ANSWER: "Drafting Archivist's response.",
+    AnswerProgressStage.VALIDATING_ANSWER: "Validating the response.",
     AnswerProgressStage.CHECKING_RELEASE: "Applying public release safeguards.",
 }
 

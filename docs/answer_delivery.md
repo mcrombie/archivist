@@ -41,10 +41,30 @@ This is a structural provenance boundary, not a semantic judge. Local support-ID
 not prove that a sentence is entailed by the cited passage or that the model classified every run
 correctly. Documentation, telemetry, and evaluation must not call that check faithfulness.
 
+### Product help before corpus and spend
+
+`product-help-v1` compares the whole normalized question with a closed set of direct
+capability/how-to phrases such as “What do you do?” and “How can you help me?”. After exact
+matching, bounded optimal-string-alignment distance tolerates one ordinary insertion, deletion,
+substitution, or adjacent transposition per token, a same-letter scramble such as `hlpe`, and up
+to three total edits across a same-shape short question. A two-edit fallback covers a merged or split token, and case, spacing, and stray punctuation are
+normalized. Only the closest canonical phrase may win, while explicit semantic guards protect
+high-risk meaning-changing near-matches. The bounded recognizer deliberately favors a truthful
+local help answer over a paid, irrelevant RAG fallback for rare ambiguous near-matches. This is
+robust typo recovery, not open-ended semantic intent classification. It returns fixed
+application-owned copy in every reader mode
+before corpus loading, retrieval, or spend enforcement. It makes no provider call, exposes no
+manuscript sources, reports `product_help`, and keeps the outer product identity at
+`retrieval-authored-v5`. Explicit product wording may match after prior turns; the deictic “How
+does this work?” and “How do I use this?” forms are first-turn-only. Historical, manuscript,
+compound, multiline, and contextual near-misses are not product help.
+The route belongs to the current application-compiled Retrieved-passages product; explicit Full
+Context, V26/V27, legacy, and custom-project dispatch remain unchanged.
+
 ### Character conversation before retrieval
 
 For every registered generated mode, a conservative local classifier recognizes a narrow set of
-direct social or personal questions before retrieval. `character-conversation-v2`
+direct social or personal questions before retrieval. `character-conversation-v3`
 then makes exactly one no-retry `answer_generation` call to `gpt-5.6-sol` with low reasoning, low
 verbosity, a 12-second timeout, and at most 576 output tokens. It sends only the question, selected mode, and character
 instructions—no conversation history, embedding, manuscript text, retrieved evidence, dossier,
@@ -53,8 +73,9 @@ conversation plus one to three in-character questions that explicitly lead back 
 or *Cradle of the Empire*. It may not state historical facts.
 Its input/output schemas remain `archivist.character_conversation_input/1` and
 `archivist.character_conversation_answer/1`; its renderer remains
-`character-conversation-renderer-v1`. The v2 route identity reflects generalized mode eligibility,
-not a changed structured-response shape.
+`character-conversation-renderer-v1`. The v3 route identity retains generalized mode eligibility
+and narrowly adds anchored `now`/`right now` forms to the existing greeting family; it does not
+change the structured-response shape. Sealed v4 social outcomes retain their v2 identity.
 
 A provider failure, refusal, or invalid response returns a deterministic mode-specific local reply
 with the same manuscript-leading question. It does not retry, retrieve, or substitute Essential,
@@ -179,7 +200,7 @@ Offline checks must establish that:
 - Essential makes exactly the query-embedding request and no prose-generation call;
 - each generated mode makes the same embedding request plus exactly one no-retry authored-response
   call;
-- only narrow social questions in registered generated modes enter `character-conversation-v2`, whose request
+- only narrow social questions in registered generated modes enter `character-conversation-v3`, whose request
   contains no evidence/history and makes one compact no-retry call without retrieval;
 - character-social output contains no citations or historical claims, requires one to three
   explicit manuscript-leading questions, and uses deterministic in-character local fallback on

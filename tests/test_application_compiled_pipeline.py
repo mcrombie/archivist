@@ -20,6 +20,7 @@ from character_conversation import (
     CharacterConversationResult,
     CharacterConversationStatus,
 )
+from product_help import PRODUCT_HELP_POLICY_VERSION
 from rag_pipeline import answer_run_diagnostics
 from query_planning import RouteTrait
 
@@ -244,10 +245,15 @@ def test_essential_uses_one_no_retry_client_for_hybrid_retrieval_only(monkeypatc
         (ArchivistMode.EMBER_AND_INK, "strategically stable morning"),
     ),
 )
+@pytest.mark.parametrize(
+    "question",
+    ("How are you?", "How are you now?"),
+)
 def test_character_social_turn_bypasses_retrieval_and_answers_once(
     monkeypatch,
     mode,
     expected_phrase,
+    question,
 ):
     harness = _install_pipeline(monkeypatch)
     author_calls = []
@@ -274,7 +280,7 @@ def test_character_social_turn_bypasses_retrieval_and_answers_once(
 
     result = web_project.answer_project_question_result(
         "current",
-        "How are you?",
+        question,
         archivist_mode=mode,
         application_compiled=True,
         progress_callback=stages.append,
@@ -289,7 +295,7 @@ def test_character_social_turn_bypasses_retrieval_and_answers_once(
     assert harness.retrieval_calls == []
     assert harness.planning_calls == []
     assert len(author_calls) == 1
-    assert author_calls[0][1:] == ("How are you?", mode)
+    assert author_calls[0][1:] == (question, mode)
     assert AnswerProgressStage.GENERATING_ANSWER in stages
     assert AnswerProgressStage.VALIDATING_ANSWER in stages
     assert AnswerProgressStage.RETRIEVING_SOURCES not in stages
@@ -303,6 +309,119 @@ def test_character_social_turn_bypasses_retrieval_and_answers_once(
         call["timeout"] for call in harness.client.option_calls if "timeout" in call
     ]
     assert timeout_calls == [web_project.CHARACTER_CONVERSATION_TIMEOUT_SECONDS]
+
+
+@pytest.mark.parametrize(
+    "mode",
+    web_project.APPLICATION_COMPILED_MODES,
+)
+def test_product_help_is_provider_free_in_every_reader_mode(monkeypatch, mode):
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("product help must not load the corpus, retrieve, or call a provider")
+
+    monkeypatch.setattr(web_project, "chroma_client", unexpected)
+    monkeypatch.setattr(web_project, "load_project_chunks", unexpected)
+    monkeypatch.setattr(web_project, "openai_client", unexpected)
+    monkeypatch.setattr(web_project, "build_question_plan", unexpected)
+    stages = []
+
+    result = web_project.answer_project_question_result(
+        "current",
+        "What do you do?",
+        archivist_mode=mode,
+        application_compiled=True,
+        progress_callback=stages.append,
+        checked_claim_callback=unexpected,
+        stream_milestone_callback=unexpected,
+    )
+
+    assert result.status == "product_help"
+    assert result.final_chunks == []
+    assert result.evidence_decision == "not_applicable"
+    assert result.resolved_question == "What do you do?"
+    assert result.answer_strategy_version == AUTHORED_RESPONSE_POLICY_VERSION
+    assert "not the open web" in result.answer
+    assert result.diagnostics["response_route"] == PRODUCT_HELP_POLICY_VERSION
+    assert result.diagnostics["generation"]["structured_generation_called"] is False
+    assert result.diagnostics["stage_timings_ms"]["answer_generation"] == 0.0
+    assert result.diagnostics["stage_timings_ms"]["answer_validation"] == 0.0
+    assert stages == [
+        AnswerProgressStage.GENERATING_ANSWER,
+        AnswerProgressStage.VALIDATING_ANSWER,
+    ]
+
+    diagnostics = answer_run_diagnostics(result)
+    assert diagnostics["answer_status"] == "product_help"
+    assert diagnostics["validation_result"] == "valid"
+    assert diagnostics["content_outcome"] == "valid_complete"
+    assert diagnostics["cohort"]["generator_model"] == "not-applicable"
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        pytest.param("How can you helpe me?", id="one-insertion"),
+        pytest.param("what dop youd do>?", id="reported-two-typo-question"),
+    ),
+)
+def test_typo_tolerant_product_help_stays_provider_free_in_application_pipeline(
+    monkeypatch,
+    question,
+):
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("typo-tolerant product help must not retrieve or call a provider")
+
+    monkeypatch.setattr(web_project, "chroma_client", unexpected)
+    monkeypatch.setattr(web_project, "load_project_chunks", unexpected)
+    monkeypatch.setattr(web_project, "openai_client", unexpected)
+    monkeypatch.setattr(web_project, "build_question_plan", unexpected)
+
+    result = web_project.answer_project_question_result(
+        "current",
+        question,
+        archivist_mode=ArchivistMode.PROFESSIONAL,
+        application_compiled=True,
+    )
+
+    assert result.status == "product_help"
+    assert result.resolved_question == question
+    assert result.final_chunks == []
+    assert result.diagnostics["response_route"] == PRODUCT_HELP_POLICY_VERSION
+
+
+def test_explicit_product_help_still_works_after_a_greeting(monkeypatch):
+    monkeypatch.setattr(
+        web_project,
+        "chroma_client",
+        lambda: pytest.fail("explicit product help must remain provider-free after a greeting"),
+    )
+
+    result = web_project.answer_project_question_result(
+        "current",
+        "What do you do?",
+        archivist_mode=ArchivistMode.PROFESSIONAL,
+        application_compiled=True,
+        history=({"question": "Hello"},),
+    )
+
+    assert result.status == "product_help"
+
+
+def test_deictic_product_help_does_not_override_a_contextual_followup(monkeypatch):
+    monkeypatch.setattr(
+        web_project,
+        "chroma_client",
+        lambda: (_ for _ in ()).throw(RuntimeError("grounded path reached")),
+    )
+
+    with pytest.raises(RuntimeError, match="grounded path reached"):
+        web_project.answer_project_question_result(
+            "current",
+            "How does this work?",
+            archivist_mode=ArchivistMode.PROFESSIONAL,
+            application_compiled=True,
+            history=({"question": "What happened during the crisis?"},),
+        )
 
 
 def test_character_social_provider_failure_keeps_character_reply_without_sources(monkeypatch):

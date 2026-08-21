@@ -68,10 +68,16 @@ successful generated answers show no fallback notice. The notice is headed **Ess
 and says, “Archivist could not complete the {Mode label} AI response, so it returned Essential's
 direct manuscript evidence instead.”
 
+Mode selection does not alter product truth. `product-help-v1` answers a closed set of direct
+questions about Archivist itself with fixed application-owned copy before corpus loading or any
+provider call. It works in all five modes, returns no sources, and does not invent a persona role
+or biography. The selected Perspective remains visible, but the explanation of what Archivist is
+and does is identical.
+
 Every registered generated mode also has a separate, narrow pre-retrieval route for direct social
 or personal questions addressed to its persona. `is_character_conversation_question(question,
 mode)` is conservative and derives eligibility from the generated-mode registry rather than a
-list of personality IDs. An eligible turn uses `character-conversation-v2`: exactly one no-retry `answer_generation` call to
+list of personality IDs. An eligible turn uses `character-conversation-v3`: exactly one no-retry `answer_generation` call to
 `gpt-5.6-sol`, with low reasoning, low verbosity, a 12-second timeout, and at most 576 output tokens. Its input schema is
 `archivist.character_conversation_input/1`; its structured output schema is
 `archivist.character_conversation_answer/1`, its renderer is

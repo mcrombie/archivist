@@ -91,6 +91,30 @@ const oversizedHistory = [
 try {
   const delivery = await server.ssrLoadModule("/src/delivery.ts");
   const api = await server.ssrLoadModule("/src/api.ts");
+  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  const questionStepsMatch = appSource.match(
+    /const QUESTION_STEPS = \[([\s\S]*?)\n\];/
+  );
+  assert.ok(questionStepsMatch, "the complete-answer waiting copy should stay explicit");
+  assert.doesNotMatch(
+    questionStepsMatch[1],
+    /manuscript|passages|source matches|citations/i,
+    "shared waiting copy must not claim retrieval before the server chooses a route"
+  );
+  assert.doesNotMatch(
+    appSource,
+    /Finding the passages that best answer|returning to the manuscript/,
+    "complete-answer supporting copy must remain route-neutral"
+  );
+  assert.match(appSource, /pending \? "Working"/);
+  for (const stage of ["checking_corpus", "generating_answer", "validating_answer"]) {
+    assert.doesNotMatch(
+      api.PROGRESSIVE_STAGE_COPY[stage],
+      /manuscript|passage|source|citation|retriev/i,
+      `${stage} is shared with character conversation and must remain route-neutral`
+    );
+  }
 
   assert.equal(api.answerPolicyLabel("retrieval-authored-v5"), "Retrieval-authored v5");
   assert.equal(api.answerPolicyLabel("retrieval-authored-v4"), "Retrieval-authored v4");
@@ -166,7 +190,6 @@ try {
   );
 
   const chatCss = readFileSync(new URL("../src/chat.css", import.meta.url), "utf8");
-  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const vibeControlSource = readFileSync(new URL("../src/VibeControl.tsx", import.meta.url), "utf8");
   const vibeControlUses = [...appSource.matchAll(/<VibeControl\b[\s\S]*?\/>/g)]
     .map((match) => match[0]);
@@ -598,10 +621,10 @@ try {
   assert.equal(api.progressiveCheckedClaimsText(checkedClaims), `${checkedClaimOne}\n\n${checkedClaimTwo}`);
   assert.deepEqual(stages, [
     { stage: "accepted", message: "Starting your request." },
-    { stage: "generating_answer", message: "Drafting an answer from retrieved evidence." },
+    { stage: "generating_answer", message: "Drafting Archivist's response." },
     {
       stage: "validating_answer",
-      message: "Checking response structure and citation references."
+      message: "Checking the response."
     }
   ]);
   assert.deepEqual(heartbeats, [{ count: 1 }]);

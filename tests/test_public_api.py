@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import web_api
+import web_project
+from archivist_modes import ArchivistMode
 from costs import CostLimitExceeded, UsageLedger, current_usage_context
 from exposure_profile import ExposureConfigurationError, ExposureSettings
 from public_request_gate import (
@@ -25,6 +27,7 @@ from public_sources import (
     answer_has_extended_verbatim_overlap,
     public_source_payload,
 )
+from perspectives import AnswerVoice, HistoriographicalLens, Worldview
 from web_project import source_payload
 
 
@@ -710,6 +713,82 @@ def test_public_character_conversation_releases_without_manuscript_sources(monke
     assert response["sources"] == []
     assert response["source_schema"] == "archivist.public_sources/1"
     assert response["prose_renderer_version"] == "character-conversation-renderer-v1"
+
+
+def test_public_product_help_has_no_model_renderer_metadata():
+    metadata = web_api._answer_mode_metadata(
+        archivist_mode=ArchivistMode.PROFESSIONAL,
+        historiographical_lens=HistoriographicalLens.EVIDENCE_FIRST,
+        voice=AnswerVoice.PLAINSPOKEN,
+        worldview=Worldview.SECULAR_HUMANIST,
+        application_compiled=True,
+        answer_status="product_help",
+    )
+
+    assert metadata["prose_renderer_version"] is None
+    assert metadata["prose_renderer_prompt_sha256"] is None
+    assert metadata["prose_renderer_mode_instruction_sha256"] is None
+    assert metadata["prose_renderer_influence_prompt_sha256"] is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        pytest.param("What do you do?", id="exact"),
+        pytest.param("How can you helpe me?", id="one-insertion"),
+        pytest.param("what dop youd do>?", id="reported-two-typo-question"),
+    ),
+)
+def test_public_product_help_releases_without_corpus_provider_or_sources(
+    monkeypatch,
+    question,
+):
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("provider-free product help must not load corpus or reserve provider spend")
+
+    monkeypatch.setattr(web_project, "chroma_client", unexpected)
+    monkeypatch.setattr(web_project, "openai_client", unexpected)
+    monkeypatch.setattr(web_api, "UsageLedger", unexpected)
+    monkeypatch.setattr(web_api, "enforce_projected_usage_budget", unexpected)
+    monkeypatch.setattr(web_api, "public_source_payload", unexpected)
+    stages = []
+
+    response = web_api._run_public_question(
+        web_api.PublicQuestionRequest(question=question),
+        public_settings(),
+        progress_callback=stages.append,
+    )
+
+    assert response["answer_status"] == "product_help"
+    assert response["sources"] == []
+    assert response["prose_renderer_version"] is None
+    assert "not the open web" in response["answer"]
+    assert stages == [
+        web_api.AnswerProgressStage.GENERATING_ANSWER,
+        web_api.AnswerProgressStage.VALIDATING_ANSWER,
+        web_api.AnswerProgressStage.CHECKING_RELEASE,
+    ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        pytest.param("What do you do?", id="exact"),
+        pytest.param("How can you helpe me?", id="one-insertion"),
+        pytest.param("what dop youd do>?", id="reported-two-typo-question"),
+    ),
+)
+def test_public_progressive_product_help_skips_spend_preflight(monkeypatch, question):
+    monkeypatch.setattr(
+        web_api,
+        "UsageLedger",
+        lambda: pytest.fail("provider-free product help must not inspect the spend ledger"),
+    )
+
+    web_api._preflight_public_progressive_question(
+        web_api.PublicQuestionRequest(question=question),
+        public_settings(),
+    )
 
 
 @pytest.mark.parametrize(

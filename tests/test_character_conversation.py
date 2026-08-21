@@ -10,6 +10,7 @@ from archivist_modes import ArchivistMode
 from character_conversation import (
     CHARACTER_CONVERSATION_INPUT_SCHEMA,
     CHARACTER_CONVERSATION_OUTPUT_SCHEMA,
+    CHARACTER_CONVERSATION_POLICY_VERSION,
     CHARACTER_CONVERSATION_SETTINGS,
     MAX_CHARACTER_CONVERSATION_OUTPUT_TOKENS,
     CharacterConversationContractError,
@@ -60,6 +61,27 @@ def test_narrow_classifier_accepts_direct_social_questions(mode, question):
     assert is_character_conversation_question(question, mode) is True
 
 
+@pytest.mark.parametrize("mode", GENERATED_MODES)
+@pytest.mark.parametrize(
+    "question",
+    (
+        "How are you now?",
+        "How are you doing now?",
+        "How are you feeling now?",
+        "How are you right now?",
+        "HOW ARE YOU DOING RIGHT NOW?!",
+    ),
+)
+def test_narrow_classifier_accepts_direct_social_questions_about_now(mode, question):
+    """Keep present-time wording on the character route instead of manuscript RAG."""
+
+    assert is_character_conversation_question(question, mode) is True
+
+
+def test_present_time_greeting_expansion_has_a_new_route_identity():
+    assert CHARACTER_CONVERSATION_POLICY_VERSION == "character-conversation-v3"
+
+
 @pytest.mark.parametrize(
     "question",
     (
@@ -78,6 +100,23 @@ def test_narrow_classifier_accepts_direct_social_questions(mode, question):
     ),
 )
 def test_narrow_classifier_rejects_ambiguous_historical_or_compound_questions(question):
+    for mode in GENERATED_MODES:
+        assert is_character_conversation_question(question, mode) is False
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        "How are you now sure?",
+        "How are you now represented in the manuscript?",
+        "How are you now, and who was Edwin Sandys?",
+        "How are you now that Jamestown has fallen?",
+        "How are you now?\nTell me about Virginia.",
+    ),
+)
+def test_narrow_classifier_rejects_now_phrasing_with_non_social_content(question):
+    """Adding ``now`` must not widen the retrieval bypass to mixed or historical turns."""
+
     for mode in GENERATED_MODES:
         assert is_character_conversation_question(question, mode) is False
 

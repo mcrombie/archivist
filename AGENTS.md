@@ -134,6 +134,24 @@ Archivist currently documents these answer-policy families, including superseded
   Ordinary Essential and successfully authored answers show no such notice. These five modes and
   linked appearances are the only current UI/API choices; dormant
   definitions and assets are compatibility-only.
+  Before corpus loading or any spend gate, `product-help-v1` recognizes a closed set of direct
+  questions about Archivist itself, including “What do you do?”, “What can you do?”, and “How can
+  you help me?”. It returns fixed application-owned copy in every reader mode, makes no embedding
+  or generation call, exposes no sources, and does not depend on the corpus being ready. Explicit
+  product wording may match after earlier turns; the deictic “How does this work?” and “How do I
+  use this?” forms match only without conversation history. After exact phrase matching, a bounded
+  optimal-string-alignment matcher tolerates up to three mistyped tokens across a same-shape short
+  question. Each token may differ by one insertion, deletion, substitution, or adjacent
+  transposition; a same-letter scramble such as `hlpe` for `help` may cost two edits. A two-edit
+  fallback covers a single merged or split token, and punctuation/case/spacing noise is normalized. Only the closest
+  canonical phrase may win, and explicit semantic collision guards protect high-risk
+  meaning-changing forms such as `did`, `his`, `our`, `word`, and `archivism`. This remains a
+  typographical recognizer, not a semantic intent classifier: rare very-close real-word phrases
+  may receive the truthful product-help answer. That recall bias is deliberate because a false
+  negative otherwise incurs provider work and displays irrelevant manuscript fallback copy. Longer historical,
+  manuscript, compound, multiline, and contextual near-misses remain on their normal grounded path. This shell route is
+  part of the current application-compiled RAG product; explicit Full Context, V26/V27, custom,
+  and legacy dispatch remain unchanged.
   Before any manuscript retrieval, a narrow local router may recognize a social or personal
   question in any registered generated mode. This registry-derived rule includes Professional,
   Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist now and automatically covers
@@ -148,8 +166,9 @@ Archivist currently documents these answer-policy families, including superseded
   manuscript, or mixed factual questions continue through retrieval and the grounded dossier.
   Its input/output schemas remain `archivist.character_conversation_input/1` and
   `archivist.character_conversation_answer/1`, and its renderer remains
-  `character-conversation-renderer-v1`; `character-conversation-v2` records the generalized routing
-  contract rather than a changed wire shape.
+  `character-conversation-renderer-v1`; `character-conversation-v3` retains the generalized routing
+  contract and adds narrowly anchored present-time greeting forms such as “How are you now?”
+  without changing the wire shape. Sealed v4 social evidence remains identified as v2.
 - **`retrieval-authored-v4`.** This is the immediately preceding fixed-length policy and the
   identity of its sealed evaluation. It used the same retrieval, dossier, Sol settings, strict
   output schema, 35/8/30-second boundaries, 1,800-token output ceiling for every question, shared
@@ -464,6 +483,7 @@ Use the entry format at the top of that file.
 | Vector store | **ChromaDB, persistent; HNSW `l2`** | The corpus manifest pins the store contract. |
 | Embeddings | **`text-embedding-3-small`** | Current, not deprecated, and re-embedding is expensive — no reason to move. |
 | Interactive authored response | **`gpt-5.6-sol`, low reasoning, medium verbosity, exactly one no-retry call; ordinary target 500-700 visible answer tokens / 1,800-token API ceiling; broad target 900-1,100 / 2,400-token ceiling** | Applies to every registered generated mode after one shared query-embedding call: currently Professional, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist. `RouteTrait.BROAD_SYNTHESIS` in the existing `QuestionPlan.traits` selects the broad profile; all other plans use ordinary. Targets are advisory and never justify padding. Essential omits this prose call but still uses the embedding provider. |
+| Product help | **Application-owned fixed copy; zero provider calls** | `product-help-v1` answers a closed set of direct capability/how-to questions in every reader mode before corpus loading or spend enforcement. A bounded nearest-phrase Damerau-style matcher tolerates one ordinary edit per token, same-letter scrambles, up to three total edits, and limited spacing noise while guarding meaning-changing near-matches and rejecting appended context. It returns no manuscript sources and never substitutes fictional character biography for product truth. |
 | Character conversation | **`gpt-5.6-sol`, low reasoning, low verbosity, 12-second timeout, at most 576 output tokens, exactly one no-retry call** | Applies to narrowly classified social/personal turns in every registered generated mode, including future modes added through that registry. Essential is excluded. It receives no manuscript or evidence, writes no historical claims or citations, and falls back locally in the selected character. |
 | Formal generation/judging | **Dated snapshots when exposed; otherwise catalog-bound canonical IDs** | Bind the catalog observation plus requested/returned IDs, report the limitation, and keep generator and judge independent. |
 

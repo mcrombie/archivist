@@ -80,8 +80,12 @@ The web API needs:
   Essential turns and successful generated answers. Its heading is **Essential fallback** and its
   message is “Archivist could not complete the {Mode label} AI response, so it returned Essential's
   direct manuscript evidence instead.”
+- Answers a closed set of direct product questions, including “What do you do?”, through
+  `product-help-v1`. The fixed explanation is identical in every Perspective, makes no provider
+  call, loads no corpus, returns no sources, and remains distinct from both fictional social chat
+  and manuscript RAG.
 - Routes only narrowly classified social or personal questions in every registered generated mode
-  through `character-conversation-v2` before retrieval. Professional, Pretty Pink Princess,
+  through `character-conversation-v3` before retrieval. Professional, Pretty Pink Princess,
   Baleful Black Baron, and Ruthless Red Realist are covered now; Essential is excluded and future
   generated modes inherit the route through registration. That route makes exactly one
   compact, no-retry, low-reasoning/low-verbosity `gpt-5.6-sol` call with a 12-second timeout and a 576-token ceiling and

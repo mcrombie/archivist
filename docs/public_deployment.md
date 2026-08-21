@@ -157,6 +157,11 @@ active **Perspective** appears above the input, and any facet or appearance over
 active top-right and Settings-panel label to exactly **Custom** while retaining the base preset in
 its explanatory copy.
 
+The provider-free product-help check is separate from the paid behavior check below. Asking “What
+do you do?” should return `answer_status=product_help`, fixed source-free product copy, and no
+embedding or generation event. `product-help-v1` runs before corpus loading and spend enforcement,
+so this check does not authorize or consume a provider call.
+
 The post-v5 behavior check is separately costed and separately authorized: one generated-mode
 personal question should return an uncited in-character reply with a manuscript-leading question
 and record exactly one `answer_generation` event, with no embedding event or source payload. The
@@ -272,7 +277,7 @@ This smoke checks deployment behavior that the offline suite cannot establish, i
 proxy buffering and stream cleanup. It requires fresh authorization because current Essential
 retrieval sends the question to the embedding provider and generated modes also send the dossier
 to Sol. No such live deployment smoke has run for `retrieval-authored-v5` or
-`character-conversation-v2`; this runbook makes no latency,
+`character-conversation-v3`; this runbook makes no latency,
 quality, or model-performance claim.
 
 ## Production-performance cohort

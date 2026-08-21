@@ -122,14 +122,14 @@ export type ProgressiveCheckedClaim = {
 
 export const PROGRESSIVE_STAGE_COPY = {
   accepted: "Starting your request.",
-  checking_corpus: "Checking manuscript availability.",
+  checking_corpus: "Preparing Archivist's response.",
   resolving_question: "Resolving conversation context.",
   planning_search: "Planning a source search.",
   retrieving_sources: "Retrieving manuscript evidence.",
   checking_evidence: "Checking evidence sufficiency.",
   preparing_context: "Preparing source context.",
-  generating_answer: "Drafting an answer from retrieved evidence.",
-  validating_answer: "Checking response structure and citation references.",
+  generating_answer: "Drafting Archivist's response.",
+  validating_answer: "Checking the response.",
   checking_release: "Applying public release safeguards."
 } satisfies Readonly<Record<ProgressiveAnswerStage, string>>;
 

@@ -16,6 +16,7 @@ from answer_progress import (
     IncrementalJSONArrayItems,
     MAX_PROGRESSIVE_LEAD_CHARACTERS,
     MAX_PROGRESSIVE_LEAD_WORDS,
+    PROGRESS_MESSAGES,
     validate_progressive_lead,
     ProviderStreamMilestone,
 )
@@ -42,6 +43,20 @@ class _FakeDevelopmentLedger:
 
 def test_progressive_heartbeat_interval_supports_visible_activity():
     assert 0 < web_api._STREAM_HEARTBEAT_SECONDS <= 3.0
+
+
+def test_shared_generation_progress_copy_does_not_claim_manuscript_retrieval():
+    shared_copy = " ".join(
+        (
+            PROGRESS_MESSAGES[AnswerProgressStage.CHECKING_CORPUS],
+            PROGRESS_MESSAGES[AnswerProgressStage.GENERATING_ANSWER],
+            PROGRESS_MESSAGES[AnswerProgressStage.VALIDATING_ANSWER],
+        )
+    ).lower()
+
+    assert "manuscript" not in shared_copy
+    assert "source" not in shared_copy
+    assert "citation" not in shared_copy
 
 
 def test_incremental_array_reader_never_yields_partial_members():

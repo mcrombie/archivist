@@ -368,10 +368,10 @@ const EMBEDDING_STEPS = [
 ];
 
 const QUESTION_STEPS = [
-  "Searching the manuscript for relevant passages...",
-  "Comparing the strongest source matches...",
-  "Assembling grounded context...",
-  "Writing an answer with source citations..."
+  "Understanding your question...",
+  "Choosing the right response path...",
+  "Preparing Archivist's response...",
+  "Checking the response..."
 ];
 
 const INDEX_ENTRY_STEPS = [
@@ -2667,7 +2667,7 @@ function ConversationComposer({
           </span>
           <button type="submit" disabled={pending || !question.trim()}>
             {pending ? <Loader2 size={17} className="spin" /> : <Send size={16} />}
-            <span>{pending ? "Reading" : location === "landing" ? "Ask" : "Send"}</span>
+            <span>{pending ? "Working" : location === "landing" ? "Ask" : "Send"}</span>
           </button>
         </div>
       </div>
@@ -2830,7 +2830,7 @@ function ConversationTurn({
         {turn.status === "pending" && turn.responseDelivery === "complete" ? (
           <div className="archivist-thinking">
             <ProcessStatus messages={QUESTION_STEPS} />
-            <p>{turnNumber > 1 ? "Following the thread, then returning to the manuscript." : "Finding the passages that best answer your question."}</p>
+            <p>{turnNumber > 1 ? "Following the thread and preparing a response." : "Preparing the response that best fits your question."}</p>
           </div>
         ) : null}
 

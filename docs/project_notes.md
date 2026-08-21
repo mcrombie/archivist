@@ -63,9 +63,14 @@ eight seconds and authoring at thirty. Timeout, transport failure, provider exce
 structured-output rejection, or local contract-validation failure falls back to Essential without
 retry and receives a text-free internal code. ID resolution is not proof of semantic entailment.
 
+Before corpus loading, `product-help-v1` answers a closed set of direct product-purpose and how-to
+questions with fixed local copy. It works in every reader mode, makes no provider call, returns no
+sources, and remains available without spend headroom. Historical, manuscript, compound,
+multiline, and contextual near-misses continue to the grounded path.
+
 Before that path, `is_character_conversation_question(question, mode)` recognizes a narrow set of
 direct social/personal turns in every registered generated mode.
-`character-conversation-v2` sends just the question, selected character, and instructions to one
+`character-conversation-v3` sends just the question, selected character, and instructions to one
 no-retry `gpt-5.6-sol` `answer_generation` call with low reasoning, low verbosity, a 12-second
 timeout, and a 576-token
 ceiling. It sends no conversation history, embedding, manuscript text, retrieval result, dossier,

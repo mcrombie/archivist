@@ -41,7 +41,7 @@ from model_config import GPT_5_6_SOL_MODEL, ResponseModelSettings
 CHARACTER_CONVERSATION_INPUT_SCHEMA = "archivist.character_conversation_input/1"
 CHARACTER_CONVERSATION_SCHEMA = "archivist.character_conversation_answer/1"
 CHARACTER_CONVERSATION_OUTPUT_SCHEMA = CHARACTER_CONVERSATION_SCHEMA
-CHARACTER_CONVERSATION_POLICY_VERSION = "character-conversation-v2"
+CHARACTER_CONVERSATION_POLICY_VERSION = "character-conversation-v3"
 CHARACTER_CONVERSATION_RENDERER_VERSION = "character-conversation-renderer-v1"
 MAX_CHARACTER_CONVERSATION_OUTPUT_TOKENS = 576
 
@@ -69,7 +69,7 @@ _SOCIAL_QUESTION_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
         r"(?:hi|hello|hey|greetings|good (?:morning|afternoon|evening))",
-        r"how are you(?: doing| feeling)?(?: today)?",
+        r"how are you(?: doing| feeling)?(?: today| (?:right )?now)?",
         r"how have you been",
         r"how(?:'|’)s it going",
         r"how(?:'|’)s life",

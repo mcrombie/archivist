@@ -35,6 +35,8 @@ The reader experience includes:
 - a permanent first-page explanation of what Archivist is, what it searches, and how Perspectives
   affect a reading, plus a skippable first-visit spotlight tour with replay and, after tour
   completion, a deferred Sources explanation beside the first source-bearing answer;
+- provider-free answers to a closed set of direct product questions such as “What do you do?” and
+  “How can you help me?”, available in every Perspective without searching the manuscript;
 - a one-page, multi-turn conversation with contextual follow-up resolution;
 - local follow-up resolution, hybrid dense/BM25 retrieval, rich evidence-dossier compilation, and
   inline source citations;
@@ -74,11 +76,24 @@ not apply to Essential and never change retrieval or the underlying dossier. His
 definitions and assets remain only so stored and server compatibility data continue to resolve;
 they are not selectable through the current UI or API.
 
+Direct questions about the product itself use `product-help-v1` before corpus loading or any
+provider/spend boundary. The route returns one fixed explanation of what Archivist searches, what
+questions it supports, how Sources work, and what Perspectives change. It works in every reader
+mode, returns no manuscript sources, and makes no provider call. Its classifier compares the whole
+question with a closed phrase set using bounded Damerau-style distance: it tolerates one ordinary
+edit per token, same-letter scrambles, up to three total edits, limited merged/split-word errors,
+and stray punctuation. It chooses only the
+nearest canonical phrase and blocks high-risk meaning-changing near-matches such as past-tense,
+referential, or historical terms. It intentionally favors a truthful local help answer over an
+irrelevant paid RAG fallback when a very-close short phrase remains ambiguous; it is typo recovery,
+not general semantic understanding. Longer historical, manuscript, compound, multiline, and
+contextual near-misses remain grounded.
+
 Every registered generated mode also recognizes a deliberately narrow set of direct social and
-personal questions such as “How are you?” before retrieval begins. This includes Professional,
+personal questions such as “How are you?” and “How are you now?” before retrieval begins. This includes Professional,
 Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist now and automatically includes
 future modes when they register generated-mode instructions. Essential remains outside the route.
-A matching turn uses `character-conversation-v2`: exactly one no-retry `gpt-5.6-sol` call with low reasoning, low
+A matching turn uses `character-conversation-v3`: exactly one no-retry `gpt-5.6-sol` call with low reasoning, low
 verbosity, a 12-second timeout, and at most 576 output tokens. It sends only the question and selected-character
 instructions—not an embedding, manuscript passage, retrieval result, dossier, or conversation
 history. The reply is fictional character conversation, carries no citations or historical facts,
@@ -93,8 +108,9 @@ the closed adaptive-length profile. Its output schema remains
 `archivist.retrieval_authored_answer/1` and its renderer remains
 `retrieval-authored-renderer-v1`. Character conversation likewise retains schemas
 `archivist.character_conversation_input/1` and `archivist.character_conversation_answer/1` plus
-renderer `character-conversation-renderer-v1`; its v2 policy name records registry-generalized
-routing rather than a changed wire shape.
+renderer `character-conversation-renderer-v1`; its v3 policy name records the narrowly expanded
+present-time greeting classifier without changing the wire shape. Sealed v4 social results remain
+historical `character-conversation-v2` evidence.
 
 Ruthless Red Realist uses the existing Ember & Ink appearance and the wire ID `ember_and_ink`.
 It reads history through power, leverage, incentives, bargaining positions, credible commitments,
@@ -139,6 +155,8 @@ private Chroma index (481 eligible text-embedding-3-small vectors)
         |
         v
 local high-confidence follow-up resolution
+        |
+        +--> direct product-help question: fixed local answer, no corpus or provider call
         |
         +--> narrow social turn in any registered generated mode: no retrieval or manuscript evidence
         |        one compact no-retry gpt-5.6-sol character call (12-second timeout)

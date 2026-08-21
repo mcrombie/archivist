@@ -95,6 +95,12 @@ from perspectives import (
     Worldview,
     settings_for_legacy_perspective,
 )
+from product_help import (
+    PRODUCT_HELP_POLICY_VERSION,
+    PRODUCT_HELP_RENDERER_VERSION,
+    is_product_help_question,
+    render_product_help_answer,
+)
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
 from query_planning import ResolvedTurn, RouteTrait, build_question_plan
 from full_context_pipeline import run_full_context_answer
@@ -1032,6 +1038,28 @@ def _character_conversation_generation_trace(
     }
 
 
+def _product_help_generation_trace() -> dict[str, object]:
+    """Describe an application-owned help answer without implying a model call."""
+
+    return {
+        "status": "application_owned",
+        "validation_result": "valid",
+        "error_code": None,
+        "content_outcome": "valid_complete",
+        "repair_applied": False,
+        "repair_codes": [],
+        "prompt_version": PRODUCT_HELP_RENDERER_VERSION,
+        "normalizer_version": PRODUCT_HELP_POLICY_VERSION,
+        "instructions_sha256": "not-applicable",
+        "schema_sha256": "not-applicable",
+        "generator_model": "not-applicable",
+        "generator_reasoning_effort": "not-applicable",
+        "generator_verbosity": "not-applicable",
+        "structured_generation_called": False,
+        "fallback_code": None,
+    }
+
+
 def _run_application_compiled_answer(
     *,
     original_question: str,
@@ -1480,6 +1508,38 @@ def answer_project_question_result(
         raise ValueError(
             "application-compiled answers require the built-in retrieval corpus "
             "and a supported reader mode"
+        )
+
+    if (
+        application_compiled
+        and resolved_turn is None
+        and is_product_help_question(question, has_history=bool(history))
+    ):
+        # A bounded question about the product has one stable, application-owned
+        # answer. It must remain available without corpus loading, retrieval, or a
+        # provider call, and it must not borrow a fictional character biography.
+        emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
+        result = AnswerModeResult(
+            answer=render_product_help_answer(),
+            final_chunks=[],
+            status="product_help",
+            plan=None,
+            evidence_decision="not_applicable",
+            diagnostics={
+                "rag_policy_version": AUTHORED_RESPONSE_POLICY_VERSION,
+                "planner": {"status": "not_called"},
+                "generation": _product_help_generation_trace(),
+                "response_route": PRODUCT_HELP_POLICY_VERSION,
+            },
+            answer_strategy_version=AUTHORED_RESPONSE_POLICY_VERSION,
+            resolved_question_text=question.strip(),
+        )
+        return _with_stage_timings(
+            _with_archivist_mode_metadata(result, selected_mode),
+            answer_generation=0.0,
+            answer_validation=0.0,
+            total=_elapsed_ms(answer_run_started_ns),
         )
 
     # Custom projects do not yet persist the independent per-chunk identity

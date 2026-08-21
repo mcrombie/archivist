@@ -63,6 +63,50 @@ record of why that temporary contract existed.
 
 ---
 
+## [2026-08-21] A direct product-capability question entered manuscript RAG
+Phase/Brief: Public reader first-use product explanation
+Symptom: “What do you do?” was treated as a manuscript question, then an authored-response failure
+fell back to “The retrieved passages did not contain...” instead of explaining Archivist. After
+the local route was added, the one-letter typo “How can you helpe me?” still fell through because
+recognition was exact-only.
+Cause: **missing intent boundary plus brittle recognition.** The reader had grounded manuscript
+and fictional social routes but no application-owned route for questions about the product itself.
+Adding the phrase to the social classifier alone would still exclude Essential and could return a
+mood-specific local fallback rather than product truth; requiring byte-equivalent normalized copy
+was too strict for ordinary user input.
+Resolution and verification: the initial exact matcher and follow-up curated-alias patch were both
+rejected as too brittle after `what dop youd do>?` reproduced the failure. `product-help-v1` now
+exact-matches a closed capability/how-to phrase set, then applies bounded nearest-phrase
+optimal-string-alignment distance. It tolerates one insertion, deletion, substitution, or adjacent
+transposition per token, same-letter scrambles such as `hlpe`, and up to three total edits across
+the short question, plus a two-edit merged/split-token fallback and punctuation noise. Only the closest canonical phrase may win; explicit collision guards keep
+meaning-changing alternatives such as `did`, `his`, `our`, `word`, and `archivism` outside the
+route. The recognizer deliberately favors recall within this short closed phrase family: a rare
+very-close real-word phrase can receive truthful local help copy, because the observed false-negative
+cost is a paid, misleading manuscript fallback. It returns fixed source-free copy in every mode before corpus loading and
+spend enforcement and makes zero provider calls. Explicit product wording can follow a greeting;
+deictic “this” wording is first-turn-only. Unit, pipeline, public-preflight, and negative-boundary
+tests prove the two reported typo strings, distributed three-edit, same-letter-scramble, and spacing errors, semantic
+collisions, and historical, manuscript, compound, multiline, social, and contextual boundaries.
+
+---
+
+## [2026-08-21] Present-time greeting and waiting copy falsely implied manuscript retrieval
+Phase/Brief: Public reader character-conversation routing and answer progress
+Symptom: “How are you now?” entered the manuscript-answer path while “How are you?” entered the
+character-conversation path. Even a correctly routed personal greeting displayed “Searching the
+manuscript for relevant passages…” while its answer was pending.
+Cause: **other — classifier coverage and presentation mismatch.** The anchored greeting expression
+allowed optional `today` but not `now`; independently, the complete-answer timer and shared
+progress-stage labels assumed every pending turn was retrieval-backed.
+Resolution and verification: `character-conversation-v3` narrowly admits `now` and `right now`
+within the existing “How are you?” family while full-match, historical/compound, length, and
+newline guards remain. Regression tests prove the new forms bypass retrieval in every generated
+mode and that historical, compound, ambiguous, and multiline near-misses do not. Shared waiting
+and progressive copy is route-neutral; only retrieval-exclusive stages mention manuscript
+evidence or sources. Focused Python routing/progress tests, frontend delivery tests, Ruff, and the
+frontend build verify the repair without a provider call.
+
 ## [2026-08-14] Clickable perspective labels lacked historical-turn semantics
 Phase/Brief: Public reader perspective controls and answer provenance
 Symptom: the request to make the displayed perspective clickable did not specify which labels were
