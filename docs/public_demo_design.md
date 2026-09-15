@@ -275,6 +275,13 @@ the frontend:
 - replace raw exception messages with public-safe errors;
 - keep the OpenAI key, chunks, Chroma store, source PDF, and manuscript files server-side.
 
+Request bodies are read incrementally and rejected at the first chunk that exceeds the byte cap,
+including requests with missing or understated `Content-Length`. The rate gate retains only the
+last minute of accepted request timestamps and currently active slots. Rejected client identities
+do not allocate persistent gate entries; expired clients are removed even if they never return.
+An invalid client/category release cannot free another request's concurrency slot, and
+`Retry-After` rounds up to cover the remaining rate window.
+
 Direct anonymous HTTP checks verified the release boundary independently of the intended UI:
 documentation, management, source, embedding, cost, and custom-project routes return `404`;
 client-supplied tuning returns `422`; oversized input returns `413`; and the request gate returns

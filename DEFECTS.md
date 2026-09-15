@@ -63,6 +63,48 @@ record of why that temporary contract existed.
 
 ---
 
+## [2026-09-14] Review: stale conversation totals, repeated ledger writes, and public resource bounds
+Phase/Brief: General correctness and efficiency review
+Symptom: an earlier cost-summary request could complete after a conversation reset or newer answer
+and restore stale totals. Every ledger read repeated schema statements and diagnostic backfills,
+requiring the SQLite writer lock. Budget decisions used rounded display percentages. The public
+gate retained expired and rejected client identities; an unmatched release could decrement another
+request's active counters. Oversized request bodies were fully buffered before the byte cap was
+checked. Lexical ranking retokenized every eligible chunk for every query, and nonfinite semantic
+distances could reach fallback selection.
+Cause: **other — asynchronous request ownership, repeated migration, rounding, and resource
+lifecycle defects.** These are implementation defects, not evaluation-contract or model-policy
+changes.
+Resolution and verification:
+
+- A shared frontend cost-summary controller owns cancellation and update ordering. Behavioral
+  mocked-fetch tests cover reset, overlapping requests, stale errors, answer-supplied costs, and
+  unmount cleanup.
+- Ledger schema migration is versioned and transactional; ordinary reads perform no data writes,
+  and failed setup closes its connection. The version is checked under the migration lock to
+  avoid overwriting a newer concurrent migration. Synthetic SQLite tests cover pending writers,
+  concurrent migration, rollback, and precise budget thresholds. A traced settings read decreased
+  from 21 SQL statements (13 schema/data writes) to five statements with zero writes.
+- The gate evicts expired accepted requests and keeps active leases separately. Tests exercise
+  2,000 rejected client identities without retained-state growth, expired active leases, invalid
+  releases, and rounded-up retry timing. ASGI tests verify early byte-limit rejection on both
+  delivery endpoints and exact-limit fragmented-body replay.
+- Lexical preprocessing caches immutable features for at most 1,024 exact chunk texts; corpus
+  statistics and ranks remain query-local. Independent comparison against pre-review commit
+  `76e12b057fe9eb6f08acd37b9a4d5deacf569cf7` matched the complete ranked outputs and metadata in
+  1,500 synthetic cases, including corpus and in-place text/eligibility changes. Hybrid retrieval
+  now rejects NaN and either infinity before threshold/fallback selection.
+
+Final verification: repository-wide Ruff, 1,592 Python tests (one intentional skip), all three
+frontend suites, and the production build passed. Pytest required host filesystem access after
+the sandbox denied its temporary directories; the final complete run had no test failures.
+
+All verification uses synthetic/offline inputs. These changes make no claim about live answer
+latency or semantic quality and do not modify the manuscript, gold set, frozen cohorts, prompts,
+model settings, retrieval weights, thresholds, or source limits.
+
+---
+
 ## [2026-08-21] A direct product-capability question entered manuscript RAG
 Phase/Brief: Public reader first-use product explanation
 Symptom: “What do you do?” was treated as a manuscript question, then an authored-response failure

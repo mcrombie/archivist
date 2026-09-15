@@ -804,13 +804,18 @@ function unwrapCostSettings(
   };
 }
 
-export async function getCostSummary(projectId: string, conversationId: string) {
+export async function getCostSummary(
+  projectId: string,
+  conversationId: string,
+  signal?: AbortSignal
+) {
   const params = new URLSearchParams({
     project_id: projectId,
     conversation_id: conversationId
   });
   const data = await requestJson<CostSummary | { costs?: CostSummary; summary?: CostSummary }>(
-    `/api/costs/summary?${params.toString()}`
+    `/api/costs/summary?${params.toString()}`,
+    { signal }
   );
   return unwrapCostSummary(data);
 }

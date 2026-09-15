@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -581,6 +582,105 @@ def test_public_request_size_is_enforced_when_content_length_lies(monkeypatch):
     assert response.headers["x-frame-options"] == "DENY"
 
 
+def _chunked_public_request(app, *, path, chunks, content_length=None):
+    """Exercise ASGI chunks directly; TestClient joins request iterators first."""
+
+    messages = []
+    received = []
+
+    async def run():
+        response_finished = asyncio.Event()
+        remaining = iter(chunks)
+
+        async def receive():
+            chunk = next(remaining, None)
+            if chunk is None:
+                await response_finished.wait()
+                return {"type": "http.disconnect"}
+            received.append(chunk)
+            return {
+                "type": "http.request",
+                "body": chunk,
+                "more_body": len(received) < len(chunks),
+            }
+
+        async def send(message):
+            messages.append(message)
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                response_finished.set()
+
+        headers = [(b"content-type", b"application/json")]
+        if content_length is not None:
+            headers.append((b"content-length", str(content_length).encode("ascii")))
+        await app(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0", "spec_version": "2.4"},
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "http",
+                "path": path,
+                "raw_path": path.encode("ascii"),
+                "query_string": b"",
+                "root_path": "",
+                "headers": headers,
+                "client": ("synthetic-reader", 123),
+                "server": ("testserver", 80),
+            },
+            receive,
+            send,
+        )
+
+    asyncio.run(run())
+    return messages, received
+
+
+@pytest.mark.parametrize("suffix", ("", "/progressive"))
+@pytest.mark.parametrize("content_length", (None, 1))
+def test_public_body_limit_stops_receiving_after_first_oversized_chunk(suffix, content_length):
+    messages, received = _chunked_public_request(
+        web_api.create_app(public_settings(max_request_bytes=400)),
+        path=f"/api/projects/current/question{suffix}",
+        chunks=[b"x" * 200, b"y" * 201, b"never read"],
+        content_length=content_length,
+    )
+
+    assert received == [b"x" * 200, b"y" * 201]
+    start = next(message for message in messages if message["type"] == "http.response.start")
+    assert start["status"] == 413
+    body = b"".join(
+        message.get("body", b"") for message in messages if message["type"] == "http.response.body"
+    )
+    assert json.loads(body)["detail"]["code"] == "request_too_large"
+    headers = dict(start["headers"])
+    assert headers[b"x-request-id"].decode() == json.loads(body)["detail"]["request_id"]
+    assert headers[b"x-content-type-options"] == b"nosniff"
+
+
+def test_public_body_limit_replays_fragmented_request_at_exact_byte_limit(monkeypatch):
+    monkeypatch.setattr(
+        web_api,
+        "_run_public_question",
+        lambda request, _settings: {"question": request.question},
+    )
+    encoded = json.dumps({"question": "Synthetic harbor question?"}).encode("utf-8")
+    chunks = [encoded[:7], encoded[7:19], encoded[19:]]
+    messages, received = _chunked_public_request(
+        web_api.create_app(public_settings(max_request_bytes=len(encoded))),
+        path="/api/projects/current/question",
+        chunks=chunks,
+    )
+
+    assert received == chunks
+    assert next(message for message in messages if message["type"] == "http.response.start")[
+        "status"
+    ] == 200
+    body = b"".join(
+        message.get("body", b"") for message in messages if message["type"] == "http.response.body"
+    )
+    assert json.loads(body) == {"question": "Synthetic harbor question?"}
+
+
 def test_public_source_payload_preserves_numbers_and_bounds_excerpts():
     chunks = synthetic_chunks(5)
     answer = " ".join(
@@ -971,6 +1071,72 @@ def test_public_gate_enforces_rate_and_concurrency_without_waiting():
     gate.leave("reader-a")
     assert gate.try_enter("reader-a", now=103).reason == "client_rate_limit"
     assert gate.try_enter("reader-c", now=161).allowed
+
+
+def test_public_gate_state_is_bounded_by_recent_accepted_and_active_requests():
+    gate = PublicRequestGate(
+        requests_per_minute=2,
+        global_requests_per_minute=2,
+        max_concurrent_requests=1,
+        max_concurrent_per_client=1,
+    )
+    assert gate.try_enter("reader-a", now=100).allowed
+    for index in range(1_000):
+        assert gate.try_enter(f"rejected-{index}", now=101).reason == "global_concurrency_limit"
+    assert set(gate._client_timestamps) == {"reader-a"}
+    assert set(gate._category_timestamps) == {(DEFAULT_CATEGORY, "reader-a")}
+    assert gate._client_active == {"reader-a": 1}
+
+    gate.leave("reader-a")
+    assert gate._client_active == {}
+    assert gate._category_active == {}
+    assert gate._active_requests == {}
+    assert gate.try_enter("reader-b", now=102).allowed
+    gate.leave("reader-b")
+    for index in range(1_000):
+        assert gate.try_enter(f"rate-rejected-{index}", now=103).reason == "global_rate_limit"
+    assert set(gate._client_timestamps) == {"reader-a", "reader-b"}
+    assert gate._client_active == {}
+
+    assert gate.try_enter("reader-c", now=162).allowed
+    assert set(gate._client_timestamps) == {"reader-c"}
+    assert set(gate._category_timestamps) == {(DEFAULT_CATEGORY, "reader-c")}
+    assert len(gate._recent_requests) == 1
+
+
+def test_public_gate_preserves_active_slots_after_rate_history_expires():
+    gate = PublicRequestGate(
+        requests_per_minute=1,
+        global_requests_per_minute=2,
+        max_concurrent_requests=1,
+        max_concurrent_per_client=1,
+    )
+    assert gate.try_enter("reader-a", now=100, category=FULL_CONTEXT_CATEGORY).allowed
+    assert gate.try_enter("reader-b", now=161).reason == "global_concurrency_limit"
+    assert gate._client_timestamps == {}
+    assert gate._category_timestamps == {}
+    gate.leave("reader-a", category=DEFAULT_CATEGORY)
+    gate.leave("unrecognized-reader", category=FULL_CONTEXT_CATEGORY)
+    assert gate.try_enter("reader-b", now=162).reason == "global_concurrency_limit"
+    gate.leave("reader-a", category=FULL_CONTEXT_CATEGORY)
+    assert gate.try_enter("reader-b", now=162).allowed
+    gate.leave("reader-a", category=FULL_CONTEXT_CATEGORY)
+    assert gate.try_enter("reader-c", now=162).reason == "global_concurrency_limit"
+
+
+def test_public_gate_retry_after_covers_the_remaining_rate_window():
+    gate = PublicRequestGate(
+        requests_per_minute=1,
+        global_requests_per_minute=2,
+        max_concurrent_requests=1,
+        max_concurrent_per_client=1,
+    )
+    assert gate.try_enter("reader-a", now=100).allowed
+    gate.leave("reader-a")
+    decision = gate.try_enter("reader-a", now=101.6)
+    assert decision.reason == "client_rate_limit"
+    assert decision.retry_after_seconds == 59
+    assert gate.try_enter("reader-a", now=101.6 + decision.retry_after_seconds).allowed
 
 
 def test_development_source_payload_still_contains_diagnostic_text():

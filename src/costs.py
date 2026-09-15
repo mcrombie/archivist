@@ -31,6 +31,9 @@ from query_planning import safe_planner_validation_code
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_USAGE_DB = BASE_DIR / "runtime" / "usage.sqlite3"
+# Bump whenever _ensure_schema gains a migration. Ledgers already at this
+# version skip _ensure_schema entirely, so an unbumped change never reaches them.
+USAGE_SCHEMA_VERSION = 1
 PRICING_VERSION = "2026-08-14-service-tiers"
 CURRENCY = "USD"
 NANO_USD_PER_USD = Decimal("1000000000")
@@ -709,17 +712,39 @@ class UsageLedger:
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=30)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 30000")
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA synchronous = NORMAL")
-        self._ensure_schema(connection)
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA busy_timeout = 30000")
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
+            self._ensure_schema(connection)
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     @staticmethod
     def _ensure_schema(connection: sqlite3.Connection) -> None:
-        connection.executescript(
-            f"""
+        # A ledger is opened repeatedly for admission checks and response
+        # accounting. Current-schema reads must not rerun data migrations or
+        # acquire SQLite's single writer lock.
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version == USAGE_SCHEMA_VERSION:
+            return
+        if version > USAGE_SCHEMA_VERSION:
+            raise RuntimeError("usage ledger schema is newer than this application")
+
+        # Another process may migrate while this connection waits for the
+        # writer lock. Recheck before making any schema or data changes.
+        connection.execute("BEGIN IMMEDIATE")
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version == USAGE_SCHEMA_VERSION:
+            connection.commit()
+            return
+        if version > USAGE_SCHEMA_VERSION:
+            raise RuntimeError("usage ledger schema is newer than this application")
+
+        schema_script = f"""
             CREATE TABLE IF NOT EXISTS usage_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 response_id TEXT NOT NULL UNIQUE,
@@ -804,7 +829,16 @@ class UsageLedger:
             ) VALUES (1, NULL, 80, 0)
             ON CONFLICT(singleton) DO NOTHING;
             """
-        )
+        # executescript would commit and release the migration lock. Execute
+        # complete statements directly to keep initialization atomic instead.
+        statement = ""
+        for line in schema_script.splitlines(keepends=True):
+            statement += line
+            if sqlite3.complete_statement(statement):
+                connection.execute(statement)
+                statement = ""
+        if statement.strip():
+            raise RuntimeError("usage ledger schema contains an incomplete statement")
         diagnostic_columns = {
             str(row[1])
             for row in connection.execute("PRAGMA table_info(answer_run_diagnostics)").fetchall()
@@ -884,6 +918,7 @@ class UsageLedger:
             "CREATE INDEX IF NOT EXISTS answer_run_diagnostics_request_idx "
             "ON answer_run_diagnostics(request_id)"
         )
+        connection.execute(f"PRAGMA user_version = {USAGE_SCHEMA_VERSION}")
         connection.commit()
 
     def record(
@@ -1579,9 +1614,10 @@ class UsageLedger:
             )
         )
         warning_reached = bool(
-            percent_used is not None and percent_used >= int(settings["warning_threshold_percent"])
+            budget_nano is not None
+            and spent_nano * 100 >= int(budget_nano) * int(settings["warning_threshold_percent"])
         )
-        limit_reached = bool(percent_used is not None and percent_used >= 100)
+        limit_reached = bool(budget_nano is not None and spent_nano >= int(budget_nano))
         remaining = (
             None if budget_nano is None else _usd_from_nano(max(0, int(budget_nano) - spent_nano))
         )

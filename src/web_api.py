@@ -1973,17 +1973,24 @@ def _create_public_app(settings: ExposureSettings) -> FastAPI:
                             request_id=request_id,
                         )
                     )
-            body = await request.body()
-            observation_metadata = _request_observation_metadata(body)
-            if len(body) > settings.public_max_request_bytes:
-                return finalize(
-                    _public_safe_error(
-                        status_code=413,
-                        code="request_too_large",
-                        message="This question is too large for the public demo.",
-                        request_id=request_id,
+            body_buffer = bytearray()
+            async for chunk in request.stream():
+                if len(body_buffer) + len(chunk) > settings.public_max_request_bytes:
+                    return finalize(
+                        _public_safe_error(
+                            status_code=413,
+                            code="request_too_large",
+                            message="This question is too large for the public demo.",
+                            request_id=request_id,
+                        )
                     )
-                )
+                body_buffer.extend(chunk)
+            body = bytes(body_buffer)
+            # Starlette's BaseHTTPMiddleware replays the cached body to the
+            # route. Populate that cache only after the bounded stream read;
+            # Request.body() would buffer an arbitrarily large upload first.
+            request._body = body
+            observation_metadata = _request_observation_metadata(body)
             category = _request_category(body)
             decision = gate.try_enter(client_id, category=category)
             if not decision.allowed:

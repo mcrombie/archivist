@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { createServer } from "vite";
+import { testCostSummary } from "./cost-summary.mjs";
 
 const server = await createServer({
   appType: "custom",
@@ -89,6 +90,7 @@ const oversizedHistory = [
 ];
 
 try {
+  await testCostSummary(server);
   const delivery = await server.ssrLoadModule("/src/delivery.ts");
   const api = await server.ssrLoadModule("/src/api.ts");
   const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");

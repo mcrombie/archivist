@@ -1,9 +1,11 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from threading import Barrier, Event
 from types import SimpleNamespace
 
 import httpx
@@ -89,6 +91,117 @@ def answer_run_diagnostics_payload(**overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def test_current_ledger_reads_succeed_while_another_connection_is_writing(
+    monkeypatch, ledger_path,
+):
+    ledger = UsageLedger(ledger_path)
+    settings = ledger.get_settings()
+    sqlite_connect = sqlite3.connect
+
+    class ShortWaitConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "PRAGMA busy_timeout = 30000":
+                sql = "PRAGMA busy_timeout = 25"
+            return super().execute(sql, parameters)
+
+    monkeypatch.setattr(
+        costs.sqlite3,
+        "connect",
+        lambda *args, **kwargs: sqlite_connect(
+            *args, **kwargs, factory=ShortWaitConnection,
+        ),
+    )
+    with closing(sqlite_connect(ledger_path)) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE cost_settings SET warning_threshold_percent = 90")
+        # Readers see the last committed snapshot without waiting for a writer.
+        assert UsageLedger(ledger_path).get_settings() == settings
+        assert ledger.request_usage_cost_state("synthetic-request")["event_count"] == 0
+
+
+def test_usage_ledger_initialization_is_safe_across_concurrent_connections(ledger_path):
+    # Set the persistent journal mode before the simultaneous schema migrations.
+    with closing(sqlite3.connect(ledger_path)) as connection:
+        connection.execute("PRAGMA journal_mode = WAL")
+    start = Barrier(4)
+
+    def read_settings():
+        start.wait(timeout=5)
+        return UsageLedger(ledger_path).get_settings()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: read_settings(), range(4)))
+
+    assert all(result == results[0] for result in results)
+    assert results[0]["warning_threshold_percent"] == 80
+    with closing(sqlite3.connect(ledger_path)) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_waiting_migration_cannot_overwrite_a_newer_schema_version(monkeypatch, ledger_path):
+    UsageLedger(ledger_path).get_settings()
+    sqlite_connect = sqlite3.connect
+    migration_waiting = Event()
+
+    class ObservedConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "BEGIN IMMEDIATE":
+                migration_waiting.set()
+            return super().execute(sql, parameters)
+
+    monkeypatch.setattr(
+        costs.sqlite3,
+        "connect",
+        lambda *args, **kwargs: sqlite_connect(
+            *args, **kwargs, factory=ObservedConnection,
+        ),
+    )
+    with closing(sqlite_connect(ledger_path)) as writer:
+        writer.execute("PRAGMA user_version = 0")
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(f"PRAGMA user_version = {costs.USAGE_SCHEMA_VERSION + 1}")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(UsageLedger(ledger_path).get_settings)
+            try:
+                assert migration_waiting.wait(timeout=5)
+            finally:
+                writer.commit()
+            with pytest.raises(RuntimeError, match="schema is newer"):
+                pending.result(timeout=5)
+        assert writer.execute("PRAGMA user_version").fetchone()[0] == (
+            costs.USAGE_SCHEMA_VERSION + 1
+        )
+
+
+def test_usage_ledger_failed_setup_closes_connection_and_rolls_back(
+    monkeypatch, ledger_path,
+):
+    connections = []
+    sqlite_connect = sqlite3.connect
+
+    def tracked_connect(*args, **kwargs):
+        connection = sqlite_connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    def fail_migration(connection):
+        connection.executescript(
+            "BEGIN IMMEDIATE; CREATE TABLE unfinished_migration (id INTEGER);"
+        )
+        raise RuntimeError("synthetic migration failure")
+
+    monkeypatch.setattr(costs.sqlite3, "connect", tracked_connect)
+    monkeypatch.setattr(UsageLedger, "_ensure_schema", staticmethod(fail_migration))
+    with pytest.raises(RuntimeError, match="synthetic migration failure"):
+        UsageLedger(ledger_path).get_settings()
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+    with closing(sqlite_connect(ledger_path)) as connection:
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'unfinished_migration'"
+        ).fetchall() == []
 
 
 def test_answer_run_diagnostics_round_trip_is_text_free_and_upserted(ledger_path):
@@ -1371,6 +1484,38 @@ def test_settings_and_hard_stop_use_global_utc_month(ledger_path):
     assert state["percent_used"] == 125.0
     assert state["warning"] is True
     assert state["exceeded"] is True
+
+
+@pytest.mark.parametrize(
+    ("input_tokens", "percent_used", "warning", "exceeded"),
+    [
+        (63_999_999, 80.0, False, False),
+        (64_000_000, 80.0, True, False),
+        (79_999_999, 100.0, True, False),
+        (80_000_000, 100.0, True, True),
+    ],
+)
+def test_budget_thresholds_use_exact_cost_before_display_rounding(
+    ledger_path, input_tokens, percent_used, warning, exceeded,
+):
+    ledger = UsageLedger(ledger_path)
+    ledger.update_settings(
+        monthly_budget_usd="100",
+        warning_threshold_percent=80,
+        hard_limit_enabled=True,
+    )
+    ledger.record(
+        response_id="synthetic-near-budget",
+        operation="answer_generation",
+        requested_model="gpt-5",
+        actual_model="gpt-5",
+        usage=TokenUsage(input_tokens=input_tokens, total_tokens=input_tokens),
+        recorded_at="2026-07-01T00:00:00+00:00",
+    )
+    state = ledger.budget_state(datetime(2026, 7, 1, tzinfo=timezone.utc))
+    assert state["percent_used"] == percent_used
+    assert state["warning"] is warning
+    assert state["exceeded"] is exceeded
 
 
 def test_cost_settings_and_summary_api_functions_return_flat_shapes(monkeypatch, ledger_path):

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
@@ -419,6 +420,28 @@ def _file_sha256(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@dataclass(frozen=True, slots=True)
+class _LexicalFeatures:
+    length: int
+    counts: Mapping[str, int]
+    normalized_text: str
+
+
+@lru_cache(maxsize=1024)
+def _lexical_features(text: str) -> _LexicalFeatures:
+    """Reuse immutable token features, keyed by content so edits cannot go stale.
+
+    Only chunk preprocessing is cached; eligibility, corpus frequencies, scores,
+    and ranking are recomputed for the exact corpus and query on each call.
+    """
+    tokens = _tokens(text)
+    return _LexicalFeatures(
+        length=len(tokens),
+        counts=MappingProxyType(dict(Counter(tokens))),
+        normalized_text=" ".join(tokens),
+    )
+
+
 def lexical_candidates(
     query: str,
     chunks: list[dict[str, Any]],
@@ -438,12 +461,11 @@ def lexical_candidates(
             "quoted_phrase_count": len(quoted_phrases),
         }
 
-    eligible: list[tuple[int, dict[str, Any], list[str], Counter[str]]] = []
+    eligible: list[tuple[int, dict[str, Any], _LexicalFeatures]] = []
     for ordinal, chunk in enumerate(chunks):
         if should_skip_document(str(chunk.get("document") or "")):
             continue
-        chunk_tokens = _tokens(str(chunk.get("text") or ""))
-        eligible.append((ordinal, chunk, chunk_tokens, Counter(chunk_tokens)))
+        eligible.append((ordinal, chunk, _lexical_features(str(chunk.get("text") or ""))))
 
     if not eligible:
         return [], {
@@ -453,10 +475,10 @@ def lexical_candidates(
         }
 
     document_frequency = {
-        term: sum(1 for _, _, _, counts in eligible if counts.get(term, 0) > 0)
+        term: sum(1 for _, _, features in eligible if features.counts.get(term, 0) > 0)
         for term in query_terms
     }
-    average_length = sum(len(tokens) for _, _, tokens, _ in eligible) / len(eligible)
+    average_length = sum(features.length for _, _, features in eligible) / len(eligible)
     average_length = max(average_length, 1.0)
     corpus_size = len(eligible)
     content_sequence = [
@@ -472,16 +494,16 @@ def lexical_candidates(
     )
 
     ranked: list[dict[str, Any]] = []
-    for ordinal, chunk, chunk_tokens, counts in eligible:
+    for ordinal, chunk, features in eligible:
         score = 0.0
         matched_term_count = 0
         length_normalization = (
             1.0
             - BM25_B
-            + BM25_B * (len(chunk_tokens) / average_length)
+            + BM25_B * (features.length / average_length)
         )
         for term in query_terms:
-            frequency = counts.get(term, 0)
+            frequency = features.counts.get(term, 0)
             if not frequency:
                 continue
             matched_term_count += 1
@@ -494,7 +516,7 @@ def lexical_candidates(
                 / (frequency + BM25_K1 * length_normalization)
             )
 
-        normalized_chunk = " ".join(chunk_tokens)
+        normalized_chunk = features.normalized_text
         quoted_phrase_hits = sum(
             1 for phrase in quoted_phrases if phrase in normalized_chunk
         )
@@ -576,6 +598,8 @@ def _semantic_candidates(results: Mapping[str, Any]) -> list[dict[str, Any]]:
             distance = float(raw_distance)
         except (TypeError, ValueError) as exc:
             raise ValueError("semantic candidate distance must be numeric") from exc
+        if not math.isfinite(distance):
+            raise ValueError("semantic candidate distance must be finite")
         candidates.append(
             {
                 "rank": index,

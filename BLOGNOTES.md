@@ -4584,3 +4584,23 @@ boundary. We now give the request guard the effective cohort ceiling and leave
 remaining-balance enforcement to the ledger plus the exact next-call
 projection. The once-only artifact protocol made the correction resumable
 without replaying a paid call.
+
+## 2026-09-14 — Correctness and efficiency review
+
+The review found small lifecycle problems across the reader and service: an older cost request
+could repopulate a cleared conversation, ledger reads unnecessarily acquired SQLite's writer lock,
+and the public gate retained client records after their rate windows expired. Request size checks
+also buffered the entire upload before enforcing the cap. Focused refactors now assign ownership
+to cost refreshes, perform schema migration once under a transaction, expire gate state, and stop
+oversized bodies during reading. Budget decisions use exact costs instead of rounded percentages.
+
+Lexical search now reuses immutable token features in a bounded cache keyed by exact chunk text.
+An independent comparison against the prior implementation matched ranked outputs and metadata
+in 1,500 synthetic cases, including changes to text, eligibility, and corpus composition. A
+synthetic SQL trace reduced a settings read from 21 statements, including 13 schema/data writes,
+to five statements and zero writes. These are local implementation checks, not live answer-latency
+or semantic-quality measurements. Synthetic regression tests exercise the concurrency and reset
+failures; the frontend suites and production build passed. No provider calls, deployment, or
+changes to the gold set, manuscript, model prompts, or sealed cohorts were part of this review.
+The final complete Python suite passed 1,592 tests with one intentional skip, and repository-wide
+Ruff passed.

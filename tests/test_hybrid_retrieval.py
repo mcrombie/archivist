@@ -375,6 +375,53 @@ def test_lexical_tokenizer_normalizes_terminal_possessives():
     assert plain_ranked[0]["chunk_id"] == "02_Two_001"
 
 
+def test_lexical_features_reuse_tokenization_without_stale_chunk_data(monkeypatch):
+    retrieval._lexical_features.cache_clear()
+    evidence = chunk("01_One_001", "one.md", "Harbor merchants traded copper.")
+    tokenized = []
+    original_tokens = retrieval._tokens
+
+    def record_tokens(text):
+        tokenized.append(text)
+        return original_tokens(text)
+
+    monkeypatch.setattr(retrieval, "_tokens", record_tokens)
+    try:
+        first = lexical_candidates("harbor copper", [evidence])
+        assert lexical_candidates("harbor copper", [dict(evidence)]) == first
+        assert tokenized.count(evidence["text"]) == 1
+
+        # A caller may edit a chunk in place or reuse its ID in another corpus.
+        evidence["text"] = "Orchard workers planted apples."
+        assert lexical_candidates("harbor copper", [evidence])[0] == []
+        assert lexical_candidates("orchard apples", [evidence])[0][0]["chunk"] is evidence
+        assert tokenized.count(evidence["text"]) == 1
+
+        # Cached features must not preserve prior eligibility or metadata.
+        evidence["document"] = "02_Table of Contents.md"
+        assert lexical_candidates("orchard apples", [evidence])[0] == []
+    finally:
+        retrieval._lexical_features.cache_clear()
+
+
+def test_lexical_cache_recomputes_statistics_for_the_current_corpus():
+    evidence = chunk("01_One_001", "one.md", "harbor copper")
+    other = chunk("02_Two_001", "two.md", "orchard apples")
+    alone = lexical_candidates("harbor", [evidence])
+    expanded = lexical_candidates("harbor", [evidence, other])
+    assert expanded[0][0]["score"] > alone[0][0]["score"]
+    assert lexical_candidates("harbor", [evidence]) == alone
+
+
+@pytest.mark.parametrize("distance", [float("nan"), float("inf"), float("-inf")])
+def test_hybrid_retrieval_rejects_nonfinite_semantic_distances(distance):
+    evidence = chunk("01_One_001", "one.md", "harbor copper")
+    with pytest.raises(ValueError, match="distance must be finite"):
+        build_hybrid_results(
+            "harbor", semantic_results([evidence], [distance]), [evidence]
+        )
+
+
 def test_answer_context_reserves_all_primaries_before_optional_neighbors():
     chunks = [
         chunk(f"01_One_{index:03}", "one.md", f"one {index}")

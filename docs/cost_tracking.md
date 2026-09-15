@@ -20,11 +20,20 @@ The conversation interface shows the estimated cost for each answer plus convers
 UTC month, and all-time totals. The detailed cost panel breaks the current month's estimate down by
 operation and recent call.
 
+Summary refreshes belong to the active conversation and newest request. Starting a new
+conversation cancels pending refreshes and clears their state; stale responses cannot restore old
+totals or overwrite costs delivered with a newer answer.
+
 ## Persistence and privacy
 
 The SQLite ledger lives under the ignored local `runtime/` directory by default. Set
 `ARCHIVIST_USAGE_DB` to an alternate file path if needed. The ledger begins with the first API call
 made after tracking is installed; it does not reconstruct earlier usage.
+
+Schema initialization and upgrades run once under a SQLite write transaction, with the schema
+version checked again after acquiring the lock. A newer unsupported schema is rejected. Normal
+reads of an initialized ledger skip migrations and can read the committed snapshot while another
+connection writes. Setup failures close the connection and roll back unfinished changes.
 
 ### Cross-run development lineage
 
@@ -59,6 +68,9 @@ The cost panel can set a local monthly budget, warning percentage, and optional 
 stop is disabled by default. When enabled, Archivist blocks the next request after locally tracked
 monthly spend has reached the limit and offers a one-request override. A request already in progress
 can cross the threshold because its final token use is not known in advance.
+
+Warning and hard-stop decisions compare integer nanodollar amounts with the configured thresholds.
+The rounded percentage is for display only and cannot trigger a limit early.
 
 OpenAI project budgets are separate, soft notification thresholds: requests continue after those
 budgets are exceeded. See [Managing projects in the API

@@ -57,7 +57,6 @@ import {
   getCandidateTerms,
   getAppConfig,
   getCostSettings,
-  getCostSummary,
   getManuscriptSources,
   isProgressiveFallbackEligible,
   answerPolicyLabel,
@@ -72,6 +71,7 @@ import {
   storedResponseDelivery,
   type ResponseDelivery
 } from "./delivery";
+import { createCostSummaryController, type CostSummaryState } from "./costSummary";
 import { VibeControl } from "./VibeControl";
 import { OnboardingTour } from "./OnboardingTour";
 import {
@@ -1581,9 +1581,14 @@ function QuestionMode({
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState(createConversationId);
-  const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
-  const [costSummaryLoading, setCostSummaryLoading] = useState(config.features.cost_ledger);
-  const [costSummaryError, setCostSummaryError] = useState<string | null>(null);
+  const [costSummaryState, setCostSummaryState] = useState<CostSummaryState>({
+    summary: null,
+    loading: config.features.cost_ledger,
+    error: null
+  });
+  const [costSummaryController] = useState(() => createCostSummaryController(setCostSummaryState));
+  const { summary: costSummary, loading: costSummaryLoading } = costSummaryState;
+  const costSummaryError = costSummaryState.error === null ? null : errorMessage(costSummaryState.error);
   const [costDrawerOpen, setCostDrawerOpen] = useState(false);
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(
     storedOnboardingState
@@ -1603,41 +1608,14 @@ function QuestionMode({
 
   useEffect(() => {
     if (!config.features.cost_ledger) {
-      setCostSummary(null);
-      setCostSummaryLoading(false);
-      setCostSummaryError(null);
+      costSummaryController.clear();
       return;
     }
-    let cancelled = false;
-    setCostSummaryLoading(true);
-    setCostSummaryError(null);
-    getCostSummary(project.id, conversationId)
-      .then((summary) => {
-        if (!cancelled) setCostSummary(summary);
-      })
-      .catch((loadError) => {
-        if (!cancelled) setCostSummaryError(errorMessage(loadError));
-      })
-      .finally(() => {
-        if (!cancelled) setCostSummaryLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [config.features.cost_ledger, conversationId, project.id]);
+    void costSummaryController.activate(project.id, conversationId);
+    return costSummaryController.dispose;
+  }, [config.features.cost_ledger, conversationId, costSummaryController, project.id]);
 
-  async function refreshCostSummary() {
-    if (!config.features.cost_ledger) return;
-    setCostSummaryLoading(true);
-    setCostSummaryError(null);
-    try {
-      setCostSummary(await getCostSummary(project.id, conversationId));
-    } catch (loadError) {
-      setCostSummaryError(errorMessage(loadError));
-    } finally {
-      setCostSummaryLoading(false);
-    }
-  }
+  const refreshCostSummary = costSummaryController.refresh;
 
   function scrollToTurn(turnId: string, firstTurn: boolean) {
     window.setTimeout(() => {
@@ -1763,7 +1741,7 @@ function QuestionMode({
           questionOptions
         );
       }
-      if (result.costs) setCostSummary(result.costs);
+      if (result.costs) costSummaryController.accept(result.costs);
       else if (config.features.cost_ledger) void refreshCostSummary();
       const validationFailed = result.answer_status === "generation_contract_failed";
       const pipelineFailed = validationFailed || result.answer_status === "corpus_integrity_failed";
@@ -1941,8 +1919,7 @@ function QuestionMode({
     setFacets(modeDefaultFacets(archivistModeId));
     setCopiedTurnId(null);
     setConversationId(createConversationId());
-    setCostSummary(null);
-    setCostSummaryError(null);
+    costSummaryController.clear();
     const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ? "auto"
       : "smooth";

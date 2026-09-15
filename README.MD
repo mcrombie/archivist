@@ -199,6 +199,12 @@ and response IDs, while disclosing that provider-side weights may change behind 
 generator and judge use different predeclared identifiers; Archivist never manufactures a dated
 snapshot name.
 
+Lexical search keeps a bounded, process-local cache of immutable token features keyed by exact
+chunk text. It recomputes eligibility, corpus statistics, scores, and ranking for every query, so
+changing chunk content or the active corpus cannot reuse stale search results. The ledger uses a
+versioned, transactional schema migration; ordinary reads of an initialized ledger perform no
+schema or data writes.
+
 ## Local quickstart
 
 Requirements:
@@ -380,7 +386,7 @@ npm run test:onboarding
 npm run build
 ```
 
-**Verification snapshot — August 14, 2026:** repository-wide Ruff passed; **1,444 Python tests passed
+**Verification snapshot — September 14, 2026:** repository-wide Ruff passed; **1,592 Python tests passed
 and 1 was intentionally skipped**; the delivery, mode, and onboarding frontend suites passed; and
 the production frontend built successfully. These checks are offline and make no paid OpenAI calls. Live deployment behavior
 still requires the release smoke checks in the deployment runbook.
