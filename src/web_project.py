@@ -101,6 +101,17 @@ from product_help import (
     is_product_help_question,
     render_product_help_answer,
 )
+from prepared_answers import (
+    PREPARED_ANSWER_POLICY_VERSION,
+    PREPARED_ANSWER_STATUS,
+    prepared_answer_for,
+)
+from provider_errors import (
+    INSUFFICIENT_QUOTA_CODE,
+    PROVIDER_CREDITS_EXHAUSTED_MESSAGE,
+    PROVIDER_CREDITS_EXHAUSTED_STATUS,
+    is_insufficient_quota_error,
+)
 from prompts import build_answer_prompt, build_index_prompt_web, build_interpretive_answer_prompt
 from query_planning import ResolvedTurn, RouteTrait, build_question_plan
 from full_context_pipeline import run_full_context_answer
@@ -504,6 +515,8 @@ def friendly_openai_error(exc: OpenAIError) -> str:
     if error_name == "AuthenticationError":
         return "OpenAI authentication failed. Check OPENAI_API_KEY in the Archivist .env file."
     if error_name == "RateLimitError":
+        if is_insufficient_quota_error(exc):
+            return PROVIDER_CREDITS_EXHAUSTED_MESSAGE
         return "OpenAI rate limit or quota was reached. Wait a bit or check project billing, then retry."
     return f"OpenAI request failed: {exc}"
 
@@ -923,7 +936,7 @@ def _retrieval_authored_generation_trace(
         return {
             "status": (
                 "retrieval_failed"
-                if fallback_code == "retrieval_failure"
+                if fallback_code in {"retrieval_failure", INSUFFICIENT_QUOTA_CODE}
                 else ("fallback_to_direct_evidence" if failed_before_call else "not_called")
             ),
             "validation_result": (
@@ -1060,6 +1073,19 @@ def _product_help_generation_trace() -> dict[str, object]:
     }
 
 
+def _prepared_answer_generation_trace() -> dict[str, object]:
+    """Describe a prepared, cited answer without implying a model call."""
+
+    trace = _product_help_generation_trace()
+    trace.update(
+        {
+            "prompt_version": PREPARED_ANSWER_POLICY_VERSION,
+            "normalizer_version": PREPARED_ANSWER_POLICY_VERSION,
+        }
+    )
+    return trace
+
+
 def _run_application_compiled_answer(
     *,
     original_question: str,
@@ -1194,16 +1220,27 @@ def _run_application_compiled_answer(
         )
     except CostLimitExceeded:
         raise
-    except Exception:
+    except Exception as exc:
         timings["retrieval"] = _elapsed_ms(retrieval_started_ns)
         timings["pipeline_total"] = _elapsed_ms(pipeline_started_ns)
+        # An exhausted OpenAI balance will not clear on retry, so say what is wrong
+        # instead of inviting the reader to try again.
+        credits_exhausted = is_insufficient_quota_error(exc)
         return AnswerModeResult(
             answer=(
-                "Archivist could not complete the evidence search for this question. "
-                "Please try again."
+                PROVIDER_CREDITS_EXHAUSTED_MESSAGE
+                if credits_exhausted
+                else (
+                    "Archivist could not complete the evidence search for this question. "
+                    "Please try again."
+                )
             ),
             final_chunks=[],
-            status="retrieval_unavailable",
+            status=(
+                PROVIDER_CREDITS_EXHAUSTED_STATUS
+                if credits_exhausted
+                else "retrieval_unavailable"
+            ),
             plan=plan,
             evidence_decision="indeterminate",
             diagnostics={
@@ -1213,7 +1250,9 @@ def _run_application_compiled_answer(
                     mode=archivist_mode,
                     generation_called=False,
                     generation_valid=False,
-                    fallback_code="retrieval_failure",
+                    fallback_code=(
+                        INSUFFICIENT_QUOTA_CODE if credits_exhausted else "retrieval_failure"
+                    ),
                     answer_length_target=answer_length_target,
                 ),
                 "stage_timings_ms": timings,
@@ -1480,6 +1519,7 @@ def answer_project_question_result(
     answer_strategy: AnswerStrategy | str = AnswerStrategy.RAG,
     rag_policy: RagPolicy = EVIDENCE_PLANNED_POLICY,
     application_compiled: bool = False,
+    allow_prepared_answers: bool = False,
     progress_callback: ProgressCallback | None = None,
     checked_claim_callback: CheckedClaimCallback | None = None,
     stream_milestone_callback: ProviderStreamMilestoneCallback | None = None,
@@ -1488,6 +1528,7 @@ def answer_project_question_result(
 
     Both strategies share this function's preflight and conversation resolution
     and return the same result shape; they diverge only at the one dispatch below.
+    Prepared answers are opt-in so evaluation runs keep exercising the live pipeline.
     """
     answer_run_started_ns = perf_counter_ns()
     selected_strategy = AnswerStrategy(answer_strategy)
@@ -1535,6 +1576,56 @@ def answer_project_question_result(
             answer_strategy_version=AUTHORED_RESPONSE_POLICY_VERSION,
             resolved_question_text=question.strip(),
         )
+        return _with_stage_timings(
+            _with_archivist_mode_metadata(result, selected_mode),
+            answer_generation=0.0,
+            answer_validation=0.0,
+            total=_elapsed_ms(answer_run_started_ns),
+        )
+
+    prepared = (
+        prepared_answer_for(
+            question,
+            archivist_mode=selected_mode,
+            historiographical_lens=historiographical_lens,
+            voice=voice,
+            worldview=worldview,
+        )
+        if allow_prepared_answers and application_compiled and resolved_turn is None
+        else None
+    )
+    if prepared is not None:
+        # A stable question about the book itself has an answer written once from
+        # the passages it cites. Serving it needs only those chunks: no retrieval,
+        # embedding, or authoring call.
+        emit_progress(progress_callback, AnswerProgressStage.GENERATING_ANSWER)
+        chunks_by_id = {
+            str(chunk.get("chunk_id") or ""): chunk
+            for chunk in load_project_chunks(project_id)
+        }
+        missing = [
+            chunk_id for chunk_id in prepared.source_chunk_ids if chunk_id not in chunks_by_id
+        ]
+        if missing:
+            raise FileNotFoundError(
+                f"prepared answer {prepared.answer_id} cites missing chunks: {', '.join(missing)}"
+            )
+        result = AnswerModeResult(
+            answer=prepared.answer,
+            final_chunks=[dict(chunks_by_id[chunk_id]) for chunk_id in prepared.source_chunk_ids],
+            status=PREPARED_ANSWER_STATUS,
+            plan=None,
+            evidence_decision="direct_answer",
+            diagnostics={
+                "rag_policy_version": AUTHORED_RESPONSE_POLICY_VERSION,
+                "planner": {"status": "not_called"},
+                "generation": _prepared_answer_generation_trace(),
+                "response_route": PREPARED_ANSWER_POLICY_VERSION,
+            },
+            answer_strategy_version=PREPARED_ANSWER_POLICY_VERSION,
+            resolved_question_text=question.strip(),
+        )
+        emit_progress(progress_callback, AnswerProgressStage.VALIDATING_ANSWER)
         return _with_stage_timings(
             _with_archivist_mode_metadata(result, selected_mode),
             answer_generation=0.0,

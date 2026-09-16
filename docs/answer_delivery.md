@@ -61,6 +61,25 @@ compound, multiline, and contextual near-misses are not product help.
 The route belongs to the current application-compiled Retrieved-passages product; explicit Full
 Context, V26/V27, legacy, and custom-project dispatch remain unchanged.
 
+### Prepared answers before retrieval
+
+`prepared-answer-v1` follows product help. It answers a few stable questions about the book itself,
+currently “What is Cradle of the Empire about?” and close variants, with the same bounded matcher and
+fixed text written once from specific manuscript passages. It loads only those chunks and makes no
+embedding, retrieval, or authoring call, so web requests skip spend preflight. The answer still cites
+its passages: it reports `prepared_answer`, returns those chunks as sources, and on the public server
+passes the same verbatim-overlap and locator gates as a generated answer. Only Professional with its
+default facets uses it, and only web requests opt in (`allow_prepared_answers=True`), so evaluations
+keep exercising the live pipeline.
+
+### Exhausted provider credits
+
+OpenAI reports an empty prepaid balance as HTTP 429 `insufficient_quota`, which no retry clears. When
+retrieval fails that way the result reports `provider_credits_exhausted` with diagnostics code
+`insufficient_quota`, and the reader is told that Archivist's usage credits have run out and the
+developer needs to add more. The public server returns it as `503 provider_credits_exhausted`; the
+progressive stream sends the same code and message.
+
 ### Character conversation before retrieval
 
 For every registered generated mode, a conservative local classifier recognizes a narrow set of

@@ -24,7 +24,7 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import {
   AppConfig,
@@ -59,7 +59,9 @@ import {
   getCostSettings,
   getManuscriptSources,
   isProgressiveFallbackEligible,
+  isProviderCreditsExhausted,
   answerPolicyLabel,
+  PROVIDER_CREDITS_EXHAUSTED,
   searchExistingIndex,
   updateCostSettings
 } from "./api";
@@ -72,31 +74,27 @@ import {
   type ResponseDelivery
 } from "./delivery";
 import { createCostSummaryController, type CostSummaryState } from "./costSummary";
-import { VibeControl } from "./VibeControl";
 import { OnboardingTour } from "./OnboardingTour";
 import {
   archivistModeSummary,
   archivistMode,
   authoredFallbackNotice,
   modeDefaultFacets,
-  modeHasOverrides,
-  persistAppearance,
-  persistArchivistMode,
-  storedAppearance,
-  storedArchivistMode
+  ARCHIVIST_MODES,
+  DEFAULT_ARCHIVIST_MODE,
+  modeHasOverrides
 } from "./modes";
 import {
   completeOnboarding,
   markSourcesTipSeen,
   markSourcesTipSkipped,
   persistOnboardingState,
-  shouldAutoStartOnboarding,
   shouldShowSourcesTip,
   skipOnboarding,
   storedOnboardingState,
   type OnboardingState
 } from "./onboarding";
-import { VIBES, type VibeId } from "./vibes";
+import { DEFAULT_VIBE, VIBES, type VibeId } from "./vibes";
 import coverArt from "./assets/cradle-of-the-empire-cover.jpg";
 import openingQuestions from "./openingQuestions.json";
 
@@ -300,11 +298,14 @@ function answerFacetSummary(facets: AnswerFacets) {
   ].join(" · ");
 }
 
+// Lens, voice, and worldview overrides are hidden to keep Settings simple. The controls and their
+// request plumbing remain; set this to true to offer them again.
+const INTERPRETIVE_OVERRIDES_VISIBLE = false;
+
 function currentPerspectiveCopy(
   modeId: ArchivistModeId,
   facets: AnswerFacets,
-  interpretiveOverrides: boolean,
-  appearanceOverride: boolean
+  interpretiveOverrides: boolean
 ) {
   const mode = archivistMode(modeId);
   if (interpretiveOverrides) {
@@ -314,10 +315,7 @@ function currentPerspectiveCopy(
     const worldview = worldviewOption.value === "none"
       ? "no added worldview"
       : `a ${worldviewOption.label.toLowerCase()} worldview`;
-    return `Based on ${mode.label}, whose character remains active, using ${lens} framing, a ${voice} voice, and ${worldview}.${appearanceOverride ? " Appearance is also customized." : ""}`;
-  }
-  if (appearanceOverride) {
-    return `The appearance is customized; the underlying ${mode.label} perspective is unchanged. ${mode.perspective}`;
+    return `Based on ${mode.label}, whose character remains active, using ${lens} framing, a ${voice} voice, and ${worldview}.`;
   }
   return mode.perspective;
 }
@@ -876,7 +874,6 @@ type ChatTurn = {
   id: string;
   question: string;
   archivistMode: ArchivistModeId;
-  appearance: VibeId;
   facets: AnswerFacets;
   // What was requested, and what the server reports actually ran. They differ if
   // a request is rejected, so the badge reads the second one.
@@ -900,6 +897,7 @@ type ChatTurn = {
   validationErrorCode?: string;
   stageTimingsMs?: Record<string, number>;
   budgetBlocked?: boolean;
+  creditsExhausted?: boolean;
   turnCostUsd?: number;
 };
 
@@ -965,6 +963,16 @@ function formatTurnCost(value: number) {
   return value < 1 ? `$${value.toFixed(4)}` : formatUsd(value);
 }
 
+// Readers think in cents, not in the ledger's four-decimal precision.
+function formatReaderUsd(value: number) {
+  if (value > 0 && value < 0.01) return "<$0.01";
+  return formatUsd(value);
+}
+
+function conversationCostUsd(turns: ChatTurn[]) {
+  return turns.reduce((total, turn) => total + (turn.turnCostUsd ?? 0), 0);
+}
+
 function formatCostTimestamp(timestamp: string) {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return timestamp;
@@ -992,6 +1000,7 @@ function CostMeterButton({
   open: boolean;
   onOpen: () => void;
 }) {
+  const tooltipId = useId();
   const budget = summary?.budget;
   const percent = budget?.percent_used;
   const state = budget?.exceeded ? "is-exceeded" : budget?.warning ? "is-warning" : "";
@@ -1002,56 +1011,99 @@ function CostMeterButton({
       : `${formatUsd(summary.month_usd)} this month; ${Math.round(percent ?? 0)} percent of local budget`;
 
   return (
-    <button
-      type="button"
-      className={`cost-meter ${state}`}
-      aria-label={`Open cost ledger. ${status}.`}
-      aria-haspopup="dialog"
-      aria-expanded={open}
-      aria-controls="archivist-cost-ledger"
-      onClick={onOpen}
-    >
-      {budget?.warning || budget?.exceeded
-        ? <AlertCircle size={16} aria-hidden="true" />
-        : <CircleDollarSign size={16} aria-hidden="true" />}
-      <span className="cost-meter-copy">
-        <small>This month</small>
-        <strong>{summary ? formatUsd(summary.month_usd) : loading ? "Loading…" : "Unavailable"}</strong>
-      </span>
-      {budget?.monthly_budget_usd !== null && percent !== null && percent !== undefined ? (
-        <span className="cost-meter-track" aria-hidden="true">
-          <i style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+    <span className="cost-meter-anchor">
+      <button
+        type="button"
+        className={`cost-meter ${state}`}
+        aria-label={`Open cost ledger. ${status}.`}
+        aria-describedby={tooltipId}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="archivist-cost-ledger"
+        onClick={onOpen}
+      >
+        {budget?.warning || budget?.exceeded
+          ? <AlertCircle size={16} aria-hidden="true" />
+          : <CircleDollarSign size={16} aria-hidden="true" />}
+        <span className="cost-meter-copy">
+          <small>This month</small>
+          <strong>{summary ? formatUsd(summary.month_usd) : loading ? "Loading…" : "Unavailable"}</strong>
         </span>
-      ) : null}
-    </button>
+        {budget?.monthly_budget_usd !== null && percent !== null && percent !== undefined ? (
+          <span className="cost-meter-track" aria-hidden="true">
+            <i style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+          </span>
+        ) : null}
+      </button>
+      <span role="tooltip" id={tooltipId} className="cost-meter-tooltip">
+        Estimated OpenAI spend this month (UTC) for every Archivist request on this server.
+        Open it for this conversation, the breakdown, and budget controls.
+      </span>
+    </span>
   );
 }
 
-type CostSettingsSaveState = "idle" | "saving" | "success" | "error";
-
-function CostLedgerDrawer({
+function ConversationCostButton({
+  turns,
   open,
-  summary,
-  loading,
-  error,
-  onClose,
-  onRefresh
+  onOpen
 }: {
+  turns: ChatTurn[];
   open: boolean;
-  summary: CostSummary | null;
-  loading: boolean;
-  error: string | null;
+  onOpen: () => void;
+}) {
+  const tooltipId = useId();
+  const total = formatReaderUsd(conversationCostUsd(turns));
+
+  return (
+    <span className="cost-meter-anchor">
+      <button
+        type="button"
+        className="cost-meter is-conversation"
+        aria-label={`What this conversation cost: about ${total}.`}
+        aria-describedby={tooltipId}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="archivist-conversation-cost"
+        onClick={onOpen}
+      >
+        <CircleDollarSign size={16} aria-hidden="true" />
+        <span className="cost-meter-copy">
+          <small>This conversation</small>
+          <strong>{total}</strong>
+        </span>
+      </button>
+      <span role="tooltip" id={tooltipId} className="cost-meter-tooltip">
+        About what this conversation's answers have cost in OpenAI usage. The developer pays
+        for the demo, so asking questions is free for you.
+      </span>
+    </span>
+  );
+}
+
+// The modal side sheet shared by the reader's cost summary and the local ledger.
+function CostSheet({
+  id,
+  open,
+  eyebrow,
+  title,
+  closeLabel,
+  describedBy,
+  onClose,
+  children
+}: {
+  id: string;
+  open: boolean;
+  eyebrow: string;
+  title: string;
+  closeLabel: string;
+  describedBy: string;
   onClose: () => void;
-  onRefresh: () => Promise<void>;
+  children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const [settings, setSettings] = useState<CostSettings | null>(null);
-  const [settingsDraft, setSettingsDraft] = useState<CostSettings>({ ...DEFAULT_COST_SETTINGS });
-  const [settingsLoading, setSettingsLoading] = useState(true);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [settingsSaveState, setSettingsSaveState] = useState<CostSettingsSaveState>("idle");
-  const [settingsSaveMessage, setSettingsSaveMessage] = useState("");
+  const titleId = `${id}-title`;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -1063,6 +1115,163 @@ function CostLedgerDrawer({
       dialog.close();
     }
   }, [open]);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      id={id}
+      className="cost-ledger-dialog"
+      aria-labelledby={titleId}
+      aria-describedby={describedBy}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClose={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="cost-ledger-drawer">
+        <header className="cost-ledger-header">
+          <div>
+            <span>{eyebrow}</span>
+            <h2 id={titleId}>{title}</h2>
+          </div>
+          <button ref={closeButtonRef} type="button" aria-label={closeLabel} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="cost-ledger-content">{children}</div>
+      </div>
+    </dialog>
+  );
+}
+
+function answerCostLabel(turn: ChatTurn, reader: boolean) {
+  if (turn.status === "pending") return "Answering…";
+  if (turn.turnCostUsd === undefined) return turn.status === "error" ? "Not answered" : "Not recorded";
+  if (reader) return turn.turnCostUsd === 0 ? "Free" : formatReaderUsd(turn.turnCostUsd);
+  return formatTurnCost(turn.turnCostUsd);
+}
+
+function AnswerCostList({ turns, reader }: { turns: ChatTurn[]; reader: boolean }) {
+  if (!turns.length) {
+    return <p className="cost-ledger-empty">No questions yet in this conversation.</p>;
+  }
+  return (
+    <ol className="answer-cost-list">
+      {turns.map((turn) => (
+        <li key={turn.id} className={turn.turnCostUsd === 0 ? "is-free" : undefined}>
+          <span className="answer-cost-question">{turn.question}</span>
+          <strong className="answer-cost-value">{answerCostLabel(turn, reader)}</strong>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ConversationCostSheet({
+  open,
+  turns,
+  onClose
+}: {
+  open: boolean;
+  turns: ChatTurn[];
+  onClose: () => void;
+}) {
+  const answered = turns.filter((turn) => turn.turnCostUsd !== undefined).length;
+
+  return (
+    <CostSheet
+      id="archivist-conversation-cost"
+      open={open}
+      eyebrow="Behind the answers"
+      title="What this conversation cost"
+      closeLabel="Close conversation cost"
+      describedBy="conversation-cost-note"
+      onClose={onClose}
+    >
+      <section className="reader-cost-summary" aria-label="Conversation total">
+        <p className="reader-cost-total">
+          <strong>{formatReaderUsd(conversationCostUsd(turns))}</strong>
+          <span>
+            estimated for {answered} {answered === 1 ? "answer" : "answers"}
+          </span>
+        </p>
+        <p className="reader-cost-assurance">
+          The developer pays for this demo's OpenAI usage. Asking questions is free for you.
+        </p>
+      </section>
+
+      <section className="cost-ledger-section" aria-labelledby="conversation-cost-answers-title">
+        <div className="cost-section-heading">
+          <span>Answer by answer</span>
+          <h3 id="conversation-cost-answers-title">Where it went</h3>
+        </div>
+        <AnswerCostList turns={turns} reader />
+      </section>
+
+      <section className="cost-ledger-section" aria-labelledby="conversation-cost-steps-title">
+        <div className="cost-section-heading">
+          <span>How it works</span>
+          <h3 id="conversation-cost-steps-title">What an answer pays for</h3>
+        </div>
+        <dl className="reader-cost-steps">
+          <div>
+            <dt>Finding the passages</dt>
+            <dd>
+              Archivist turns a question about the book into a search of the manuscript. That
+              costs a small fraction of a cent.
+            </dd>
+          </div>
+          <div>
+            <dt>Writing the answer</dt>
+            <dd>An OpenAI model writes the reply from the passages it found, usually for a few cents.</dd>
+          </div>
+          <div>
+            <dt>Prepared answers</dt>
+            <dd>
+              A few common questions, such as “What is Cradle of the Empire about?”, have answers
+              written in advance and cost nothing.
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <p className="reader-cost-note" id="conversation-cost-note">
+        Figures are estimates based on OpenAI's published prices, so the final bill can differ
+        slightly. A new conversation starts again at $0.00.
+      </p>
+    </CostSheet>
+  );
+}
+
+type CostSettingsSaveState = "idle" | "saving" | "success" | "error";
+
+function CostLedgerDrawer({
+  open,
+  summary,
+  loading,
+  error,
+  turns,
+  onClose,
+  onRefresh
+}: {
+  open: boolean;
+  summary: CostSummary | null;
+  loading: boolean;
+  error: string | null;
+  turns: ChatTurn[];
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [settings, setSettings] = useState<CostSettings | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<CostSettings>({ ...DEFAULT_COST_SETTINGS });
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsSaveState, setSettingsSaveState] = useState<CostSettingsSaveState>("idle");
+  const [settingsSaveMessage, setSettingsSaveMessage] = useState("");
 
   async function loadSettings() {
     setSettingsLoading(true);
@@ -1117,257 +1326,253 @@ function CostLedgerDrawer({
     : null;
 
   return (
-    <dialog
-      ref={dialogRef}
+    <CostSheet
       id="archivist-cost-ledger"
-      className="cost-ledger-dialog"
-      aria-labelledby="cost-ledger-title"
-      aria-describedby="cost-ledger-authority-note"
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
+      open={open}
+      eyebrow="Live cost ledger"
+      title="Usage & budget"
+      closeLabel="Close cost ledger"
+      describedBy="cost-ledger-authority-note"
       onClose={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
     >
-      <div className="cost-ledger-drawer">
-        <header className="cost-ledger-header">
-          <div>
-            <span>Live cost ledger</span>
-            <h2 id="cost-ledger-title">Usage &amp; budget</h2>
-          </div>
-          <button ref={closeButtonRef} type="button" aria-label="Close cost ledger" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </header>
+      {loading && !summary ? (
+        <div className="cost-ledger-loading" role="status">
+          <Loader2 size={18} className="spin" />
+          Reading the local ledger…
+        </div>
+      ) : null}
 
-        <div className="cost-ledger-content">
-          {loading && !summary ? (
-            <div className="cost-ledger-loading" role="status">
-              <Loader2 size={18} className="spin" />
-              Reading the local ledger…
-            </div>
-          ) : null}
+      {error ? (
+        <div className="cost-ledger-error" role="alert">
+          <AlertCircle size={17} />
+          <span>{error}</span>
+          <button type="button" onClick={() => void onRefresh()}>Try again</button>
+        </div>
+      ) : null}
 
-          {error ? (
-            <div className="cost-ledger-error" role="alert">
-              <AlertCircle size={17} />
-              <span>{error}</span>
-              <button type="button" onClick={() => void onRefresh()}>Try again</button>
-            </div>
-          ) : null}
-
-          {summary ? (
-            <>
-              <section className="cost-overview" aria-labelledby="cost-overview-title">
-                <div className="cost-section-heading">
-                  <span>Estimated spend</span>
-                  <h3 id="cost-overview-title">At a glance</h3>
-                </div>
-                <dl className="cost-total-grid">
-                  <div>
-                    <dt>This conversation</dt>
-                    <dd>{formatUsd(summary.conversation_usd)}</dd>
-                  </div>
-                  <div>
-                    <dt>This month <small>UTC</small></dt>
-                    <dd>{formatUsd(summary.month_usd)}</dd>
-                  </div>
-                  <div>
-                    <dt>All time</dt>
-                    <dd>{formatUsd(summary.all_time_usd)}</dd>
-                  </div>
-                </dl>
-                {budget?.monthly_budget_usd !== null ? (
-                  <div className={`cost-budget-progress${budget?.warning ? " is-warning" : ""}${budget?.exceeded ? " is-exceeded" : ""}`}>
-                    <div>
-                      <span>Local monthly budget</span>
-                      <strong>
-                        {Math.round(budgetPercent ?? 0)}% of {formatUsd(budget?.monthly_budget_usd ?? 0)}
-                      </strong>
-                    </div>
-                    <progress max={100} value={Math.min(100, Math.max(0, budgetPercent ?? 0))}>
-                      {Math.round(budgetPercent ?? 0)}%
-                    </progress>
-                    <small>
-                      {budget?.exceeded
-                        ? "Budget exceeded"
-                        : budget?.remaining_usd !== null
-                          ? `${formatUsd(budget?.remaining_usd ?? 0)} remaining`
-                          : "Remaining amount unavailable"}
-                    </small>
-                  </div>
-                ) : (
-                  <p className="cost-no-budget">No local monthly budget is set.</p>
-                )}
-              </section>
-
-              <section className="cost-ledger-section" aria-labelledby="cost-operations-title">
-                <div className="cost-section-heading">
-                  <span>Where it went</span>
-                  <h3 id="cost-operations-title">Operation breakdown</h3>
-                </div>
-                {summary.operations.length ? (
-                  <dl className="cost-operation-list">
-                    {summary.operations.map((operation) => (
-                      <div key={operation.operation}>
-                        <dt>{operationLabel(operation.operation)}</dt>
-                        <dd>
-                          <span>{operation.calls.toLocaleString()} {operation.calls === 1 ? "call" : "calls"}</span>
-                          <span>{operation.tokens.toLocaleString()} tokens</span>
-                          <strong>{formatUsd(operation.cost_usd)}</strong>
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                ) : <p className="cost-ledger-empty">No priced operations yet.</p>}
-              </section>
-
-              <section className="cost-ledger-section" aria-labelledby="cost-events-title">
-                <div className="cost-section-heading">
-                  <span>Latest activity</span>
-                  <h3 id="cost-events-title">Recent calls</h3>
-                </div>
-                {summary.recent_events.length ? (
-                  <ol className="cost-event-list">
-                    {summary.recent_events.map((costEvent, index) => (
-                      <li key={`${costEvent.timestamp}-${costEvent.operation}-${index}`}>
-                        <div>
-                          <strong>{operationLabel(costEvent.operation)}</strong>
-                          <span>{costEvent.model}</span>
-                        </div>
-                        <div>
-                          <strong>{costEvent.cost_usd === null ? "Unpriced" : formatUsd(costEvent.cost_usd)}</strong>
-                          <span>{costEvent.tokens.toLocaleString()} tokens · {formatCostTimestamp(costEvent.timestamp)}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                ) : <p className="cost-ledger-empty">No calls recorded yet.</p>}
-              </section>
-
-              <div className="cost-ledger-provenance">
-                <p>
-                  Totals begin when local tracking was enabled{trackingStarted ? ` (${trackingStarted})` : ""};
-                  earlier OpenAI spend was not backfilled. Monthly periods use UTC.
-                </p>
-                <p>
-                  Pricing {summary.pricing_version || "version unavailable"} · {summary.unpriced_events.toLocaleString()} unpriced {summary.unpriced_events === 1 ? "event" : "events"}.
-                </p>
-              </div>
-            </>
-          ) : null}
-
-          <section className="cost-ledger-section cost-settings-section" aria-labelledby="cost-settings-title">
+      {summary ? (
+        <>
+          <section className="cost-overview" aria-labelledby="cost-overview-title">
             <div className="cost-section-heading">
-              <span>Guardrails</span>
-              <h3 id="cost-settings-title">Local budget controls</h3>
+              <span>Estimated spend</span>
+              <h3 id="cost-overview-title">At a glance</h3>
             </div>
-            <p className="cost-settings-explainer">
-              OpenAI project budgets are soft alerts. This local hard stop blocks the next Archivist request
-              after the limit is reached; it does not change OpenAI billing controls.
-            </p>
-
-            {settingsError ? (
-              <div className="cost-settings-message is-error" role="alert">
-                <span>{settingsError}</span>
-                <button type="button" onClick={() => void loadSettings()}>Reload</button>
+            <dl className="cost-total-grid">
+              <div>
+                <dt>This conversation</dt>
+                <dd>{formatUsd(summary.conversation_usd)}</dd>
               </div>
-            ) : null}
-
-            {settingsLoading && !settings ? (
-              <div className="cost-ledger-loading" role="status">
-                <Loader2 size={16} className="spin" />
-                Loading budget settings…
+              <div>
+                <dt>This month <small>UTC</small></dt>
+                <dd>{formatUsd(summary.month_usd)}</dd>
+              </div>
+              <div>
+                <dt>All time</dt>
+                <dd>{formatUsd(summary.all_time_usd)}</dd>
+              </div>
+            </dl>
+            {budget?.monthly_budget_usd !== null ? (
+              <div className={`cost-budget-progress${budget?.warning ? " is-warning" : ""}${budget?.exceeded ? " is-exceeded" : ""}`}>
+                <div>
+                  <span>Local monthly budget</span>
+                  <strong>
+                    {Math.round(budgetPercent ?? 0)}% of {formatUsd(budget?.monthly_budget_usd ?? 0)}
+                  </strong>
+                </div>
+                <progress max={100} value={Math.min(100, Math.max(0, budgetPercent ?? 0))}>
+                  {Math.round(budgetPercent ?? 0)}%
+                </progress>
+                <small>
+                  {budget?.exceeded
+                    ? "Budget exceeded"
+                    : budget?.remaining_usd !== null
+                      ? `${formatUsd(budget?.remaining_usd ?? 0)} remaining`
+                      : "Remaining amount unavailable"}
+                </small>
               </div>
             ) : (
-              <form className="cost-settings-form" onSubmit={saveSettings}>
-                <label>
-                  <span>Monthly budget (USD)</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0.01"
-                    max="100000"
-                    step="0.01"
-                    placeholder="No budget"
-                    value={settingsDraft.monthly_budget_usd ?? ""}
-                    disabled={settingsSaveState === "saving"}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      updateSettingsDraft({
-                        ...settingsDraft,
-                        monthly_budget_usd: value === "" ? null : Number(value),
-                        hard_limit_enabled: value === "" ? false : settingsDraft.hard_limit_enabled
-                      });
-                    }}
-                  />
-                </label>
-                <label>
-                  <span>Warn at</span>
-                  <span className="cost-percent-input">
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="1"
-                      max="100"
-                      step="1"
-                      required
-                      value={settingsDraft.warning_threshold_percent}
-                      disabled={settingsSaveState === "saving"}
-                      onChange={(event) => updateSettingsDraft({
-                        ...settingsDraft,
-                        warning_threshold_percent: Number(event.currentTarget.value)
-                      })}
-                    />
-                    <i aria-hidden="true">%</i>
-                  </span>
-                </label>
-                <label className="cost-hard-stop-toggle">
-                  <input
-                    type="checkbox"
-                    checked={settingsDraft.hard_limit_enabled}
-                    disabled={settingsDraft.monthly_budget_usd === null || settingsSaveState === "saving"}
-                    onChange={(event) => updateSettingsDraft({
-                      ...settingsDraft,
-                      hard_limit_enabled: event.currentTarget.checked
-                    })}
-                  />
-                  <span>
-                    <strong>Hard stop</strong>
-                    <small>{settingsDraft.monthly_budget_usd === null ? "Set a budget to enable" : "Block the next request at the limit"}</small>
-                  </span>
-                </label>
-                <div className="cost-settings-submit">
-                  <button type="submit" disabled={settingsSaveState === "saving" || settingsLoading}>
-                    {settingsSaveState === "saving" ? <Loader2 size={15} className="spin" /> : <Save size={15} />}
-                    {settingsSaveState === "saving" ? "Saving…" : "Save"}
-                  </button>
-                  {settingsSaveMessage ? (
-                    <span
-                      className={settingsSaveState === "error" ? "is-error" : "is-success"}
-                      role={settingsSaveState === "error" ? "alert" : "status"}
-                    >
-                      {settingsSaveMessage}
-                    </span>
-                  ) : null}
-                </div>
-              </form>
+              <p className="cost-no-budget">No local monthly budget is set.</p>
             )}
           </section>
 
-          <footer className="cost-ledger-footer" id="cost-ledger-authority-note">
-            <strong>Local estimate; OpenAI billing is authoritative.</strong>
-            <a href="https://platform.openai.com/usage" target="_blank" rel="noreferrer">
-              Open OpenAI usage
-              <ExternalLink size={14} />
-            </a>
-          </footer>
+          {turns.length ? (
+            <section className="cost-ledger-section" aria-labelledby="cost-conversation-title">
+              <div className="cost-section-heading">
+                <span>This conversation</span>
+                <h3 id="cost-conversation-title">Answer by answer</h3>
+              </div>
+              <AnswerCostList turns={turns} reader={false} />
+            </section>
+          ) : null}
+
+          <section className="cost-ledger-section" aria-labelledby="cost-operations-title">
+            <div className="cost-section-heading">
+              <span>Where it went</span>
+              <h3 id="cost-operations-title">Operation breakdown</h3>
+            </div>
+            {summary.operations.length ? (
+              <dl className="cost-operation-list">
+                {summary.operations.map((operation) => (
+                  <div key={operation.operation}>
+                    <dt>{operationLabel(operation.operation)}</dt>
+                    <dd>
+                      <span>{operation.calls.toLocaleString()} {operation.calls === 1 ? "call" : "calls"}</span>
+                      <span>{operation.tokens.toLocaleString()} tokens</span>
+                      <strong>{formatUsd(operation.cost_usd)}</strong>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : <p className="cost-ledger-empty">No priced operations yet.</p>}
+          </section>
+
+          <section className="cost-ledger-section" aria-labelledby="cost-events-title">
+            <details className="cost-disclosure">
+              <summary>
+                <span className="cost-section-heading">
+                  <span>Latest activity</span>
+                  <h3 id="cost-events-title">Recent calls</h3>
+                </span>
+                <small>{summary.recent_events.length.toLocaleString()} shown</small>
+                <ChevronDown size={16} aria-hidden="true" />
+              </summary>
+              {summary.recent_events.length ? (
+                <ol className="cost-event-list">
+                  {summary.recent_events.map((costEvent, index) => (
+                    <li key={`${costEvent.timestamp}-${costEvent.operation}-${index}`}>
+                      <div>
+                        <strong>{operationLabel(costEvent.operation)}</strong>
+                        <span>{costEvent.model}</span>
+                      </div>
+                      <div>
+                        <strong>{costEvent.cost_usd === null ? "Unpriced" : formatUsd(costEvent.cost_usd)}</strong>
+                        <span>{costEvent.tokens.toLocaleString()} tokens · {formatCostTimestamp(costEvent.timestamp)}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              ) : <p className="cost-ledger-empty">No calls recorded yet.</p>}
+            </details>
+          </section>
+
+          <div className="cost-ledger-provenance">
+            <p>
+              Totals begin when local tracking was enabled{trackingStarted ? ` (${trackingStarted})` : ""};
+              earlier OpenAI spend was not backfilled. Monthly periods use UTC.
+            </p>
+            <p>
+              Pricing {summary.pricing_version || "version unavailable"} · {summary.unpriced_events.toLocaleString()} unpriced {summary.unpriced_events === 1 ? "event" : "events"}.
+            </p>
+          </div>
+        </>
+      ) : null}
+
+      <section className="cost-ledger-section cost-settings-section" aria-labelledby="cost-settings-title">
+        <div className="cost-section-heading">
+          <span>Guardrails</span>
+          <h3 id="cost-settings-title">Local budget controls</h3>
         </div>
-      </div>
-    </dialog>
+        <p className="cost-settings-explainer">
+          OpenAI project budgets are soft alerts. This local hard stop blocks the next Archivist request
+          after the limit is reached; it does not change OpenAI billing controls.
+        </p>
+
+        {settingsError ? (
+          <div className="cost-settings-message is-error" role="alert">
+            <span>{settingsError}</span>
+            <button type="button" onClick={() => void loadSettings()}>Reload</button>
+          </div>
+        ) : null}
+
+        {settingsLoading && !settings ? (
+          <div className="cost-ledger-loading" role="status">
+            <Loader2 size={16} className="spin" />
+            Loading budget settings…
+          </div>
+        ) : (
+          <form className="cost-settings-form" onSubmit={saveSettings}>
+            <label>
+              <span>Monthly budget (USD)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0.01"
+                max="100000"
+                step="0.01"
+                placeholder="No budget"
+                value={settingsDraft.monthly_budget_usd ?? ""}
+                disabled={settingsSaveState === "saving"}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  updateSettingsDraft({
+                    ...settingsDraft,
+                    monthly_budget_usd: value === "" ? null : Number(value),
+                    hard_limit_enabled: value === "" ? false : settingsDraft.hard_limit_enabled
+                  });
+                }}
+              />
+            </label>
+            <label>
+              <span>Warn at</span>
+              <span className="cost-percent-input">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  max="100"
+                  step="1"
+                  required
+                  value={settingsDraft.warning_threshold_percent}
+                  disabled={settingsSaveState === "saving"}
+                  onChange={(event) => updateSettingsDraft({
+                    ...settingsDraft,
+                    warning_threshold_percent: Number(event.currentTarget.value)
+                  })}
+                />
+                <i aria-hidden="true">%</i>
+              </span>
+            </label>
+            <label className="cost-hard-stop-toggle">
+              <input
+                type="checkbox"
+                checked={settingsDraft.hard_limit_enabled}
+                disabled={settingsDraft.monthly_budget_usd === null || settingsSaveState === "saving"}
+                onChange={(event) => updateSettingsDraft({
+                  ...settingsDraft,
+                  hard_limit_enabled: event.currentTarget.checked
+                })}
+              />
+              <span>
+                <strong>Hard stop</strong>
+                <small>{settingsDraft.monthly_budget_usd === null ? "Set a budget to enable" : "Block the next request at the limit"}</small>
+              </span>
+            </label>
+            <div className="cost-settings-submit">
+              <button type="submit" disabled={settingsSaveState === "saving" || settingsLoading}>
+                {settingsSaveState === "saving" ? <Loader2 size={15} className="spin" /> : <Save size={15} />}
+                {settingsSaveState === "saving" ? "Saving…" : "Save"}
+              </button>
+              {settingsSaveMessage ? (
+                <span
+                  className={settingsSaveState === "error" ? "is-error" : "is-success"}
+                  role={settingsSaveState === "error" ? "alert" : "status"}
+                >
+                  {settingsSaveMessage}
+                </span>
+              ) : null}
+            </div>
+          </form>
+        )}
+      </section>
+
+      <footer className="cost-ledger-footer" id="cost-ledger-authority-note">
+        <strong>Local estimate; OpenAI billing is authoritative.</strong>
+        <a href="https://platform.openai.com/usage" target="_blank" rel="noreferrer">
+          Open OpenAI usage
+          <ExternalLink size={14} />
+        </a>
+      </footer>
+    </CostSheet>
   );
 }
 
@@ -1395,11 +1600,11 @@ function NewConversationButton({
 }
 
 function OpeningGuidance({
-  selectedQuestion,
+  onAskQuestion,
   onPrepareQuestion,
   onFocusQuestion
 }: {
-  selectedQuestion: string;
+  onAskQuestion: (question: string) => void;
   onPrepareQuestion: (question: string, selectPlaceholder?: boolean) => void;
   onFocusQuestion: () => void;
 }) {
@@ -1511,26 +1716,22 @@ function OpeningGuidance({
           <button
             type="button"
             key={starter.label}
-            aria-pressed={selectedQuestion === starter.question}
-            onClick={() => onPrepareQuestion(starter.question)}
+            onClick={() => onAskQuestion(starter.question)}
           >
             <span>{starter.label}</span>
             <strong>{starter.question}</strong>
           </button>
         ))}
-        <button
-          ref={guideTriggerRef}
-          type="button"
-          className="opening-guide-trigger"
-          onClick={() => setOpen(true)}
-        >
-          <MessageCircle size={15} aria-hidden="true" />
-          <span>
-            <small>Not sure what to ask?</small>
-            <strong>Let Archivist guide me</strong>
-          </span>
-        </button>
       </div>
+      <button
+        ref={guideTriggerRef}
+        type="button"
+        className="opening-guide-trigger"
+        onClick={() => setOpen(true)}
+      >
+        <MessageCircle size={14} aria-hidden="true" />
+        Help me choose a question
+      </button>
     </section>
   );
 }
@@ -1567,9 +1768,11 @@ function QuestionMode({
 }) {
   const publicDemo = config.exposure_profile === "public_demo";
   const [question, setQuestion] = useState("");
-  const [archivistModeId, setArchivistModeId] = useState<ArchivistModeId>(storedArchivistMode);
-  const [facets, setFacets] = useState<AnswerFacets>(() => modeDefaultFacets(archivistModeId));
-  const [appearance, setAppearance] = useState<VibeId>(() => storedAppearance(archivistModeId));
+  // Perspective is a per-visit advanced setting, so every visit starts in Professional.
+  const [archivistModeId, setArchivistModeId] = useState<ArchivistModeId>(DEFAULT_ARCHIVIST_MODE);
+  const [facets, setFacets] = useState<AnswerFacets>(() => modeDefaultFacets(DEFAULT_ARCHIVIST_MODE));
+  // The visual theme is its own setting, independent of the perspective.
+  const [appearance, setAppearance] = useState<VibeId>(DEFAULT_VIBE);
   // Per-turn, exactly like the interpretive facets, so a reader can compare the
   // two scopes inside one conversation instead of starting a new thread.
   const [answerStrategy, setAnswerStrategy] = useState<AnswerStrategy>(DEFAULT_ANSWER_STRATEGY);
@@ -1593,9 +1796,9 @@ function QuestionMode({
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(
     storedOnboardingState
   );
-  const [onboardingOpen, setOnboardingOpen] = useState(() => (
-    publicDemo && shouldAutoStartOnboarding(storedOnboardingState())
-  ));
+  // A first visit is no longer interrupted. "How Archivist works" opens the same
+  // tour on request.
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingReplay, setOnboardingReplay] = useState(false);
   const conversationRef = useRef<HTMLElement>(null);
   const landingQuestionRef = useRef<HTMLTextAreaElement>(null);
@@ -1603,8 +1806,11 @@ function QuestionMode({
   const onboardingInvokerRef = useRef<HTMLElement | null>(null);
   const pending = turns.some((turn) => turn.status === "pending");
   const chatStarted = turns.length > 0;
-  const customMode = modeHasOverrides(archivistModeId, facets)
-    || appearance !== archivistMode(archivistModeId).appearance;
+  const customMode = modeHasOverrides(archivistModeId, facets);
+
+  useEffect(() => {
+    document.documentElement.dataset.vibe = appearance;
+  }, [appearance]);
 
   useEffect(() => {
     if (!config.features.cost_ledger) {
@@ -1744,7 +1950,10 @@ function QuestionMode({
       if (result.costs) costSummaryController.accept(result.costs);
       else if (config.features.cost_ledger) void refreshCostSummary();
       const validationFailed = result.answer_status === "generation_contract_failed";
-      const pipelineFailed = validationFailed || result.answer_status === "corpus_integrity_failed";
+      const creditsExhausted = result.answer_status === PROVIDER_CREDITS_EXHAUSTED;
+      const pipelineFailed = validationFailed
+        || creditsExhausted
+        || result.answer_status === "corpus_integrity_failed";
       setTurns((current) => current.map((turn) => turn.id === turnId ? {
         ...turn,
         status: pipelineFailed ? "error" : "complete",
@@ -1777,7 +1986,8 @@ function QuestionMode({
         progressiveElapsedSeconds: undefined,
         progressiveHeartbeatCount: undefined,
         budgetBlocked: false,
-        turnCostUsd: result.costs?.turn_usd
+        creditsExhausted,
+        turnCostUsd: result.costs?.turn_usd ?? result.turn_cost_usd ?? undefined
       } : turn));
     } catch (error) {
       const budgetBlocked = (error instanceof ApiRequestError && error.status === 402)
@@ -1789,6 +1999,7 @@ function QuestionMode({
         progressiveClaims: [],
         error: errorMessage(error),
         budgetBlocked,
+        creditsExhausted: isProviderCreditsExhausted(error),
         progressiveStage: undefined,
         progressiveMessage: undefined,
         progressiveElapsedSeconds: undefined,
@@ -1800,9 +2011,10 @@ function QuestionMode({
     }
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmedQuestion = question.trim();
+  // Shared by the composer and the opening starter questions, which send on one
+  // click instead of filling the field and waiting for Ask.
+  async function askQuestionNow(rawQuestion: string) {
+    const trimmedQuestion = rawQuestion.trim();
     if (!trimmedQuestion || pending) return;
 
     const history = turns
@@ -1819,7 +2031,6 @@ function QuestionMode({
       id: turnId,
       question: trimmedQuestion,
       archivistMode: archivistModeId,
-      appearance,
       facets: { ...facets },
       requestedStrategy: answerStrategy,
       requestedDelivery: responseDelivery,
@@ -1831,7 +2042,8 @@ function QuestionMode({
       progressiveClaims: [],
       sources: [],
       displayGroups: [],
-      budgetBlocked: false
+      budgetBlocked: false,
+      creditsExhausted: false
     };
 
     setTurns((current) => [...current, nextTurn]);
@@ -1847,6 +2059,11 @@ function QuestionMode({
       answerStrategy,
       responseDelivery
     );
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await askQuestionNow(question);
   }
 
   async function retryTurn(turnId: string, allowOverBudget = false) {
@@ -1876,6 +2093,7 @@ function QuestionMode({
       answerStrategyVersion: undefined,
       stageTimingsMs: undefined,
       budgetBlocked: false,
+      creditsExhausted: false,
       progressiveStage: undefined,
       progressiveMessage: undefined,
       progressiveElapsedSeconds: candidate.requestedDelivery === "progressive" ? 0 : undefined,
@@ -1928,17 +2146,12 @@ function QuestionMode({
   }
 
   function changeArchivistMode(nextMode: ArchivistModeId) {
-    const nextAppearance = archivistMode(nextMode).appearance;
     setArchivistModeId(nextMode);
     setFacets(modeDefaultFacets(nextMode));
-    setAppearance(nextAppearance);
-    persistArchivistMode(nextMode);
-    persistAppearance(nextAppearance);
   }
 
   function changeAppearance(nextAppearance: VibeId) {
     setAppearance(nextAppearance);
-    persistAppearance(nextAppearance);
   }
 
   function changeResponseDelivery(nextDelivery: ResponseDelivery) {
@@ -1948,10 +2161,7 @@ function QuestionMode({
   }
 
   function resetModeOverrides() {
-    const defaultAppearance = archivistMode(archivistModeId).appearance;
     setFacets(modeDefaultFacets(archivistModeId));
-    setAppearance(defaultAppearance);
-    persistAppearance(defaultAppearance);
   }
 
   function focusLandingQuestion(candidateQuestion = question, selectPlaceholder = false) {
@@ -2062,28 +2272,22 @@ function QuestionMode({
         <div className="chat-intro-panel">
           <header className="chat-landing-header">
             <div className="chat-brand">
-              <span><Library size={17} /></span>
+              <span><Library size={22} /></span>
               <strong>Archivist</strong>
               <i aria-hidden="true" />
-              <small>Manuscript conversation</small>
+              <small>An AI historian grounded in a single manuscript</small>
             </div>
             {!chatStarted ? (
-              <div className="chat-header-actions">
-                {config.features.cost_ledger ? (
+              config.features.cost_ledger ? (
+                <div className="chat-header-actions">
                   <CostMeterButton
                     summary={costSummary}
                     loading={costSummaryLoading}
                     open={costDrawerOpen}
                     onOpen={() => setCostDrawerOpen(true)}
                   />
-                ) : null}
-                <VibeControl
-                  mode={archivistModeId}
-                  appearance={appearance}
-                  custom={customMode}
-                  onModeChange={changeArchivistMode}
-                />
-              </div>
+                </div>
+              ) : null
             ) : (
               <NewConversationButton pending={pending} onStart={startNewConversation} />
             )}
@@ -2092,12 +2296,17 @@ function QuestionMode({
           {!chatStarted ? (
             <div className="chat-start-hub">
               <div className="chat-intro-copy">
-                <p className="chat-kicker">A manuscript-grounded AI guide</p>
-                <h1 id="question-page-title">What would you like to uncover?</h1>
+                <div className="chat-intro-lede">
+                  <h1 id="question-page-title">Cradle of the Empire: A Big History of Virginia</h1>{" "}
+                  <p>
+                    traces the making of the American imperial system through Virginia—from the
+                    tectonic collisions that raised the Appalachians to the empire of the present
+                    day.
+                  </p>
+                </div>
                 <p className="chat-intro-description">
-                  Ask about the people, events, themes, or arguments in <cite>{project.name}</cite>.
-                  Archivist searches this manuscript—not the open web—and shows supporting
-                  passages for manuscript answers.
+                  Ask anything about the manuscript. Archivist searches this book—not the open
+                  web—and cites the passages behind every answer.
                 </p>
               </div>
               <ConversationComposer
@@ -2124,15 +2333,11 @@ function QuestionMode({
                 onSubmit={submit}
               />
               <OpeningGuidance
-                selectedQuestion={question}
+                onAskQuestion={askQuestionNow}
                 onPrepareQuestion={prepareLandingQuestion}
                 onFocusQuestion={() => focusLandingQuestion()}
               />
               <div className="chat-evidence-caveat">
-                <p>
-                  Perspectives change voice and emphasis—not the manuscript being searched.
-                  Follow-ups stay in this conversation. Your question is not sent until you press Ask.
-                </p>
                 <button
                   type="button"
                   onClick={(event) => openOnboardingReplay(event.currentTarget)}
@@ -2159,7 +2364,7 @@ function QuestionMode({
         >
           <header className="conversation-header">
             <a className="conversation-brand" href="#question-page-title" aria-label="Return to the Archivist introduction">
-              <span><Library size={16} /></span>
+              <span><Library size={18} /></span>
               <span>
                 <strong>Archivist</strong>
                 <small>{project.name}</small>
@@ -2173,15 +2378,14 @@ function QuestionMode({
                   open={costDrawerOpen}
                   onOpen={() => setCostDrawerOpen(true)}
                 />
+              ) : config.features.conversation_costs ? (
+                <ConversationCostButton
+                  turns={turns}
+                  open={costDrawerOpen}
+                  onOpen={() => setCostDrawerOpen(true)}
+                />
               ) : null}
               <NewConversationButton pending={pending} onStart={startNewConversation} />
-              <VibeControl
-                mode={archivistModeId}
-                appearance={appearance}
-                custom={customMode}
-                onModeChange={changeArchivistMode}
-                compact
-              />
             </div>
           </header>
 
@@ -2198,10 +2402,6 @@ function QuestionMode({
                   showSourcesTip={turn.id === sourcesTipTurnId}
                   onSourcesTipSeen={markOnboardingSourcesTipSeen}
                   onSourcesTipSkipped={skipOnboardingSourcesTip}
-                  currentArchivistMode={archivistModeId}
-                  currentAppearance={appearance}
-                  currentModeCustom={customMode}
-                  onModeChange={changeArchivistMode}
                   publicDemo={publicDemo}
                 />
               </li>
@@ -2242,8 +2442,15 @@ function QuestionMode({
           summary={costSummary}
           loading={costSummaryLoading}
           error={costSummaryError}
+          turns={turns}
           onClose={() => setCostDrawerOpen(false)}
           onRefresh={refreshCostSummary}
+        />
+      ) : config.features.conversation_costs ? (
+        <ConversationCostSheet
+          open={costDrawerOpen}
+          turns={turns}
+          onClose={() => setCostDrawerOpen(false)}
         />
       ) : null}
       <OnboardingTour
@@ -2305,8 +2512,10 @@ function ConversationComposer({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const settingsDisclosureRef = useRef<HTMLDetailsElement>(null);
+  // The opening screen is one question box. Settings, including the advanced
+  // perspective chooser, join the composer once a conversation exists.
+  const showAnswerControls = location === "thread";
   const questionId = `archivist-question-${location}`;
-  const perspectiveId = `archivist-perspective-${location}`;
   const lensId = `archivist-lens-${location}`;
   const voiceId = `archivist-voice-${location}`;
   const worldviewId = `archivist-worldview-${location}`;
@@ -2315,18 +2524,15 @@ function ConversationComposer({
   const scopeName = `archivist-evidence-scope-${location}`;
   const deliveryDescriptionId = `archivist-delivery-description-${location}`;
   const deliveryName = `archivist-answer-delivery-${location}`;
+  const perspectiveName = `archivist-perspective-${location}`;
+  const perspectiveDescriptionId = `archivist-perspective-description-${location}`;
+  const appearanceId = `archivist-appearance-${location}`;
   const groundingId = `question-grounding-note-${location}`;
   const selectedMode = archivistMode(archivistModeId);
-  const interpretiveOverrides = modeHasOverrides(archivistModeId, facets);
-  const appearanceOverride = appearance !== selectedMode.appearance;
-  const customMode = interpretiveOverrides || appearanceOverride;
+  const customMode = modeHasOverrides(archivistModeId, facets);
   const activeModeLabel = customMode ? "Custom" : selectedMode.label;
-  const perspectiveCopy = currentPerspectiveCopy(
-    archivistModeId,
-    facets,
-    interpretiveOverrides,
-    appearanceOverride
-  );
+  const perspectiveCopy = currentPerspectiveCopy(archivistModeId, facets, customMode);
+  const currentVibe = VIBES.find((vibe) => vibe.id === appearance) ?? VIBES[0];
   const evidenceScopeSettings = (
     <fieldset className="chat-evidence-scope" aria-describedby={scopeDescriptionId}>
       <legend>Evidence scope</legend>
@@ -2454,24 +2660,50 @@ function ConversationComposer({
       </div>
     </fieldset>
   );
-  const appearanceSettings = (
-    <fieldset className="chat-appearance-settings">
-      <legend>Advanced appearance</legend>
-      <p>
-        Appearance only. This does not change the mode's interpretive defaults, evidence,
-        or citations.
+  const perspectiveSettings = (
+    <fieldset
+      className="chat-answer-delivery chat-perspective-settings"
+      aria-describedby={perspectiveDescriptionId}
+    >
+      <legend>Perspective</legend>
+      <p id={perspectiveDescriptionId}>
+        Changes the voice and emphasis of future answers. Every perspective searches the same
+        manuscript and cites the same evidence.
       </p>
-      <label htmlFor={`archivist-appearance-${location}`}>
-        <span
-          className={`vibe-swatch vibe-swatch-${appearance}`}
-          aria-hidden="true"
-        />
+      <div className="chat-answer-delivery-options chat-perspective-options">
+        {ARCHIVIST_MODES.map((mode) => (
+          <label key={mode.id}>
+            <input
+              type="radio"
+              name={perspectiveName}
+              value={mode.id}
+              checked={archivistModeId === mode.id}
+              disabled={pending}
+              onChange={() => onModeChange(mode.id)}
+            />
+            <span>
+              <span>
+                <strong>{mode.label}</strong>
+                {mode.id === DEFAULT_ARCHIVIST_MODE ? <i>Default</i> : null}
+              </span>
+              <small>{mode.description}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+  const appearanceSettings = (
+    <div className="chat-appearance-settings">
+      <p>Changes only how Archivist looks. Answers, evidence, and citations stay the same.</p>
+      <label htmlFor={appearanceId}>
+        <span className={`vibe-swatch vibe-swatch-${appearance}`} aria-hidden="true" />
         <span>
-          <strong>Visual theme</strong>
-          <small>{VIBES.find((vibe) => vibe.id === appearance)?.description}</small>
+          <strong>{currentVibe.label}</strong>
+          <small>{currentVibe.description}</small>
         </span>
         <select
-          id={`archivist-appearance-${location}`}
+          id={appearanceId}
           value={appearance}
           onChange={(event) => onAppearanceChange(event.target.value as VibeId)}
         >
@@ -2480,7 +2712,7 @@ function ConversationComposer({
           ))}
         </select>
       </label>
-    </fieldset>
+    </div>
   );
 
   return (
@@ -2494,24 +2726,6 @@ function ConversationComposer({
         onSubmit(event);
       }}
     >
-      <div
-        className="chat-perspective-note"
-        data-onboarding-target="perspective"
-      >
-        <VibeControl
-          mode={archivistModeId}
-          appearance={appearance}
-          custom={customMode}
-          onModeChange={onModeChange}
-          triggerVariant="perspective"
-          triggerEyebrow="Perspective"
-          triggerLabel={activeModeLabel}
-          triggerAriaLabel={`Change perspective. Current perspective: ${activeModeLabel}. Applies to future answers.`}
-        />
-        <p id={perspectiveId} aria-live="polite" aria-atomic="true">
-          {perspectiveCopy}
-        </p>
-      </div>
       <label className="chat-question-field" htmlFor={questionId}>
         <span>{location === "landing" ? "Begin the conversation" : "Your next question"}</span>
         <textarea
@@ -2520,7 +2734,7 @@ function ConversationComposer({
           rows={location === "landing" ? 2 : 1}
           required
           maxLength={4_000}
-          aria-describedby={`${perspectiveId} ${groundingId}`}
+          aria-describedby={groundingId}
           value={question}
           onChange={(event) => onQuestionChange(event.target.value)}
           onKeyDown={(event) => {
@@ -2536,10 +2750,11 @@ function ConversationComposer({
       </label>
 
       <div className="chat-composer-options">
+        {showAnswerControls ? (
         <details className="chat-answer-settings-disclosure" ref={settingsDisclosureRef}>
           <summary
             data-onboarding-target="settings"
-            aria-label={`Settings. Current mode: ${activeModeLabel}; ${responseDelivery === "progressive" ? "Progressive response, experimental" : "Complete answer"}`}
+            aria-label={`Settings. Perspective: ${activeModeLabel}; theme: ${currentVibe.label}; ${responseDelivery === "progressive" ? "Progressive response, experimental" : "Complete answer"}`}
           >
             <SlidersHorizontal size={16} aria-hidden="true" />
             <span>
@@ -2548,24 +2763,56 @@ function ConversationComposer({
             <ChevronDown size={14} aria-hidden="true" />
           </summary>
           <div className="chat-answer-settings-panel">
-            <div className="chat-mode-context">
-              <VibeControl
-                mode={archivistModeId}
-                appearance={appearance}
-                custom={customMode}
-                onModeChange={onModeChange}
-                triggerVariant="settings"
-                triggerEyebrow="Current mode"
-                triggerLabel={activeModeLabel}
-                triggerAriaLabel={`Change perspective. Current perspective: ${activeModeLabel}. Applies to future answers.`}
-              />
-              <p>
-                {customMode
-                  ? `Based on ${selectedMode.label}. Advanced settings override this preset for future answers.`
-                  : selectedMode.disclosure}
-              </p>
-            </div>
-            {evidenceScopeSettings}
+            <details className="chat-advanced-interpretive-settings">
+              <summary>
+                <span>
+                  <strong>Advanced perspective settings</strong>
+                  <small>
+                    {customMode ? `${selectedMode.label} · Custom` : selectedMode.label}
+                  </small>
+                </span>
+                <ChevronDown size={15} aria-hidden="true" />
+              </summary>
+              <div>
+                {perspectiveSettings}
+                {INTERPRETIVE_OVERRIDES_VISIBLE ? (
+                  <>
+                    <div className="chat-mode-context">
+                      <p aria-live="polite" aria-atomic="true">{perspectiveCopy}</p>
+                    </div>
+                    {archivistModeId === "essential" ? (
+                      <div className="chat-mode-context">
+                        <strong>Direct cited evidence</strong>
+                        <p>
+                          Essential returns compiled, cited evidence directly without a
+                          prose-generation rewrite. Lens, voice, and worldview are prose settings,
+                          so they do not apply in this mode. Choose a generated mode to use them.
+                        </p>
+                      </div>
+                    ) : answerSettings}
+                    <div className="chat-advanced-reset-row">
+                      <span>
+                        {customMode ? `${selectedMode.label} · Custom` : `${selectedMode.label} defaults`}
+                      </span>
+                      <button type="button" disabled={!customMode} onClick={onResetModeDefaults}>
+                        <RotateCcw size={14} aria-hidden="true" />
+                        Reset to mode
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </details>
+            <details className="chat-advanced-interpretive-settings">
+              <summary>
+                <span>
+                  <strong>Visual theme</strong>
+                  <small>{currentVibe.label}</small>
+                </span>
+                <ChevronDown size={15} aria-hidden="true" />
+              </summary>
+              <div>{appearanceSettings}</div>
+            </details>
             {deliverySettings ? (
               <details className="chat-advanced-interpretive-settings chat-advanced-delivery-settings">
                 <summary>
@@ -2582,43 +2829,9 @@ function ConversationComposer({
                 <div>{deliverySettings}</div>
               </details>
             ) : null}
-            <details className="chat-advanced-interpretive-settings">
-              <summary>
-                <span>
-                  <strong>Advanced interpretive settings</strong>
-                  <small>
-                    {interpretiveOverrides
-                      ? "Interpretive overrides active"
-                      : appearanceOverride
-                        ? "Appearance override active"
-                        : "Using mode defaults"}
-                  </small>
-                </span>
-                <ChevronDown size={15} aria-hidden="true" />
-              </summary>
-              <div>
-                {archivistModeId === "essential" ? (
-                  <div className="chat-mode-context">
-                    <strong>Direct cited evidence</strong>
-                    <p>
-                      Essential returns compiled, cited evidence directly without a
-                      prose-generation rewrite. Lens, voice, and worldview are prose settings,
-                      so they do not apply in this mode. Choose a generated mode to use them.
-                    </p>
-                  </div>
-                ) : answerSettings}
-                {appearanceSettings}
-                <div className="chat-advanced-reset-row">
-                  <span>
-                    {customMode ? `${selectedMode.label} · Custom` : `${selectedMode.label} defaults`}
-                  </span>
-                  <button type="button" disabled={!customMode} onClick={onResetModeDefaults}>
-                    <RotateCcw size={14} aria-hidden="true" />
-                    Reset to mode
-                  </button>
-                </div>
-              </div>
-            </details>
+            {/* With full-book answers disabled there is only one evidence scope, so the choice
+                is shown only on deployments that enable them. */}
+            {fullContextAvailable ? evidenceScopeSettings : null}
             <button
               type="button"
               className="chat-onboarding-replay"
@@ -2632,6 +2845,7 @@ function ConversationComposer({
             </button>
           </div>
         </details>
+        ) : null}
 
         <div className="chat-composer-submit">
           <span id={groundingId}>
@@ -2713,10 +2927,6 @@ function ConversationTurn({
   showSourcesTip,
   onSourcesTipSeen,
   onSourcesTipSkipped,
-  currentArchivistMode,
-  currentAppearance,
-  currentModeCustom,
-  onModeChange,
   publicDemo
 }: {
   turn: ChatTurn;
@@ -2728,10 +2938,6 @@ function ConversationTurn({
   showSourcesTip: boolean;
   onSourcesTipSeen: () => void;
   onSourcesTipSkipped: () => void;
-  currentArchivistMode: ArchivistModeId;
-  currentAppearance: VibeId;
-  currentModeCustom: boolean;
-  onModeChange: (mode: ArchivistModeId) => void;
   publicDemo: boolean;
 }) {
   const headingId = `turn-${turn.id}-question`;
@@ -2743,11 +2949,7 @@ function ConversationTurn({
         0
       );
   const facetSummary = answerFacetSummary(turn.facets);
-  const modeSummary = archivistModeSummary(
-    turn.archivistMode,
-    turn.facets,
-    turn.appearance
-  );
+  const modeSummary = archivistModeSummary(turn.archivistMode, turn.facets);
   const customMode = modeHasOverrides(turn.archivistMode, turn.facets);
   const progressiveHasClaims = turn.progressiveClaims.length > 0;
   const progressiveFinalizing = progressiveHasClaims
@@ -2779,17 +2981,7 @@ function ConversationTurn({
               <strong>Archivist</strong>
               <small className="sr-only">Turn {turnNumber}</small>
               <div className="turn-facet-summary">
-                <VibeControl
-                  mode={currentArchivistMode}
-                  appearance={currentAppearance}
-                  custom={currentModeCustom}
-                  onModeChange={onModeChange}
-                  triggerVariant="turn"
-                  triggerEyebrow="Mode"
-                  triggerLabel={modeSummary}
-                  triggerAriaLabel={`This turn was requested with ${modeSummary}. Choose a perspective for future answers.`}
-                  contextNote={`This turn used ${modeSummary}. Changing the current perspective will not alter it.`}
-                />
+                <span><i>Perspective</i>{modeSummary}</span>
                 {customMode ? <span><i>Overrides</i>{facetSummary}</span> : null}
                 {turn.requestedDelivery === "progressive" ? (
                   <span>
@@ -2912,9 +3104,11 @@ function ConversationTurn({
               <strong>
                 {turn.budgetBlocked
                   ? "The local monthly cost limit stopped this request."
-                  : turn.answerStatus === "generation_contract_failed"
-                    ? "Archivist rejected an unverified response."
-                    : "Archivist could not complete this answer."}
+                  : turn.creditsExhausted
+                    ? "Archivist is out of usage credits."
+                    : turn.answerStatus === "generation_contract_failed"
+                      ? "Archivist rejected an unverified response."
+                      : "Archivist could not complete this answer."}
               </strong>
               <p>{turn.error}</p>
               {!publicDemo && (
@@ -3049,7 +3243,7 @@ function ConversationTurn({
                 {turn.answerStrategy === "full_context" ? (
                   <span className="turn-strategy-chip">Full book</span>
                 ) : null}
-                {turn.turnCostUsd !== undefined ? (
+                {!publicDemo && turn.turnCostUsd !== undefined ? (
                   <span className="turn-cost-chip">Est. {formatTurnCost(turn.turnCostUsd)}</span>
                 ) : null}
                 <button

@@ -92,6 +92,11 @@ from public_sources import (
     public_source_payload,
 )
 from product_help import is_product_help_question
+from prepared_answers import PREPARED_ANSWER_STATUS, prepared_answer_for
+from provider_errors import (
+    PROVIDER_CREDITS_EXHAUSTED_MESSAGE,
+    PROVIDER_CREDITS_EXHAUSTED_STATUS,
+)
 from web_project import (
     BASE_DIR,
     answer_project_question_result,
@@ -369,6 +374,64 @@ def _is_application_product_help_request(
     )
 
 
+def _is_application_prepared_answer_request(
+    request: QuestionRequest | PublicQuestionRequest,
+    *,
+    project_id: str = "current",
+) -> bool:
+    """Identify a prepared, cited answer that needs no retrieval or provider call."""
+
+    return (
+        project_id == "current"
+        and _uses_application_compiled_answer(
+            archivist_mode=request.archivist_mode,
+            answer_strategy=request.answer_strategy,
+            legacy_perspective=getattr(request, "perspective", None) is not None,
+            rag_policy_version=getattr(request, "rag_policy_version", None),
+        )
+        and prepared_answer_for(
+            request.question,
+            archivist_mode=request.archivist_mode,
+            historiographical_lens=request.historiographical_lens,
+            voice=request.voice,
+            worldview=request.worldview,
+        )
+        is not None
+    )
+
+
+def _is_provider_free_request(
+    request: QuestionRequest | PublicQuestionRequest,
+    *,
+    project_id: str = "current",
+) -> bool:
+    """Requests answered from application-owned text skip every spend gate."""
+
+    return _is_application_product_help_request(
+        request,
+        project_id=project_id,
+    ) or _is_application_prepared_answer_request(request, project_id=project_id)
+
+
+class ProviderCreditsExhausted(RuntimeError):
+    """OpenAI reported that the account's prepaid usage credits are gone."""
+
+
+def _public_turn_cost_usd(ledger: UsageLedger, request_id: str) -> float | None:
+    """Estimate one public answer's cost from the events recorded for its request.
+
+    The figure is display-only, so a ledger read failure hides it rather than
+    withholding an answer that has already passed the release gate.
+    """
+
+    try:
+        cost = ledger.request_usage_totals(request_id)["estimated_cost_usd"]
+    except Exception:
+        logger.exception("Could not read public answer cost request_id=%s", request_id)
+        return None
+    return float(cost) if isinstance(cost, (int, float)) else None
+
+
 def _answer_mode_metadata(
     *,
     archivist_mode: ArchivistMode,
@@ -381,7 +444,7 @@ def _answer_mode_metadata(
     """Bind compatibility metadata to the exact authored prompt in use."""
 
     metadata = dict(archivist_mode_metadata(archivist_mode))
-    if application_compiled and answer_status == "product_help":
+    if application_compiled and answer_status in {"product_help", PREPARED_ANSWER_STATUS}:
         metadata.update(
             {
                 "prose_renderer_version": None,
@@ -457,6 +520,9 @@ def _feature_flags(
     public = profile is ExposureProfile.PUBLIC_DEMO
     return {
         "cost_ledger": not public,
+        # Every answer reports its own estimated cost. The public demo shows readers
+        # only those per-answer figures, never the ledger's totals or budget.
+        "conversation_costs": True,
         "full_source_text": not public,
         "local_tools": not public,
         "public_page_locators": public,
@@ -636,7 +702,7 @@ def _development_question_preflight(
 ) -> UsageLedger:
     _require_full_context_available(EXPOSURE_SETTINGS, request.answer_strategy)
     ledger = UsageLedger()
-    if _is_application_product_help_request(request, project_id=project_id):
+    if _is_provider_free_request(request, project_id=project_id):
         return ledger
     budget = ledger.budget_state()
     if budget["hard_limit_enabled"] and budget["exceeded"] and not request.allow_over_budget:
@@ -699,6 +765,7 @@ def _run_development_question(
                 answer_kwargs["rag_policy"] = rag_policy
             if application_compiled:
                 answer_kwargs["application_compiled"] = True
+                answer_kwargs["allow_prepared_answers"] = True
             answer_result = answer_project_question_result(
                 project_id,
                 request.question,
@@ -955,6 +1022,7 @@ _STREAM_ERROR_MESSAGES = {
     ),
     "public_request_failed": "Archivist could not complete this request.",
     "question_unavailable": "Archivist could not complete this request.",
+    "provider_credits_exhausted": PROVIDER_CREDITS_EXHAUSTED_MESSAGE,
 }
 
 
@@ -1161,6 +1229,17 @@ def _progressive_answer_response(
                         error={
                             "code": ("public_request_failed" if public else "question_unavailable"),
                             "message": "Archivist could not complete this request.",
+                        },
+                    )
+                    break
+                if result.get("answer_status") == PROVIDER_CREDITS_EXHAUSTED_STATUS:
+                    timing.mark_terminal("error")
+                    stream_outcome = "error"
+                    yield frame(
+                        "error",
+                        error={
+                            "code": PROVIDER_CREDITS_EXHAUSTED_STATUS,
+                            "message": PROVIDER_CREDITS_EXHAUSTED_MESSAGE,
                         },
                     )
                     break
@@ -1519,7 +1598,7 @@ def _preflight_public_progressive_question(
                 "request_id": request_id,
             },
         )
-    if _is_application_product_help_request(request):
+    if _is_provider_free_request(request):
         return
     try:
         ledger = UsageLedger()
@@ -1565,7 +1644,7 @@ def _run_public_question(
         archivist_mode=request.archivist_mode,
         answer_strategy=request.answer_strategy,
     )
-    product_help = _is_application_product_help_request(request)
+    provider_free = _is_provider_free_request(request)
     answer_result: object | None = None
     released_claims: list[CheckedClaimCandidate] = []
     claim_release_failed = False
@@ -1622,7 +1701,7 @@ def _run_public_question(
             },
         )
     try:
-        if product_help:
+        if provider_free:
             answer_kwargs: dict[str, object] = {
                 "n_results": settings.public_n_results,
                 "historiographical_lens": request.historiographical_lens,
@@ -1631,6 +1710,7 @@ def _run_public_question(
                 "history": [turn.model_dump(exclude_none=True) for turn in request.history],
                 "answer_strategy": request.answer_strategy,
                 "application_compiled": True,
+                "allow_prepared_answers": True,
             }
             if "archivist_mode" in request.model_fields_set:
                 answer_kwargs["archivist_mode"] = request.archivist_mode
@@ -1642,7 +1722,22 @@ def _run_public_question(
                 **answer_kwargs,
             )
             emit_progress(progress_callback, AnswerProgressStage.CHECKING_RELEASE)
-            sources = {"source_schema": PUBLIC_SOURCE_SCHEMA, "sources": []}
+            if answer_result.final_chunks:
+                # A prepared answer still cites manuscript passages, so it passes the
+                # same quotation boundary and locator checks as a generated answer.
+                if answer_has_extended_verbatim_overlap(
+                    answer_result.answer,
+                    answer_result.final_chunks,
+                ):
+                    raise PublicSourceError("prepared answer exceeded the public quotation boundary")
+                sources = public_source_payload(
+                    answer_result.answer,
+                    answer_result.final_chunks,
+                    locator_path=settings.locator_artifact,
+                    manifest_path=BASE_DIR / "fixtures" / "corpus_manifest.json",
+                )
+            else:
+                sources = {"source_schema": PUBLIC_SOURCE_SCHEMA, "sources": []}
         else:
             ledger = UsageLedger()
             _configure_public_budget(ledger, settings)
@@ -1698,6 +1793,8 @@ def _run_public_question(
                 emit_progress(progress_callback, AnswerProgressStage.CHECKING_RELEASE)
                 if claim_release_failed:
                     raise PublicSourceError("provisional claim did not pass release gate")
+                if answer_result.status == PROVIDER_CREDITS_EXHAUSTED_STATUS:
+                    raise ProviderCreditsExhausted()
                 if answer_result.status in {
                     "generation_contract_failed",
                     "corpus_integrity_failed",
@@ -1759,6 +1856,9 @@ def _run_public_question(
             "historiographical_lens": request.historiographical_lens.value,
             "voice": request.voice.value,
             "worldview": request.worldview.value,
+            "turn_cost_usd": (
+                _public_turn_cost_usd(ledger, request_id) if ledger is not None else 0.0
+            ),
             **sources,
         }
     except CostLimitExceeded:
@@ -1768,6 +1868,16 @@ def _run_public_question(
             detail={
                 "code": "public_usage_limit",
                 "message": "The public demo has reached its current usage limit. Please try later.",
+                "request_id": request_id,
+            },
+        ) from None
+    except ProviderCreditsExhausted:
+        logger.error("OpenAI usage credits are exhausted request_id=%s", request_id)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "provider_credits_exhausted",
+                "message": PROVIDER_CREDITS_EXHAUSTED_MESSAGE,
                 "request_id": request_id,
             },
         ) from None

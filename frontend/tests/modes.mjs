@@ -8,23 +8,6 @@ const server = await createServer({
   server: { middlewareMode: true }
 });
 
-const originalWindow = globalThis.window;
-
-function memoryStorage(initial = {}) {
-  const values = new Map(Object.entries(initial));
-  return {
-    getItem(key) {
-      return values.has(key) ? values.get(key) : null;
-    },
-    setItem(key, value) {
-      values.set(key, value);
-    },
-    value(key) {
-      return values.get(key);
-    }
-  };
-}
-
 try {
   const modes = await server.ssrLoadModule("/src/modes.ts");
   const vibes = await server.ssrLoadModule("/src/vibes.ts");
@@ -32,7 +15,6 @@ try {
   const expectedModes = {
     professional: {
       label: "Professional",
-      appearance: "professional",
       defaultFacets: {
         historiographicalLens: "evidence_first",
         voice: "plainspoken",
@@ -41,43 +23,42 @@ try {
     },
     essential: {
       label: "Essential",
-      appearance: "minimal",
       defaultFacets: {
         historiographicalLens: "evidence_first",
         voice: "scholarly",
         worldview: "none"
       }
     },
-    pretty_pink_princess: {
-      label: "Pretty Pink Princess",
-      appearance: "princess",
+    classical_chronicler: {
+      label: "Classical Chronicler",
       defaultFacets: {
-        historiographicalLens: "triumphalist",
-        voice: "romantic",
-        worldview: "secular_humanist"
-      }
-    },
-    baleful_black_baron: {
-      label: "Baleful Black Baron",
-      appearance: "baron",
-      defaultFacets: {
-        historiographicalLens: "tragic",
-        voice: "romantic",
+        historiographicalLens: "evidence_first",
+        voice: "scholarly",
         worldview: "none"
       }
     },
-    ember_and_ink: {
-      label: "Ruthless Red Realist",
-      appearance: "ember",
+    pollyanna: {
+      label: "Perky Pollyanna",
       defaultFacets: {
-        historiographicalLens: "evidence_first",
+        historiographicalLens: "triumphalist",
         voice: "plainspoken",
-        worldview: "enlightenment_rationalist"
+        worldview: "none"
+      }
+    },
+    doomsayer: {
+      label: "Dour Doomsayer",
+      defaultFacets: {
+        historiographicalLens: "tragic",
+        voice: "plainspoken",
+        worldview: "none"
       }
     }
   };
   const expectedModeIds = Object.keys(expectedModes);
   const dormantModeIds = [
+    "pretty_pink_princess",
+    "baleful_black_baron",
+    "ember_and_ink",
     "forest",
     "cromb_coo_coo",
     "tidal_archivist",
@@ -88,7 +69,7 @@ try {
   assert.deepEqual(
     modes.ARCHIVIST_MODES.map((mode) => mode.id),
     expectedModeIds,
-    "the mode picker should expose exactly the five supported answer experiences"
+    "the perspective list should expose exactly the five supported answer experiences"
   );
   assert.equal(
     new Set(modes.ARCHIVIST_MODES.map((mode) => mode.id)).size,
@@ -101,16 +82,20 @@ try {
     const mode = modes.archivistMode(modeId);
     assert.equal(modes.isArchivistModeId(modeId), true, `${modeId} should be selectable`);
     assert.equal(mode.label, expected.label);
-    assert.equal(mode.appearance, expected.appearance, `${modeId} should select its matching appearance`);
+    assert.equal("appearance" in mode, false, `${modeId} should not choose a visual theme`);
     assert.deepEqual(mode.defaultFacets, expected.defaultFacets, `${modeId} should expose its preset`);
     assert.equal(modes.modeHasOverrides(modeId, expected.defaultFacets), false);
   }
 
   for (const modeId of dormantModeIds) {
     assert.equal(modes.isArchivistModeId(modeId), false, `${modeId} should remain dormant`);
-    assert.ok(modeId in modes.ARCHIVIST_MODE_APPEARANCES, `${modeId} should retain appearance compatibility`);
     assert.ok(modeId in modes.ARCHIVIST_MODE_DEFAULT_FACETS, `${modeId} should retain facet compatibility`);
   }
+  assert.equal(
+    "ARCHIVIST_MODE_APPEARANCES" in modes,
+    false,
+    "perspectives should no longer map to visual themes"
+  );
   assert.equal(modes.isArchivistModeId("unknown"), false);
   assert.equal(modes.isArchivistModeId(null), false);
 
@@ -122,9 +107,9 @@ try {
 
   const generatedCharacters = {
     professional: /Professional.*(?:measured|diplomatic|present-minded)/i,
-    pretty_pink_princess: /(?:hopeful|charming).*Princess|Princess.*(?:hopeful|charming)/i,
-    baleful_black_baron: /(?:brooding|condemnatory).*Baron|Baron.*(?:brooding|condemnatory)/i,
-    ember_and_ink: /Ruthless Red Realist.*calculating|ruthless strategic realist.*calculation/i
+    classical_chronicler: /Chronicler.*narrative|narrative historian.*causes/i,
+    pollyanna: /optimist.*resilience|Pollyanna.*hopeful/i,
+    doomsayer: /pessimist.*fragility|Doomsayer.*gloomy/i
   };
   for (const [modeId, characterPattern] of Object.entries(generatedCharacters)) {
     const mode = modes.archivistMode(modeId);
@@ -136,21 +121,21 @@ try {
   const perspectivePatterns = {
     professional: /measured.*diplomatic.*human agency/i,
     essential: /no added interpretive persona.*direct.*cited evidence/i,
-    pretty_pink_princess: /hopeful.*triumphalist.*bleak or frightening/i,
-    baleful_black_baron: /tragic.*severe.*coercion.*human suffering/i,
-    ember_and_ink: /cold-blooded strategic calculation.*power.*leverage.*incentives.*tradeoffs.*statecraft.*Machiavelli.*Kissinger.*without impersonating either/i
+    classical_chronicler: /narrative.*evidence-first.*causes.*testimony.*character/i,
+    pollyanna: /hopeful.*resilience.*harm/i,
+    doomsayer: /pessimistic.*fragility.*achievement/i
   };
   for (const [modeId, perspectivePattern] of Object.entries(perspectivePatterns)) {
     const mode = modes.archivistMode(modeId);
     assert.match(
       mode.perspective,
       perspectivePattern,
-      `${mode.label} should disclose its interpretive bias beside the question field`
+      `${mode.label} should disclose its interpretive bias`
     );
   }
-  const princessCopy = `${modes.archivistMode("pretty_pink_princess").description} ${modes.archivistMode("pretty_pink_princess").disclosure}`;
-  assert.match(princessCopy, /songs/i, "the Princess should disclose her distinctive song-like tangents");
-  assert.match(princessCopy, /decline.*bleak|bleak.*decline/i, "the Princess should disclose her bleak-material boundary");
+  const chroniclerCopy = `${modes.archivistMode("classical_chronicler").description} ${modes.archivistMode("classical_chronicler").disclosure}`;
+  assert.match(chroniclerCopy, /causes/i, "the Chronicler should disclose its attention to causes");
+  assert.match(chroniclerCopy, /testimony|character/i, "the Chronicler should disclose its narrative-historian frame");
 
   const copiedFacets = modes.modeDefaultFacets("essential");
   assert.notEqual(copiedFacets, essential.defaultFacets, "callers should receive a copy of preset facets");
@@ -163,26 +148,20 @@ try {
     "each facet dimension should participate in override detection"
   );
   assert.equal(
-    modes.archivistModeSummary("professional", modes.modeDefaultFacets("professional"), "professional"),
+    modes.archivistModeSummary("professional", modes.modeDefaultFacets("professional")),
     "Professional",
-    "a preset appearance and preset facets should retain the preset label"
-  );
-  assert.equal(
-    modes.archivistModeSummary("professional", modes.modeDefaultFacets("professional"), "princess"),
-    "Professional · Custom",
-    "an appearance-only override should mark the snapshotted turn as Custom"
+    "preset facets should retain the preset label"
   );
   assert.equal(
     modes.archivistModeSummary(
       "professional",
-      { ...modes.modeDefaultFacets("professional"), voice: "romantic" },
-      "professional"
+      { ...modes.modeDefaultFacets("professional"), voice: "romantic" }
     ),
     "Professional · Custom",
-    "an interpretive-facet override should continue to mark the turn as Custom"
+    "an interpretive-facet override should mark the turn as Custom"
   );
 
-  for (const modeId of ["professional", "pretty_pink_princess", "baleful_black_baron", "ember_and_ink"]) {
+  for (const modeId of ["professional", "classical_chronicler", "pollyanna", "doomsayer"]) {
     const fallback = modes.authoredFallbackNotice("retrieval_authored_fallback", modeId);
     assert.equal(fallback.heading, "Essential fallback");
     assert.match(fallback.message, new RegExp(modes.archivistMode(modeId).label));
@@ -210,60 +189,36 @@ try {
   );
 
   const expectedVibes = [
+    ["cradle", "Cradle of the Empire"],
     ["professional", "Professional"],
     ["minimal", "Essential"],
+    ["forest", "Forest Folio"],
+    ["codex", "Illuminated Codex"],
     ["ember", "Ember & Ink"],
+    ["ocean", "Tidal Archive"],
+    ["whimsical", "Cosmic Almanac"],
     ["princess", "Pretty Pink Princess"],
-    ["baron", "Baleful Black Baron"]
+    ["baron", "Baleful Black Baron"],
+    ["rose", "Rose & Ruin"],
+    ["cromb", "Cromb Coo Coo"]
   ];
   assert.deepEqual(
     vibes.VIBES.map(({ id, label }) => [id, label]),
     expectedVibes,
-    "the appearance picker should expose only appearances backed by selectable answer modes"
+    "every finished visual theme should be offered under its original name"
   );
   assert.equal(new Set(vibes.VIBES.map((vibe) => vibe.id)).size, vibes.VIBES.length);
-  assert.ok(
-    modes.ARCHIVIST_MODES.every((mode) => vibes.VIBES.some((vibe) => vibe.id === mode.appearance)),
-    "every selectable mode should map to a selectable appearance"
-  );
+  assert.equal(vibes.DEFAULT_VIBE, "cradle", "Archivist should open in the book's own theme");
   for (const [vibeId] of expectedVibes) assert.equal(vibes.isVibeId(vibeId), true);
-  for (const vibeId of ["forest", "cromb", "whimsical", "codex", "ocean", "rose"]) {
-    assert.equal(vibes.isVibeId(vibeId), false, `${vibeId} should not be restored from storage as a selectable appearance`);
+  assert.equal(vibes.isVibeId("unknown"), false);
+
+  for (const removed of ["storedArchivistMode", "persistArchivistMode", "storedAppearance", "persistAppearance"]) {
+    assert.equal(
+      removed in modes,
+      false,
+      `${removed} should not exist: the perspective is a per-visit advanced setting`
+    );
   }
-
-  assert.equal(modes.storedArchivistMode(), "professional", "SSR should fall back without window storage");
-  assert.equal(modes.storedAppearance("essential"), "minimal", "SSR should use the mode appearance");
-
-  const storage = memoryStorage({
-    [modes.ARCHIVIST_MODE_STORAGE_KEY]: "pretty_pink_princess",
-    [vibes.VIBE_STORAGE_KEY]: "princess"
-  });
-  globalThis.window = { localStorage: storage };
-  assert.equal(modes.storedArchivistMode(), "pretty_pink_princess");
-  assert.equal(modes.storedAppearance("professional"), "princess");
-  modes.persistArchivistMode("baleful_black_baron");
-  modes.persistAppearance("baron");
-  assert.equal(storage.value(modes.ARCHIVIST_MODE_STORAGE_KEY), "baleful_black_baron");
-  assert.equal(storage.value(vibes.VIBE_STORAGE_KEY), "baron");
-
-  const realistStorage = memoryStorage({
-    [modes.ARCHIVIST_MODE_STORAGE_KEY]: "ember_and_ink",
-    [vibes.VIBE_STORAGE_KEY]: "ember"
-  });
-  globalThis.window = { localStorage: realistStorage };
-  assert.equal(modes.storedArchivistMode(), "ember_and_ink", "the new preset should restore from storage");
-  assert.equal(modes.storedAppearance("ember_and_ink"), "ember", "the Ember & Ink appearance should restore with the Realist");
-
-  globalThis.window = {
-    localStorage: memoryStorage({
-      [modes.ARCHIVIST_MODE_STORAGE_KEY]: "forest",
-      [vibes.VIBE_STORAGE_KEY]: "forest"
-    })
-  };
-  assert.equal(modes.storedArchivistMode(), "professional", "a dormant stored mode should fall back safely");
-  assert.equal(modes.storedAppearance("essential"), "minimal", "a dormant stored appearance should fall back to the mode");
 } finally {
-  if (originalWindow === undefined) delete globalThis.window;
-  else globalThis.window = originalWindow;
   await server.close();
 }

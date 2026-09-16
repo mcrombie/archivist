@@ -6,11 +6,12 @@ boundary between influence and evidence
 
 ## Product model
 
-An Archivist mode is a versioned preset that joins three reader-visible choices:
+An Archivist mode is a versioned preset that joins two choices:
 
-1. an appearance theme;
-2. default Historiographical lens, Voice, and Worldview settings; and
-3. an optional, reviewed interpretive influence profile.
+1. default Historiographical lens, Voice, and Worldview settings; and
+2. an optional, reviewed interpretive influence profile.
+
+A mode does not choose the visual theme; the theme is a separate reader setting.
 
 It does **not** change the evidence corpus. Historical assertions and numbered citations in every
 mode remain grounded in the retrieval-eligible text of *Cradle of the Empire*. The current
@@ -31,21 +32,28 @@ and prose, but they are not evidence and cannot authorize a historical assertion
 
 ## Primary modes
 
-| Mode | Appearance | Default answer settings | Influence profile |
-|---|---|---|---|
-| **Professional** | Professional | Evidence-first, Plainspoken, Secular humanist | `professional_public_history/1` |
-| **Essential** | Essential | Evidence-first, Scholarly, None | none |
-| **Pretty Pink Princess** | Pretty Pink Princess | Triumphalist, Romantic, Secular humanist | `rose_tinted_optimism/1` |
-| **Baleful Black Baron** | Baleful Black Baron | Tragic, Romantic, None | `severe_tragic_history/1` |
-| **Ruthless Red Realist** (`ember_and_ink`) | Ember & Ink | Evidence-first, Plainspoken, Enlightenment rationalist | `realist_statecraft/1` |
+| Mode | Default answer settings | Influence profile |
+|---|---|---|
+| **Professional** | Evidence-first, Plainspoken, Secular humanist | `professional_public_history/1` |
+| **Essential** | Evidence-first, Scholarly, None | none |
+| **Classical Chronicler** | Evidence-first, Scholarly, None | `classical_historians/1` |
+| **Perky Pollyanna** | Triumphalist, Plainspoken, None | `hopeful_history/1` |
+| **Dour Doomsayer** | Tragic, Plainspoken, None | `doomsaying_history/1` |
 
-Professional is the frontend default for a new visitor. It is a restrained public-history
-prototype, not a claim of neutrality. Essential is the direct-evidence mode and the API default
+Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist are retired from the reader UI.
+Their registry entries, generated-mode contracts, prompts, and influence profiles stay in the
+repository and the API still accepts their IDs, but the browser no longer offers them.
+
+Professional is the frontend starting perspective on every visit; choosing another is an advanced
+setting that lasts only for the page. It is a restrained public-history prototype, not a claim of
+neutrality. Essential is the direct-evidence mode and the API default
 when no mode is supplied. In current RAG it makes no prose-generation call, but it uses the shared
 `text-embedding-3-small` query request before direct evidence is compiled.
 
-Every registered generated mode -- currently Professional, Pretty Pink Princess, Baleful Black
-Baron, and Ruthless Red Realist -- makes exactly one no-retry `gpt-5.6-sol` authored-response call
+Every registered generated mode -- currently Professional, Classical Chronicler, Perky Pollyanna,
+Dour Doomsayer, Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist -- makes
+exactly one no-retry
+`gpt-5.6-sol` authored-response call
 with low reasoning and medium verbosity. The existing local `QuestionPlan` selects its length
 profile: ordinary questions target 500-700 reader-visible answer tokens with a 1,800-token API
 ceiling, while `BROAD_SYNTHESIS` plans target 900-1,100 with a 2,400-token ceiling. Targets are
@@ -70,9 +78,16 @@ direct manuscript evidence instead.”
 
 Mode selection does not alter product truth. `product-help-v1` answers a closed set of direct
 questions about Archivist itself with fixed application-owned copy before corpus loading or any
-provider call. It works in all five modes, returns no sources, and does not invent a persona role
-or biography. The selected Perspective remains visible, but the explanation of what Archivist is
-and does is identical.
+provider call. It works in every mode, returns no sources, and does not invent a persona role
+or biography. The explanation of what Archivist is and does is identical whichever perspective is
+selected.
+
+`prepared-answer-v1` serves a small set of stable questions about the book itself, currently the
+overview question “What is Cradle of the Empire about?”, from fixed text written once and cited to
+the Introduction passages it summarizes. Because that text is in the Professional voice, only
+Professional with its default facets uses it; every other perspective, and Professional with an
+override, answers the question live. Evaluation runs never use prepared answers: web requests opt
+in with `allow_prepared_answers=True`.
 
 Every registered generated mode also has a separate, narrow pre-retrieval route for direct social
 or personal questions addressed to its persona. `is_character_conversation_question(question,
@@ -92,14 +107,29 @@ uses a deterministic application-owned reply for that same character with status
 and failure code `provider_failure`, `invalid_response`, or `refusal`. It never substitutes
 Essential evidence and never makes a retry. A historical, manuscript, mixed social-and-historical,
 long, or uncertain turn falls through to the grounded retrieval-authored path. Professional,
-Pretty Pink Princess, Baleful Black Baron, and Ruthless Red Realist are covered now; Essential has
-no generated-mode contract and is excluded. A future mode inherits the route when it registers its
-authored instructions, conversational instructions, and deterministic fallback copy. This boundary
-lets the personas answer “How are you?” without turning Archivist into an uncited general chatbot.
+Classical Chronicler, Perky Pollyanna, Dour Doomsayer, Pretty Pink Princess, Baleful Black Baron,
+and Ruthless Red Realist are covered now; Essential has no generated-mode contract and is excluded. A future mode inherits the
+route when it registers its authored instructions, conversational instructions, and deterministic
+fallback copy. This boundary lets the personas answer “How are you?” without turning Archivist into
+an uncited general chatbot.
 
-These five modes and their five matching appearances are the only selectable reader choices.
-Other historical mode IDs, profiles, and visual assets remain dormant in the repository solely for
-compatibility and possible later redesign; the current UI and public API do not offer them.
+Professional, Essential, Classical Chronicler, Perky Pollyanna, and Dour Doomsayer are the only
+selectable reader perspectives. Other historical mode IDs and profiles remain dormant in the
+repository solely for compatibility and possible later redesign; the current UI and public API do
+not offer them.
+
+## Character profiles
+
+Classical Chronicler, Perky Pollyanna, and Dour Doomsayer are temperaments of a realistic historian,
+not fictional characters with invented lives. None ingests an outside text.
+
+- `classical_historians/1` names broad habits of ancient historiography loosely associated with
+  Herodotus, Thucydides, Livy, and Plutarch and forbids impersonating any of them.
+- `hopeful_history/1` looks first for resilience, reform, and recovery. Its name alludes only to the
+  optimist archetype from Eleanor H. Porter's *Pollyanna*; it must state harm plainly and may not
+  invent a silver lining.
+- `doomsaying_history/1` looks first for fragility, overreach, and deferred costs. It may not
+  exaggerate suffering, treat outcomes as inevitable, or erase achievement.
 
 ## Professional public-history profile
 
@@ -283,50 +313,51 @@ not an additional evidence source.
 
 ## Reader controls
 
-The primary control is **Archivist mode**, because it changes both presentation and answer
-character. Selecting a mode applies its appearance and interpretive defaults to future turns.
-Completed turns retain their resolved mode and settings.
+Every visit starts in Professional with the Cradle of the Empire visual theme. The composer labels
+its collapsed control **Settings**, which appears once a conversation exists and holds three
+disclosures:
 
-The composer labels its collapsed control **Settings** and keeps two secondary disclosures:
+- **Advanced perspective settings** lists the five perspectives as one-click choices, each with a
+  short description. It is the only way to change perspective. A change applies to future answers;
+  completed turns keep a static label with their resolved mode, and retry uses the original turn
+  settings.
+- **Visual theme** offers every finished theme: Cradle of the Empire, Professional, Essential, Forest
+  Folio, Illuminated Codex, Ember & Ink, Tidal Archive, Cosmic Almanac, Pretty Pink Princess,
+  Baleful Black Baron, Rose & Ruin, and Cromb Coo Coo. It changes only presentation, and it and the
+  perspective never change each other.
+- **Advanced delivery settings** chooses Complete answer, the recommended default, or the
+  experimental Progressive response.
 
-- **Evidence scope** controls retrieved-passages versus the experimental full-book strategy. It is
-  not an interpretive setting.
-- **Advanced interpretive settings** exposes Historiographical lens, Voice, Worldview, and an
-  appearance-only override. Changing an advanced value marks the preset as customized. Resetting
-  restores the active mode's complete defaults. The only selectable appearances are the five that
-  match the current modes.
+Two controls are temporarily hidden but kept in code:
 
-Above the text field, a **Perspective** note makes the current framing explicit. Its label, the
-header control, **Current mode** inside Settings, and each turn's mode badge open the same shared
-chooser. The chooser always selects the current perspective for future answers. A historical turn
-continues to display its snapshotted mode, facets, and appearance; opening its badge does not
-retroactively relabel that answer, and retry continues to use the original turn settings. Preset
-copy is:
+- **Evidence scope** (retrieved passages versus the experimental full-book strategy) appears only on
+  deployments that enable full-book answers.
+- **Fine-grained overrides** for Historiographical lens, Voice, and Worldview sit behind
+  `INTERPRETIVE_OVERRIDES_VISIBLE` in `App.tsx`. Changing one marks the preset as customized, and
+  Reset to mode restores the active mode's defaults.
+
+When the overrides are shown, each preset's fixed perspective copy explains the current framing:
 
 - Professional: “Measured and diplomatic, with a present-minded focus on human agency,
   institutions, and material consequences.”
 - Essential: “No added interpretive persona: direct, cited evidence from the manuscript without a
   prose-generation rewrite.”
-- Pretty Pink Princess: “Hopeful and triumphalist, favoring achievement and charm while avoiding
-  subjects she finds too bleak or frightening.”
-- Baleful Black Baron: “Tragic and severe, emphasizing coercion, loss, ruin, and human suffering.”
-- Ruthless Red Realist: “Cold-blooded strategic calculation centered on power, leverage,
-  incentives, tradeoffs, and statecraft; loosely inspired by Machiavelli and Kissinger without
-  impersonating either.”
+- Classical Chronicler: “Narrative and evidence-first, attentive to causes, the limits of
+  testimony, human character, and the long arc a single episode sits inside.”
+- Perky Pollyanna: “Hopeful and optimistic, drawn to resilience, reform, and recovery while still
+  stating harm and failure plainly.”
+- Dour Doomsayer: “Pessimistic and wary, drawn to fragility, overreach, and deferred costs while
+  still crediting real achievement.”
 
-Any facet or appearance override makes the active top-right and Settings-panel labels exactly
-**Custom**. Facet-custom copy names its base preset, selected lens, voice, and worldview because
-advanced facets do not remove the preset's registered character or influence. An appearance-only
-override explicitly says that appearance is customized while the underlying preset perspective is
-unchanged. Completed-turn badges retain “{Preset} · Custom” so historical provenance stays clear,
-even though the badge is an actionable entry point to the future-answer chooser.
-Custom is a resolved presentation/settings state, not a sixth server mode: character-social turns
-retain their registered generated-mode identity, while advanced interpretive facets shape generated
-historical/manuscript prose.
+Any facet override labels the perspective exactly **Custom**. Facet-custom copy names its base
+preset, selected lens, voice, and worldview because advanced facets do not remove the preset's
+registered character or influence. Completed-turn labels retain “{Preset} · Custom” so historical
+provenance stays clear. Custom is a resolved settings state, not a sixth server mode:
+character-social turns retain their registered generated-mode identity, while advanced interpretive
+facets shape generated historical/manuscript prose.
 
-Dormant appearance definitions and assets remain loadable by compatibility code but are not shown
-as reader controls. The UI also exposes no V26/V27 latency or RAG-policy selector. Explicit V26 and
-V27 policy requests remain available only through the development API compatibility boundary.
+The UI exposes no V26/V27 latency or RAG-policy selector. Explicit V26 and V27 policy requests
+remain available only through the development API compatibility boundary.
 
 ## API and reproducibility
 
@@ -372,7 +403,8 @@ Offline tests must establish:
 6. local rendering maps support IDs to citations without claiming semantic entailment;
 7. each v5 timeout, transport, provider, refusal, structured-output, or local-validation failure
    receives its stable text-free code and returns direct Essential evidence without replay;
-8. only five mode IDs and five appearances are selectable, while dormant definitions remain hidden;
+8. only five mode IDs are selectable, dormant definitions remain hidden, and the visual theme is
+   independent of the mode;
 9. no V26/V27 selector appears in the UI, while explicit development API compatibility remains;
 10. advanced overrides and retries preserve the resolved per-turn settings; and
 11. public responses disclose the mode without exposing private prompts or diagnostics;

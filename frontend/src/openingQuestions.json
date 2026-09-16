@@ -1,7 +1,15 @@
 [
   {
-    "label": "Meet a person",
-    "question": "Who was Edwin Sandys, and what did he do?"
+    "label": "Start broad",
+    "question": "What is Cradle of the Empire about?"
+  },
+  {
+    "label": "The land",
+    "question": "How did Virginia's geography shape its history?"
+  },
+  {
+    "label": "A person",
+    "question": "Who was Powhatan, and why does he matter?"
   },
   {
     "label": "Trace a theme",

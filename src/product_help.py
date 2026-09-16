@@ -95,7 +95,9 @@ def _optimal_string_alignment_distance(value: str, target: str) -> int:
     return distances[-1][-1]
 
 
-def _matches_approved_question(value: str, approved_questions: tuple[str, ...]) -> bool:
+def matches_approved_question(value: str, approved_questions: tuple[str, ...]) -> bool:
+    """Match a normalized question to an approved phrase, tolerating small typos."""
+
     value_tokens = value.split()
     fuzzy_candidates: list[tuple[int, bool]] = []
     for candidate in approved_questions:
@@ -140,11 +142,11 @@ def _matches_approved_question(value: str, approved_questions: tuple[str, ...]) 
     )
 
 
-def is_product_help_question(question: str, *, has_history: bool = False) -> bool:
-    """Return whether a turn asks only how Archivist itself can help."""
+def normalize_bounded_question(question: object) -> str | None:
+    """Normalize a short, single-line question for approved-phrase matching."""
 
     if not isinstance(question, str) or "\n" in question or "\r" in question:
-        return False
+        return None
     normalized = unicodedata.normalize("NFKC", question).strip().casefold().replace("’", "'")
     normalized = "".join(
         character if character.isalnum() or character in {"'", " "} else " "
@@ -153,13 +155,22 @@ def is_product_help_question(question: str, *, has_history: bool = False) -> boo
     normalized = _SPACE_RE.sub(" ", normalized)
     normalized = normalized.strip()
     if not normalized or len(normalized) > _MAX_QUESTION_CHARACTERS:
+        return None
+    return normalized
+
+
+def is_product_help_question(question: str, *, has_history: bool = False) -> bool:
+    """Return whether a turn asks only how Archivist itself can help."""
+
+    normalized = normalize_bounded_question(question)
+    if normalized is None:
         return False
-    if _matches_approved_question(
+    if matches_approved_question(
         normalized,
         _CONTEXT_INDEPENDENT_PRODUCT_HELP_QUESTIONS,
     ):
         return True
-    return not has_history and _matches_approved_question(
+    return not has_history and matches_approved_question(
         normalized,
         _FIRST_TURN_PRODUCT_HELP_QUESTIONS,
     )
@@ -176,5 +187,7 @@ __all__ = [
     "PRODUCT_HELP_POLICY_VERSION",
     "PRODUCT_HELP_RENDERER_VERSION",
     "is_product_help_question",
+    "matches_approved_question",
+    "normalize_bounded_question",
     "render_product_help_answer",
 ]

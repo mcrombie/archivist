@@ -160,7 +160,14 @@ its explanatory copy.
 The provider-free product-help check is separate from the paid behavior check below. Asking “What
 do you do?” should return `answer_status=product_help`, fixed source-free product copy, and no
 embedding or generation event. `product-help-v1` runs before corpus loading and spend enforcement,
-so this check does not authorize or consume a provider call.
+so this check does not authorize or consume a provider call. Asking “What is Cradle of the Empire
+about?” in Professional is also provider-free: it should return `answer_status=prepared_answer`,
+answer policy `prepared-answer-v1`, two Introduction sources, and no embedding or generation event.
+
+If the OpenAI account runs out of prepaid credits, answers that need the provider fail with
+`503 provider_credits_exhausted` and a message saying the developer needs to add credits. Adding
+credits in the OpenAI dashboard restores service without a redeploy, though OpenAI can take a few
+minutes to apply them.
 
 The post-v5 behavior check is separately costed and separately authorized: one generated-mode
 personal question should return an uncited in-character reply with a manuscript-leading question
@@ -208,8 +215,11 @@ Render's custom-domain verification and certificate status, and the Vercel envir
 
 ## Public-payload frontend regression
 
-Public responses intentionally omit private `run_diagnostics`, `resolved_query`, costs, and ledger
-state. On July 28, 2026, the first live-answer test exposed a presentation-contract mismatch: the
+Public responses intentionally omit private `run_diagnostics`, `resolved_query`, and ledger state.
+The one cost field they carry is `turn_cost_usd`: that request's own estimate, read from the ledger
+by its server-issued request ID (`0.0` for prepared answers and product help, `null` if the ledger
+read fails). The reader's conversation total is summed in the browser, so the public server exposes
+no conversation, monthly, or budget figures. On July 28, 2026, the first live-answer test exposed a presentation-contract mismatch: the
 public API correctly omitted `run_diagnostics`, but the frontend dereferenced it as a required
 object and crashed to a blank page. Commit `1dd45aa` made the public-only fields optional in the
 TypeScript response contract and guarded diagnostic reads. It also moved the stored-vibe

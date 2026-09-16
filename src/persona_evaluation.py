@@ -114,11 +114,23 @@ PERSONA_EVALUATION_CASES = (
         mode=ArchivistMode.EMBER_AND_INK,
         question="How are you?",
     ),
+    PersonaEvaluationCase(
+        mode=ArchivistMode.CLASSICAL_CHRONICLER,
+        question="How are you?",
+    ),
+    PersonaEvaluationCase(
+        mode=ArchivistMode.POLLYANNA,
+        question="How are you?",
+    ),
+    PersonaEvaluationCase(
+        mode=ArchivistMode.DOOMSAYER,
+        question="How are you?",
+    ),
 )
 
 # These lexicons are transparent development diagnostics, not a gold rubric or
 # semantic judge.  They report whether each reply contains at least one plainly
-# mode-specific signal and whether all four replies remain lexically distinct.
+# mode-specific signal and whether all replies remain lexically distinct.
 PERSONA_SIGNATURES: Mapping[ArchivistMode, tuple[str, ...]] = {
     ArchivistMode.PROFESSIONAL: (
         "archive",
@@ -152,6 +164,33 @@ PERSONA_SIGNATURES: Mapping[ArchivistMode, tuple[str, ...]] = {
         "strategy",
         "timing",
         "tradeoff",
+    ),
+    ArchivistMode.CLASSICAL_CHRONICLER: (
+        "chronicle",
+        "digression",
+        "historian",
+        "inquiry",
+        "notes",
+        "question",
+        "testimony",
+    ),
+    ArchivistMode.POLLYANNA: (
+        "bright",
+        "cheer",
+        "delight",
+        "glad",
+        "hope",
+        "splendid",
+        "sunny",
+    ),
+    ArchivistMode.DOOMSAYER: (
+        "doom",
+        "fatal",
+        "forecast",
+        "gloom",
+        "grim",
+        "warning",
+        "worse",
     ),
 }
 

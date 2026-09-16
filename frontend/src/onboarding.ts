@@ -103,8 +103,9 @@ export function shouldRunOnboarding(
 }
 
 export function shouldShowSourcesTip(state: OnboardingState): boolean {
-  const current = normalizeOnboardingState(state);
-  return current.tour === "completed" && current.sourcesTip === "pending";
+  // The tour no longer opens on its own, so a pending tip cannot wait for a
+  // completed one. Skipping the tour still suppresses the tip.
+  return normalizeOnboardingState(state).sourcesTip === "pending";
 }
 
 function browserStorage(): OnboardingStorage | null {

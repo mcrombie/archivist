@@ -69,6 +69,7 @@ export type AppConfig = {
   project: Project;
   features: {
     cost_ledger: boolean;
+    conversation_costs?: boolean;
     full_source_text: boolean;
     local_tools: boolean;
     public_page_locators: boolean;
@@ -80,6 +81,7 @@ export type AppConfig = {
 export type AnswerStrategy = "rag" | "full_context";
 
 export function answerPolicyLabel(version: string | null | undefined) {
+  if (version === "prepared-answer-v1") return "Prepared answer";
   if (version === "retrieval-authored-v5") return "Retrieval-authored v5";
   if (version === "retrieval-authored-v4") return "Retrieval-authored v4";
   if (version === "retrieval-authored-v3") return "Retrieval-authored v3";
@@ -266,6 +268,9 @@ export type AnswerFacets = {
 export type ArchivistModeId =
   | "professional"
   | "essential"
+  | "classical_chronicler"
+  | "pollyanna"
+  | "doomsayer"
   | "pretty_pink_princess"
   | "baleful_black_baron"
   | "ember_and_ink"
@@ -394,6 +399,8 @@ export type QuestionResponse = {
   sources: SourceReference[];
   display_groups?: DisplayGroup[];
   costs?: CostSummary | null;
+  // The public demo reports only this answer's estimate, never ledger totals.
+  turn_cost_usd?: number | null;
 };
 
 type QuestionOptions = {
@@ -591,6 +598,18 @@ function isQuestionResponse(value: unknown): value is QuestionResponse {
     && typeof result.worldview === "string"
     && Array.isArray(result.sources)
   );
+}
+
+export const PROVIDER_CREDITS_EXHAUSTED = "provider_credits_exhausted";
+
+// OpenAI usage credits running out is not something a retry fixes, so the
+// reader sees that plainly rather than a generic failure.
+export function isProviderCreditsExhausted(error: unknown) {
+  if (error instanceof ProgressiveStreamError) return error.code === PROVIDER_CREDITS_EXHAUSTED;
+  return error instanceof ApiRequestError
+    && typeof error.detail === "object"
+    && error.detail !== null
+    && (error.detail as { code?: unknown }).code === PROVIDER_CREDITS_EXHAUSTED;
 }
 
 export function isProgressiveFallbackEligible(error: unknown) {

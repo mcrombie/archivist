@@ -635,6 +635,40 @@ def test_late_global_failure_retracts_provisional_claims_with_terminal_error(
     assert not any(frame["type"] == "complete" for frame in frames)
 
 
+def test_progressive_stream_names_exhausted_openai_credits(monkeypatch):
+    def fake_answer(*_args, progress_callback=None, **_kwargs):
+        progress_callback(AnswerProgressStage.GENERATING_ANSWER)
+        return SimpleNamespace(
+            answer="Credits are exhausted.",
+            final_chunks=[],
+            status="provider_credits_exhausted",
+            evidence_decision="indeterminate",
+            diagnostics={},
+            resolved_question="What happened?",
+        )
+
+    monkeypatch.setattr(web_api, "UsageLedger", _FakeDevelopmentLedger)
+    monkeypatch.setattr(web_api, "answer_project_question_result", fake_answer)
+    monkeypatch.setattr(
+        web_api,
+        "answer_run_diagnostics",
+        lambda _result: {"schema": "archivist.answer_run_diagnostics/3"},
+    )
+
+    frames = _frames(
+        TestClient(web_api.app).post(
+            "/api/projects/current/question/progressive",
+            json={"question": "What happened?"},
+        )
+    )
+
+    assert frames[-1]["type"] == "error"
+    assert frames[-1]["error"]["code"] == "provider_credits_exhausted"
+    assert "credits have run out" in frames[-1]["error"]["message"]
+    assert "developer needs to add more credits" in frames[-1]["error"]["message"]
+    assert not any(frame["type"] == "complete" for frame in frames)
+
+
 def test_public_release_gate_withholds_provisional_claim_that_fails_verbatim_guard(
     monkeypatch,
 ):

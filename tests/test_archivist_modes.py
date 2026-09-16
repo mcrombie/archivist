@@ -38,6 +38,9 @@ def test_mode_registry_is_allowlisted_and_versioned():
     assert set(ARCHIVIST_MODES) == {
         ArchivistMode.PROFESSIONAL,
         ArchivistMode.ESSENTIAL,
+        ArchivistMode.CLASSICAL_CHRONICLER,
+        ArchivistMode.POLLYANNA,
+        ArchivistMode.DOOMSAYER,
         ArchivistMode.FOREST,
         ArchivistMode.CROMB_COO_COO,
         ArchivistMode.PRETTY_PINK_PRINCESS,
@@ -50,6 +53,9 @@ def test_mode_registry_is_allowlisted_and_versioned():
     assert set(INFLUENCE_PROFILES) == {
         "none",
         "professional_public_history",
+        "classical_historians",
+        "hopeful_history",
+        "doomsaying_history",
         "dunsany_elfland",
         "cromb_coo_coo_manuscript",
         "rose_tinted_optimism",
@@ -66,6 +72,9 @@ def test_mode_registry_is_allowlisted_and_versioned():
 def test_generated_mode_capability_drives_authored_social_and_selectable_modes():
     expected = {
         ArchivistMode.PROFESSIONAL,
+        ArchivistMode.CLASSICAL_CHRONICLER,
+        ArchivistMode.POLLYANNA,
+        ArchivistMode.DOOMSAYER,
         ArchivistMode.PRETTY_PINK_PRINCESS,
         ArchivistMode.BALEFUL_BLACK_BARON,
         ArchivistMode.EMBER_AND_INK,
@@ -113,6 +122,24 @@ def test_omitted_mode_is_essential_and_preserves_the_prompt_byte_for_byte():
             "essential",
             HistoriographicalLens.EVIDENCE_FIRST,
             AnswerVoice.SCHOLARLY,
+            Worldview.NONE,
+        ),
+        (
+            "classical_chronicler",
+            HistoriographicalLens.EVIDENCE_FIRST,
+            AnswerVoice.SCHOLARLY,
+            Worldview.NONE,
+        ),
+        (
+            "pollyanna",
+            HistoriographicalLens.TRIUMPHALIST,
+            AnswerVoice.PLAINSPOKEN,
+            Worldview.NONE,
+        ),
+        (
+            "doomsayer",
+            HistoriographicalLens.TRAGIC,
+            AnswerVoice.PLAINSPOKEN,
             Worldview.NONE,
         ),
         (
@@ -181,6 +208,9 @@ def test_registered_mode_resolves_defaults(mode, lens, voice, worldview):
     (
         "professional",
         "essential",
+        "classical_chronicler",
+        "pollyanna",
+        "doomsayer",
         "pretty_pink_princess",
         "baleful_black_baron",
         "ember_and_ink",
@@ -553,6 +583,7 @@ def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):
         archivist_mode,
         answer_strategy="rag",
         application_compiled=False,
+        allow_prepared_answers=False,
     ):
         captured.update(
             project_id=project_id,
@@ -564,6 +595,7 @@ def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):
             worldview=worldview,
             history=history,
             application_compiled=application_compiled,
+            allow_prepared_answers=allow_prepared_answers,
         )
         return SimpleNamespace(
             answer="Synthetic answer [Source 1].",
@@ -588,6 +620,7 @@ def test_question_api_forwards_and_echoes_mode_metadata(monkeypatch):
     assert captured["voice"] is AnswerVoice.PLAINSPOKEN
     assert captured["worldview"] is Worldview.SECULAR_HUMANIST
     assert captured["application_compiled"] is True
+    assert captured["allow_prepared_answers"] is True
     assert response["archivist_mode"] == "professional"
     assert response["archivist_mode_version"] == "1"
     assert response["influence_profile_id"] == "professional_public_history"

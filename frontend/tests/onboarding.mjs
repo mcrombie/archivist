@@ -35,8 +35,14 @@ try {
   const onboarding = await server.ssrLoadModule("/src/onboarding.ts");
   await server.ssrLoadModule("/src/OnboardingTour.tsx");
 
-  assert.match(appSource, /A manuscript-grounded AI guide/);
-  assert.match(appSource, /not the open web/);
+  assert.match(appSource, /Cradle of the Empire: A Big History of Virginia/);
+  assert.match(appSource, /Archivist searches this\s+book/);
+  assert.match(appSource, /not the open\s+web/);
+  assert.doesNotMatch(
+    appSource,
+    /shouldAutoStartOnboarding/,
+    "the opening screen must not interrupt a first visit with the tour"
+  );
   assert.match(appSource, /How Archivist works/);
   assert.match(appSource, /openOnboardingReplay\(event\.currentTarget\)/);
   assert.match(appSource, /replayInvoker=\{onboardingInvokerRef\.current\}/);
@@ -45,14 +51,14 @@ try {
   assert.deepEqual(
     [...appSource.matchAll(/data-onboarding-target="(ask|perspective|settings)"/g)]
       .map((match) => match[1]),
-    ["ask", "perspective", "settings"],
-    "the initial tour should expose exactly three stable spotlight targets"
+    ["ask", "settings"],
+    "the tour should spotlight only the question box and Settings, not the advanced perspective"
   );
 
   assert.equal(
     [...tourSource.matchAll(/id: "(ask|perspective|settings)",\s+target: "\1"/g)].length,
-    3,
-    "the tour should contain exactly three targeted explanatory steps"
+    2,
+    "the tour should contain exactly two targeted explanatory steps"
   );
   assert.match(tourSource, /dialog\.showModal\(\)/);
   assert.match(tourSource, /new ResizeObserver/);
@@ -80,7 +86,11 @@ try {
   assert.equal(onboarding.isOnboardingState(initial), true);
   assert.equal(onboarding.shouldAutoStartOnboarding(initial), true);
   assert.equal(onboarding.shouldRunOnboarding(initial), true);
-  assert.equal(onboarding.shouldShowSourcesTip(initial), false);
+  assert.equal(
+    onboarding.shouldShowSourcesTip(initial),
+    true,
+    "the deferred sources note no longer depends on a tour the reader never saw"
+  );
 
   for (const invalid of [
     null,

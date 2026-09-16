@@ -523,6 +523,9 @@ def test_public_request_rejects_temporarily_hidden_modes(mode):
     (
         "essential",
         "professional",
+        "classical_chronicler",
+        "pollyanna",
+        "doomsayer",
         "pretty_pink_princess",
         "baleful_black_baron",
         "ember_and_ink",
@@ -766,6 +769,93 @@ def test_public_question_response_omits_internal_diagnostics_and_costs(monkeypat
     }.intersection(all_keys(response))
 
 
+def test_public_profile_offers_conversation_costs_without_the_ledger():
+    public = web_api._feature_flags(web_api.ExposureProfile.PUBLIC_DEMO, public_settings())
+    development = web_api._feature_flags(web_api.ExposureProfile.DEVELOPMENT)
+
+    assert public["cost_ledger"] is False
+    assert public["conversation_costs"] is True
+    assert development["cost_ledger"] is True
+    assert development["conversation_costs"] is True
+
+
+class _CostReportingLedger:
+    def __init__(self, cost=None, error=None):
+        self.cost = cost
+        self.error = error
+        self.cost_requests: list[str] = []
+
+    def get_settings(self):
+        return {
+            "monthly_budget_usd": 5.0,
+            "warning_threshold_percent": 80,
+            "hard_limit_enabled": True,
+        }
+
+    def budget_state(self):
+        return {"exceeded": False}
+
+    def record_answer_run_diagnostics(self, **_kwargs):
+        return None
+
+    def request_usage_totals(self, request_id):
+        self.cost_requests.append(request_id)
+        if self.error is not None:
+            raise self.error
+        return {"estimated_cost_usd": self.cost, "event_count": 2}
+
+
+def _answer_publicly(monkeypatch, ledger, request_id):
+    monkeypatch.setattr(web_api, "UsageLedger", lambda: ledger)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+    monkeypatch.setattr(web_api, "enforce_projected_usage_budget", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer=(
+                "Alpha evidence 1 directly supports the requested historical claim. [Source 1]"
+            ),
+            final_chunks=synthetic_chunks(1),
+            status="answered",
+        ),
+    )
+    return web_api._run_public_question(
+        web_api.PublicQuestionRequest(question="What happened?"),
+        public_settings(),
+        request_id=request_id,
+    )
+
+
+def test_public_answer_reports_only_its_own_estimated_cost(monkeypatch):
+    ledger = _CostReportingLedger(cost=0.0512)
+    request_id = "e" * 32
+
+    response = _answer_publicly(monkeypatch, ledger, request_id)
+
+    assert response["turn_cost_usd"] == 0.0512
+    # Scoped by the server-issued request ID, so a reader can never ask about
+    # another conversation, the month, or the budget.
+    assert ledger.cost_requests == [request_id]
+    assert not {
+        "costs",
+        "budget",
+        "conversation_usd",
+        "month_usd",
+        "all_time_usd",
+        "recent_events",
+    }.intersection(all_keys(response))
+
+
+def test_public_answer_is_released_when_its_cost_cannot_be_read(monkeypatch):
+    ledger = _CostReportingLedger(error=RuntimeError("synthetic ledger failure"))
+
+    response = _answer_publicly(monkeypatch, ledger, "f" * 32)
+
+    assert response["answer_status"] == "answered"
+    assert response["turn_cost_usd"] is None
+
+
 def test_public_character_conversation_releases_without_manuscript_sources(monkeypatch):
     class FakeLedger:
         def get_settings(self):
@@ -930,6 +1020,110 @@ def test_public_question_withholds_fail_closed_answer_statuses(monkeypatch, stat
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["code"] == "public_answer_unavailable"
+
+
+def test_public_exhausted_credits_return_a_specific_error(monkeypatch):
+    class FakeLedger:
+        def get_settings(self):
+            return {
+                "monthly_budget_usd": 5.0,
+                "warning_threshold_percent": 80,
+                "hard_limit_enabled": True,
+            }
+
+        def budget_state(self):
+            return {"exceeded": False}
+
+        def record_answer_run_diagnostics(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(web_api, "UsageLedger", FakeLedger)
+    monkeypatch.setattr(web_api, "answer_run_diagnostics", lambda _result: {})
+    monkeypatch.setattr(
+        web_api,
+        "answer_project_question_result",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            answer="Credits are exhausted.",
+            final_chunks=[],
+            status="provider_credits_exhausted",
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        web_api._run_public_question(
+            web_api.PublicQuestionRequest(question="What happened?"),
+            public_settings(),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["code"] == "provider_credits_exhausted"
+    assert "credits have run out" in exc_info.value.detail["message"]
+    stream_error = web_api._safe_stream_error(exc_info.value, public=True)
+    assert stream_error["code"] == "provider_credits_exhausted"
+    assert "credits have run out" in stream_error["message"]
+
+
+def test_public_prepared_answer_releases_cited_sources_without_spend(monkeypatch):
+    from prepared_answers import BOOK_OVERVIEW
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("a prepared answer must not retrieve, call a provider, or reserve spend")
+
+    monkeypatch.setattr(web_project, "chroma_client", unexpected)
+    monkeypatch.setattr(web_project, "openai_client", unexpected)
+    monkeypatch.setattr(web_api, "UsageLedger", unexpected)
+    monkeypatch.setattr(web_api, "enforce_projected_usage_budget", unexpected)
+    monkeypatch.setattr(
+        web_project,
+        "load_project_chunks",
+        lambda _project_id: [
+            {
+                "document": "05_Introduction.md",
+                "chapter_title": "Introduction",
+                "chunk_id": chunk_id,
+                "paragraph_start": 1,
+                "paragraph_end": 2,
+                "text": "A short synthetic introduction passage.",
+            }
+            for chunk_id in BOOK_OVERVIEW.source_chunk_ids
+        ],
+    )
+    released = []
+
+    def fake_public_source_payload(answer, chunks, **_kwargs):
+        released.append([chunk["chunk_id"] for chunk in chunks])
+        return {"source_schema": "archivist.public_sources/1", "sources": [{"source_number": 1}]}
+
+    monkeypatch.setattr(web_api, "public_source_payload", fake_public_source_payload)
+    web_api._preflight_public_progressive_question(
+        web_api.PublicQuestionRequest(
+            question="What is Cradle of the Empire about?",
+            archivist_mode="professional",
+            historiographical_lens="evidence_first",
+            voice="plainspoken",
+            worldview="secular_humanist",
+        ),
+        public_settings(),
+    )
+
+    response = web_api._run_public_question(
+        web_api.PublicQuestionRequest(
+            question="What is Cradle of the Empire about?",
+            archivist_mode="professional",
+            historiographical_lens="evidence_first",
+            voice="plainspoken",
+            worldview="secular_humanist",
+        ),
+        public_settings(),
+    )
+
+    assert response["answer_status"] == "prepared_answer"
+    assert response["answer"] == BOOK_OVERVIEW.answer
+    assert response["answer_strategy_version"] == "prepared-answer-v1"
+    assert response["sources"] == [{"source_number": 1}]
+    assert response["turn_cost_usd"] == 0.0
+    assert released == [list(BOOK_OVERVIEW.source_chunk_ids)]
+    assert response["prose_renderer_version"] is None
 
 
 def test_public_answer_overlap_guard_detects_long_reproduction():

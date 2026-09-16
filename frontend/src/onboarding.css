@@ -3,6 +3,7 @@ html[data-vibe] {
   --onboarding-primary-ink: #111412;
 }
 
+html[data-vibe="cradle"],
 html[data-vibe="professional"],
 html[data-vibe="minimal"],
 html[data-vibe="princess"] {

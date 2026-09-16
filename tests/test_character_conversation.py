@@ -31,6 +31,9 @@ from costs import CostLimitExceeded
 
 GENERATED_MODES = (
     ArchivistMode.PROFESSIONAL,
+    ArchivistMode.CLASSICAL_CHRONICLER,
+    ArchivistMode.POLLYANNA,
+    ArchivistMode.DOOMSAYER,
     ArchivistMode.PRETTY_PINK_PRINCESS,
     ArchivistMode.BALEFUL_BLACK_BARON,
     ArchivistMode.EMBER_AND_INK,
@@ -183,6 +186,9 @@ def test_response_model_requires_manuscript_leading_question():
     ("mode", "expected"),
     (
         (ArchivistMode.PROFESSIONAL, "public historian"),
+        (ArchivistMode.CLASSICAL_CHRONICLER, "digression"),
+        (ArchivistMode.POLLYANNA, "bright side"),
+        (ArchivistMode.DOOMSAYER, "weary fatalism"),
         (ArchivistMode.PRETTY_PINK_PRINCESS, "ribbons"),
         (ArchivistMode.BALEFUL_BLACK_BARON, "ravens"),
         (ArchivistMode.EMBER_AND_INK, "breakfast were a negotiation"),
@@ -358,8 +364,14 @@ def test_provider_failure_returns_deterministic_mode_specific_local_fallback(
         assert "wonderfully well" in result.answer
     elif mode is ArchivistMode.BALEFUL_BLACK_BARON:
         assert "Miserable" in result.answer
-    else:
+    elif mode is ArchivistMode.EMBER_AND_INK:
         assert "clarity, leverage, and timing" in result.answer
+    elif mode is ArchivistMode.POLLYANNA:
+        assert "worth being glad about" in result.answer
+    elif mode is ArchivistMode.DOOMSAYER:
+        assert "neither will improve" in result.answer
+    else:
+        assert "questions are multiplying" in result.answer
 
 
 def test_invalid_output_and_refusal_return_distinct_local_fallbacks(monkeypatch):

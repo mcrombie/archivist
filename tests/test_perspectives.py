@@ -466,6 +466,7 @@ def test_question_endpoint_forwards_and_echoes_all_three_facets(monkeypatch):
         archivist_mode,
         answer_strategy="rag",
         application_compiled=False,
+        allow_prepared_answers=False,
     ):
         captured.update(
             project_id=project_id,

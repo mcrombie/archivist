@@ -1568,6 +1568,7 @@ def test_question_api_scopes_calls_forwards_ids_and_returns_costs(monkeypatch, l
         archivist_mode,
         answer_strategy="rag",
         application_compiled=False,
+        allow_prepared_answers=False,
     ):
         captured.append(
             (

@@ -6,38 +6,40 @@
 
 ## Product purpose
 
-The landing page must explain Archivist even when a visitor skips the tour. It identifies the
-application as a manuscript-grounded AI guide, names the kinds of manuscript questions it is for,
-states that manuscript answers search the selected book rather than the open web, and tells the
-reader that supporting passages are inspectable. Perspective copy separately explains that a mode
-changes voice and emphasis rather than the manuscript being searched.
+The landing page must explain Archivist without a tour. It names the manuscript and what the book is
+about, states that manuscript answers search that book rather than the open web, and tells the
+reader that supporting passages are cited. Advanced perspective settings, inside Settings,
+separately explains that a perspective changes voice and emphasis rather than the manuscript being
+searched.
 
 The existing guided start and the first-visit tour have different jobs:
 
 - **How Archivist works** teaches the product's mental model.
-- **Let Archivist guide me** helps a reader compose a useful question.
+- **Help me choose a question** helps a reader compose a useful question.
 
 Neither flow sends a request, creates a conversation turn, changes a mode or setting, or incurs a
-provider call.
+provider call. The starter questions beside them behave differently: each is already a complete
+question, so one click sends it.
 
-## First-visit sequence
+## Orientation sequence
 
-The public reader automatically offers an optional welcome card once per browser and tour version.
-The welcome card offers **Show me around** and **Skip and explore**. The orientation then contains
-three informational spotlight steps:
+Nothing opens automatically. **How Archivist works** starts the orientation on request, beginning
+with the welcome card and its **Show me around** and **Skip and explore** controls. The orientation
+defines two informational spotlight steps and drops any whose control is not currently rendered,
+so the opening screen runs only the first of them:
 
-1. **Begin with a question.** Highlight the composer and explain free-form questions and the local
-   starter flow.
-2. **Perspective changes the reading.** Highlight the live Perspective note. Modes alter voice and
-   interpretive emphasis; Essential displays direct cited evidence without a character voice. The
-   step also tells readers that clicking Perspective after the tour opens the mode chooser.
-3. **Keep the defaults—or go deeper.** Highlight Settings and make clear that every default is ready
-   to use.
+1. **Begin with a question.** Highlight the composer and explain free-form questions, the starter
+   questions, and the local guide.
+2. **Keep the defaults—or go deeper.** Highlight Settings, make clear that every default is ready to
+   use, and name what it holds: a perspective, a visual theme, and answer delivery. A perspective
+   changes voice and emphasis without changing the manuscript searched.
 
-Finishing closes the modal and focuses the active question field. Skipping, the close control, and
-Escape have the same persisted effect during automatic first-run onboarding. A replay never changes
-the saved first-run disposition. **How Archivist works** remains available beside the landing
-disclosure and inside Settings.
+The perspective is an advanced setting, so the tour says where it lives but never spotlights the
+chooser itself.
+
+Finishing closes the modal and returns focus to the control that opened it. Because the orientation
+is always opened on request, it never changes the saved disposition. **How Archivist works** sits
+below the starter questions on the opening screen, and inside Settings once a conversation exists.
 
 The tour is informational. Highlighted page controls are visual context only and cannot be clicked
 through the modal. The tour cannot submit a question.
@@ -45,15 +47,14 @@ through the modal. The tour cannot submit a question.
 ## Deferred Sources explanation
 
 Sources and inline citations do not exist before an answer and are intentionally absent from some
-social/persona replies. Consequently, they are not a first-run spotlight step. Completing the tour
-leaves one contextual explanation pending. After the first completed turn that actually contains
-sources, a non-modal note appears immediately above that turn's Sources disclosure. It explains
-that citation numbers open supporting passages and that Sources contains excerpts and manuscript
-locations.
+social/persona replies. Consequently, they are not a spotlight step. One contextual explanation
+stays pending from the first visit, whether or not the reader ever opens the orientation. After the
+first completed turn that actually contains sources, a non-modal note appears immediately above that
+turn's Sources disclosure. It explains that citation numbers open supporting passages and that
+Sources contains excerpts and manuscript locations.
 
-Opening Sources or choosing **Got it** marks the note seen. Dismissing it marks it skipped. Skipping
-the initial tour suppresses the later note entirely. The note never steals focus or interrupts
-answer reading.
+Opening Sources or choosing **Got it** marks the note seen. Dismissing it marks it skipped, and it
+does not return. The note never steals focus or interrupts answer reading.
 
 ## Persistence contract
 
@@ -92,11 +93,11 @@ tour contract.
 - first-run completion and skip dispositions;
 - replay without persistence mutation;
 - source-tip eligibility and dismissal;
-- exactly three stable spotlight targets;
+- exactly two stable spotlight targets, the composer and Settings;
 - no network client or request primitive in the tour implementation;
 - native modal, Escape, focus, resize, missing-target, reduced-motion, and forced-colors contracts;
 - TypeScript compilation and production frontend build.
 
 Rendered release review should additionally exercise keyboard-only use, mobile widths, zoom,
-every selectable appearance, and a source-bearing answer. That visual review does not establish
+every selectable visual theme, and a source-bearing answer. That visual review does not establish
 model or semantic quality.

@@ -143,6 +143,7 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
         history,
         answer_strategy="rag",
         application_compiled=False,
+        allow_prepared_answers=False,
     ):
         calls.append(
             (
@@ -208,6 +209,9 @@ def test_question_endpoint_resolves_then_retrieves_fresh_evidence(monkeypatch):
     (
         "professional",
         "essential",
+        "classical_chronicler",
+        "pollyanna",
+        "doomsayer",
         "pretty_pink_princess",
         "baleful_black_baron",
     ),

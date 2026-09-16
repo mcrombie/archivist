@@ -118,6 +118,25 @@ try {
     );
   }
 
+  assert.equal(api.answerPolicyLabel("prepared-answer-v1"), "Prepared answer");
+  assert.equal(
+    api.isProviderCreditsExhausted(
+      new api.ApiRequestError(503, "Out of credits.", { code: "provider_credits_exhausted" })
+    ),
+    true
+  );
+  assert.equal(
+    api.isProviderCreditsExhausted(
+      new api.ProgressiveStreamError("Out of credits.", true, "provider_credits_exhausted")
+    ),
+    true
+  );
+  assert.equal(
+    api.isProviderCreditsExhausted(
+      new api.ApiRequestError(503, "Unavailable.", { code: "public_answer_unavailable" })
+    ),
+    false
+  );
   assert.equal(api.answerPolicyLabel("retrieval-authored-v5"), "Retrieval-authored v5");
   assert.equal(api.answerPolicyLabel("retrieval-authored-v4"), "Retrieval-authored v4");
   assert.equal(api.answerPolicyLabel("retrieval-authored-v3"), "Retrieval-authored v3");
@@ -192,16 +211,50 @@ try {
   );
 
   const chatCss = readFileSync(new URL("../src/chat.css", import.meta.url), "utf8");
-  const vibeControlSource = readFileSync(new URL("../src/VibeControl.tsx", import.meta.url), "utf8");
-  const vibeControlUses = [...appSource.matchAll(/<VibeControl\b[\s\S]*?\/>/g)]
-    .map((match) => match[0]);
   const composerUses = [...appSource.matchAll(/<ConversationComposer\b[\s\S]*?\/>/g)]
     .map((match) => match[0]);
   const turnUses = [...appSource.matchAll(/<ConversationTurn\b[\s\S]*?\/>/g)]
     .map((match) => match[0]);
-  const perspectiveControlUse = vibeControlUses.find((use) => use.includes('triggerVariant="perspective"')) ?? "";
-  const settingsControlUse = vibeControlUses.find((use) => use.includes('triggerVariant="settings"')) ?? "";
-  const turnControlUse = vibeControlUses.find((use) => use.includes('triggerVariant="turn"')) ?? "";
+  assert.doesNotMatch(
+    appSource,
+    /VibeControl/,
+    "perspective and theme should be plain Settings controls rather than a pop-up chooser"
+  );
+  assert.match(
+    appSource,
+    /ARCHIVIST_MODES\.map\(\(mode\) => \(\s*<label key=\{mode\.id\}>/,
+    "Advanced perspective settings should list every selectable perspective directly"
+  );
+  assert.match(
+    appSource,
+    /<strong>Visual theme<\/strong>/,
+    "the visual theme should be a Settings section of its own"
+  );
+  assert.match(
+    appSource,
+    /function changeArchivistMode\(nextMode: ArchivistModeId\) \{\s*setArchivistModeId\(nextMode\);\s*setFacets\(modeDefaultFacets\(nextMode\)\);\s*\}/,
+    "choosing a perspective should not change the visual theme"
+  );
+  assert.match(
+    appSource,
+    /useState<VibeId>\(DEFAULT_VIBE\)/,
+    "every visit should open in the default visual theme"
+  );
+  assert.match(
+    appSource,
+    /\{fullContextAvailable \? evidenceScopeSettings : null\}/,
+    "evidence scope should appear only where full-book answers are enabled"
+  );
+  assert.match(
+    appSource,
+    /const INTERPRETIVE_OVERRIDES_VISIBLE = false;/,
+    "lens, voice, and worldview overrides should stay hidden for now"
+  );
+  assert.doesNotMatch(
+    appSource,
+    /storedArchivistMode|storedAppearance|persistArchivistMode|persistAppearance/,
+    "every visit should start in the default perspective instead of restoring a saved one"
+  );
   assert.doesNotMatch(
     appSource,
     /V27 compact|Experimental latency settings/,
@@ -230,20 +283,20 @@ try {
     /const activeModeLabel = customMode \? "Custom" : selectedMode\.label/,
     "active customized controls should identify the mode as Custom"
   );
-  assert.match(
-    appSource,
-    /type ChatTurn = \{[\s\S]*?archivistMode: ArchivistModeId;[\s\S]*?appearance: VibeId;/,
-    "each turn should retain the appearance selected when its request began"
+  assert.doesNotMatch(
+    appSource.match(/type ChatTurn = \{[\s\S]*?\n\};/)?.[0] ?? "",
+    /appearance/,
+    "a turn should not record the visual theme, which never affects the answer"
   );
   assert.match(
     appSource,
-    /const nextTurn: ChatTurn = \{[\s\S]*?archivistMode: archivistModeId,[\s\S]*?appearance,[\s\S]*?facets: \{ \.\.\.facets \}/,
-    "new request snapshots should capture appearance alongside mode and facets"
+    /const nextTurn: ChatTurn = \{[\s\S]*?archivistMode: archivistModeId,\s*facets: \{ \.\.\.facets \}/,
+    "new request snapshots should capture the perspective and its facets"
   );
   assert.match(
     appSource,
-    /archivistModeSummary\(\s*turn\.archivistMode,\s*turn\.facets,\s*turn\.appearance\s*\)/,
-    "completed-turn badges should use the request's appearance snapshot"
+    /archivistModeSummary\(turn\.archivistMode, turn\.facets\)/,
+    "completed-turn labels should describe the request's perspective"
   );
   assert.match(
     appSource,
@@ -251,120 +304,36 @@ try {
     "a Custom perspective should still disclose its underlying character influence"
   );
   assert.match(
-    perspectiveControlUse,
-    /mode=\{archivistModeId\}/,
-    "both composers should make their visible current-perspective disclosure a mode picker"
+    appSource,
+    /<strong>Advanced perspective settings<\/strong>/,
+    "the perspective chooser should live in an advanced disclosure"
   );
-  assert.match(perspectiveControlUse, /onModeChange=\{onModeChange\}/);
-  assert.match(perspectiveControlUse, /triggerLabel=\{activeModeLabel\}/);
-  assert.match(perspectiveControlUse, /triggerEyebrow="Perspective"/);
+  assert.doesNotMatch(
+    appSource,
+    /chat-perspective-note/,
+    "the composer should no longer show a perspective strip above the question field"
+  );
   assert.match(
     appSource,
-    /aria-describedby=\{`\$\{perspectiveId\} \$\{groundingId\}`\}/,
-    "the question field should expose perspective and grounding context to assistive technology"
-  );
-  assert.match(
-    vibeControlSource,
-    /const displayLabel = triggerLabel \?\? \(custom \? "Custom" : current\.shortLabel\)/,
-    "an explicit inline label should override the header's exact Custom fallback"
-  );
-  assert.match(
-    vibeControlSource,
-    /const accessibleLabel = triggerAriaLabel[\s\S]*?Archivist mode: \$\{displayLabel\}\. Choose a perspective for future answers\./,
-    "every mode control, including the icon-only mobile trigger, should retain an explicit accessible name"
-  );
-  assert.match(
-    vibeControlSource,
-    /type\s+VibeControlTriggerVariant\s*=\s*"header"\s*\|\s*"perspective"\s*\|\s*"settings"\s*\|\s*"turn"/,
-    "the shared mode picker should explicitly support every visible perspective-label context"
-  );
-  for (const optionalTriggerProp of [
-    "triggerLabel",
-    "triggerEyebrow",
-    "triggerAriaLabel",
-    "contextNote"
-  ]) {
-    assert.match(
-      vibeControlSource,
-      new RegExp(`${optionalTriggerProp}\\?:`),
-      `${optionalTriggerProp} should remain an optional shared-picker trigger customization`
-    );
-  }
-  assert.match(
-    vibeControlSource,
-    /triggerVariant\s*!==\s*"header"/,
-    "inline perspective labels should follow the picker dialog path instead of the header popover path"
-  );
-  assert.match(
-    vibeControlSource,
-    /<dialog[\s\S]*?ref=\{dialogRef\}[\s\S]*?className="vibe-menu/,
-    "inline perspective pickers should use the native dialog element"
-  );
-  assert.match(
-    vibeControlSource,
-    /dialog\.showModal\(\)/,
-    "opening an inline perspective picker should invoke the browser's native modal behavior"
-  );
-  assert.match(
-    vibeControlSource,
-    /aria-expanded=\{open\}[\s\S]*?aria-controls=\{pickerId\}/,
-    "every perspective trigger should expose its popup relationship and expanded state"
-  );
-  assert.match(
-    vibeControlSource,
-    /onCancel=\{[\s\S]*?closeAndRestoreFocus\(\)[\s\S]*?\}/,
-    "Escape should close native inline perspective dialogs"
-  );
-  assert.match(
-    vibeControlSource,
-    /function closeAndRestoreFocus\(\)[\s\S]*?setOpen\(false\)[\s\S]*?triggerRef\.current\?\.focus\(/,
-    "closing or selecting from an inline picker should restore focus to its invoking label"
-  );
-  assert.match(
-    vibeControlSource,
-    /future answers/i,
-    "the shared picker should announce that a perspective change applies to future answers"
+    /aria-describedby=\{groundingId\}/,
+    "the question field should expose its grounding context to assistive technology"
   );
   assert.match(
     composerUses.map((use) => use.match(/onModeChange=\{changeArchivistMode\}/)?.[0] ?? "").join(" "),
     /^onModeChange=\{changeArchivistMode\} onModeChange=\{changeArchivistMode\}$/,
     "landing and docked composers should both route perspective-label choices through the canonical mode change"
   );
-  assert.match(
-    settingsControlUse,
-    /triggerLabel=\{activeModeLabel\}/,
-    "the current-mode label inside Settings should use the same mode changer"
-  );
-  assert.match(settingsControlUse, /mode=\{archivistModeId\}/);
-  assert.match(settingsControlUse, /onModeChange=\{onModeChange\}/);
   assert.equal(turnUses.length, 1, "the conversation should have one shared completed-turn rendering path");
-  assert.match(
+  assert.doesNotMatch(
     turnUses[0] ?? "",
-    /currentArchivistMode=\{archivistModeId\}/,
-    "completed-turn controls should receive the current future-answer selection separately from the turn snapshot"
+    /onModeChange=/,
+    "a completed answer should show its perspective without offering a chooser"
   );
-  assert.match(turnUses[0] ?? "", /currentAppearance=\{appearance\}/);
-  assert.match(turnUses[0] ?? "", /currentModeCustom=\{customMode\}/);
-  assert.match(turnUses[0] ?? "", /onModeChange=\{changeArchivistMode\}/);
   assert.match(
-    turnControlUse,
-    /mode=\{currentArchivistMode\}/,
-    "a response picker should show the snapshotted response label while selecting the current future-answer mode"
+    appSource,
+    /<span><i>Perspective<\/i>\{modeSummary\}<\/span>/,
+    "each completed answer should keep a static record of the perspective that produced it"
   );
-  assert.match(turnControlUse, /appearance=\{currentAppearance\}/);
-  assert.match(turnControlUse, /custom=\{currentModeCustom\}/);
-  assert.match(turnControlUse, /triggerLabel=\{modeSummary\}/);
-  assert.match(
-    turnControlUse,
-    /contextNote=/,
-    "response-picker copy should state that completed answers are immutable and a new perspective affects future answers"
-  );
-  assert.match(turnControlUse, /(?:completed answer|answer already given|this turn used)/i);
-  assert.match(
-    turnControlUse,
-    /(?:remain|does not change|won't change|will not change|will not rewrite|will not alter|keep the perspective)/i
-  );
-  assert.match(turnControlUse, /future answers/i);
   assert.match(
     appSource,
     /question:\s*questionForConversationHistory\(turn\)\.slice\(0, 4_000\)/,
@@ -390,55 +359,25 @@ try {
     /\.turn-fallback-notice\s*\{[^}]*display:\s*grid;[^}]*border:/s,
     "the fallback notice should have a visible theme-aware treatment"
   );
-  assert.match(
+  assert.doesNotMatch(
     chatCss,
-    /\.chat-perspective-note\s*\{[^}]*display:\s*grid;[^}]*border-left:/s,
-    "the perspective disclosure should have a visible theme-aware treatment"
+    /\.chat-perspective-note/,
+    "perspective-strip styling should not outlive the strip"
+  );
+  assert.doesNotMatch(
+    chatCss,
+    /\.vibe-trigger|\.vibe-menu|\.vibe-picker|\.vibe-options|\.archivist-vibe-control/,
+    "pop-up chooser styling should not outlive the chooser"
   );
   assert.match(
     chatCss,
-    /\.chat-composer\.is-docked\s+\.chat-perspective-note\s*\{[^}]*grid-column:\s*1\s*\/\s*-1\s*;/s,
-    "the docked perspective disclosure should span the input and control columns"
-  );
-  assert.match(
-    chatCss,
-    /\.vibe-trigger:focus-visible,[\s\S]*?outline:\s*3px solid var\(--chat-accent-bright\)/,
-    "every perspective-label trigger should have an explicit keyboard focus treatment"
-  );
-  assert.match(
-    chatCss,
-    /\.vibe-trigger\.is-perspective,[\s\S]*?\.vibe-trigger\.is-turn\s*\{[^}]*min-height:\s*30px;/s,
-    "inline perspective controls should retain a visible, compact hit area"
-  );
-  assert.match(
-    chatCss,
-    /\.vibe-picker-dialog\s*\{[^}]*max-height:\s*calc\(100dvh\s*-\s*32px\);/s,
-    "inline perspective pickers should remain bounded to the visible viewport"
-  );
-  assert.match(
-    chatCss,
-    /\.vibe-picker-dialog::backdrop\s*\{[^}]*background:/s,
-    "inline perspective pickers should visually and interactively isolate the chooser"
-  );
-  assert.match(
-    chatCss,
-    /@media \(forced-colors: active\)[\s\S]*?\.vibe-picker-dialog,/,
-    "the native perspective dialog should retain a boundary in forced-colors mode"
-  );
-  assert.match(
-    chatCss,
-    /@media \(forced-colors: active\)[\s\S]*?\.vibe-swatch,[\s\S]*?display:\s*none;[\s\S]*?\.vibe-options\s*>\s*button\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*18px;/s,
-    "hiding swatches in forced-colors mode must also remove their grid column so option text stays readable"
+    /@media \(forced-colors: active\)[\s\S]*?\.vibe-swatch,[\s\S]*?display:\s*none;/,
+    "theme swatches should step aside in forced-colors mode"
   );
   assert.match(
     chatCss,
     /\.chat-composer\.is-docked\s+\.chat-answer-settings-disclosure\s*>\s*\.chat-answer-settings-panel\s*\{[^}]*position:\s*fixed;[^}]*bottom:\s*calc\(var\(--chat-dock-height\)\s*\+\s*8px\)\s*;/s,
     "the docked settings panel should open above the complete perspective-aware composer"
-  );
-  assert.match(
-    chatCss,
-    /\.vibe-trigger\.is-custom\s*>\s*span\s*\{[^}]*display:\s*grid\s*;/s,
-    "Custom should remain visible in the compact mobile mode control"
   );
   const settingsPanelRules = [
     ...chatCss.matchAll(
@@ -446,23 +385,15 @@ try {
     )
   ].map((match) => match[1]);
   const scrollableSettingsPanelRule = settingsPanelRules.find((rule) => /overflow-y:\s*auto\s*;/.test(rule)) ?? "";
-  const landingSettingsPanelRule = chatCss.match(
-    /\.chat-composer\.is-landing\s+\.chat-answer-settings-disclosure\s*>\s*\.chat-answer-settings-panel\s*\{([^}]*)\}/
-  )?.[1] ?? "";
   assert.match(
-    landingSettingsPanelRule,
-    /position:\s*static\s*;/,
-    "landing settings must expand in document flow so the page can scroll on short viewports"
+    appSource,
+    /const showAnswerControls = location === "thread";/,
+    "the opening composer should carry no perspective or settings control"
   );
-  assert.match(
-    landingSettingsPanelRule,
-    /max-height:\s*none\s*;/,
-    "landing settings must not create a nested height limit"
-  );
-  assert.match(
-    landingSettingsPanelRule,
-    /overflow-y:\s*visible\s*;/,
-    "landing settings must leave vertical scrolling to the document"
+  assert.doesNotMatch(
+    chatCss,
+    /\.chat-composer\.is-landing\s+\.chat-answer-settings-disclosure/,
+    "landing settings styling should not outlive the control it positioned"
   );
   assert.match(
     scrollableSettingsPanelRule,

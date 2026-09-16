@@ -137,6 +137,18 @@ _REPLIES = {
         "Fun is operational: I test strategy, preserve leverage, and negotiate alliances when the "
         "timing is favorable."
     ),
+    ArchivistMode.CLASSICAL_CHRONICLER: (
+        "My notes are in order, my questions are multiplying, and the testimony still wants "
+        "weighing, which is the ordinary condition of a working historian."
+    ),
+    ArchivistMode.POLLYANNA: (
+        "Splendid and glad, thank you; even a gray morning has a bright, hopeful side worth "
+        "finding."
+    ),
+    ArchivistMode.DOOMSAYER: (
+        "Holding up for now, though the forecast looks grim and history suggests things will "
+        "get worse."
+    ),
 }
 
 
@@ -193,6 +205,9 @@ def test_manifest_is_provider_free_and_covers_current_generated_registry(tmp_pat
         "pretty_pink_princess",
         "baleful_black_baron",
         "ember_and_ink",
+        "classical_chronicler",
+        "pollyanna",
+        "doomsayer",
     ]
     assert {item["mode"] for item in manifest["items"]} == {
         mode.value for mode in supported_generated_modes()
@@ -200,7 +215,7 @@ def test_manifest_is_provider_free_and_covers_current_generated_registry(tmp_pat
     assert {item["question"] for item in manifest["items"]} == {"How are you?"}
     assert all(case.question == "How are you?" for case in PERSONA_EVALUATION_CASES)
     assert all(item["route_classifier_eligible"] is True for item in manifest["items"])
-    assert manifest["expected_provider_calls"] == 4
+    assert manifest["expected_provider_calls"] == 7
     assert manifest["automatic_retry_count"] == 0
     assert manifest["model"] == "gpt-5.6-sol"
     assert manifest["reasoning_effort"] == "low"
@@ -262,7 +277,7 @@ def test_prepare_is_offline_idempotent_and_does_not_create_ledger(tmp_path):
     assert not (run_root / "attempts").exists()
 
 
-def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
+def test_run_makes_seven_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
     evaluation_root, run_root, usage_db = _paths(tmp_path)
     prepare_evaluation(
         run_root=run_root,
@@ -290,12 +305,12 @@ def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
     )
 
     assert calls == [(case.mode.value, case.question) for case in PERSONA_EVALUATION_CASES]
-    assert client.retry_values == [0, 0, 0, 0]
-    assert report["attempt_count"] == 4
+    assert client.retry_values == [0, 0, 0, 0, 0, 0, 0]
+    assert report["attempt_count"] == 7
     assert report["automatic_retry_count"] == 0
-    assert report["status_counts"] == {"generated": 4}
-    assert report["follow_up_to_manuscript_pass_count"] == 4
-    assert report["character_distinctness_pass_count"] == 4
+    assert report["status_counts"] == {"generated": 7}
+    assert report["follow_up_to_manuscript_pass_count"] == 7
+    assert report["character_distinctness_pass_count"] == 7
     assert report["all_persona_replies_unique"] is True
     assert report["cohort_cost_nano_usd"] > 0
     assert report["cohort_cost_nano_usd"] < MASTER_COST_CAP_NANO_USD
@@ -315,18 +330,18 @@ def test_run_makes_four_scoped_no_retry_calls_and_reports_diagnostics(tmp_path):
         Decimal(report["effective_remaining_nano_usd_at_report"])
         / Decimal(1_000_000_000)
     )
-    assert len(report["pairwise_token_jaccard"]) == 6
+    assert len(report["pairwise_token_jaccard"]) == 21
     assert all(mode["own_signature_hits"] for mode in report["modes"])
     assert all(mode["follow_up_to_manuscript"] for mode in report["modes"])
-    assert ledger.request_usage_cost_state(MASTER_REQUEST_ID)["event_count"] == 4
+    assert ledger.request_usage_cost_state(MASTER_REQUEST_ID)["event_count"] == 7
     assert ledger.get_settings() == {
         "monthly_budget_usd": 7.0,
         "warning_threshold_percent": 80,
         "hard_limit_enabled": True,
     }
     assert os.environ.get("ARCHIVIST_USAGE_DB") == original_usage_db
-    assert len(list((run_root / "attempts").glob("*/intent.json"))) == 4
-    assert len(list((run_root / "attempts").glob("*/outcome.json"))) == 4
+    assert len(list((run_root / "attempts").glob("*/intent.json"))) == 7
+    assert len(list((run_root / "attempts").glob("*/outcome.json"))) == 7
     assert load_diagnostics_report(
         run_root=run_root,
         usage_db=usage_db,
@@ -374,7 +389,7 @@ def test_committed_h003_chain_drives_manifest_scope_budget_and_report(
         evaluation_root=evaluation_root,
     )
 
-    assert len(calls) == 4
+    assert len(calls) == 7
     assert report["ambiguity_reservation_count"] == 2
     assert [value["item_id"] for value in report["ambiguity_reservations"]] == [
         "H002",
@@ -421,7 +436,7 @@ def test_completed_run_resumes_without_client_or_provider_calls(tmp_path):
     assert calls == []
     assert UsageLedger(usage_db).request_usage_cost_state(MASTER_REQUEST_ID)[
         "event_count"
-    ] == 4
+    ] == 7
 
 
 def test_unresolved_intent_blocks_resume_before_client_construction(tmp_path):
@@ -653,7 +668,7 @@ def test_manifest_tamper_is_rejected_without_provider_work(tmp_path):
     )
     path = run_root / "prepared-manifest.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["expected_provider_calls"] = 5
+    payload["expected_provider_calls"] = 8
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(PersonaEvaluationError, match="hash no longer binds"):

@@ -820,6 +820,7 @@ def answer_run_diagnostics(result: AnswerModeResult) -> dict[str, Any]:
             "invalid_response",
             "refusal",
             "retrieval_failure",
+            "insufficient_quota",
             "request_timeout",
             "transport_failure",
             "provider_exception",

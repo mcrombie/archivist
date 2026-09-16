@@ -3,14 +3,10 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles.css";
 import "./chat.css";
-import { storedAppearance, storedArchivistMode } from "./modes";
+import { DEFAULT_VIBE } from "./vibes";
 
-function initializeStoredMode() {
-  const mode = storedArchivistMode();
-  document.documentElement.dataset.vibe = storedAppearance(mode);
-}
-
-initializeStoredMode();
+// Every visit opens in the default theme; paint it before React mounts to avoid a flash.
+document.documentElement.dataset.vibe = DEFAULT_VIBE;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

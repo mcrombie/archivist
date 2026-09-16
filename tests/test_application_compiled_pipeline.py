@@ -744,6 +744,138 @@ def test_retrieval_failure_never_attempts_authored_response(monkeypatch):
     assert diagnostics["validation_error_code"] == "retrieval_failure"
 
 
+def test_exhausted_openai_credits_explain_the_retrieval_failure(monkeypatch):
+    import httpx
+    import openai
+
+    from provider_errors import (
+        PROVIDER_CREDITS_EXHAUSTED_MESSAGE,
+        PROVIDER_CREDITS_EXHAUSTED_STATUS,
+    )
+
+    request = httpx.Request("POST", "https://api.openai.com/v1/embeddings")
+    quota_error = openai.RateLimitError(
+        "synthetic quota failure",
+        response=httpx.Response(429, request=request),
+        body={"code": "insufficient_quota", "type": "insufficient_quota", "message": "synthetic"},
+    )
+    _install_pipeline(monkeypatch, retrieval_error=quota_error)
+    monkeypatch.setattr(
+        web_project,
+        "generate_authored_response",
+        lambda *_args, **_kwargs: pytest.fail("authoring must not run without retrieval"),
+    )
+
+    result = web_project.answer_project_question_result(
+        "current",
+        "Who was Edwin Sandys?",
+        archivist_mode=ArchivistMode.PROFESSIONAL,
+        application_compiled=True,
+    )
+
+    assert result.status == PROVIDER_CREDITS_EXHAUSTED_STATUS
+    assert result.answer == PROVIDER_CREDITS_EXHAUSTED_MESSAGE
+    assert "credits" in result.answer
+    assert result.final_chunks == []
+    assert result.diagnostics["generation"]["fallback_code"] == "insufficient_quota"
+    assert result.diagnostics["generation"]["status"] == "retrieval_failed"
+    diagnostics = answer_run_diagnostics(result)
+    assert diagnostics["answer_status"] == PROVIDER_CREDITS_EXHAUSTED_STATUS
+    assert diagnostics["validation_result"] == "invalid"
+    assert diagnostics["validation_error_code"] == "insufficient_quota"
+
+
+def _prepared_source_chunks():
+    from prepared_answers import BOOK_OVERVIEW
+
+    return [
+        {
+            "document": "05_Introduction.md",
+            "chapter_title": "Introduction",
+            "chunk_id": chunk_id,
+            "paragraph_start": index,
+            "paragraph_end": index + 1,
+            "text": f"Synthetic introduction passage {index}.",
+        }
+        for index, chunk_id in enumerate(BOOK_OVERVIEW.source_chunk_ids, start=1)
+    ]
+
+
+def test_prepared_book_overview_is_cited_and_provider_free(monkeypatch):
+    from prepared_answers import (
+        BOOK_OVERVIEW,
+        PREPARED_ANSWER_POLICY_VERSION,
+        PREPARED_ANSWER_STATUS,
+    )
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("a prepared answer must not retrieve, plan, or call a provider")
+
+    monkeypatch.setattr(web_project, "chroma_client", unexpected)
+    monkeypatch.setattr(web_project, "openai_client", unexpected)
+    monkeypatch.setattr(web_project, "build_question_plan", unexpected)
+    monkeypatch.setattr(
+        web_project,
+        "load_project_chunks",
+        lambda _project_id: [*CHUNKS, *_prepared_source_chunks()],
+    )
+    stages = []
+
+    result = web_project.answer_project_question_result(
+        "current",
+        "What is Cradle of the Empire about?",
+        archivist_mode=ArchivistMode.PROFESSIONAL,
+        application_compiled=True,
+        allow_prepared_answers=True,
+        progress_callback=stages.append,
+    )
+
+    assert result.status == PREPARED_ANSWER_STATUS
+    assert result.answer == BOOK_OVERVIEW.answer
+    assert [chunk["chunk_id"] for chunk in result.final_chunks] == list(
+        BOOK_OVERVIEW.source_chunk_ids
+    )
+    assert result.evidence_decision == "direct_answer"
+    assert result.answer_strategy_version == PREPARED_ANSWER_POLICY_VERSION
+    assert result.diagnostics["response_route"] == PREPARED_ANSWER_POLICY_VERSION
+    assert result.diagnostics["generation"]["structured_generation_called"] is False
+    assert stages == [
+        AnswerProgressStage.GENERATING_ANSWER,
+        AnswerProgressStage.VALIDATING_ANSWER,
+    ]
+    diagnostics = answer_run_diagnostics(result)
+    assert diagnostics["answer_status"] == PREPARED_ANSWER_STATUS
+    assert diagnostics["validation_result"] == "valid"
+
+
+@pytest.mark.parametrize(
+    ("mode", "allow_prepared_answers"),
+    (
+        pytest.param(ArchivistMode.PROFESSIONAL, False, id="not-opted-in"),
+        pytest.param(ArchivistMode.CLASSICAL_CHRONICLER, True, id="other-perspective"),
+    ),
+)
+def test_prepared_answer_needs_the_web_opt_in_and_default_perspective(
+    monkeypatch,
+    mode,
+    allow_prepared_answers,
+):
+    monkeypatch.setattr(
+        web_project,
+        "chroma_client",
+        lambda: (_ for _ in ()).throw(RuntimeError("grounded path reached")),
+    )
+
+    with pytest.raises(RuntimeError, match="grounded path reached"):
+        web_project.answer_project_question_result(
+            "current",
+            "What is Cradle of the Empire about?",
+            archivist_mode=mode,
+            application_compiled=True,
+            allow_prepared_answers=allow_prepared_answers,
+        )
+
+
 def test_local_followup_resolution_uses_prior_user_question_not_assistant_text():
     turn = web_project.resolve_application_compiled_turn(
         "When did he live?",

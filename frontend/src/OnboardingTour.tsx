@@ -13,8 +13,8 @@ const SPOTLIGHT_PADDING = 9;
 const VIEWPORT_GUTTER = 8;
 
 type TourStep = {
-  id: "welcome" | "ask" | "perspective" | "settings";
-  target: "ask" | "perspective" | "settings" | null;
+  id: "welcome" | "ask" | "settings";
+  target: "ask" | "settings" | null;
   eyebrow: string;
   title: string;
   body: string;
@@ -63,21 +63,14 @@ function tourSteps(projectName: string, replay: boolean): ReadonlyArray<TourStep
       target: "ask",
       eyebrow: "Ask the manuscript",
       title: "Begin with a question",
-      body: "Type your own question, choose a suggested starting point, or let Archivist help shape one. Your question is not sent until you press Ask."
-    },
-    {
-      id: "perspective",
-      target: "perspective",
-      eyebrow: "Choose a point of view",
-      title: "Perspective changes the reading",
-      body: "A mode changes the voice and interpretive emphasis—not the manuscript Archivist searches. Essential shows direct cited evidence without a character voice. After the tour, click Perspective whenever you want to choose another mode."
+      body: "Type your own question and press Ask, or pick one of the suggested questions to send it straight away. Archivist can also help you shape a question before you send it."
     },
     {
       id: "settings",
       target: "settings",
       eyebrow: "Optional controls",
       title: "Keep the defaults—or go deeper",
-      body: "Settings adjust evidence scope, answer delivery, interpretive details, and appearance. The defaults are ready, so you can ignore these controls until you need them."
+      body: "Settings let you choose a perspective and a visual theme, and adjust how answers are delivered. A perspective changes voice and emphasis but never the manuscript Archivist searches. The defaults are ready, so you can ignore these controls until you need them."
     }
   ];
 }
@@ -235,7 +228,9 @@ export function OnboardingTour({
   onSkip,
   onFinishFocus
 }: OnboardingTourProps) {
-  const steps = tourSteps(projectName, replay);
+  const [steps, setSteps] = useState<ReadonlyArray<TourStep>>(
+    () => tourSteps(projectName, replay)
+  );
   const [stepIndex, setStepIndex] = useState(0);
   const [spotlight, setSpotlight] = useState<SpotlightRect | null>(null);
   const [cardPosition, setCardPosition] = useState<CardPosition | null>(null);
@@ -249,9 +244,15 @@ export function OnboardingTour({
   const numberedStepCount = steps.length - 1;
   const isLastStep = stepIndex === steps.length - 1;
 
+  // A step whose control is absent would spotlight nothing: Perspective and
+  // Settings only join the composer once a conversation exists.
   useEffect(() => {
-    if (open) setStepIndex(0);
-  }, [open]);
+    if (!open) return;
+    setSteps(tourSteps(projectName, replay).filter(
+      (step) => !step.target || findTourTarget(step.target)
+    ));
+    setStepIndex(0);
+  }, [open, projectName, replay]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
